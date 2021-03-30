@@ -1,12 +1,13 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,8 +19,8 @@
 package org.apache.flink.streaming.connectors.kafka.table;
 
 import org.apache.flink.api.common.serialization.SerializationSchema;
-import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
-import org.apache.flink.connector.kafka.sink.KafkaSink;
+import org.apache.flink.streaming.connectors.kafka.KafkaContextAware;
+import org.apache.flink.streaming.connectors.kafka.KafkaSerializationSchema;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
@@ -30,22 +31,43 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 
 import javax.annotation.Nullable;
 
-import static org.apache.flink.util.Preconditions.checkNotNull;
+import java.io.Serializable;
 
-/** SerializationSchema used by {@link KafkaDynamicSink} to configure a {@link KafkaSink}. */
-class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationSchema<RowData> {
+/** A specific {@link KafkaSerializationSchema} for {@link KafkaDynamicSink}. */
+class DynamicKafkaSerializationSchema
+        implements KafkaSerializationSchema<RowData>, KafkaContextAware<RowData> {
+
+    private static final long serialVersionUID = 1L;
+
+    private final @Nullable FlinkKafkaPartitioner<RowData> partitioner;
 
     private final String topic;
-    private final FlinkKafkaPartitioner<RowData> partitioner;
-    @Nullable private final SerializationSchema<RowData> keySerialization;
+
+    private final @Nullable SerializationSchema<RowData> keySerialization;
+
     private final SerializationSchema<RowData> valueSerialization;
+
     private final RowData.FieldGetter[] keyFieldGetters;
+
     private final RowData.FieldGetter[] valueFieldGetters;
+
     private final boolean hasMetadata;
-    private final int[] metadataPositions;
+
     private final boolean upsertMode;
 
-    DynamicKafkaRecordSerializationSchema(
+    /**
+     * Contains the position for each value of {@link KafkaDynamicSink.WritableMetadata} in the
+     * consumed row or -1 if this metadata key is not used.
+     */
+    private final int[] metadataPositions;
+
+    private int[] partitions;
+
+    private int parallelInstanceId;
+
+    private int numParallelInstances;
+
+    DynamicKafkaSerializationSchema(
             String topic,
             @Nullable FlinkKafkaPartitioner<RowData> partitioner,
             @Nullable SerializationSchema<RowData> keySerialization,
@@ -60,10 +82,10 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
                     keySerialization != null && keyFieldGetters.length > 0,
                     "Key must be set in upsert mode for serialization schema.");
         }
-        this.topic = checkNotNull(topic);
+        this.topic = topic;
         this.partitioner = partitioner;
         this.keySerialization = keySerialization;
-        this.valueSerialization = checkNotNull(valueSerialization);
+        this.valueSerialization = valueSerialization;
         this.keyFieldGetters = keyFieldGetters;
         this.valueFieldGetters = valueFieldGetters;
         this.hasMetadata = hasMetadata;
@@ -72,21 +94,28 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
     }
 
     @Override
-    public ProducerRecord<byte[], byte[]> serialize(
-            RowData consumedRow, KafkaSinkContext context, Long timestamp) {
+    public void open(SerializationSchema.InitializationContext context) throws Exception {
+        if (keySerialization != null) {
+            keySerialization.open(context);
+        }
+        valueSerialization.open(context);
+        if (partitioner != null) {
+            partitioner.open(parallelInstanceId, numParallelInstances);
+        }
+    }
+
+    @Override
+    public ProducerRecord<byte[], byte[]> serialize(RowData consumedRow, @Nullable Long timestamp) {
         // shortcut in case no input projection is required
         if (keySerialization == null && !hasMetadata) {
             final byte[] valueSerialized = valueSerialization.serialize(consumedRow);
             return new ProducerRecord<>(
                     topic,
-                    extractPartition(
-                            consumedRow,
-                            null,
-                            valueSerialized,
-                            context.getPartitionsForTopic(topic)),
+                    extractPartition(consumedRow, null, valueSerialized),
                     null,
                     valueSerialized);
         }
+
         final byte[] keySerialized;
         if (keySerialization == null) {
             keySerialized = null;
@@ -97,32 +126,23 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
 
         final byte[] valueSerialized;
         final RowKind kind = consumedRow.getRowKind();
+        final RowData valueRow = createProjectedRow(consumedRow, kind, valueFieldGetters);
         if (upsertMode) {
             if (kind == RowKind.DELETE || kind == RowKind.UPDATE_BEFORE) {
                 // transform the message as the tombstone message
                 valueSerialized = null;
             } else {
                 // make the message to be INSERT to be compliant with the INSERT-ONLY format
-                final RowData valueRow =
-                        DynamicKafkaRecordSerializationSchema.createProjectedRow(
-                                consumedRow, kind, valueFieldGetters);
                 valueRow.setRowKind(RowKind.INSERT);
                 valueSerialized = valueSerialization.serialize(valueRow);
             }
         } else {
-            final RowData valueRow =
-                    DynamicKafkaRecordSerializationSchema.createProjectedRow(
-                            consumedRow, kind, valueFieldGetters);
             valueSerialized = valueSerialization.serialize(valueRow);
         }
 
         return new ProducerRecord<>(
                 topic,
-                extractPartition(
-                        consumedRow,
-                        keySerialized,
-                        valueSerialized,
-                        context.getPartitionsForTopic(topic)),
+                extractPartition(consumedRow, keySerialized, valueSerialized),
                 readMetadata(consumedRow, KafkaDynamicSink.WritableMetadata.TIMESTAMP),
                 keySerialized,
                 valueSerialized,
@@ -130,25 +150,36 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
     }
 
     @Override
-    public void open(
-            SerializationSchema.InitializationContext context, KafkaSinkContext sinkContext)
-            throws Exception {
-        if (keySerialization != null) {
-            keySerialization.open(context);
+    public void setParallelInstanceId(int parallelInstanceId) {
+        this.parallelInstanceId = parallelInstanceId;
+    }
+
+    @Override
+    public void setNumParallelInstances(int numParallelInstances) {
+        this.numParallelInstances = numParallelInstances;
+    }
+
+    @Override
+    public void setPartitions(int[] partitions) {
+        this.partitions = partitions;
+    }
+
+    @Override
+    public String getTargetTopic(RowData element) {
+        return topic;
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> T readMetadata(RowData consumedRow, KafkaDynamicSink.WritableMetadata metadata) {
+        final int pos = metadataPositions[metadata.ordinal()];
+        if (pos < 0) {
+            return null;
         }
-        if (partitioner != null) {
-            partitioner.open(
-                    sinkContext.getParallelInstanceId(),
-                    sinkContext.getNumberOfParallelInstances());
-        }
-        valueSerialization.open(context);
+        return (T) metadata.converter.read(consumedRow, pos);
     }
 
     private Integer extractPartition(
-            RowData consumedRow,
-            @Nullable byte[] keySerialized,
-            byte[] valueSerialized,
-            int[] partitions) {
+            RowData consumedRow, @Nullable byte[] keySerialized, byte[] valueSerialized) {
         if (partitioner != null) {
             return partitioner.partition(
                     consumedRow, keySerialized, valueSerialized, topic, partitions);
@@ -166,12 +197,9 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
         return genericRowData;
     }
 
-    @SuppressWarnings("unchecked")
-    private <T> T readMetadata(RowData consumedRow, KafkaDynamicSink.WritableMetadata metadata) {
-        final int pos = metadataPositions[metadata.ordinal()];
-        if (pos < 0) {
-            return null;
-        }
-        return (T) metadata.converter.read(consumedRow, pos);
+    // --------------------------------------------------------------------------------------------
+
+    interface MetadataConverter extends Serializable {
+        Object read(RowData consumedRow, int pos);
     }
 }

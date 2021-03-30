@@ -18,11 +18,10 @@
 
 package org.apache.flink.streaming.connectors.kafka.table;
 
-import java.io.Serializable;
 import java.util.Objects;
 
 /** Sink buffer flush configuration. */
-public class SinkBufferFlushMode implements Serializable {
+public class SinkBufferFlushMode {
 
     private static final int DISABLED_BATCH_SIZE = 0;
     private static final long DISABLED_BATCH_INTERVAL = 0L;
