@@ -139,20 +139,18 @@ under the License.
             <scope>test</scope>
         </dependency>
 
-        <!-- Required to execute the kafka server for testing. Please change the zookeeper version accordingly when changing the Kafka version
-             https://github.com/apache/kafka/blob/839b886f9b732b151e1faeace7303c80641c08c4/gradle/dependencies.gradle#L122 -->
-        <dependency>
-            <groupId>org.apache.zookeeper</groupId>
-            <artifactId>zookeeper</artifactId>
-            <version>${zookeeper.version}</version>
-            <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-log4j12</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
+		<dependency>
+			<groupId>org.apache.zookeeper</groupId>
+			<artifactId>zookeeper</artifactId>
+			<version>${zookeeper.version}</version>
+			<scope>test</scope>
+			<exclusions>
+				<exclusion>
+					<groupId>org.slf4j</groupId>
+					<artifactId>slf4j-log4j12</artifactId>
+				</exclusion>
+			</exclusions>
+		</dependency>
 
         <dependency>
             <groupId>org.testcontainers</groupId>

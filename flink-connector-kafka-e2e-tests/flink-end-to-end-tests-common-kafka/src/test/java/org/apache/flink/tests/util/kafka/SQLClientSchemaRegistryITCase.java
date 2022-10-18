@@ -70,6 +70,8 @@ public class SQLClientSchemaRegistryITCase {
             ResourceTestUtils.getResource(".*avro-confluent.jar");
     private final Path sqlConnectorKafkaJar = ResourceTestUtils.getResource(".*kafka.jar");
 
+    private final Path guavaJar = ResourceTestUtils.getResource(".*guava.jar");
+
     @ClassRule public static final Network NETWORK = Network.newNetwork();
 
     @ClassRule public static final Timeout TIMEOUT = new Timeout(10, TimeUnit.MINUTES);
@@ -83,7 +85,7 @@ public class SQLClientSchemaRegistryITCase {
 
     @ClassRule
     public static final SchemaRegistryContainer REGISTRY =
-            new SchemaRegistryContainer("6.2.2")
+            new SchemaRegistryContainer(DockerImageName.parse(DockerImageVersions.SCHEMA_REGISTRY))
                     .withKafka(INTER_CONTAINER_KAFKA_ALIAS + ":9092")
                     .withNetwork(NETWORK)
                     .withNetworkAliases(INTER_CONTAINER_REGISTRY_ALIAS)
@@ -252,7 +254,12 @@ public class SQLClientSchemaRegistryITCase {
     private void executeSqlStatements(List<String> sqlLines) throws Exception {
         flink.submitSQLJob(
                 new SQLJobSubmission.SQLJobSubmissionBuilder(sqlLines)
-                        .addJars(sqlAvroJar, sqlAvroRegistryJar, sqlConnectorKafkaJar)
+                        .addJars(
+                                sqlAvroJar,
+                                sqlAvroRegistryJar,
+                                sqlConnectorKafkaJar,
+                                sqlToolBoxJar,
+                                guavaJar)
                         .build());
     }
 }
