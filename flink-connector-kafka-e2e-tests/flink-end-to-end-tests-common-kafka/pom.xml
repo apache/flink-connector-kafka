@@ -38,7 +38,7 @@ under the License.
     </repositories>
 
     <properties>
-        <confluent.version>6.2.2</confluent.version>
+        <confluent.version>7.2.2</confluent.version>
     </properties>
 
     <dependencies>
@@ -155,6 +155,12 @@ under the License.
             <version>${hamcrest.version}</version>
             <scope>test</scope>
         </dependency>
+		<!-- Needed by Schema Registry -->
+		<dependency>
+			<groupId>com.google.guava</groupId>
+			<artifactId>guava</artifactId>
+			<version>30.1.1-jre</version>
+		</dependency>
     </dependencies>
 
     <build>
@@ -229,6 +235,14 @@ under the License.
                             <type>jar</type>
                             <outputDirectory>${project.build.directory}/dependencies</outputDirectory>
                         </artifactItem>
+						<artifactItem>
+							<groupId>com.google.guava</groupId>
+							<artifactId>guava</artifactId>
+							<version>30.1.1-jre</version>
+							<destFileName>guava.jar</destFileName>
+							<type>jar</type>
+							<outputDirectory>${project.build.directory}/dependencies</outputDirectory>
+						</artifactItem>
                     </artifactItems>
                 </configuration>
             </plugin>
