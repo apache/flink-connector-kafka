@@ -10,6 +10,7 @@ github:
     - datastream
     - table
     - sql
+  autolink_jira: FLINK
   collaborators:
     - flinkbot
 notifications:
