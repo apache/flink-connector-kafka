@@ -19,21 +19,20 @@
 package org.apache.flink.tests.util.kafka;
 
 import org.apache.flink.api.common.time.Deadline;
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.connector.testframe.container.FlinkContainers;
+import org.apache.flink.connector.testframe.container.FlinkContainersSettings;
+import org.apache.flink.connector.testframe.container.TestcontainersSettings;
+import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.test.resources.ResourceTestUtils;
 import org.apache.flink.test.util.SQLJobSubmission;
-import org.apache.flink.tests.util.cache.DownloadCache;
-import org.apache.flink.tests.util.flink.ClusterController;
-import org.apache.flink.tests.util.flink.FlinkResource;
-import org.apache.flink.tests.util.flink.FlinkResourceSetup;
-import org.apache.flink.tests.util.flink.LocalStandaloneFlinkResourceFactory;
+import org.apache.flink.util.DockerImageVersions;
 import org.apache.flink.util.TestLogger;
 
-import org.apache.commons.lang3.StringUtils;
+import org.apache.kafka.common.serialization.StringSerializer;
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.ClassRule;
-import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -41,6 +40,10 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.containers.Network;
+import org.testcontainers.containers.output.Slf4jLogConsumer;
+import org.testcontainers.utility.DockerImageName;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -57,13 +60,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import static org.apache.flink.tests.util.TestUtils.readCsvResultFiles;
 import static org.hamcrest.Matchers.arrayContainingInAnyOrder;
 import static org.junit.Assert.assertThat;
 
 /** End-to-end test for the kafka SQL connectors. */
 @RunWith(Parameterized.class)
-@Ignore("FLINK-21796")
 public class SQLClientKafkaITCase extends TestLogger {
 
     private static final Logger LOG = LoggerFactory.getLogger(SQLClientKafkaITCase.class);
@@ -75,22 +76,36 @@ public class SQLClientKafkaITCase extends TestLogger {
         return Arrays.asList(new Object[][] {{"3.2.3", "universal", "kafka", ".*kafka.jar"}});
     }
 
-    private static Configuration getConfiguration() {
-        // we have to enable checkpoint to trigger flushing for filesystem sink
-        final Configuration flinkConfig = new Configuration();
-        flinkConfig.setString("execution.checkpointing.interval", "5s");
-        return flinkConfig;
-    }
+    private static final Slf4jLogConsumer LOG_CONSUMER = new Slf4jLogConsumer(LOG);
+    public static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
 
-    @Rule
-    public final FlinkResource flink =
-            new LocalStandaloneFlinkResourceFactory()
-                    .create(
-                            FlinkResourceSetup.builder()
-                                    .addConfiguration(getConfiguration())
-                                    .build());
+    @ClassRule public static final Network NETWORK = Network.newNetwork();
 
-    @Rule public final KafkaResource kafka;
+    @ClassRule
+    public static final KafkaContainer KAFKA =
+            new KafkaContainer(DockerImageName.parse(DockerImageVersions.KAFKA))
+                    .withNetwork(NETWORK)
+                    .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS)
+                    .withLogConsumer(LOG_CONSUMER);
+
+    public final TestcontainersSettings testcontainersSettings =
+            TestcontainersSettings.builder().network(NETWORK).logger(LOG).dependsOn(KAFKA).build();
+
+    public final FlinkContainers flink =
+            FlinkContainers.builder()
+                    .withFlinkContainersSettings(
+                            FlinkContainersSettings.builder()
+                                    // we have to enable checkpoint to trigger flushing for
+                                    // filesystem sink
+                                    .numSlotsPerTaskManager(2)
+                                    .setConfigOption(
+                                            ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL,
+                                            Duration.ofSeconds(5L))
+                                    .build())
+                    .withTestcontainersSettings(testcontainersSettings)
+                    .build();
+
+    private KafkaContainerClient kafkaClient;
 
     @Rule public final TemporaryFolder tmp = new TemporaryFolder();
 
@@ -98,8 +113,6 @@ public class SQLClientKafkaITCase extends TestLogger {
     private final String kafkaSQLVersion;
     private final String kafkaIdentifier;
     private Path result;
-
-    @ClassRule public static final DownloadCache DOWNLOAD_CACHE = DownloadCache.get();
 
     private static final Path sqlAvroJar = ResourceTestUtils.getResource(".*avro.jar");
     private static final Path sqlToolBoxJar = ResourceTestUtils.getResource(".*SqlToolbox.jar");
@@ -111,7 +124,6 @@ public class SQLClientKafkaITCase extends TestLogger {
             String kafkaSQLVersion,
             String kafkaIdentifier,
             String kafkaSQLJarPattern) {
-        this.kafka = KafkaResource.get(kafkaVersion);
         this.kafkaVersion = kafkaVersion;
         this.kafkaSQLVersion = kafkaSQLVersion;
         this.kafkaIdentifier = kafkaIdentifier;
@@ -121,67 +133,68 @@ public class SQLClientKafkaITCase extends TestLogger {
 
     @Before
     public void before() throws Exception {
-        DOWNLOAD_CACHE.before();
+        flink.start();
+        kafkaClient = new KafkaContainerClient(KAFKA);
         Path tmpPath = tmp.getRoot().toPath();
         LOG.info("The current temporary path: {}", tmpPath);
         this.result = tmpPath.resolve("result");
     }
 
-    @Test
-    public void testKafka() throws Exception {
-        try (ClusterController clusterController = flink.startCluster(2)) {
-            // Create topic and send message
-            String testJsonTopic = "test-json-" + kafkaVersion + "-" + UUID.randomUUID().toString();
-            String testAvroTopic = "test-avro-" + kafkaVersion + "-" + UUID.randomUUID().toString();
-            kafka.createTopic(1, 1, testJsonTopic);
-            String[] messages =
-                    new String[] {
-                        "{\"rowtime\": \"2018-03-12 08:00:00\", \"user\": \"Alice\", \"event\": { \"type\": \"WARNING\", \"message\": \"This is a warning.\"}}",
-                        "{\"rowtime\": \"2018-03-12 08:10:00\", \"user\": \"Alice\", \"event\": { \"type\": \"WARNING\", \"message\": \"This is a warning.\"}}",
-                        "{\"rowtime\": \"2018-03-12 09:00:00\", \"user\": \"Bob\", \"event\": { \"type\": \"WARNING\", \"message\": \"This is another warning.\"}}",
-                        "{\"rowtime\": \"2018-03-12 09:10:00\", \"user\": \"Alice\", \"event\": { \"type\": \"INFO\", \"message\": \"This is a info.\"}}",
-                        "{\"rowtime\": \"2018-03-12 09:20:00\", \"user\": \"Steve\", \"event\": { \"type\": \"INFO\", \"message\": \"This is another info.\"}}",
-                        "{\"rowtime\": \"2018-03-12 09:30:00\", \"user\": \"Steve\", \"event\": { \"type\": \"INFO\", \"message\": \"This is another info.\"}}",
-                        "{\"rowtime\": \"2018-03-12 09:30:00\", \"user\": null, \"event\": { \"type\": \"WARNING\", \"message\": \"This is a bad message because the user is missing.\"}}",
-                        "{\"rowtime\": \"2018-03-12 10:40:00\", \"user\": \"Bob\", \"event\": { \"type\": \"ERROR\", \"message\": \"This is an error.\"}}"
-                    };
-            kafka.sendMessages(testJsonTopic, messages);
-
-            // Create topic test-avro
-            kafka.createTopic(1, 1, testAvroTopic);
-
-            // Initialize the SQL statements from "kafka_e2e.sql" file
-            Map<String, String> varsMap = new HashMap<>();
-            varsMap.put("$KAFKA_IDENTIFIER", this.kafkaIdentifier);
-            varsMap.put("$TOPIC_JSON_NAME", testJsonTopic);
-            varsMap.put("$TOPIC_AVRO_NAME", testAvroTopic);
-            varsMap.put("$RESULT", this.result.toAbsolutePath().toString());
-            varsMap.put(
-                    "$KAFKA_BOOTSTRAP_SERVERS",
-                    StringUtils.join(kafka.getBootstrapServerAddresses().toArray(), ","));
-            List<String> sqlLines = initializeSqlLines(varsMap);
-
-            // Execute SQL statements in "kafka_e2e.sql" file
-            executeSqlStatements(clusterController, sqlLines);
-
-            // Wait until all the results flushed to the CSV file.
-            LOG.info("Verify the CSV result.");
-            checkCsvResultFile();
-            LOG.info("The Kafka({}) SQL client test run successfully.", this.kafkaSQLVersion);
-        }
+    @After
+    public void tearDown() {
+        flink.stop();
     }
 
-    private void executeSqlStatements(ClusterController clusterController, List<String> sqlLines)
-            throws Exception {
+    @Test
+    public void testKafka() throws Exception {
+
+        // Create topic and send message
+        String testJsonTopic = "test-json-" + kafkaVersion + "-" + UUID.randomUUID().toString();
+        String testAvroTopic = "test-avro-" + kafkaVersion + "-" + UUID.randomUUID().toString();
+        kafkaClient.createTopic(1, 1, testJsonTopic);
+        String[] messages =
+                new String[] {
+                    "{\"rowtime\": \"2018-03-12 08:00:00\", \"user\": \"Alice\", \"event\": { \"type\": \"WARNING\", \"message\": \"This is a warning.\"}}",
+                    "{\"rowtime\": \"2018-03-12 08:10:00\", \"user\": \"Alice\", \"event\": { \"type\": \"WARNING\", \"message\": \"This is a warning.\"}}",
+                    "{\"rowtime\": \"2018-03-12 09:00:00\", \"user\": \"Bob\", \"event\": { \"type\": \"WARNING\", \"message\": \"This is another warning.\"}}",
+                    "{\"rowtime\": \"2018-03-12 09:10:00\", \"user\": \"Alice\", \"event\": { \"type\": \"INFO\", \"message\": \"This is a info.\"}}",
+                    "{\"rowtime\": \"2018-03-12 09:20:00\", \"user\": \"Steve\", \"event\": { \"type\": \"INFO\", \"message\": \"This is another info.\"}}",
+                    "{\"rowtime\": \"2018-03-12 09:30:00\", \"user\": \"Steve\", \"event\": { \"type\": \"INFO\", \"message\": \"This is another info.\"}}",
+                    "{\"rowtime\": \"2018-03-12 09:30:00\", \"user\": null, \"event\": { \"type\": \"WARNING\", \"message\": \"This is a bad message because the user is missing.\"}}",
+                    "{\"rowtime\": \"2018-03-12 10:40:00\", \"user\": \"Bob\", \"event\": { \"type\": \"ERROR\", \"message\": \"This is an error.\"}}"
+                };
+        kafkaClient.sendMessages(testJsonTopic, new StringSerializer(), messages);
+
+        // Create topic test-avro
+        kafkaClient.createTopic(1, 1, testAvroTopic);
+
+        // Initialize the SQL statements from "kafka_e2e.sql" file
+        Map<String, String> varsMap = new HashMap<>();
+        varsMap.put("$KAFKA_IDENTIFIER", this.kafkaIdentifier);
+        varsMap.put("$TOPIC_JSON_NAME", testJsonTopic);
+        varsMap.put("$TOPIC_AVRO_NAME", testAvroTopic);
+        varsMap.put("$RESULT", this.result.toAbsolutePath().toString());
+        varsMap.put("$KAFKA_BOOTSTRAP_SERVERS", INTER_CONTAINER_KAFKA_ALIAS + ":9092");
+        List<String> sqlLines = initializeSqlLines(varsMap);
+
+        // Execute SQL statements in "kafka_e2e.sql" file
+        executeSqlStatements(sqlLines);
+
+        // Wait until all the results flushed to the CSV file.
+        LOG.info("Verify the CSV result.");
+        checkCsvResultFile();
+        LOG.info("The Kafka({}) SQL client test run successfully.", this.kafkaSQLVersion);
+    }
+
+    private void executeSqlStatements(List<String> sqlLines) throws Exception {
         LOG.info("Executing Kafka {} end-to-end SQL statements.", kafkaSQLVersion);
-        clusterController.submitSQLJob(
+        flink.submitSQLJob(
                 new SQLJobSubmission.SQLJobSubmissionBuilder(sqlLines)
                         .addJar(sqlAvroJar)
                         .addJars(apacheAvroJars)
                         .addJar(sqlConnectorKafkaJar)
                         .addJar(sqlToolBoxJar)
-                        .build(),
-                Duration.ofMinutes(2L));
+                        .build());
     }
 
     private List<String> initializeSqlLines(Map<String, String> vars) throws IOException {
@@ -204,7 +217,7 @@ public class SQLClientKafkaITCase extends TestLogger {
 
     private void checkCsvResultFile() throws Exception {
         boolean success = false;
-        final Deadline deadline = Deadline.fromNow(Duration.ofSeconds(120));
+        final Deadline deadline = Deadline.fromNow(Duration.ofSeconds(300));
         while (deadline.hasTimeLeft()) {
             if (Files.exists(result)) {
                 List<String> lines = readCsvResultFiles(result);
@@ -231,5 +244,18 @@ public class SQLClientKafkaITCase extends TestLogger {
             Thread.sleep(500);
         }
         Assert.assertTrue("Did not get expected results before timeout.", success);
+    }
+
+    private static List<String> readCsvResultFiles(Path path) throws IOException {
+        File filePath = path.toFile();
+        // list all the non-hidden files
+        File[] csvFiles = filePath.listFiles((dir, name) -> !name.startsWith("."));
+        List<String> result = new ArrayList<>();
+        if (csvFiles != null) {
+            for (File file : csvFiles) {
+                result.addAll(Files.readAllLines(file.toPath()));
+            }
+        }
+        return result;
     }
 }

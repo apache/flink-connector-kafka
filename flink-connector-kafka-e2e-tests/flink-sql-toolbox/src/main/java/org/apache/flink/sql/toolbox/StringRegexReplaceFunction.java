@@ -16,21 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.flink.tests.util.kafka;
+package org.apache.flink.sql.toolbox;
 
-import java.util.Optional;
+import org.apache.flink.table.functions.ScalarFunction;
 
-/** A factory for {@link KafkaResource} implementations. */
-@FunctionalInterface
-public interface KafkaResourceFactory {
+/**
+ * Scalar function for replacing all occurrences of a regular expression with a replacement string.
+ */
+public class StringRegexReplaceFunction extends ScalarFunction {
 
-    /**
-     * Returns a {@link KafkaResource} instance. If the instance could not be instantiated (for
-     * example, because a mandatory parameter was missing), then an empty {@link Optional} should be
-     * returned.
-     *
-     * @return KafkaResource instance
-     * @throws Exception if the instance could not be instantiated
-     */
-    KafkaResource create(String kafkaVersion) throws Exception;
+    public String eval(String input, String regex, String replacement) {
+        return input.replaceAll(regex, replacement);
+    }
 }

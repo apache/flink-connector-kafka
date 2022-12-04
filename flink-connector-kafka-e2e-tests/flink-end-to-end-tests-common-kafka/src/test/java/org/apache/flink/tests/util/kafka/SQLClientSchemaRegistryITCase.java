@@ -68,7 +68,8 @@ public class SQLClientSchemaRegistryITCase {
     private static final Path sqlAvroJar = ResourceTestUtils.getResource(".*avro.jar");
     private static final Path sqlAvroRegistryJar =
             ResourceTestUtils.getResource(".*avro-confluent.jar");
-    private static final Path sqlToolBoxJar = ResourceTestUtils.getResource(".*SqlToolbox.jar");
+    private static final Path sqlToolBoxJar =
+            ResourceTestUtils.getResource(".*flink-connector-testing.jar");
     private final Path sqlConnectorKafkaJar = ResourceTestUtils.getResource(".*kafka.jar");
 
     @ClassRule public static final Network NETWORK = Network.newNetwork();

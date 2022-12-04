@@ -55,7 +55,7 @@ CREATE TABLE CsvTable (
   'csv.disable-quote-character' = 'true'
 );
 
-CREATE FUNCTION RegReplace AS 'org.apache.flink.table.toolbox.StringRegexReplaceFunction';
+CREATE FUNCTION RegReplace AS 'org.apache.flink.sql.toolbox.StringRegexReplaceFunction';
 
 INSERT INTO AvroTable -- read from Kafka Json, window aggregation, and write into Kafka Avro
 SELECT
