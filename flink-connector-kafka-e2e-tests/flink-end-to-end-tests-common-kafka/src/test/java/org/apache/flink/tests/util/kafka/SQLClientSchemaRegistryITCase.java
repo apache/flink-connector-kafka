@@ -68,7 +68,6 @@ public class SQLClientSchemaRegistryITCase {
     private static final Path sqlAvroJar = ResourceTestUtils.getResource(".*avro.jar");
     private static final Path sqlAvroRegistryJar =
             ResourceTestUtils.getResource(".*avro-confluent.jar");
-    private static final Path sqlToolBoxJar = ResourceTestUtils.getResource(".*SqlToolbox.jar");
     private final Path sqlConnectorKafkaJar = ResourceTestUtils.getResource(".*kafka.jar");
 
     @ClassRule public static final Network NETWORK = Network.newNetwork();
@@ -253,8 +252,7 @@ public class SQLClientSchemaRegistryITCase {
     private void executeSqlStatements(List<String> sqlLines) throws Exception {
         flink.submitSQLJob(
                 new SQLJobSubmission.SQLJobSubmissionBuilder(sqlLines)
-                        .addJars(
-                                sqlAvroJar, sqlAvroRegistryJar, sqlConnectorKafkaJar, sqlToolBoxJar)
+                        .addJars(sqlAvroJar, sqlAvroRegistryJar, sqlConnectorKafkaJar)
                         .build());
     }
 }

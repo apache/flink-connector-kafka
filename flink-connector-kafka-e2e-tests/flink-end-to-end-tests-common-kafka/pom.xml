@@ -21,9 +21,9 @@ under the License.
 		 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 		 xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<parent>
-		<artifactId>flink-end-to-end-tests</artifactId>
 		<groupId>org.apache.flink</groupId>
-		<version>1.16-SNAPSHOT</version>
+		<artifactId>flink-connector-kafka-e2e-tests</artifactId>
+		<version>3.0-SNAPSHOT</version>
 	</parent>
 	<modelVersion>4.0.0</modelVersion>
 
@@ -37,12 +37,11 @@ under the License.
 		</repository>
 	</repositories>
 
+	<properties>
+		<confluent.version>6.2.2</confluent.version>
+	</properties>
+
 	<dependencies>
-		<dependency>
-			<groupId>org.apache.flink</groupId>
-			<artifactId>flink-end-to-end-tests-common</artifactId>
-			<version>${project.version}</version>
-		</dependency>
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-connector-kafka</artifactId>
@@ -76,7 +75,7 @@ under the License.
 		<dependency>
 			<groupId>org.apache.kafka</groupId>
 			<artifactId>kafka-clients</artifactId>
-			<version>3.2.3</version>
+			<version>${kafka.version}</version>
 		</dependency>
 
 		<!-- The following dependencies are for connector/format sql-jars that
@@ -86,23 +85,17 @@ under the License.
 			This ensures that all modules we actually need (as defined by the
  			dependency-plugin configuration) are built before this module. -->
 		<dependency>
-			<groupId>org.apache.flink</groupId>
-			<artifactId>flink-sql-client-test</artifactId>
-			<version>${project.version}</version>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
 			<!-- Used by maven-dependency-plugin -->
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-sql-avro</artifactId>
-			<version>${project.version}</version>
+			<version>${flink.version}</version>
 			<scope>test</scope>
 		</dependency>
 		<dependency>
 			<!-- Used by maven-dependency-plugin -->
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-sql-avro-confluent-registry</artifactId>
-			<version>${project.version}</version>
+			<version>${flink.version}</version>
 			<scope>test</scope>
 		</dependency>
 
@@ -115,14 +108,14 @@ under the License.
 			<!-- https://mvnrepository.com/artifact/io.confluent/kafka-avro-serializer -->
 			<groupId>io.confluent</groupId>
 			<artifactId>kafka-avro-serializer</artifactId>
-			<version>6.2.2</version>
+			<version>${confluent.version}</version>
 			<scope>test</scope>
 		</dependency>
 
 		<dependency>
 			<groupId>io.confluent</groupId>
 			<artifactId>kafka-schema-registry-client</artifactId>
-			<version>6.2.2</version>
+			<version>${confluent.version}</version>
 			<scope>test</scope>
 			<exclusions>
 				<exclusion>
@@ -142,7 +135,7 @@ under the License.
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-connector-test-utils</artifactId>
-			<version>${project.version}</version>
+			<version>${flink.version}</version>
 			<exclusions>
 				<exclusion>
 					<groupId>com.google.guava</groupId>
@@ -155,6 +148,12 @@ under the License.
 			<artifactId>flink-connector-kafka</artifactId>
 			<version>${project.version}</version>
 			<type>test-jar</type>
+		</dependency>
+		<dependency>
+			<groupId>org.hamcrest</groupId>
+			<artifactId>hamcrest-all</artifactId>
+			<version>${hamcrest.version}</version>
+			<scope>test</scope>
 		</dependency>
 	</dependencies>
 
@@ -182,19 +181,10 @@ under the License.
 							<overWrite>true</overWrite>
 							<outputDirectory>${project.build.directory}/dependencies</outputDirectory>
 						</artifactItem>
-
-						<artifactItem>
-							<groupId>org.apache.flink</groupId>
-							<artifactId>flink-sql-client-test</artifactId>
-							<version>${project.version}</version>
-							<destFileName>SqlToolbox.jar</destFileName>
-							<type>jar</type>
-							<outputDirectory>${project.build.directory}/dependencies</outputDirectory>
-						</artifactItem>
 						<artifactItem>
 							<groupId>org.apache.flink</groupId>
 							<artifactId>flink-sql-avro</artifactId>
-							<version>${project.version}</version>
+							<version>${flink.version}</version>
 							<destFileName>avro.jar</destFileName>
 							<type>jar</type>
 							<outputDirectory>${project.build.directory}/dependencies</outputDirectory>
@@ -202,7 +192,7 @@ under the License.
 						<artifactItem>
 							<groupId>org.apache.flink</groupId>
 							<artifactId>flink-sql-avro-confluent-registry</artifactId>
-							<version>${project.version}</version>
+							<version>${flink.version}</version>
 							<destFileName>avro-confluent.jar</destFileName>
 							<type>jar</type>
 							<outputDirectory>${project.build.directory}/dependencies</outputDirectory>
@@ -226,7 +216,7 @@ under the License.
 						<artifactItem>
 							<groupId>org.apache.flink</groupId>
 							<artifactId>flink-connector-test-utils</artifactId>
-							<version>${project.version}</version>
+							<version>${flink.version}</version>
 							<destFileName>flink-connector-testing.jar</destFileName>
 							<type>jar</type>
 							<outputDirectory>${project.build.directory}/dependencies</outputDirectory>
@@ -234,7 +224,7 @@ under the License.
 						<artifactItem>
 							<groupId>org.apache.kafka</groupId>
 							<artifactId>kafka-clients</artifactId>
-							<version>3.2.3</version>
+							<version>${kafka.version}</version>
 							<destFileName>kafka-clients.jar</destFileName>
 							<type>jar</type>
 							<outputDirectory>${project.build.directory}/dependencies</outputDirectory>
