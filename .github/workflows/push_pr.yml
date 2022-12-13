@@ -18,6 +18,9 @@
 
 name: Build flink-connector-kafka
 on: [push, pull_request]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   compile_and_test:
     uses: ./.github/workflows/ci.yml
