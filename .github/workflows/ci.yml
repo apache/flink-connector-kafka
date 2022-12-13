@@ -79,9 +79,9 @@ jobs:
         if: steps.cache-flink.outputs.cache-hit != 'true'
         run: wget -q -c ${{ inputs.flink_url }} -O - | tar -xz
 
-      - name: Compile and test flink-connector-kafka
+      - name: Compile and test
         timeout-minutes: 30
-        run: |
+        run: |          
           set -o pipefail
 
           mvn clean deploy ${MVN_COMMON_OPTIONS} \

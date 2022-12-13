@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-name: Build flink-connector-kafka
+name: Nightly
 on:
   schedule:
     - cron: "0 0 * * 0"
