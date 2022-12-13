@@ -22,6 +22,7 @@ on:
     - cron: "0 0 * * 0"
 jobs:
   compile_and_test:
+    if: github.repository_owner == 'apache'
     strategy:
       matrix:
         flink: [1.16-SNAPSHOT, 1.17-SNAPSHOT]
