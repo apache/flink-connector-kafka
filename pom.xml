@@ -49,7 +49,7 @@ under the License.
     </modules>
 
     <properties>
-        <flink.version>1.16.0</flink.version>
+        <flink.version>1.16.1</flink.version>
         <flink.shaded.version>15.0</flink.shaded.version>
         <kafka.version>3.2.3</kafka.version>
         <zookeeper.version>3.5.9</zookeeper.version>
