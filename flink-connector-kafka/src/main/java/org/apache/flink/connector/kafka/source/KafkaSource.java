@@ -49,6 +49,7 @@ import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplitSerializ
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.util.UserCodeClassLoader;
+import org.apache.flink.util.function.SerializableSupplier;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 
@@ -56,6 +57,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -98,6 +100,8 @@ public class KafkaSource<OUT>
     private final KafkaRecordDeserializationSchema<OUT> deserializationSchema;
     // The configurations.
     private final Properties props;
+    // Client rackId callback
+    private final SerializableSupplier<String> rackIdSupplier;
 
     KafkaSource(
             KafkaSubscriber subscriber,
@@ -105,13 +109,15 @@ public class KafkaSource<OUT>
             @Nullable OffsetsInitializer stoppingOffsetsInitializer,
             Boundedness boundedness,
             KafkaRecordDeserializationSchema<OUT> deserializationSchema,
-            Properties props) {
+            Properties props,
+            SerializableSupplier<String> rackIdSupplier) {
         this.subscriber = subscriber;
         this.startingOffsetsInitializer = startingOffsetsInitializer;
         this.stoppingOffsetsInitializer = stoppingOffsetsInitializer;
         this.boundedness = boundedness;
         this.deserializationSchema = deserializationSchema;
         this.props = props;
+        this.rackIdSupplier = rackIdSupplier;
     }
 
     /**
@@ -157,7 +163,14 @@ public class KafkaSource<OUT>
                 new KafkaSourceReaderMetrics(readerContext.metricGroup());
 
         Supplier<KafkaPartitionSplitReader> splitReaderSupplier =
-                () -> new KafkaPartitionSplitReader(props, readerContext, kafkaSourceReaderMetrics);
+                () ->
+                        new KafkaPartitionSplitReader(
+                                props,
+                                readerContext,
+                                kafkaSourceReaderMetrics,
+                                Optional.ofNullable(rackIdSupplier)
+                                        .map(Supplier::get)
+                                        .orElse(null));
         KafkaRecordEmitter<OUT> recordEmitter = new KafkaRecordEmitter<>(deserializationSchema);
 
         return new KafkaSourceReader<>(

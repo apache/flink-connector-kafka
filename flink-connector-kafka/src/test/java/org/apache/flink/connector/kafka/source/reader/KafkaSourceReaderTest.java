@@ -40,6 +40,7 @@ import org.apache.flink.metrics.Gauge;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.testutils.MetricListener;
 import org.apache.flink.runtime.metrics.groups.InternalSourceReaderMetricGroup;
+import org.apache.flink.util.function.SerializableSupplier;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -53,6 +54,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -79,6 +81,8 @@ import static org.apache.flink.connector.kafka.source.metrics.KafkaSourceReaderM
 import static org.apache.flink.connector.kafka.testutils.KafkaSourceTestEnv.NUM_PARTITIONS;
 import static org.apache.flink.core.testutils.CommonTestUtils.waitUtil;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 /** Unit tests for {@link KafkaSourceReader}. */
 public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSplit> {
@@ -271,7 +275,8 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
                                 Boundedness.CONTINUOUS_UNBOUNDED,
                                 new TestingReaderContext(),
                                 (ignore) -> {},
-                                properties)) {
+                                properties,
+                                null)) {
             reader.addSplits(
                     getSplits(numSplits, NUM_RECORDS_PER_SPLIT, Boundedness.CONTINUOUS_UNBOUNDED));
             ValidatingSourceOutput output = new ValidatingSourceOutput();
@@ -479,6 +484,45 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
         }
     }
 
+    @Test
+    public void testThatReaderDoesNotCallRackIdSupplierOnInit() throws Exception {
+        SerializableSupplier<String> rackIdSupplier = Mockito.mock(SerializableSupplier.class);
+
+        try (KafkaSourceReader<Integer> reader =
+                (KafkaSourceReader<Integer>)
+                        createReader(
+                                Boundedness.CONTINUOUS_UNBOUNDED,
+                                new TestingReaderContext(),
+                                (ignore) -> {},
+                                new Properties(),
+                                rackIdSupplier)) {
+            // Do nothing here
+        }
+
+        verify(rackIdSupplier, never()).get();
+    }
+
+    @Test
+    public void testThatReaderDoesCallRackIdSupplierOnSplitAssignment() throws Exception {
+        SerializableSupplier<String> rackIdSupplier = Mockito.mock(SerializableSupplier.class);
+        Mockito.when(rackIdSupplier.get()).thenReturn("use1-az1");
+
+        try (KafkaSourceReader<Integer> reader =
+                (KafkaSourceReader<Integer>)
+                        createReader(
+                                Boundedness.CONTINUOUS_UNBOUNDED,
+                                new TestingReaderContext(),
+                                (ignore) -> {},
+                                new Properties(),
+                                rackIdSupplier)) {
+            reader.addSplits(
+                    Collections.singletonList(
+                            new KafkaPartitionSplit(new TopicPartition(TOPIC, 1), 1L)));
+        }
+
+        verify(rackIdSupplier).get();
+    }
+
     // ------------------------------------------
 
     @Override
@@ -535,14 +579,15 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
             throws Exception {
         Properties properties = new Properties();
         properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
-        return createReader(boundedness, context, splitFinishedHook, properties);
+        return createReader(boundedness, context, splitFinishedHook, properties, null);
     }
 
     private SourceReader<Integer, KafkaPartitionSplit> createReader(
             Boundedness boundedness,
             SourceReaderContext context,
             Consumer<Collection<String>> splitFinishedHook,
-            Properties props)
+            Properties props,
+            SerializableSupplier<String> rackIdSupplier)
             throws Exception {
         KafkaSourceBuilder<Integer> builder =
                 KafkaSource.<Integer>builder()
@@ -558,6 +603,9 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
                         .setProperties(props);
         if (boundedness == Boundedness.BOUNDED) {
             builder.setBounded(OffsetsInitializer.latest());
+        }
+        if (rackIdSupplier != null) {
+            builder.setRackIdSupplier(rackIdSupplier);
         }
 
         return KafkaSourceTestUtils.createReaderWithFinishedSplitHook(
