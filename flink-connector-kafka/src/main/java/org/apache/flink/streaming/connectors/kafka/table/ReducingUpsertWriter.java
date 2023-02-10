@@ -158,7 +158,7 @@ class ReducingUpsertWriter<WriterState>
      * ReducingUpsertWriter} will emit the records in the buffer with memorized timestamp.
      */
     private static class WrappedContext implements SinkWriter.Context {
-        private long timestamp;
+        private Long timestamp;
         private SinkWriter.Context context;
 
         @Override
@@ -169,11 +169,10 @@ class ReducingUpsertWriter<WriterState>
 
         @Override
         public Long timestamp() {
-            checkNotNull(timestamp, "timestamp must to be set before retrieving it.");
             return timestamp;
         }
 
-        public void setTimestamp(long timestamp) {
+        public void setTimestamp(Long timestamp) {
             this.timestamp = timestamp;
         }
 
