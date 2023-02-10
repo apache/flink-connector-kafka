@@ -24,7 +24,7 @@ import org.apache.flink.connector.testframe.container.TestcontainersSettings;
 import org.apache.flink.test.resources.ResourceTestUtils;
 import org.apache.flink.test.util.SQLJobSubmission;
 import org.apache.flink.tests.util.kafka.containers.SchemaRegistryContainer;
-import org.apache.flink.util.DockerImageVersions;
+import org.apache.flink.tests.util.kafka.test.DockerImageVersions;
 
 import io.confluent.kafka.schemaregistry.avro.AvroSchema;
 import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
