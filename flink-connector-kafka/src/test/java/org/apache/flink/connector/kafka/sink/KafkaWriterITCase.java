@@ -41,6 +41,7 @@ import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.errors.InvalidProducerEpochException;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -75,6 +76,7 @@ import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaCo
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.drainAllRecordsFromTopic;
 import static org.apache.flink.util.DockerImageVersions.KAFKA;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
 
 /** Tests for the standalone KafkaWriter. */
 @ExtendWith(TestLoggerExtension.class)
@@ -223,7 +225,10 @@ public class KafkaWriterITCase {
             }
 
             writer.write(3, SINK_WRITER_CONTEXT);
-            writer.flush(false);
+            assertThatCode(() -> writer.flush(false))
+                    .as(
+                            "Will throw Kafka exception since the transactionId has already been committed.")
+                    .hasRootCauseExactlyInstanceOf(InvalidProducerEpochException.class);
             writer.prepareCommit();
             assertThat(numRecordsOutErrors.getCount()).isEqualTo(1L);
         }
@@ -380,6 +385,28 @@ public class KafkaWriterITCase {
             }
 
             assertThat(drainAllRecordsFromTopic(topic, properties, true)).hasSize(1);
+        }
+    }
+
+    @Test
+    public void testErrorPropagation() {
+        Properties properties = getKafkaClientConfiguration();
+        final KafkaWriter<Integer> writer =
+                createWriterWithConfiguration(properties, DeliveryGuarantee.AT_LEAST_ONCE);
+        try {
+            writer.getAsyncProducerException()
+                    .set(new IOException("previous send request encountered error."));
+            assertThatCode(() -> writer.write(1, SINK_WRITER_CONTEXT))
+                    .hasRootCauseExactlyInstanceOf(IOException.class);
+
+            writer.getAsyncProducerException()
+                    .set(new IOException("previous send request encountered error."));
+            assertThatCode(() -> writer.flush(false))
+                    .hasRootCauseExactlyInstanceOf(IOException.class);
+        } finally {
+            writer.getAsyncProducerException()
+                    .set(new IOException("previous send request encountered error."));
+            assertThatCode(writer::close).hasRootCauseExactlyInstanceOf(IOException.class);
         }
     }
 
