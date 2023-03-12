@@ -178,7 +178,14 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
     @Test
     public void testTableSink() {
         // Construct table sink using options and table sink factory.
-        final DynamicTableSink actualSink = createTableSink(SINK_SCHEMA, getFullSinkOptions());
+        final Map<String, String> modifiedOptions =
+                getModifiedOptions(
+                        getFullSinkOptions(),
+                        options -> {
+                            options.put("sink.delivery-guarantee", "exactly-once");
+                            options.put("sink.transactional-id-prefix", "kafka-sink");
+                        });
+        final DynamicTableSink actualSink = createTableSink(SINK_SCHEMA, modifiedOptions);
 
         final DynamicTableSink expectedSink =
                 createExpectedSink(
@@ -190,9 +197,10 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         null,
                         SINK_TOPIC,
                         UPSERT_KAFKA_SINK_PROPERTIES,
-                        DeliveryGuarantee.AT_LEAST_ONCE,
+                        DeliveryGuarantee.EXACTLY_ONCE,
                         SinkBufferFlushMode.DISABLED,
-                        null);
+                        null,
+                        "kafka-sink");
 
         // Test sink format.
         final KafkaDynamicSink actualUpsertKafkaSink = (KafkaDynamicSink) actualSink;
@@ -219,6 +227,8 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                                 options -> {
                                     options.put("sink.buffer-flush.max-rows", "100");
                                     options.put("sink.buffer-flush.interval", "1s");
+                                    options.put("sink.delivery-guarantee", "exactly-once");
+                                    options.put("sink.transactional-id-prefix", "kafka-sink");
                                 }));
 
         final DynamicTableSink expectedSink =
@@ -231,9 +241,10 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         null,
                         SINK_TOPIC,
                         UPSERT_KAFKA_SINK_PROPERTIES,
-                        DeliveryGuarantee.AT_LEAST_ONCE,
+                        DeliveryGuarantee.EXACTLY_ONCE,
                         new SinkBufferFlushMode(100, 1000L),
-                        null);
+                        null,
+                        "kafka-sink");
 
         // Test sink format.
         final KafkaDynamicSink actualUpsertKafkaSink = (KafkaDynamicSink) actualSink;
@@ -266,7 +277,12 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
     public void testTableSinkWithParallelism() {
         final Map<String, String> modifiedOptions =
                 getModifiedOptions(
-                        getFullSinkOptions(), options -> options.put("sink.parallelism", "100"));
+                        getFullSinkOptions(),
+                        options -> {
+                            options.put("sink.parallelism", "100");
+                            options.put("sink.delivery-guarantee", "exactly-once");
+                            options.put("sink.transactional-id-prefix", "kafka-sink");
+                        });
         final DynamicTableSink actualSink = createTableSink(SINK_SCHEMA, modifiedOptions);
 
         final DynamicTableSink expectedSink =
@@ -279,9 +295,10 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         null,
                         SINK_TOPIC,
                         UPSERT_KAFKA_SINK_PROPERTIES,
-                        DeliveryGuarantee.AT_LEAST_ONCE,
+                        DeliveryGuarantee.EXACTLY_ONCE,
                         SinkBufferFlushMode.DISABLED,
-                        100);
+                        100,
+                        "kafka-sink");
         assertThat(actualSink).isEqualTo(expectedSink);
 
         final DynamicTableSink.SinkRuntimeProvider provider =
@@ -634,6 +651,26 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         }));
     }
 
+    @Test
+    public void testExactlyOnceGuaranteeWithoutTransactionalIdPrefix() {
+        thrown.expect(ValidationException.class);
+        thrown.expect(
+                containsCause(
+                        new ValidationException(
+                                "sink.transactional-id-prefix must be specified when using DeliveryGuarantee.EXACTLY_ONCE.")));
+
+        final Map<String, String> modifiedOptions =
+                getModifiedOptions(
+                        getFullSinkOptions(),
+                        options -> {
+                            options.remove(KafkaConnectorOptions.TRANSACTIONAL_ID_PREFIX.key());
+                            options.put(
+                                    KafkaConnectorOptions.DELIVERY_GUARANTEE.key(),
+                                    DeliveryGuarantee.EXACTLY_ONCE.toString());
+                        });
+        createTableSink(SINK_SCHEMA, modifiedOptions);
+    }
+
     // --------------------------------------------------------------------------------------------
     // Utilities
     // --------------------------------------------------------------------------------------------
@@ -764,7 +801,8 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
             Properties properties,
             DeliveryGuarantee deliveryGuarantee,
             SinkBufferFlushMode flushMode,
-            Integer parallelism) {
+            Integer parallelism,
+            String transactionalIdPrefix) {
         return new KafkaDynamicSink(
                 consumedDataType,
                 consumedDataType,
@@ -780,7 +818,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                 true,
                 flushMode,
                 parallelism,
-                null);
+                transactionalIdPrefix);
     }
 
     private KafkaSource<?> assertKafkaSource(ScanTableSource.ScanRuntimeProvider provider) {

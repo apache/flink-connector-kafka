@@ -21,8 +21,6 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.sink2.Committer;
-import org.apache.flink.api.connector.sink2.StatefulSink;
-import org.apache.flink.api.connector.sink2.TwoPhaseCommittingSink;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 
@@ -56,8 +54,7 @@ import java.util.Properties;
  */
 @PublicEvolving
 public class KafkaSink<IN>
-        implements StatefulSink<IN, KafkaWriterState>,
-                TwoPhaseCommittingSink<IN, KafkaCommittable> {
+        implements TwoPhaseCommittingStatefulSink<IN, KafkaWriterState, KafkaCommittable> {
 
     private final DeliveryGuarantee deliveryGuarantee;
 

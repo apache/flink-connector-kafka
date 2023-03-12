@@ -19,8 +19,8 @@ package org.apache.flink.streaming.connectors.kafka.table;
 
 import org.apache.flink.api.common.operators.ProcessingTimeService;
 import org.apache.flink.api.connector.sink2.SinkWriter;
-import org.apache.flink.api.connector.sink2.StatefulSink;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.connector.kafka.sink.TwoPhaseCommittingStatefulSink;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -28,6 +28,7 @@ import org.apache.flink.types.RowKind;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,10 +40,13 @@ import static org.apache.flink.types.RowKind.UPDATE_AFTER;
 import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
-class ReducingUpsertWriter<WriterState>
-        implements StatefulSink.StatefulSinkWriter<RowData, WriterState> {
+class ReducingUpsertWriter<WriterState, Comm>
+        implements TwoPhaseCommittingStatefulSink.PrecommittingStatefulSinkWriter<
+                RowData, WriterState, Comm> {
 
-    private final StatefulSink.StatefulSinkWriter<RowData, WriterState> wrappedWriter;
+    private final TwoPhaseCommittingStatefulSink.PrecommittingStatefulSinkWriter<
+                    RowData, WriterState, Comm>
+            wrappedWriter;
     private final WrappedContext wrappedContext = new WrappedContext();
     private final int batchMaxRowNums;
     private final Function<RowData, RowData> valueCopyFunction;
@@ -55,7 +59,9 @@ class ReducingUpsertWriter<WriterState>
     private long lastFlush = System.currentTimeMillis();
 
     ReducingUpsertWriter(
-            StatefulSink.StatefulSinkWriter<RowData, WriterState> wrappedWriter,
+            TwoPhaseCommittingStatefulSink.PrecommittingStatefulSinkWriter<
+                            RowData, WriterState, Comm>
+                    wrappedWriter,
             DataType physicalDataType,
             int[] keyProjection,
             SinkBufferFlushMode bufferFlushMode,
@@ -148,6 +154,11 @@ class ReducingUpsertWriter<WriterState>
         }
         lastFlush = System.currentTimeMillis();
         reduceBuffer.clear();
+    }
+
+    @Override
+    public Collection<Comm> prepareCommit() throws IOException, InterruptedException {
+        return wrappedWriter.prepareCommit();
     }
 
     /**
