@@ -221,6 +221,22 @@ Connector Options
        By default, this is disabled. Note both <code>'sink.buffer-flush.max-rows'</code> and
        <code>'sink.buffer-flush.interval'</code> must be set to be greater than zero to enable sink buffer flushing.</td>
     </tr>
+    <tr>
+      <td><h5>sink.delivery-guarantee</h5></td>
+      <td>optional</td>
+      <td>no</td>
+      <td style="word-wrap: break-word;">at-least-once</td>
+      <td>String</td>
+      <td>Defines the delivery semantic for the upsert-kafka sink. Valid enumerationns are <code>'at-least-once'</code>, <code>'exactly-once'</code> and <code>'none'</code>. See <a href='#consistency-guarantees'>Consistency guarantees</a> for more details. </td>
+    </tr>
+    <tr>
+      <td><h5>sink.transactional-id-prefix</h5></td>
+      <td>optional</td>
+      <td>yes</td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>String</td>
+      <td>If the delivery guarantee is configured as <code>'exactly-once'</code> this value must be set and is used a prefix for the identifier of all opened Kafka transactions.</td>
+    </tr>
     </tbody>
 </table>
 
@@ -276,6 +292,19 @@ This means, Flink may write duplicate records with the same key into the Kafka t
 connector is working in the upsert mode, the last record on the same key will take effect when
 reading back as a source. Therefore, the upsert-kafka connector achieves idempotent writes just like
 the [HBase sink]({{< ref "docs/connectors/table/hbase" >}}).
+
+With Flink's checkpointing enabled, the `upsert-kafka` connector can provide exactly-once delivery guarantees.
+
+Besides enabling Flink's checkpointing, you can also choose three different modes of operating chosen by passing appropriate `sink.delivery-guarantee` option:
+
+* `none`: Flink will not guarantee anything. Produced records can be lost or they can be duplicated.
+* `at-least-once` (default setting): This guarantees that no records will be lost (although they can be duplicated).
+* `exactly-once`: Kafka transactions will be used to provide exactly-once semantic. Whenever you write
+  to Kafka using transactions, do not forget about setting desired `isolation.level` (`read_uncommitted`
+  or `read_committed` - the latter one is the default value) for any application consuming records
+  from Kafka.
+
+Please refer to [Kafka documentation]({{< ref "docs/connectors/datastream/kafka" >}}#kafka-producers-and-fault-tolerance) for more caveats about delivery guarantees.
 
 ### Source Per-Partition Watermarks
 
