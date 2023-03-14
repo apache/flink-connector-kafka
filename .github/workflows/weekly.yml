@@ -29,3 +29,4 @@ jobs:
     uses: apache/flink-connector-shared-utils/.github/workflows/ci.yml@ci_utils
     with:
       flink_version: ${{ matrix.flink }}
+      run_dependency_convergence: false
