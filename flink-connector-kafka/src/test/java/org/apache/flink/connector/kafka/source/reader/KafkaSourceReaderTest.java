@@ -540,15 +540,14 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
         Mockito.when(rackIdSupplier.get()).thenReturn("use1-az1");
 
         try (KafkaSourceReader<Integer> reader =
-                     (KafkaSourceReader<Integer>)
-                             createReader(
-                                     Boundedness.CONTINUOUS_UNBOUNDED,
-                                     new TestingReaderContext(),
-                                     (ignore) -> {
-                                     },
-                                     new Properties(),
-                                     rackIdSupplier,
-                                     null)) {
+                (KafkaSourceReader<Integer>)
+                        createReader(
+                                Boundedness.CONTINUOUS_UNBOUNDED,
+                                new TestingReaderContext(),
+                                (ignore) -> {},
+                                new Properties(),
+                                rackIdSupplier,
+                                null)) {
             reader.addSplits(
                     Collections.singletonList(
                             new KafkaPartitionSplit(new TopicPartition(TOPIC, 1), 1L)));
@@ -728,7 +727,8 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
             throws Exception {
         Properties properties = new Properties();
         properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
-        return createReader(boundedness, context, splitFinishedHook, properties, null, recordEvaluator);
+        return createReader(
+                boundedness, context, splitFinishedHook, properties, null, recordEvaluator);
     }
 
     private SourceReader<Integer, KafkaPartitionSplit> createReader(
