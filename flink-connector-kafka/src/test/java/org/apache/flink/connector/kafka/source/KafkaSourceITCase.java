@@ -27,6 +27,7 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.NoStoppingOffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
@@ -80,6 +81,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.flink.connector.kafka.testutils.KafkaSourceExternalContext.SplitMappingMode.PARTITION;
 import static org.apache.flink.connector.kafka.testutils.KafkaSourceExternalContext.SplitMappingMode.TOPIC;
+import static org.apache.flink.connector.kafka.testutils.KafkaSourceTestEnv.NUM_RECORDS_PER_PARTITION;
 import static org.apache.flink.streaming.connectors.kafka.KafkaTestBase.kafkaServer;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -169,6 +171,45 @@ public class KafkaSourceITCase {
         }
 
         @Test
+        public void testEndWithRecordEvaluator() throws Throwable {
+            KafkaSource<PartitionAndValue> source =
+                    KafkaSource.<PartitionAndValue>builder()
+                            .setBootstrapServers(KafkaSourceTestEnv.brokerConnectionStrings)
+                            .setGroupId("testEndWithRecordEvaluator")
+                            .setTopics(Arrays.asList(TOPIC1, TOPIC2))
+                            .setDeserializer(new TestingKafkaRecordDeserializationSchema(false))
+                            .setStartingOffsets(OffsetsInitializer.earliest())
+                            .setBounded(new NoStoppingOffsetsInitializer())
+                            .setEofRecordEvaluator(
+                                    pav -> {
+                                        String tp = pav.tp;
+                                        int expectedValue =
+                                                Integer.parseInt(tp.substring(tp.lastIndexOf('-')));
+                                        return pav.value != expectedValue;
+                                    })
+                            .build();
+            StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+            env.setParallelism(1);
+            DataStream<PartitionAndValue> stream =
+                    env.fromSource(
+                            source, WatermarkStrategy.noWatermarks(), "testEndWithRecordEvaluator");
+
+            Map<String, List<Integer>> resultPerPartition =
+                    executeAndGetResultPerPartition(env, stream);
+            resultPerPartition.forEach(
+                    (tp, values) -> {
+                        int expectedValue = Integer.parseInt(tp.substring(tp.lastIndexOf('-') + 1));
+                        assertThat(values.size()).isEqualTo(1);
+                        assertThat((int) values.get(0))
+                                .as(
+                                        String.format(
+                                                "The value for partition %s should be only %d",
+                                                tp, expectedValue))
+                                .isEqualTo(expectedValue);
+                    });
+        }
+
+        @Test
         public void testValueOnlyDeserializer() throws Exception {
             KafkaSource<Integer> source =
                     KafkaSource.<Integer>builder()
@@ -202,9 +243,7 @@ public class KafkaSourceITCase {
                 for (int partition = 0;
                         partition < KafkaSourceTestEnv.NUM_PARTITIONS;
                         partition++) {
-                    for (int value = partition;
-                            value < KafkaSourceTestEnv.NUM_RECORDS_PER_PARTITION;
-                            value++) {
+                    for (int value = partition; value < NUM_RECORDS_PER_PARTITION; value++) {
                         expectedSum += value;
                     }
                 }
@@ -516,6 +555,30 @@ public class KafkaSourceITCase {
 
     private void executeAndVerify(
             StreamExecutionEnvironment env, DataStream<PartitionAndValue> stream) throws Exception {
+        Map<String, List<Integer>> resultPerPartition =
+                executeAndGetResultPerPartition(env, stream);
+
+        // Expected elements from partition P should be an integer sequence from P to
+        // NUM_RECORDS_PER_PARTITION.
+        resultPerPartition.forEach(
+                (tp, values) -> {
+                    int firstExpectedValue =
+                            Integer.parseInt(tp.substring(tp.lastIndexOf('-') + 1));
+                    assertThat(values.size())
+                            .isEqualTo(NUM_RECORDS_PER_PARTITION - firstExpectedValue);
+                    for (int i = 0; i < values.size(); i++) {
+                        assertThat((int) values.get(i))
+                                .as(
+                                        String.format(
+                                                "The %d-th value for partition %s should be %d",
+                                                i, tp, firstExpectedValue + i))
+                                .isEqualTo(firstExpectedValue + i);
+                    }
+                });
+    }
+
+    private Map<String, List<Integer>> executeAndGetResultPerPartition(
+            StreamExecutionEnvironment env, DataStream<PartitionAndValue> stream) throws Exception {
         stream.addSink(
                 new RichSinkFunction<PartitionAndValue>() {
                     @Override
@@ -536,22 +599,7 @@ public class KafkaSourceITCase {
                         resultPerPartition
                                 .computeIfAbsent(partitionAndValue.tp, ignored -> new ArrayList<>())
                                 .add(partitionAndValue.value));
-
-        // Expected elements from partition P should be an integer sequence from P to
-        // NUM_RECORDS_PER_PARTITION.
-        resultPerPartition.forEach(
-                (tp, values) -> {
-                    int firstExpectedValue =
-                            Integer.parseInt(tp.substring(tp.lastIndexOf('-') + 1));
-                    for (int i = 0; i < values.size(); i++) {
-                        assertThat((int) values.get(i))
-                                .as(
-                                        String.format(
-                                                "The %d-th value for partition %s should be %d",
-                                                i, tp, firstExpectedValue + i))
-                                .isEqualTo(firstExpectedValue + i);
-                    }
-                });
+        return resultPerPartition;
     }
 
     private static class OnEventWatermarkGenerator

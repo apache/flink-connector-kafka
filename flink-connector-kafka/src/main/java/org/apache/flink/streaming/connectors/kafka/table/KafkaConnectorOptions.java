@@ -194,6 +194,12 @@ public class KafkaConnectorOptions {
                                     + "The value 0 disables the partition discovery."
                                     + "The default value is 5 minutes, which is equal to the default value of metadata.max.age.ms in Kafka.");
 
+    public static final ConfigOption<String> SCAN_RECORD_EVALUATOR_CLASS =
+            ConfigOptions.key("scan.record.evaluator.class")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Record evaluator to decide the end of the Kafka stream.");
+
     // --------------------------------------------------------------------------------------------
     // Sink specific options
     // --------------------------------------------------------------------------------------------

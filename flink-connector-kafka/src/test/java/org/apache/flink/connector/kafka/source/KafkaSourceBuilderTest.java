@@ -18,6 +18,7 @@
 package org.apache.flink.connector.kafka.source;
 
 import org.apache.flink.configuration.ConfigOptions;
+import org.apache.flink.connector.base.source.reader.RecordEvaluator;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
@@ -215,6 +216,16 @@ public class KafkaSourceBuilderTest {
         assertThatThrownBy(() -> getBasicBuilder().setProperty(propertyKey, propertyValue).build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(expectedError);
+    }
+
+    @Test
+    public void testSettingRecordEvaluator() {
+        assertThat(getBasicBuilder().build().getEofRecordEvaluator()).isNull();
+
+        RecordEvaluator<String> recordEvaluator = s -> s.contains("test");
+        final KafkaSource<String> kafkaSource =
+                getBasicBuilder().setEofRecordEvaluator(recordEvaluator).build();
+        assertThat(kafkaSource.getEofRecordEvaluator()).isEqualTo(recordEvaluator);
     }
 
     private KafkaSourceBuilder<String> getBasicBuilder() {

@@ -29,6 +29,7 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
+import org.apache.flink.streaming.connectors.kafka.testutils.MockRecordEvaluator;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.api.config.TableConfigOptions;
@@ -48,6 +49,8 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -83,6 +86,7 @@ import static org.assertj.core.api.HamcrestCondition.matching;
 /** Basic IT cases for the Kafka table source and sink. */
 @RunWith(Parameterized.class)
 public class KafkaTableITCase extends KafkaTableTestBase {
+    private static final Logger LOG = LoggerFactory.getLogger(KafkaTableITCase.class);
 
     private static final String JSON_FORMAT = "json";
     private static final String AVRO_FORMAT = "avro";
@@ -1322,6 +1326,93 @@ public class KafkaTableITCase extends KafkaTableTestBase {
     public void testStartFromGroupOffsetsNone() {
         Assertions.assertThatThrownBy(() -> testStartFromGroupOffsetsWithNoneResetStrategy())
                 .satisfies(anyCauseMatches(NoOffsetForPartitionException.class));
+    }
+
+    @Test
+    public void testKafkaSourceWithRecordEvaluator() throws Throwable {
+        // we always use a different topic name for each parameterized topic,
+        // in order to make sure the topic can be created.
+        final String topic = "recordEvaluator_" + format + "_" + UUID.randomUUID();
+        TableResult tableResult = null;
+        try {
+            createTestTopic(topic, 3, 1);
+
+            // ---------- Produce an event time stream into Kafka -------------------
+            String groupId = getStandardProps().getProperty("group.id");
+            String bootstraps = getBootstrapServers();
+            tEnv.getConfig().set(TABLE_EXEC_SOURCE_IDLE_TIMEOUT, Duration.ofMillis(100));
+
+            final String createTable =
+                    String.format(
+                            "CREATE TABLE kafka (\n"
+                                    + "  `partition_id` INT,\n"
+                                    + "  `value` STRING\n"
+                                    + ") WITH (\n"
+                                    + "  'connector' = 'kafka',\n"
+                                    + "  'topic' = '%s',\n"
+                                    + "  'properties.bootstrap.servers' = '%s',\n"
+                                    + "  'properties.group.id' = '%s',\n"
+                                    + "  'scan.startup.mode' = 'earliest-offset',\n"
+                                    + "  'sink.partitioner' = '%s',\n"
+                                    + "  'format' = '%s',\n"
+                                    + "  'scan.record.evaluator.class' = '%s'\n"
+                                    + ")",
+                            topic,
+                            bootstraps,
+                            groupId,
+                            TestPartitioner.class.getName(),
+                            format,
+                            MockRecordEvaluator.class.getName());
+            tEnv.executeSql(createTable);
+
+            env.setParallelism(1);
+            String initialValues =
+                    "INSERT INTO kafka\n"
+                            + "VALUES\n"
+                            + " (0, 'test0'),\n"
+                            + " (1, 'test1'),\n"
+                            + " (2, 'test2'),\n"
+                            + " (3, 'End'),\n"
+                            + " (4, 'End'),\n"
+                            + " (5, 'End'),\n"
+                            + " (6, 'should not send'),\n"
+                            + " (7, 'should not send'),\n"
+                            + " (8, 'should not send')\n";
+            tEnv.executeSql(initialValues).await();
+
+            // ---------- Consume stream from Kafka -------------------
+            String sinkName = "MySink";
+            String createSink =
+                    "CREATE TABLE "
+                            + sinkName
+                            + "(\n"
+                            + "  `partition` INT,\n"
+                            + "  `value` STRING\n"
+                            + ") WITH (\n"
+                            + "  'connector' = 'values'\n"
+                            + ")";
+            tEnv.executeSql(createSink);
+
+            tableResult = tEnv.executeSql("INSERT INTO " + sinkName + " SELECT * FROM kafka");
+            List<String> expected = Arrays.asList("+I[0, test0]", "+I[1, test1]", "+I[2, test2]");
+            KafkaTableTestUtils.waitingExpectedResults(sinkName, expected, Duration.ofSeconds(15));
+
+            // insert some records and make sure that these records will not be sent
+            String insertValues =
+                    "INSERT INTO kafka\n"
+                            + " VALUES\n"
+                            + " (9, 'Insert new values. This should not be sent.'),\n"
+                            + " (10, 'Insert new values. This should not be sent.'),\n"
+                            + " (11, 'Insert new values. This should not be sent.')\n";
+            tEnv.executeSql(insertValues).await();
+            KafkaTableTestUtils.waitingExpectedResults(sinkName, expected, Duration.ofSeconds(15));
+        } finally {
+            // ------------- cleanup -------------------
+            if (tableResult != null) {
+                tableResult.getJobClient().ifPresent(JobClient::cancel);
+            }
+            deleteTestTopic(topic);
+        }
     }
 
     private List<String> appendNewData(

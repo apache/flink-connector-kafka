@@ -31,6 +31,7 @@ import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.connector.base.source.reader.RecordEvaluator;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.synchronization.FutureCompletingBlockingQueue;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
@@ -102,11 +103,13 @@ public class KafkaSource<OUT>
     private final Properties props;
     // Client rackId callback
     private final SerializableSupplier<String> rackIdSupplier;
+    @Nullable private RecordEvaluator<OUT> eofRecordEvaluator;
 
     KafkaSource(
             KafkaSubscriber subscriber,
             OffsetsInitializer startingOffsetsInitializer,
             @Nullable OffsetsInitializer stoppingOffsetsInitializer,
+            @Nullable RecordEvaluator<OUT> eofRecordEvaluator,
             Boundedness boundedness,
             KafkaRecordDeserializationSchema<OUT> deserializationSchema,
             Properties props,
@@ -118,6 +121,7 @@ public class KafkaSource<OUT>
         this.deserializationSchema = deserializationSchema;
         this.props = props;
         this.rackIdSupplier = rackIdSupplier;
+        this.eofRecordEvaluator = eofRecordEvaluator;
     }
 
     /**
@@ -171,7 +175,8 @@ public class KafkaSource<OUT>
                                 Optional.ofNullable(rackIdSupplier)
                                         .map(Supplier::get)
                                         .orElse(null));
-        KafkaRecordEmitter<OUT> recordEmitter = new KafkaRecordEmitter<>(deserializationSchema);
+        KafkaRecordEmitter<OUT> recordEmitter =
+                new KafkaRecordEmitter<>(deserializationSchema, eofRecordEvaluator);
 
         return new KafkaSourceReader<>(
                 elementsQueue,
@@ -180,7 +185,8 @@ public class KafkaSource<OUT>
                 recordEmitter,
                 toConfiguration(props),
                 readerContext,
-                kafkaSourceReaderMetrics);
+                kafkaSourceReaderMetrics,
+                eofRecordEvaluator);
     }
 
     @Internal
@@ -250,5 +256,11 @@ public class KafkaSource<OUT>
     @VisibleForTesting
     OffsetsInitializer getStoppingOffsetsInitializer() {
         return stoppingOffsetsInitializer;
+    }
+
+    @VisibleForTesting
+    @Nullable
+    RecordEvaluator<OUT> getEofRecordEvaluator() {
+        return eofRecordEvaluator;
     }
 }

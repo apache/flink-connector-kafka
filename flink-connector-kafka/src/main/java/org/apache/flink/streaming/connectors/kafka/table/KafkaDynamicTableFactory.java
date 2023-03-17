@@ -26,6 +26,7 @@ import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.base.source.reader.RecordEvaluator;
 import org.apache.flink.connector.kafka.sink.KafkaPartitioner;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
@@ -74,6 +75,7 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_BOUNDED_MODE;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_BOUNDED_SPECIFIC_OFFSETS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_BOUNDED_TIMESTAMP_MILLIS;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_RECORD_EVALUATOR_CLASS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_MODE;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_SPECIFIC_OFFSETS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_TIMESTAMP_MILLIS;
@@ -144,6 +146,7 @@ public class KafkaDynamicTableFactory
         options.add(SCAN_STARTUP_SPECIFIC_OFFSETS);
         options.add(SCAN_TOPIC_PARTITION_DISCOVERY);
         options.add(SCAN_STARTUP_TIMESTAMP_MILLIS);
+        options.add(SCAN_RECORD_EVALUATOR_CLASS);
         options.add(SINK_PARTITIONER);
         options.add(SINK_PARALLELISM);
         options.add(DELIVERY_GUARANTEE);
@@ -166,6 +169,7 @@ public class KafkaDynamicTableFactory
                         SCAN_STARTUP_SPECIFIC_OFFSETS,
                         SCAN_TOPIC_PARTITION_DISCOVERY,
                         SCAN_STARTUP_TIMESTAMP_MILLIS,
+                        SCAN_RECORD_EVALUATOR_CLASS,
                         SINK_PARTITIONER,
                         SINK_PARALLELISM,
                         TRANSACTIONAL_ID_PREFIX)
@@ -215,6 +219,15 @@ public class KafkaDynamicTableFactory
 
         final String keyPrefix = tableOptions.getOptional(KEY_FIELDS_PREFIX).orElse(null);
 
+        final RecordEvaluator<RowData> recordEvaluator;
+        try {
+            recordEvaluator =
+                    loadRecordEvaluator(
+                            tableOptions.getOptional(SCAN_RECORD_EVALUATOR_CLASS).orElse(null));
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Fail to load the RecordEvaluator class.", e);
+        }
+
         return createKafkaTableSource(
                 physicalDataType,
                 keyDecodingFormat.orElse(null),
@@ -231,7 +244,8 @@ public class KafkaDynamicTableFactory
                 boundedOptions.boundedMode,
                 boundedOptions.specificOffsets,
                 boundedOptions.boundedTimestampMillis,
-                context.getObjectIdentifier().asSummaryString());
+                context.getObjectIdentifier().asSummaryString(),
+                recordEvaluator);
     }
 
     @Override
@@ -378,6 +392,16 @@ public class KafkaDynamicTableFactory
         return tableOptions.get(DELIVERY_GUARANTEE);
     }
 
+    private RecordEvaluator<RowData> loadRecordEvaluator(String recordEvaluatorClassName)
+            throws Exception {
+        if (recordEvaluatorClassName == null) {
+            return null;
+        }
+        ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+        Class<?> recordEvaluatorClass = classLoader.loadClass(recordEvaluatorClassName);
+        return (RecordEvaluator<RowData>) recordEvaluatorClass.newInstance();
+    }
+
     // --------------------------------------------------------------------------------------------
 
     protected KafkaDynamicSource createKafkaTableSource(
@@ -396,7 +420,8 @@ public class KafkaDynamicTableFactory
             BoundedMode boundedMode,
             Map<KafkaTopicPartition, Long> specificEndOffsets,
             long endTimestampMillis,
-            String tableIdentifier) {
+            String tableIdentifier,
+            @Nullable RecordEvaluator<RowData> recordEvaluator) {
         return new KafkaDynamicSource(
                 physicalDataType,
                 keyDecodingFormat,
@@ -414,7 +439,8 @@ public class KafkaDynamicTableFactory
                 specificEndOffsets,
                 endTimestampMillis,
                 false,
-                tableIdentifier);
+                tableIdentifier,
+                recordEvaluator);
     }
 
     protected KafkaDynamicSink createKafkaTableSink(
