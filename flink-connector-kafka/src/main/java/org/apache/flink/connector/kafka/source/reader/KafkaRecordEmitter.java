@@ -21,13 +21,18 @@ package org.apache.flink.connector.kafka.source.reader;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.connector.source.SourceOutput;
 import org.apache.flink.connector.base.source.reader.RecordEmitter;
+import org.apache.flink.connector.base.source.reader.RecordEvaluator;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplitState;
 import org.apache.flink.util.Collector;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
+import java.util.HashSet;
+import java.util.Set;
 
 /** The {@link RecordEmitter} implementation for {@link KafkaSourceReader}. */
 @Internal
@@ -35,10 +40,17 @@ public class KafkaRecordEmitter<T>
         implements RecordEmitter<ConsumerRecord<byte[], byte[]>, T, KafkaPartitionSplitState> {
 
     private final KafkaRecordDeserializationSchema<T> deserializationSchema;
-    private final SourceOutputWrapper<T> sourceOutputWrapper = new SourceOutputWrapper<>();
+    private final SourceOutputWrapper<T> sourceOutputWrapper;
+    @Nullable private final RecordEvaluator<T> eofRecordEvaluator;
+    private final Set<String> finishedSplits;
 
-    public KafkaRecordEmitter(KafkaRecordDeserializationSchema<T> deserializationSchema) {
+    public KafkaRecordEmitter(
+            KafkaRecordDeserializationSchema<T> deserializationSchema,
+            @Nullable RecordEvaluator<T> eofRecordEvaluator) {
         this.deserializationSchema = deserializationSchema;
+        this.sourceOutputWrapper = new SourceOutputWrapper<>(eofRecordEvaluator);
+        this.eofRecordEvaluator = eofRecordEvaluator;
+        this.finishedSplits = new HashSet<>();
     }
 
     @Override
@@ -51,20 +63,35 @@ public class KafkaRecordEmitter<T>
             sourceOutputWrapper.setSourceOutput(output);
             sourceOutputWrapper.setTimestamp(consumerRecord.timestamp());
             deserializationSchema.deserialize(consumerRecord, sourceOutputWrapper);
-            splitState.setCurrentOffset(consumerRecord.offset() + 1);
+
+            if (sourceOutputWrapper.isEofRecord()) {
+                finishedSplits.add(splitState.splitId());
+            }
+            if (eofRecordEvaluator == null || !finishedSplits.contains(splitState.splitId())) {
+                splitState.setCurrentOffset(consumerRecord.offset() + 1);
+            }
         } catch (Exception e) {
             throw new IOException("Failed to deserialize consumer record due to", e);
         }
     }
 
     private static class SourceOutputWrapper<T> implements Collector<T> {
+        @Nullable private final RecordEvaluator<T> eofRecordEvaluator;
 
         private SourceOutput<T> sourceOutput;
         private long timestamp;
+        private boolean isEofRecord = false;
+
+        public SourceOutputWrapper(@Nullable RecordEvaluator<T> eofRecordEvaluator) {
+            this.eofRecordEvaluator = eofRecordEvaluator;
+        }
 
         @Override
         public void collect(T record) {
             sourceOutput.collect(record, timestamp);
+            if (eofRecordEvaluator != null) {
+                isEofRecord = eofRecordEvaluator.isEndOfStream(record);
+            }
         }
 
         @Override
@@ -76,6 +103,11 @@ public class KafkaRecordEmitter<T>
 
         private void setTimestamp(long timestamp) {
             this.timestamp = timestamp;
+        }
+
+        /** Whether the previous sent record is an eof record. */
+        public boolean isEofRecord() {
+            return isEofRecord;
         }
     }
 }
