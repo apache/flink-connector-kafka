@@ -25,6 +25,20 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 
+/**
+ * The {@link org.apache.flink.core.io.SimpleVersionedSerializer serializer} for {@link
+ * KafkaCommittable}.
+ *
+ * <p>The serializer has a version (returned by {@link #getVersion()}) which can be attached to the
+ * serialized data. When the serializer evolves, the version can be used to identify with which
+ * prior version the data was serialized. Currently, this serializer supported versions are:
+ *
+ * <ol>
+ *   <li>1
+ * </ol>
+ *
+ * <p>Other versions of the serialized data will fail to deserialize and throw an exception.
+ */
 class KafkaCommittableSerializer implements SimpleVersionedSerializer<KafkaCommittable> {
 
     @Override
@@ -46,6 +60,15 @@ class KafkaCommittableSerializer implements SimpleVersionedSerializer<KafkaCommi
 
     @Override
     public KafkaCommittable deserialize(int version, byte[] serialized) throws IOException {
+        switch (version) {
+            case 1:
+                return deserializeV1(serialized);
+            default:
+                throw new IOException("Unrecognized version or corrupt state: " + version);
+        }
+    }
+
+    private KafkaCommittable deserializeV1(byte[] serialized) throws IOException {
         try (final ByteArrayInputStream bais = new ByteArrayInputStream(serialized);
                 final DataInputStream in = new DataInputStream(bais)) {
             final short epoch = in.readShort();
