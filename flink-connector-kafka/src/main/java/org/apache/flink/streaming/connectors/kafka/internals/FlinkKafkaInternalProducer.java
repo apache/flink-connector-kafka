@@ -211,15 +211,14 @@ public class FlinkKafkaInternalProducer<K, V> implements Producer<K, V> {
 
             Object transactionManager = getField(kafkaProducer, "transactionManager");
             synchronized (transactionManager) {
-                Object topicPartitionBookkeeper =
-                        getField(transactionManager, "topicPartitionBookkeeper");
+                Object txnPartitionMap = getField(transactionManager, "txnPartitionMap");
 
                 invoke(
                         transactionManager,
                         "transitionTo",
                         getEnum(
                                 "org.apache.kafka.clients.producer.internals.TransactionManager$State.INITIALIZING"));
-                invoke(topicPartitionBookkeeper, "reset");
+                invoke(txnPartitionMap, "reset");
 
                 setField(
                         transactionManager,

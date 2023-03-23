@@ -373,7 +373,12 @@ public class KafkaPartitionSplitReader
             SplitsChange<KafkaPartitionSplit> splitsChange) {
         if (LOG.isDebugEnabled()) {
             StringJoiner splitsInfo = new StringJoiner(",");
+            Set<TopicPartition> assginment = consumer.assignment();
             for (KafkaPartitionSplit split : splitsChange.splits()) {
+                if (!assginment.contains(split.getTopicPartition())) {
+                    continue;
+                }
+
                 long startingOffset =
                         retryOnWakeup(
                                 () -> consumer.position(split.getTopicPartition()),
