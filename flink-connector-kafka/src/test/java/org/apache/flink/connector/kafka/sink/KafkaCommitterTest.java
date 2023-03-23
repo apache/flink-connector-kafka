@@ -96,19 +96,17 @@ public class KafkaCommitterTest {
 
                     @Override
                     public void flush() {}
-
-                    @Override
-                    public void close() {}
                 };
-        try (final KafkaCommitter committer = new KafkaCommitter(properties);
-                Recyclable<FlinkKafkaInternalProducer<Object, Object>> recyclable =
-                        new Recyclable<>(producer, p -> {})) {
+        Recyclable<FlinkKafkaInternalProducer<Object, Object>> recyclable =
+                new Recyclable<>(producer, FlinkKafkaInternalProducer::close);
+        try (final KafkaCommitter committer = new KafkaCommitter(properties)) {
             final MockCommitRequest<KafkaCommittable> request =
                     new MockCommitRequest<>(
                             new KafkaCommittable(PRODUCER_ID, EPOCH, TRANSACTIONAL_ID, recyclable));
 
             committer.commit(Collections.singletonList(request));
             assertThat(recyclable.isRecycled()).isTrue();
+            assertThat(producer.isClosed()).isTrue();
         }
     }
 
