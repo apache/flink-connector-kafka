@@ -28,6 +28,7 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.InvalidTxnStateException;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
@@ -63,16 +64,15 @@ class FlinkKafkaInternalProducerITCase {
     private static final KafkaContainer KAFKA_CONTAINER =
             createKafkaContainer(KAFKA, LOG).withEmbeddedZookeeper();
 
-    private static final String TRANSACTION_PREFIX = "test-transaction-";
-
     @Test
     void testInitTransactionId() {
         final String topic = "test-init-transactions";
+        final String transactionIdPrefix = "testInitTransactionId-";
         try (FlinkKafkaInternalProducer<String, String> reuse =
                 new FlinkKafkaInternalProducer<>(getProperties(), "dummy")) {
             int numTransactions = 20;
             for (int i = 1; i <= numTransactions; i++) {
-                reuse.initTransactionId(TRANSACTION_PREFIX + i);
+                reuse.initTransactionId(transactionIdPrefix + i);
                 reuse.beginTransaction();
                 reuse.send(new ProducerRecord<>(topic, "test-value-" + i));
                 if (i % 2 == 0) {
@@ -81,9 +81,56 @@ class FlinkKafkaInternalProducerITCase {
                     reuse.flush();
                     reuse.abortTransaction();
                 }
-                assertNumTransactions(i);
+                assertNumTransactions(i, transactionIdPrefix);
                 assertThat(readRecords(topic).count()).isEqualTo(i / 2);
             }
+        }
+    }
+
+    @Test
+    void testCommitResumedTransaction() {
+        final String topic = "test-commit-resumed-transaction";
+        final String transactionIdPrefix = "testCommitResumedTransaction-";
+        final String transactionalId = transactionIdPrefix + "id";
+
+        KafkaCommittable snapshottedCommittable;
+        try (FlinkKafkaInternalProducer<String, String> producer =
+                new FlinkKafkaInternalProducer<>(getProperties(), transactionalId)) {
+            producer.initTransactions();
+            producer.beginTransaction();
+            producer.send(new ProducerRecord<>(topic, "test-value"));
+            producer.flush();
+            snapshottedCommittable = KafkaCommittable.of(producer, ignored -> {});
+        }
+
+        try (FlinkKafkaInternalProducer<String, String> resumedProducer =
+                new FlinkKafkaInternalProducer<>(getProperties(), transactionalId)) {
+            resumedProducer.resumeTransaction(
+                    snapshottedCommittable.getProducerId(), snapshottedCommittable.getEpoch());
+            resumedProducer.commitTransaction();
+        }
+
+        assertNumTransactions(1, transactionIdPrefix);
+        assertThat(readRecords(topic).count()).isEqualTo(1);
+    }
+
+    @Test
+    void testCommitResumedEmptyTransactionShouldFail() {
+        KafkaCommittable snapshottedCommittable;
+        try (FlinkKafkaInternalProducer<String, String> producer =
+                new FlinkKafkaInternalProducer<>(getProperties(), "dummy")) {
+            producer.initTransactions();
+            producer.beginTransaction();
+            snapshottedCommittable = KafkaCommittable.of(producer, ignored -> {});
+        }
+
+        try (FlinkKafkaInternalProducer<String, String> resumedProducer =
+                new FlinkKafkaInternalProducer<>(getProperties(), "dummy")) {
+            resumedProducer.resumeTransaction(
+                    snapshottedCommittable.getProducerId(), snapshottedCommittable.getEpoch());
+
+            assertThatThrownBy(resumedProducer::commitTransaction)
+                    .isInstanceOf(InvalidTxnStateException.class);
         }
     }
 
@@ -131,10 +178,10 @@ class FlinkKafkaInternalProducerITCase {
                 FlinkKafkaInternalProducer::abortTransaction);
     }
 
-    private void assertNumTransactions(int numTransactions) {
+    private void assertNumTransactions(int numTransactions, String transactionIdPrefix) {
         List<KafkaTransactionLog.TransactionRecord> transactions =
                 new KafkaTransactionLog(getProperties())
-                        .getTransactions(id -> id.startsWith(TRANSACTION_PREFIX));
+                        .getTransactions(id -> id.startsWith(transactionIdPrefix));
         assertThat(
                         transactions.stream()
                                 .map(KafkaTransactionLog.TransactionRecord::getTransactionId)
