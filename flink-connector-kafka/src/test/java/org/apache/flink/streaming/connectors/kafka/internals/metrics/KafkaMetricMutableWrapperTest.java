@@ -73,14 +73,19 @@ class KafkaMetricMutableWrapperTest {
     private static void testOnlyMeasurableMetricsAreRegistered(
             Function<Metric, Gauge<Double>> wrapperFactory) {
         final Collection<Gauge<Double>> metricWrappers = new ArrayList<>();
-        final KafkaConsumer<?, ?> consumer = new KafkaConsumer<>(getKafkaClientConfiguration());
-        final KafkaProducer<?, ?> producer = new KafkaProducer<>(getKafkaClientConfiguration());
-        Stream.concat(consumer.metrics().values().stream(), producer.metrics().values().stream())
-                .map(wrapperFactory::apply)
-                .forEach(metricWrappers::add);
+        try (final KafkaConsumer<?, ?> consumer =
+                        new KafkaConsumer<>(getKafkaClientConfiguration());
+                final KafkaProducer<?, ?> producer =
+                        new KafkaProducer<>(getKafkaClientConfiguration())) {
+            Stream.concat(
+                            consumer.metrics().values().stream(),
+                            producer.metrics().values().stream())
+                    .map(wrapperFactory::apply)
+                    .forEach(metricWrappers::add);
 
-        // Ensure that all values are accessible and return valid double values
-        metricWrappers.forEach(Gauge::getValue);
+            // Ensure that all values are accessible and return valid double values
+            metricWrappers.forEach(Gauge::getValue);
+        }
     }
 
     private static Properties getKafkaClientConfiguration() {
