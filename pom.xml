@@ -51,7 +51,7 @@ under the License.
     <properties>
         <flink.version>1.17-SNAPSHOT</flink.version>
         <flink.shaded.version>16.1</flink.shaded.version>
-        <kafka.version>3.2.3</kafka.version>
+        <kafka.version>3.4.0</kafka.version>
         <zookeeper.version>3.5.9</zookeeper.version>
 
         <jackson-bom.version>2.13.4.20221013</jackson-bom.version>
