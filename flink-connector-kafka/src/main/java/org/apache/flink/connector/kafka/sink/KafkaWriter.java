@@ -210,13 +210,22 @@ class KafkaWriter<IN>
 
     @Override
     public Collection<KafkaCommittable> prepareCommit() {
-        if (deliveryGuarantee == DeliveryGuarantee.EXACTLY_ONCE) {
+        if (deliveryGuarantee != DeliveryGuarantee.EXACTLY_ONCE) {
+            return Collections.emptyList();
+        }
+
+        // only return a KafkaCommittable if the current transaction has been written some data
+        if (currentProducer.hasRecordsInTransaction()) {
             final List<KafkaCommittable> committables =
                     Collections.singletonList(
                             KafkaCommittable.of(currentProducer, producerPool::add));
             LOG.debug("Committing {} committables.", committables);
             return committables;
         }
+
+        // otherwise, we commit the empty transaction as is (no-op) and just recycle the producer
+        currentProducer.commitTransaction();
+        producerPool.add(currentProducer);
         return Collections.emptyList();
     }
 
