@@ -416,6 +416,7 @@ public class KafkaWriterITCase {
                         getKafkaClientConfiguration(), DeliveryGuarantee.EXACTLY_ONCE)) {
             assertThat(writer.getProducerPool()).hasSize(0);
 
+            writer.write(1, SINK_WRITER_CONTEXT);
             writer.flush(false);
             Collection<KafkaCommittable> committables0 = writer.prepareCommit();
             writer.snapshotState(1);
@@ -435,6 +436,7 @@ public class KafkaWriterITCase {
             committable.getProducer().get().close();
             assertThat(writer.getProducerPool()).hasSize(1);
 
+            writer.write(1, SINK_WRITER_CONTEXT);
             writer.flush(false);
             Collection<KafkaCommittable> committables1 = writer.prepareCommit();
             writer.snapshotState(2);
@@ -445,6 +447,30 @@ public class KafkaWriterITCase {
             assertThat(firstProducer == writer.getCurrentProducer())
                     .as("Expected recycled producer")
                     .isTrue();
+        }
+    }
+
+    /**
+     * Tests that if a pre-commit attempt occurs on an empty transaction, the writer should not emit
+     * a KafkaCommittable, and instead immediately commit the empty transaction and recycle the
+     * producer.
+     */
+    @Test
+    void prepareCommitForEmptyTransaction() throws Exception {
+        try (final KafkaWriter<Integer> writer =
+                createWriterWithConfiguration(
+                        getKafkaClientConfiguration(), DeliveryGuarantee.EXACTLY_ONCE)) {
+            assertThat(writer.getProducerPool()).hasSize(0);
+
+            // no data written to current transaction
+            writer.flush(false);
+            Collection<KafkaCommittable> emptyCommittables = writer.prepareCommit();
+
+            assertThat(emptyCommittables).hasSize(0);
+            assertThat(writer.getProducerPool()).hasSize(1);
+            final FlinkKafkaInternalProducer<?, ?> recycledProducer =
+                    writer.getProducerPool().pop();
+            assertThat(recycledProducer.isInTransaction()).isFalse();
         }
     }
 

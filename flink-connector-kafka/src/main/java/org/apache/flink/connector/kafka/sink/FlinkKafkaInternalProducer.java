@@ -17,8 +17,11 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.clients.producer.internals.TransactionManager;
 import org.apache.kafka.clients.producer.internals.TransactionalRequestResult;
 import org.apache.kafka.common.errors.ProducerFencedException;
@@ -33,6 +36,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.time.Duration;
 import java.util.Properties;
+import java.util.concurrent.Future;
 
 import static org.apache.flink.util.Preconditions.checkState;
 
@@ -49,6 +53,7 @@ class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
 
     @Nullable private String transactionalId;
     private volatile boolean inTransaction;
+    private volatile boolean hasRecordsInTransaction;
     private volatile boolean closed;
 
     public FlinkKafkaInternalProducer(Properties properties, @Nullable String transactionalId) {
@@ -65,6 +70,14 @@ class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         props.putAll(properties);
         props.setProperty(ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
         return props;
+    }
+
+    @Override
+    public Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback) {
+        if (inTransaction) {
+            hasRecordsInTransaction = true;
+        }
+        return super.send(record, callback);
     }
 
     @Override
@@ -86,6 +99,7 @@ class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         LOG.debug("abortTransaction {}", transactionalId);
         checkState(inTransaction, "Transaction was not started");
         inTransaction = false;
+        hasRecordsInTransaction = false;
         super.abortTransaction();
     }
 
@@ -94,11 +108,16 @@ class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         LOG.debug("commitTransaction {}", transactionalId);
         checkState(inTransaction, "Transaction was not started");
         inTransaction = false;
+        hasRecordsInTransaction = false;
         super.commitTransaction();
     }
 
     public boolean isInTransaction() {
         return inTransaction;
+    }
+
+    public boolean hasRecordsInTransaction() {
+        return hasRecordsInTransaction;
     }
 
     @Override
@@ -302,8 +321,18 @@ class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
             transitionTransactionManagerStateTo(transactionManager, "READY");
 
             transitionTransactionManagerStateTo(transactionManager, "IN_TRANSACTION");
+
+            // the transactionStarted flag in the KafkaProducer controls whether
+            // an EndTxnRequest will actually be sent to Kafka for a commit
+            // or abort API call. This flag is set only after the first send (i.e.
+            // only if data is actually written to some partition).
+            // In checkpoints, we only ever store metadata of pre-committed
+            // transactions that actually have records; therefore, on restore
+            // when we create recovery producers to resume transactions and commit
+            // them, we should always set this flag.
             setField(transactionManager, "transactionStarted", true);
             this.inTransaction = true;
+            this.hasRecordsInTransaction = true;
         }
     }
 
