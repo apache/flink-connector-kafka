@@ -87,7 +87,8 @@ class ReducingUpsertWriter<WriterState>
 
     @Override
     public void flush(boolean endOfInput) throws IOException, InterruptedException {
-        flush();
+        sinkBuffer();
+        wrappedWriter.flush(endOfInput);
     }
 
     @Override
@@ -109,7 +110,7 @@ class ReducingUpsertWriter<WriterState>
         reduceBuffer.put(key, new Tuple2<>(changeFlag(value), timestamp));
 
         if (reduceBuffer.size() >= batchMaxRowNums) {
-            flush();
+            sinkBuffer();
         }
     }
 
@@ -121,7 +122,7 @@ class ReducingUpsertWriter<WriterState>
                 lastFlush + batchIntervalMs,
                 (t) -> {
                     if (t >= lastFlush + batchIntervalMs) {
-                        flush();
+                        sinkBuffer();
                     }
                     registerFlush();
                 });
@@ -140,7 +141,7 @@ class ReducingUpsertWriter<WriterState>
         return value;
     }
 
-    private void flush() throws IOException, InterruptedException {
+    private void sinkBuffer() throws IOException, InterruptedException {
         for (Tuple2<RowData, Long> value : reduceBuffer.values()) {
             wrappedContext.setTimestamp(value.f1);
             wrappedWriter.write(value.f0, wrappedContext);
