@@ -222,6 +222,7 @@ public class ReducingUpsertWriterTest {
         writeData(bufferedWriter, new ReusableIterator(0, 4));
         // snapshot should flush the buffer
         bufferedWriter.flush(true);
+        assertThat(writer.flushed).isTrue();
 
         HashMap<Integer, List<RowData>> expected = new HashMap<>();
         expected.put(
@@ -328,6 +329,8 @@ public class ReducingUpsertWriterTest {
     private static class MockedSinkWriter
             implements StatefulSink.StatefulSinkWriter<RowData, Void> {
 
+        boolean flushed = false;
+
         transient List<RowData> rowDataCollectors;
 
         MockedSinkWriter() {
@@ -343,7 +346,9 @@ public class ReducingUpsertWriterTest {
         }
 
         @Override
-        public void flush(boolean endOfInput) throws IOException, InterruptedException {}
+        public void flush(boolean endOfInput) throws IOException, InterruptedException {
+            flushed = true;
+        }
 
         @Override
         public void close() throws Exception {}
