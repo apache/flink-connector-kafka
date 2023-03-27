@@ -84,6 +84,7 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
     @Nullable private SerializationSchema<? super IN> valueSerializationSchema;
     @Nullable private FlinkKafkaPartitioner<? super IN> partitioner;
     @Nullable private SerializationSchema<? super IN> keySerializationSchema;
+    @Nullable private HeaderProvider<? super IN> headerProvider;
 
     /**
      * Sets a custom partitioner determining the target partition of the target topic.
@@ -190,6 +191,20 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
         return self;
     }
 
+    /**
+     * Sets a {@link HeaderProvider} which is used to add headers to the {@link ProducerRecord} for
+     * the current element.
+     *
+     * @param headerProvider
+     * @return {@code this}
+     */
+    public <T extends IN> KafkaRecordSerializationSchemaBuilder<T> setHeaderProvider(
+            HeaderProvider<? super T> headerProvider) {
+        KafkaRecordSerializationSchemaBuilder<T> self = self();
+        self.headerProvider = checkNotNull(headerProvider);
+        return self;
+    }
+
     @SuppressWarnings("unchecked")
     private <T extends IN> KafkaRecordSerializationSchemaBuilder<T> self() {
         return (KafkaRecordSerializationSchemaBuilder<T>) this;
@@ -239,7 +254,11 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
         checkState(valueSerializationSchema != null, "No value serializer is configured.");
         checkState(topicSelector != null, "No topic selector is configured.");
         return new KafkaRecordSerializationSchemaWrapper<>(
-                topicSelector, valueSerializationSchema, keySerializationSchema, partitioner);
+                topicSelector,
+                valueSerializationSchema,
+                keySerializationSchema,
+                partitioner,
+                headerProvider);
     }
 
     private void checkValueSerializerNotSet() {
@@ -278,16 +297,19 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
         private final Function<? super IN, String> topicSelector;
         private final FlinkKafkaPartitioner<? super IN> partitioner;
         private final SerializationSchema<? super IN> keySerializationSchema;
+        private final HeaderProvider<? super IN> headerProvider;
 
         KafkaRecordSerializationSchemaWrapper(
                 Function<? super IN, String> topicSelector,
                 SerializationSchema<? super IN> valueSerializationSchema,
                 @Nullable SerializationSchema<? super IN> keySerializationSchema,
-                @Nullable FlinkKafkaPartitioner<? super IN> partitioner) {
+                @Nullable FlinkKafkaPartitioner<? super IN> partitioner,
+                @Nullable HeaderProvider<? super IN> headerProvider) {
             this.topicSelector = checkNotNull(topicSelector);
             this.valueSerializationSchema = checkNotNull(valueSerializationSchema);
             this.partitioner = partitioner;
             this.keySerializationSchema = keySerializationSchema;
+            this.headerProvider = headerProvider;
         }
 
         @Override
@@ -325,12 +347,22 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
                                             context.getPartitionsForTopic(targetTopic)))
                             : OptionalInt.empty();
 
-            return new ProducerRecord<>(
-                    targetTopic,
-                    partition.isPresent() ? partition.getAsInt() : null,
-                    timestamp == null || timestamp < 0L ? null : timestamp,
-                    key,
-                    value);
+            if (headerProvider != null) {
+                return new ProducerRecord<>(
+                        targetTopic,
+                        partition.isPresent() ? partition.getAsInt() : null,
+                        timestamp == null || timestamp < 0L ? null : timestamp,
+                        key,
+                        value,
+                        headerProvider.getHeaders(element));
+            } else {
+                return new ProducerRecord<>(
+                        targetTopic,
+                        partition.isPresent() ? partition.getAsInt() : null,
+                        timestamp == null || timestamp < 0L ? null : timestamp,
+                        key,
+                        value);
+            }
         }
     }
 }
