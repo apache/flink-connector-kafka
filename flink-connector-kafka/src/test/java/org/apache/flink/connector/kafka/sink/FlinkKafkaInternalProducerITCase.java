@@ -51,7 +51,6 @@ import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaCo
 import static org.apache.flink.util.DockerImageVersions.KAFKA;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.assertj.core.api.Assertions.fail;
 
 @Testcontainers
 @ExtendWith(TestLoggerExtension.class)
@@ -129,13 +128,7 @@ class FlinkKafkaInternalProducerITCase {
             resumedProducer.resumeTransaction(
                     snapshottedCommittable.getProducerId(), snapshottedCommittable.getEpoch());
 
-            try {
-                resumedProducer.commitTransaction();
-            } catch (Exception e) {
-                // test assertion success
-                return;
-            }
-            fail("Committing a resumed transaction that is empty should fail.");
+            assertThatThrownBy(resumedProducer::commitTransaction);
         }
     }
 
