@@ -19,6 +19,7 @@
 package org.apache.flink.connector.kafka.source.enumerator;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.connector.base.source.utils.SerdeUtils;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplitSerializer;
@@ -46,8 +47,9 @@ public class KafkaSourceEnumStateSerializer
 
     private static final int VERSION_0 = 0;
     private static final int VERSION_1 = 1;
+    private static final int VERSION_2 = 2;
 
-    private static final int CURRENT_VERSION = VERSION_1;
+    private static final int CURRENT_VERSION = VERSION_2;
 
     @Override
     public int getVersion() {
@@ -56,54 +58,75 @@ public class KafkaSourceEnumStateSerializer
 
     @Override
     public byte[] serialize(KafkaSourceEnumState enumState) throws IOException {
-        return serializeTopicPartitions(enumState.assignedPartitions());
+
+        Set<TopicPartition> assignedPartitions = enumState.assignedPartitions();
+        Set<TopicPartition> unassignedInitialPartitons = enumState.unassignedInitialPartitons();
+        boolean initialDiscoveryFinished = enumState.initialDiscoveryFinished();
+        return serializeTopicPartitions(
+                assignedPartitions, unassignedInitialPartitons, initialDiscoveryFinished);
     }
 
     @Override
     public KafkaSourceEnumState deserialize(int version, byte[] serialized) throws IOException {
-        if (version == CURRENT_VERSION) {
-            final Set<TopicPartition> assignedPartitions = deserializeTopicPartitions(serialized);
-            return new KafkaSourceEnumState(assignedPartitions);
+        switch (version) {
+            case CURRENT_VERSION:
+                return deserializeTopicPartitionsV2(serialized);
+            case VERSION_1:
+                final Set<TopicPartition> assignedPartitions =
+                        deserializeTopicPartitionsV1(serialized);
+                return new KafkaSourceEnumState(assignedPartitions, new HashSet<>(), true);
+            case VERSION_0:
+                Map<Integer, Set<KafkaPartitionSplit>> currentPartitionAssignment =
+                        SerdeUtils.deserializeSplitAssignments(
+                                serialized, new KafkaPartitionSplitSerializer(), HashSet::new);
+                Set<TopicPartition> currentAssignedSplits = new HashSet<>();
+                currentPartitionAssignment.forEach(
+                        (reader, splits) ->
+                                splits.forEach(
+                                        split ->
+                                                currentAssignedSplits.add(
+                                                        split.getTopicPartition())));
+                return new KafkaSourceEnumState(currentAssignedSplits, new HashSet<>(), true);
+            default:
+                throw new IOException(
+                        String.format(
+                                "The bytes are serialized with version %d, "
+                                        + "while this deserializer only supports version up to %d",
+                                version, CURRENT_VERSION));
         }
-
-        // Backward compatibility
-        if (version == VERSION_0) {
-            Map<Integer, Set<KafkaPartitionSplit>> currentPartitionAssignment =
-                    SerdeUtils.deserializeSplitAssignments(
-                            serialized, new KafkaPartitionSplitSerializer(), HashSet::new);
-            Set<TopicPartition> currentAssignedSplits = new HashSet<>();
-            currentPartitionAssignment.forEach(
-                    (reader, splits) ->
-                            splits.forEach(
-                                    split -> currentAssignedSplits.add(split.getTopicPartition())));
-            return new KafkaSourceEnumState(currentAssignedSplits);
-        }
-
-        throw new IOException(
-                String.format(
-                        "The bytes are serialized with version %d, "
-                                + "while this deserializer only supports version up to %d",
-                        version, CURRENT_VERSION));
     }
 
-    private static byte[] serializeTopicPartitions(Collection<TopicPartition> topicPartitions)
+    private static byte[] serializeTopicPartitions(
+            Collection<TopicPartition> assignedPartitions,
+            Collection<TopicPartition> unassignedInitialPartitons,
+            boolean initialDiscoveryFinished)
             throws IOException {
+
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 DataOutputStream out = new DataOutputStream(baos)) {
 
-            out.writeInt(topicPartitions.size());
-            for (TopicPartition tp : topicPartitions) {
+            out.writeInt(assignedPartitions.size());
+            for (TopicPartition tp : assignedPartitions) {
                 out.writeUTF(tp.topic());
                 out.writeInt(tp.partition());
             }
             out.flush();
 
+            out.writeInt(unassignedInitialPartitons.size());
+            for (TopicPartition tp : unassignedInitialPartitons) {
+                out.writeUTF(tp.topic());
+                out.writeInt(tp.partition());
+            }
+            out.flush();
+
+            out.writeBoolean(initialDiscoveryFinished);
+
             return baos.toByteArray();
         }
     }
 
-    private static Set<TopicPartition> deserializeTopicPartitions(byte[] serializedTopicPartitions)
-            throws IOException {
+    private static Set<TopicPartition> deserializeTopicPartitionsV1(
+            byte[] serializedTopicPartitions) throws IOException {
         try (ByteArrayInputStream bais = new ByteArrayInputStream(serializedTopicPartitions);
                 DataInputStream in = new DataInputStream(bais)) {
 
@@ -119,6 +142,56 @@ public class KafkaSourceEnumStateSerializer
             }
 
             return topicPartitions;
+        }
+    }
+
+    private static KafkaSourceEnumState deserializeTopicPartitionsV2(
+            byte[] serializedTopicPartitions) throws IOException {
+
+        try (ByteArrayInputStream bais = new ByteArrayInputStream(serializedTopicPartitions);
+                DataInputStream in = new DataInputStream(bais)) {
+
+            final int numAssignedPartitions = in.readInt();
+            Set<TopicPartition> assignedPartitions = new HashSet<>(numAssignedPartitions);
+            for (int i = 0; i < numAssignedPartitions; i++) {
+                final String topic = in.readUTF();
+                final int partition = in.readInt();
+                assignedPartitions.add(new TopicPartition(topic, partition));
+            }
+            final int numUnassignedInitialPartitons = in.readInt();
+            Set<TopicPartition> unassignedInitialPartitons =
+                    new HashSet<>(numUnassignedInitialPartitons);
+            for (int i = 0; i < numUnassignedInitialPartitons; i++) {
+                final String topic = in.readUTF();
+                final int partition = in.readInt();
+                unassignedInitialPartitons.add(new TopicPartition(topic, partition));
+            }
+
+            final boolean initialDiscoveryFinished = in.readBoolean();
+
+            if (in.available() > 0) {
+                throw new IOException("Unexpected trailing bytes in serialized topic partitions");
+            }
+
+            return new KafkaSourceEnumState(
+                    assignedPartitions, unassignedInitialPartitons, initialDiscoveryFinished);
+        }
+    }
+
+    @VisibleForTesting
+    public static byte[] serializeTopicPartitionsV1(Collection<TopicPartition> topicPartitions)
+            throws IOException {
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                DataOutputStream out = new DataOutputStream(baos)) {
+
+            out.writeInt(topicPartitions.size());
+            for (TopicPartition tp : topicPartitions) {
+                out.writeUTF(tp.topic());
+                out.writeInt(tp.partition());
+            }
+            out.flush();
+
+            return baos.toByteArray();
         }
     }
 }

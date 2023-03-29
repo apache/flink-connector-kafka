@@ -196,7 +196,9 @@ public class KafkaSource<OUT>
                 props,
                 enumContext,
                 boundedness,
-                checkpoint.assignedPartitions());
+                checkpoint.assignedPartitions(),
+                checkpoint.unassignedInitialPartitons(),
+                checkpoint.initialDiscoveryFinished());
     }
 
     @Internal
