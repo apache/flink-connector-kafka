@@ -266,7 +266,9 @@ public class KafkaPartitionSplitReader
     // --------------- private helper method ----------------------
 
     /**
-     * This Method performs Null and empty Rack Id validation and sets the rack id to the client.rack Consumer Config.
+     * This Method performs Null and empty Rack Id validation and sets the rack id to the
+     * client.rack Consumer Config.
+     *
      * @param consumerProps Consumer Property.
      * @param rackIdSupplier Rack Id's.
      */
