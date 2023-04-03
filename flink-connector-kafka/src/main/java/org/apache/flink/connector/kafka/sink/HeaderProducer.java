@@ -21,6 +21,8 @@ package org.apache.flink.connector.kafka.sink;
 import org.apache.flink.annotation.PublicEvolving;
 
 import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.header.Headers;
+import org.apache.kafka.common.header.internals.RecordHeaders;
 
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -28,7 +30,7 @@ import java.util.ArrayList;
 /** Creates an {@link Iterable} of {@link Header}s from the input element. */
 @PublicEvolving
 public interface HeaderProducer<IN> extends Serializable {
-    default Iterable<Header> produceHeaders(IN input) {
-        return new ArrayList<>();
+    default Headers produceHeaders(IN input) {
+        return new RecordHeaders(new ArrayList<>());
     }
 }

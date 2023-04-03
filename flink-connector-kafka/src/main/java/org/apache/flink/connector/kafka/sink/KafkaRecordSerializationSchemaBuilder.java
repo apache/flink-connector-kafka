@@ -22,7 +22,7 @@ import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.serialization.Serializer;
 
 import javax.annotation.Nullable;
@@ -340,7 +340,7 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
                 IN element, KafkaSinkContext context, Long timestamp) {
             final String targetTopic = topicSelector.apply(element);
             final byte[] value = valueSerializationSchema.serialize(element);
-            Iterable<Header> headers = headerProducer.produceHeaders(element);
+            Headers headers = headerProducer.produceHeaders(element);
             byte[] key = null;
             if (keySerializationSchema != null) {
                 key = keySerializationSchema.serialize(element);

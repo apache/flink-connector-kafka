@@ -28,7 +28,8 @@ import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableMap;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.Configurable;
-import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.header.internals.RecordHeader;
+import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
@@ -162,19 +163,9 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
         final HeaderProducer<String> headerProducer =
                 new HeaderProducer<String>() {
                     @Override
-                    public Iterable<Header> produceHeaders(String input) {
-                        return ImmutableList.of(
-                                new Header() {
-                                    @Override
-                                    public String key() {
-                                        return input;
-                                    }
-
-                                    @Override
-                                    public byte[] value() {
-                                        return input.getBytes(StandardCharsets.UTF_8);
-                                    }
-                                });
+                    public RecordHeaders produceHeaders(String input) {
+                        return new RecordHeaders(
+                                ImmutableList.of(new RecordHeader("a", "a".getBytes())));
                     }
                 };
         final KafkaRecordSerializationSchema<String> schema =
