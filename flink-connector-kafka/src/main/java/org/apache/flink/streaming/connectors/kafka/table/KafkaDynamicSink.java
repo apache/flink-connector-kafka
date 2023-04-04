@@ -223,7 +223,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
                         ProviderContext providerContext, DataStream<RowData> dataStream) {
                     final boolean objectReuse =
                             dataStream.getExecutionEnvironment().getConfig().isObjectReuseEnabled();
-                    final ReducingUpsertSink<?> sink =
+                    final ReducingUpsertSink<?, ?> sink =
                             new ReducingUpsertSink<>(
                                     kafkaSink,
                                     physicalDataType,

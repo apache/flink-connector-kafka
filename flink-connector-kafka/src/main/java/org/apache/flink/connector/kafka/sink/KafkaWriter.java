@@ -22,8 +22,6 @@ import org.apache.flink.api.common.operators.MailboxExecutor;
 import org.apache.flink.api.common.operators.ProcessingTimeService;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.connector.sink2.Sink;
-import org.apache.flink.api.connector.sink2.StatefulSink;
-import org.apache.flink.api.connector.sink2.TwoPhaseCommittingSink;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.MetricUtil;
 import org.apache.flink.metrics.Counter;
@@ -72,8 +70,8 @@ import static org.apache.flink.util.Preconditions.checkState;
  * @param <IN> The type of the input elements.
  */
 class KafkaWriter<IN>
-        implements StatefulSink.StatefulSinkWriter<IN, KafkaWriterState>,
-                TwoPhaseCommittingSink.PrecommittingSinkWriter<IN, KafkaCommittable> {
+        implements TwoPhaseCommittingStatefulSink.PrecommittingStatefulSinkWriter<
+                IN, KafkaWriterState, KafkaCommittable> {
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaWriter.class);
     private static final String KAFKA_PRODUCER_METRIC_NAME = "KafkaProducer";

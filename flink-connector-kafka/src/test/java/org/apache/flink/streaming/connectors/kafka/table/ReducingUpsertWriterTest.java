@@ -21,7 +21,7 @@ import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.operators.ProcessingTimeService;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.connector.sink2.SinkWriter;
-import org.apache.flink.api.connector.sink2.StatefulSink;
+import org.apache.flink.connector.kafka.sink.TwoPhaseCommittingStatefulSink;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ResolvedSchema;
@@ -41,6 +41,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -151,7 +152,7 @@ public class ReducingUpsertWriterTest {
     @Test
     public void testWriteData() throws Exception {
         final MockedSinkWriter writer = new MockedSinkWriter();
-        final ReducingUpsertWriter<?> bufferedWriter = createBufferedWriter(writer);
+        final ReducingUpsertWriter<?, ?> bufferedWriter = createBufferedWriter(writer);
 
         // write 4 records which doesn't trigger batch size
         writeData(bufferedWriter, new ReusableIterator(0, 4));
@@ -218,7 +219,7 @@ public class ReducingUpsertWriterTest {
     @Test
     public void testFlushDataWhenCheckpointing() throws Exception {
         final MockedSinkWriter writer = new MockedSinkWriter();
-        final ReducingUpsertWriter<?> bufferedWriter = createBufferedWriter(writer);
+        final ReducingUpsertWriter<?, ?> bufferedWriter = createBufferedWriter(writer);
         // write all data, there should be 3 records are still buffered
         writeData(bufferedWriter, new ReusableIterator(0, 4));
         // snapshot should flush the buffer
@@ -266,7 +267,7 @@ public class ReducingUpsertWriterTest {
     @Test
     public void testWriteDataWithNullTimestamp() throws Exception {
         final MockedSinkWriter writer = new MockedSinkWriter();
-        final ReducingUpsertWriter<?> bufferedWriter = createBufferedWriter(writer);
+        final ReducingUpsertWriter<?, ?> bufferedWriter = createBufferedWriter(writer);
 
         bufferedWriter.write(
                 GenericRowData.ofKind(
@@ -322,7 +323,7 @@ public class ReducingUpsertWriterTest {
         }
     }
 
-    private void writeData(ReducingUpsertWriter<?> writer, Iterator<RowData> iterator)
+    private void writeData(ReducingUpsertWriter<?, ?> writer, Iterator<RowData> iterator)
             throws Exception {
         while (iterator.hasNext()) {
             RowData next = iterator.next();
@@ -344,7 +345,7 @@ public class ReducingUpsertWriterTest {
     }
 
     @SuppressWarnings("unchecked")
-    private ReducingUpsertWriter<?> createBufferedWriter(MockedSinkWriter sinkWriter) {
+    private ReducingUpsertWriter<?, ?> createBufferedWriter(MockedSinkWriter sinkWriter) {
         TypeInformation<RowData> typeInformation =
                 (TypeInformation<RowData>)
                         new SinkRuntimeProviderContext(false)
@@ -372,7 +373,8 @@ public class ReducingUpsertWriterTest {
     }
 
     private static class MockedSinkWriter
-            implements StatefulSink.StatefulSinkWriter<RowData, Void> {
+            implements TwoPhaseCommittingStatefulSink.PrecommittingStatefulSinkWriter<
+                    RowData, Void, Void> {
 
         boolean flushed = false;
 
@@ -382,7 +384,6 @@ public class ReducingUpsertWriterTest {
             rowDataCollectors = new ArrayList<>();
         }
 
-        @Override
         public void write(RowData element, Context context)
                 throws IOException, InterruptedException {
             // Allow comparison between null timestamps
@@ -395,7 +396,6 @@ public class ReducingUpsertWriterTest {
             rowDataCollectors.add(element);
         }
 
-        @Override
         public void flush(boolean endOfInput) throws IOException, InterruptedException {
             flushed = true;
         }
@@ -405,6 +405,11 @@ public class ReducingUpsertWriterTest {
 
         @Override
         public List<Void> snapshotState(long checkpointId) throws IOException {
+            return null;
+        }
+
+        @Override
+        public Collection<Void> prepareCommit() throws IOException, InterruptedException {
             return null;
         }
     }
