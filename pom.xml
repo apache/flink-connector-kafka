@@ -20,9 +20,9 @@ under the License.
         xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 
     <parent>
-        <groupId>io.github.zentol.flink</groupId>
+        <groupId>org.apache.flink</groupId>
         <artifactId>flink-connector-parent</artifactId>
-        <version>1.0</version>
+        <version>1.0.0</version>
     </parent>
 
     <modelVersion>4.0.0</modelVersion>
@@ -49,7 +49,7 @@ under the License.
     </modules>
 
     <properties>
-        <flink.version>1.17-SNAPSHOT</flink.version>
+        <flink.version>1.17.0</flink.version>
         <flink.shaded.version>16.1</flink.shaded.version>
         <kafka.version>3.2.3</kafka.version>
         <zookeeper.version>3.5.9</zookeeper.version>
@@ -58,7 +58,6 @@ under the License.
         <junit4.version>4.13.2</junit4.version>
         <junit5.version>5.9.1</junit5.version>
         <assertj.version>3.23.1</assertj.version>
-        <archunit.version>1.0.0</archunit.version>
         <testcontainers.version>1.17.2</testcontainers.version>
         <mockito.version>3.4.6</mockito.version>
         <hamcrest.version>1.3</hamcrest.version>
@@ -70,7 +69,7 @@ under the License.
         <avro.version>1.11.1</avro.version>
 
         <japicmp.skip>false</japicmp.skip>
-        <japicmp.referenceVersion>1.16.0</japicmp.referenceVersion>
+        <japicmp.referenceVersion>1.17.0</japicmp.referenceVersion>
 
         <slf4j.version>1.7.32</slf4j.version>
         <log4j.version>2.17.1</log4j.version>
@@ -398,20 +397,6 @@ under the License.
                 <version>${testcontainers.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
-            </dependency>
-
-            <dependency>
-                <groupId>com.tngtech.archunit</groupId>
-                <artifactId>archunit</artifactId>
-                <version>${archunit.version}</version>
-                <scope>test</scope>
-            </dependency>
-
-            <dependency>
-                <groupId>com.tngtech.archunit</groupId>
-                <artifactId>archunit-junit5</artifactId>
-                <version>${archunit.version}</version>
-                <scope>test</scope>
             </dependency>
 
         </dependencies>
