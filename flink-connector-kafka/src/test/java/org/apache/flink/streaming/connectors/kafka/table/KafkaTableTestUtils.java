@@ -68,6 +68,23 @@ public class KafkaTableTestUtils {
         return collectedRows;
     }
 
+    /**
+     * Variant of {@link #collectRows(Table, int)} for bounded queries. This should not run
+     * indefinitely if there is a bounded number of returned rows.
+     */
+    public static List<Row> collectAllRows(Table table) throws Exception {
+        final TableResult result = table.execute();
+
+        final List<Row> collectedRows = new ArrayList<>();
+        try (CloseableIterator<Row> iterator = result.collect()) {
+            while (iterator.hasNext()) {
+                collectedRows.add(iterator.next());
+            }
+        }
+
+        return collectedRows;
+    }
+
     public static List<String> readLines(String resource) throws IOException {
         final URL url = KafkaChangelogTableITCase.class.getClassLoader().getResource(resource);
         assertThat(url).isNotNull();
