@@ -145,7 +145,7 @@ class KafkaConnectorOptionsUtil {
         }
     }
 
-    private static void validateScanStartupMode(ReadableConfig tableOptions) {
+    protected static void validateScanStartupMode(ReadableConfig tableOptions) {
         tableOptions
                 .getOptional(SCAN_STARTUP_MODE)
                 .ifPresent(
@@ -189,7 +189,7 @@ class KafkaConnectorOptionsUtil {
                         });
     }
 
-    private static void validateScanBoundedMode(ReadableConfig tableOptions) {
+    protected static void validateScanBoundedMode(ReadableConfig tableOptions) {
         tableOptions
                 .getOptional(SCAN_BOUNDED_MODE)
                 .ifPresent(
