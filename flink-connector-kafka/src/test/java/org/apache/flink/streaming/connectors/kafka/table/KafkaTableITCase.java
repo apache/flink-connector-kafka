@@ -29,7 +29,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.utils.EncodingUtils;
 import org.apache.flink.test.util.SuccessException;
 import org.apache.flink.types.Row;
-import org.apache.flink.util.CloseableIterator;
 
 import org.apache.kafka.clients.consumer.NoOffsetForPartitionException;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
@@ -58,6 +57,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.flink.core.testutils.CommonTestUtils.waitUtil;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaTableTestUtils.collectAllRows;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaTableTestUtils.collectRows;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaTableTestUtils.readLines;
 import static org.apache.flink.table.api.config.ExecutionConfigOptions.TABLE_EXEC_SOURCE_IDLE_TIMEOUT;
@@ -225,13 +225,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         // ---------- Consume stream from Kafka -------------------
 
-        List<Row> results = new ArrayList<>();
-        try (CloseableIterator<Row> resultsItr =
-                tEnv.sqlQuery("SELECT * from kafka").execute().collect()) {
-            while (resultsItr.hasNext()) {
-                results.add(resultsItr.next());
-            }
-        }
+        List<Row> results = collectAllRows(tEnv.sqlQuery("SELECT * from kafka"));
 
         assertThat(results)
                 .containsExactly(Row.of(1, 1102, "behavior 1"), Row.of(2, 1103, "behavior 2"));
@@ -286,13 +280,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         // ---------- Consume stream from Kafka -------------------
 
-        List<Row> results = new ArrayList<>();
-        try (CloseableIterator<Row> resultsItr =
-                tEnv.sqlQuery("SELECT * from kafka").execute().collect()) {
-            while (resultsItr.hasNext()) {
-                results.add(resultsItr.next());
-            }
-        }
+        List<Row> results = collectAllRows(tEnv.sqlQuery("SELECT * from kafka"));
 
         assertThat(results)
                 .containsExactly(
