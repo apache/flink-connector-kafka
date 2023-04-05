@@ -21,11 +21,14 @@ package org.apache.flink.streaming.connectors.kafka.table;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.connector.sink2.Sink;
+import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
+import org.apache.flink.connector.kafka.source.KafkaSourceTestUtils;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.formats.avro.AvroRowDataSerializationSchema;
 import org.apache.flink.formats.avro.RowDataToAvroConverters;
@@ -64,23 +67,29 @@ import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.util.TestLogger;
 
+import org.apache.kafka.clients.consumer.OffsetAndTimestamp;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import static org.apache.flink.core.testutils.FlinkMatchers.containsCause;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanBoundedMode;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.AVRO_CONFLUENT;
 import static org.apache.flink.table.factories.utils.FactoryMocks.createTableSink;
 import static org.apache.flink.table.factories.utils.FactoryMocks.createTableSource;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link UpsertKafkaDynamicTableFactory}. */
 public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
@@ -391,6 +400,131 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
     }
 
     // --------------------------------------------------------------------------------------------
+    // Bounded end-offset tests
+    // --------------------------------------------------------------------------------------------
+
+    @Test
+    public void testBoundedSpecificOffsetsValidate() {
+        final Map<String, String> options = getFullSourceOptions();
+        options.put(
+                KafkaConnectorOptions.SCAN_BOUNDED_MODE.key(),
+                ScanBoundedMode.SPECIFIC_OFFSETS.toString());
+
+        assertThatThrownBy(() -> createTableSource(SOURCE_SCHEMA, options))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    public void testBoundedSpecificOffsets() {
+        testBoundedOffsets(
+                ScanBoundedMode.SPECIFIC_OFFSETS,
+                options -> {
+                    options.put("scan.bounded.specific-offsets", "partition:0,offset:2");
+                },
+                source -> {
+                    assertThat(source.getBoundedness()).isEqualTo(Boundedness.BOUNDED);
+                    OffsetsInitializer offsetsInitializer =
+                            KafkaSourceTestUtils.getStoppingOffsetsInitializer(source);
+                    TopicPartition partition = new TopicPartition(SOURCE_TOPIC, 0);
+                    Map<TopicPartition, Long> partitionOffsets =
+                            offsetsInitializer.getPartitionOffsets(
+                                    Collections.singletonList(partition),
+                                    MockPartitionOffsetsRetriever.noInteractions());
+                    assertThat(partitionOffsets)
+                            .containsOnlyKeys(partition)
+                            .containsEntry(partition, 2L);
+                });
+    }
+
+    @Test
+    public void testBoundedLatestOffset() {
+        testBoundedOffsets(
+                ScanBoundedMode.LATEST_OFFSET,
+                options -> {},
+                source -> {
+                    assertThat(source.getBoundedness()).isEqualTo(Boundedness.BOUNDED);
+                    OffsetsInitializer offsetsInitializer =
+                            KafkaSourceTestUtils.getStoppingOffsetsInitializer(source);
+                    TopicPartition partition = new TopicPartition(SOURCE_TOPIC, 0);
+                    Map<TopicPartition, Long> partitionOffsets =
+                            offsetsInitializer.getPartitionOffsets(
+                                    Collections.singletonList(partition),
+                                    MockPartitionOffsetsRetriever.noInteractions());
+                    assertThat(partitionOffsets)
+                            .containsOnlyKeys(partition)
+                            .containsEntry(partition, KafkaPartitionSplit.LATEST_OFFSET);
+                });
+    }
+
+    @Test
+    public void testBoundedGroupOffsets() {
+        testBoundedOffsets(
+                ScanBoundedMode.GROUP_OFFSETS,
+                options -> {
+                    options.put("properties.group.id", "dummy");
+                },
+                source -> {
+                    assertThat(source.getBoundedness()).isEqualTo(Boundedness.BOUNDED);
+                    OffsetsInitializer offsetsInitializer =
+                            KafkaSourceTestUtils.getStoppingOffsetsInitializer(source);
+                    TopicPartition partition = new TopicPartition(SOURCE_TOPIC, 0);
+                    Map<TopicPartition, Long> partitionOffsets =
+                            offsetsInitializer.getPartitionOffsets(
+                                    Collections.singletonList(partition),
+                                    MockPartitionOffsetsRetriever.noInteractions());
+                    assertThat(partitionOffsets)
+                            .containsOnlyKeys(partition)
+                            .containsEntry(partition, KafkaPartitionSplit.COMMITTED_OFFSET);
+                });
+    }
+
+    @Test
+    public void testBoundedTimestamp() {
+        testBoundedOffsets(
+                ScanBoundedMode.TIMESTAMP,
+                options -> {
+                    options.put("scan.bounded.timestamp-millis", "1");
+                },
+                source -> {
+                    assertThat(source.getBoundedness()).isEqualTo(Boundedness.BOUNDED);
+                    OffsetsInitializer offsetsInitializer =
+                            KafkaSourceTestUtils.getStoppingOffsetsInitializer(source);
+                    TopicPartition partition = new TopicPartition(SOURCE_TOPIC, 0);
+                    long offsetForTimestamp = 123L;
+                    Map<TopicPartition, Long> partitionOffsets =
+                            offsetsInitializer.getPartitionOffsets(
+                                    Collections.singletonList(partition),
+                                    MockPartitionOffsetsRetriever.timestampAndEnd(
+                                            partitions -> {
+                                                assertThat(partitions)
+                                                        .containsOnlyKeys(partition)
+                                                        .containsEntry(partition, 1L);
+                                                Map<TopicPartition, OffsetAndTimestamp> result =
+                                                        new HashMap<>();
+                                                result.put(
+                                                        partition,
+                                                        new OffsetAndTimestamp(
+                                                                offsetForTimestamp, 1L));
+                                                return result;
+                                            },
+                                            partitions -> {
+                                                Map<TopicPartition, Long> result = new HashMap<>();
+                                                result.put(
+                                                        partition,
+                                                        // the end offset is bigger than given by
+                                                        // timestamp
+                                                        // to make sure the one for timestamp is
+                                                        // used
+                                                        offsetForTimestamp + 1000L);
+                                                return result;
+                                            }));
+                    assertThat(partitionOffsets)
+                            .containsOnlyKeys(partition)
+                            .containsEntry(partition, offsetForTimestamp);
+                });
+    }
+
+    // --------------------------------------------------------------------------------------------
     // Negative tests
     // --------------------------------------------------------------------------------------------
 
@@ -647,7 +781,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                 null);
     }
 
-    private void assertKafkaSource(ScanTableSource.ScanRuntimeProvider provider) {
+    private KafkaSource<?> assertKafkaSource(ScanTableSource.ScanRuntimeProvider provider) {
         assertThat(provider).isInstanceOf(DataStreamScanProvider.class);
         final DataStreamScanProvider dataStreamScanProvider = (DataStreamScanProvider) provider;
         final Transformation<RowData> transformation =
@@ -662,5 +796,93 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         (SourceTransformation<RowData, KafkaPartitionSplit, KafkaSourceEnumState>)
                                 transformation;
         assertThat(sourceTransformation.getSource()).isInstanceOf(KafkaSource.class);
+        return (KafkaSource<?>) sourceTransformation.getSource();
+    }
+
+    private void testBoundedOffsets(
+            ScanBoundedMode boundedMode,
+            Consumer<Map<String, String>> optionsConfig,
+            Consumer<KafkaSource<?>> validator) {
+        final Map<String, String> options = getFullSourceOptions();
+        options.put(KafkaConnectorOptions.SCAN_BOUNDED_MODE.key(), boundedMode.toString());
+        optionsConfig.accept(options);
+
+        final DynamicTableSource tableSource = createTableSource(SOURCE_SCHEMA, options);
+        assertThat(tableSource).isInstanceOf(KafkaDynamicSource.class);
+        ScanTableSource.ScanRuntimeProvider provider =
+                ((KafkaDynamicSource) tableSource)
+                        .getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
+        assertThat(provider).isInstanceOf(DataStreamScanProvider.class);
+        final KafkaSource<?> kafkaSource = assertKafkaSource(provider);
+        validator.accept(kafkaSource);
+    }
+
+    private interface OffsetsRetriever
+            extends Function<Collection<TopicPartition>, Map<TopicPartition, Long>> {}
+
+    private interface TimestampOffsetsRetriever
+            extends Function<Map<TopicPartition, Long>, Map<TopicPartition, OffsetAndTimestamp>> {}
+
+    private static final class MockPartitionOffsetsRetriever
+            implements OffsetsInitializer.PartitionOffsetsRetriever {
+
+        public static final OffsetsRetriever UNSUPPORTED_RETRIEVAL =
+                partitions -> {
+                    throw new UnsupportedOperationException(
+                            "The method was not supposed to be called");
+                };
+        private final OffsetsRetriever committedOffsets;
+        private final OffsetsRetriever endOffsets;
+        private final OffsetsRetriever beginningOffsets;
+        private final TimestampOffsetsRetriever offsetsForTimes;
+
+        static MockPartitionOffsetsRetriever noInteractions() {
+            return new MockPartitionOffsetsRetriever(
+                    UNSUPPORTED_RETRIEVAL,
+                    UNSUPPORTED_RETRIEVAL,
+                    UNSUPPORTED_RETRIEVAL,
+                    partitions -> {
+                        throw new UnsupportedOperationException(
+                                "The method was not supposed to be called");
+                    });
+        }
+
+        static MockPartitionOffsetsRetriever timestampAndEnd(
+                TimestampOffsetsRetriever retriever, OffsetsRetriever endOffsets) {
+            return new MockPartitionOffsetsRetriever(
+                    UNSUPPORTED_RETRIEVAL, endOffsets, UNSUPPORTED_RETRIEVAL, retriever);
+        }
+
+        private MockPartitionOffsetsRetriever(
+                OffsetsRetriever committedOffsets,
+                OffsetsRetriever endOffsets,
+                OffsetsRetriever beginningOffsets,
+                TimestampOffsetsRetriever offsetsForTimes) {
+            this.committedOffsets = committedOffsets;
+            this.endOffsets = endOffsets;
+            this.beginningOffsets = beginningOffsets;
+            this.offsetsForTimes = offsetsForTimes;
+        }
+
+        @Override
+        public Map<TopicPartition, Long> committedOffsets(Collection<TopicPartition> partitions) {
+            return committedOffsets.apply(partitions);
+        }
+
+        @Override
+        public Map<TopicPartition, Long> endOffsets(Collection<TopicPartition> partitions) {
+            return endOffsets.apply(partitions);
+        }
+
+        @Override
+        public Map<TopicPartition, Long> beginningOffsets(Collection<TopicPartition> partitions) {
+            return beginningOffsets.apply(partitions);
+        }
+
+        @Override
+        public Map<TopicPartition, OffsetAndTimestamp> offsetsForTimes(
+                Map<TopicPartition, Long> timestampsToSearch) {
+            return offsetsForTimes.apply(timestampsToSearch);
+        }
     }
 }
