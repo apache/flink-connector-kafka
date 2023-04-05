@@ -46,6 +46,7 @@ import org.apache.flink.streaming.connectors.kafka.internals.KafkaTopicPartition
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkFixedPartitioner;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanStartupMode;
+import org.apache.flink.streaming.connectors.kafka.testutils.MockPartitionOffsetsRetriever;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.Column;
@@ -87,7 +88,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import javax.annotation.Nullable;
 
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -97,7 +97,6 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.regex.Pattern;
 
 import static org.apache.flink.core.testutils.FlinkAssertions.anyCauseMatches;
@@ -575,75 +574,6 @@ public class KafkaDynamicTableFactoryTest {
         assertThat(provider).isInstanceOf(DataStreamScanProvider.class);
         final KafkaSource<?> kafkaSource = assertKafkaSource(provider);
         validator.accept(kafkaSource);
-    }
-
-    private interface OffsetsRetriever
-            extends Function<Collection<TopicPartition>, Map<TopicPartition, Long>> {}
-
-    private interface TimestampOffsetsRetriever
-            extends Function<Map<TopicPartition, Long>, Map<TopicPartition, OffsetAndTimestamp>> {}
-
-    private static final class MockPartitionOffsetsRetriever
-            implements OffsetsInitializer.PartitionOffsetsRetriever {
-
-        public static final OffsetsRetriever UNSUPPORTED_RETRIEVAL =
-                partitions -> {
-                    throw new UnsupportedOperationException(
-                            "The method was not supposed to be called");
-                };
-        private final OffsetsRetriever committedOffsets;
-        private final OffsetsRetriever endOffsets;
-        private final OffsetsRetriever beginningOffsets;
-        private final TimestampOffsetsRetriever offsetsForTimes;
-
-        static MockPartitionOffsetsRetriever noInteractions() {
-            return new MockPartitionOffsetsRetriever(
-                    UNSUPPORTED_RETRIEVAL,
-                    UNSUPPORTED_RETRIEVAL,
-                    UNSUPPORTED_RETRIEVAL,
-                    partitions -> {
-                        throw new UnsupportedOperationException(
-                                "The method was not supposed to be called");
-                    });
-        }
-
-        static MockPartitionOffsetsRetriever timestampAndEnd(
-                TimestampOffsetsRetriever retriever, OffsetsRetriever endOffsets) {
-            return new MockPartitionOffsetsRetriever(
-                    UNSUPPORTED_RETRIEVAL, endOffsets, UNSUPPORTED_RETRIEVAL, retriever);
-        }
-
-        private MockPartitionOffsetsRetriever(
-                OffsetsRetriever committedOffsets,
-                OffsetsRetriever endOffsets,
-                OffsetsRetriever beginningOffsets,
-                TimestampOffsetsRetriever offsetsForTimes) {
-            this.committedOffsets = committedOffsets;
-            this.endOffsets = endOffsets;
-            this.beginningOffsets = beginningOffsets;
-            this.offsetsForTimes = offsetsForTimes;
-        }
-
-        @Override
-        public Map<TopicPartition, Long> committedOffsets(Collection<TopicPartition> partitions) {
-            return committedOffsets.apply(partitions);
-        }
-
-        @Override
-        public Map<TopicPartition, Long> endOffsets(Collection<TopicPartition> partitions) {
-            return endOffsets.apply(partitions);
-        }
-
-        @Override
-        public Map<TopicPartition, Long> beginningOffsets(Collection<TopicPartition> partitions) {
-            return beginningOffsets.apply(partitions);
-        }
-
-        @Override
-        public Map<TopicPartition, OffsetAndTimestamp> offsetsForTimes(
-                Map<TopicPartition, Long> timestampsToSearch) {
-            return offsetsForTimes.apply(timestampsToSearch);
-        }
     }
 
     @Test
