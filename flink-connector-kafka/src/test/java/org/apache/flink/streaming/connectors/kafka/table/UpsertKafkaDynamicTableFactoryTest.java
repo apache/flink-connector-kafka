@@ -410,7 +410,10 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                 ScanBoundedMode.SPECIFIC_OFFSETS.toString());
 
         assertThatThrownBy(() -> createTableSource(SOURCE_SCHEMA, options))
-                .isInstanceOf(ValidationException.class);
+                .isInstanceOf(ValidationException.class)
+                .cause()
+                .hasMessageContaining(
+                        "'scan.bounded.specific-offsets' is required in 'specific-offsets' bounded mode but missing.");
     }
 
     @Test
