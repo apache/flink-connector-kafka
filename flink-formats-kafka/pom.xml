@@ -35,7 +35,6 @@ under the License.
 
   <modules>
     <module>flink-avro-confluent-registry</module>
-    <module>flink-json-debezium</module>
     <module>flink-sql-avro-confluent-registry</module>
   </modules>
 
