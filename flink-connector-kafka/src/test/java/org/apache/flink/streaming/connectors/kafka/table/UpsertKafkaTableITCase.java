@@ -425,9 +425,9 @@ public class UpsertKafkaTableITCase extends KafkaTableTestBase {
                 "INSERT INTO upsert_kafka\n"
                         + "VALUES\n"
                         + " (1, 100, 'payload 1'),\n"
+                        + " (1, 100, 'payload 1-new'),\n"
                         + " (2, 101, 'payload 2'),\n"
-                        + " (3, 102, 'payload 3'),\n"
-                        + " (1, 100, 'payload')";
+                        + " (3, 102, 'payload 3')";
         tEnv.executeSql(insertValuesSql).await();
 
         // results should only have records up to offset=2
@@ -435,7 +435,8 @@ public class UpsertKafkaTableITCase extends KafkaTableTestBase {
         final List<Row> expected =
                 Arrays.asList(
                         changelogRow("+I", 1L, 100L, "payload 1"),
-                        changelogRow("+I", 2L, 101L, "payload 2"));
+                        changelogRow("-U", 1L, 100L, "payload 1"),
+                        changelogRow("+U", 1L, 100L, "payload 1-new"));
         assertThat(results).satisfies(matching(deepEqualTo(expected, true)));
 
         // ------------- cleanup -------------------
