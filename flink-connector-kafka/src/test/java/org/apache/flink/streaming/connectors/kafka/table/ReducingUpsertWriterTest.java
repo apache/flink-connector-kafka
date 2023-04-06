@@ -20,6 +20,7 @@ package org.apache.flink.streaming.connectors.kafka.table;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.operators.ProcessingTimeService;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.api.connector.sink2.StatefulSink;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.catalog.Column;
@@ -276,7 +277,7 @@ public class ReducingUpsertWriterTest {
                         11.11,
                         11,
                         null),
-                new org.apache.flink.api.connector.sink2.SinkWriter.Context() {
+                new SinkWriter.Context() {
                     @Override
                     public long currentWatermark() {
                         throw new UnsupportedOperationException("Not implemented.");
