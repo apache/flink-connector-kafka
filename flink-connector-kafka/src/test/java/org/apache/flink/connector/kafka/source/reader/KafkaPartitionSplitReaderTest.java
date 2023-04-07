@@ -331,11 +331,17 @@ public class KafkaPartitionSplitReaderTest {
                     return rackId;
                 };
         Properties properties = new Properties();
-        createReader(
-                properties,
-                UnregisteredMetricsGroup.createSourceReaderMetricGroup(),
-                rackIdSupplier);
+        KafkaPartitionSplitReader reader =
+                createReader(
+                        properties,
+                        UnregisteredMetricsGroup.createSourceReaderMetricGroup(),
+                        rackIdSupplier);
         assertThat(supplierCalled.get()).isEqualTo(true);
+
+        // Since we can't examine the final ConsumerConfig created by the constructor
+        // we call the helper method directly to test its output
+        reader.setConsumerClientRack(properties, rackIdSupplier);
+        assertThat(properties.get(ConsumerConfig.CLIENT_RACK_CONFIG)).isEqualTo(rackId);
     }
 
     @ParameterizedTest
@@ -350,20 +356,6 @@ public class KafkaPartitionSplitReaderTest {
                         rackIdSupplier);
         reader.setConsumerClientRack(properties, rackIdSupplier);
         assertThat(properties.containsKey(ConsumerConfig.CLIENT_RACK_CONFIG)).isFalse();
-    }
-
-    @Test
-    public void testSetConsumerClientRackUsesCorrectParameter() {
-        String rackId = "use1-az1";
-        Properties properties = new Properties();
-        Supplier<String> rackIdSupplier = () -> rackId;
-        KafkaPartitionSplitReader reader =
-                createReader(
-                        properties,
-                        UnregisteredMetricsGroup.createSourceReaderMetricGroup(),
-                        rackIdSupplier);
-        reader.setConsumerClientRack(properties, rackIdSupplier);
-        assertThat(properties.get(ConsumerConfig.CLIENT_RACK_CONFIG)).isEqualTo(rackId);
     }
 
     // ------------------
