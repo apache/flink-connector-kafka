@@ -331,11 +331,17 @@ public class KafkaPartitionSplitReaderTest {
                     return rackId;
                 };
         Properties properties = new Properties();
-        createReader(
-                properties,
-                UnregisteredMetricsGroup.createSourceReaderMetricGroup(),
-                rackIdSupplier);
+        KafkaPartitionSplitReader reader =
+                createReader(
+                        properties,
+                        UnregisteredMetricsGroup.createSourceReaderMetricGroup(),
+                        rackIdSupplier);
         assertThat(supplierCalled.get()).isEqualTo(true);
+
+        // Here we call the helper function directly, because the KafkaPartitionSplitReader
+        // doesn't allow us to examine the final ConsumerConfig object
+        reader.setConsumerClientRack(properties, rackIdSupplier);
+        assertThat(properties.get(ConsumerConfig.CLIENT_RACK_CONFIG)).isEqualTo(rackId);
     }
 
     @ParameterizedTest
@@ -348,22 +354,11 @@ public class KafkaPartitionSplitReaderTest {
                         properties,
                         UnregisteredMetricsGroup.createSourceReaderMetricGroup(),
                         rackIdSupplier);
+
+        // Here we call the helper function directly, because the KafkaPartitionSplitReader
+        // doesn't allow us to examine the final ConsumerConfig object
         reader.setConsumerClientRack(properties, rackIdSupplier);
         assertThat(properties.containsKey(ConsumerConfig.CLIENT_RACK_CONFIG)).isFalse();
-    }
-
-    @Test
-    public void testSetConsumerClientRackUsesCorrectParameter() {
-        String rackId = "use1-az1";
-        Properties properties = new Properties();
-        Supplier<String> rackIdSupplier = () -> rackId;
-        KafkaPartitionSplitReader reader =
-                createReader(
-                        properties,
-                        UnregisteredMetricsGroup.createSourceReaderMetricGroup(),
-                        rackIdSupplier);
-        reader.setConsumerClientRack(properties, rackIdSupplier);
-        assertThat(properties.get(ConsumerConfig.CLIENT_RACK_CONFIG)).isEqualTo(rackId);
     }
 
     // ------------------
