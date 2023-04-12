@@ -347,22 +347,13 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
                                             context.getPartitionsForTopic(targetTopic)))
                             : OptionalInt.empty();
 
-            if (headerProvider != null) {
-                return new ProducerRecord<>(
-                        targetTopic,
-                        partition.isPresent() ? partition.getAsInt() : null,
-                        timestamp == null || timestamp < 0L ? null : timestamp,
-                        key,
-                        value,
-                        headerProvider.getHeaders(element));
-            } else {
-                return new ProducerRecord<>(
-                        targetTopic,
-                        partition.isPresent() ? partition.getAsInt() : null,
-                        timestamp == null || timestamp < 0L ? null : timestamp,
-                        key,
-                        value);
-            }
+            return new ProducerRecord<>(
+                    targetTopic,
+                    partition.isPresent() ? partition.getAsInt() : null,
+                    timestamp == null || timestamp < 0L ? null : timestamp,
+                    key,
+                    value,
+                    headerProvider != null ? headerProvider.getHeaders(element) : null);
         }
     }
 }
