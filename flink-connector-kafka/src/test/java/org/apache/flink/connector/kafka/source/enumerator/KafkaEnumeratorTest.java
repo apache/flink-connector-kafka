@@ -64,6 +64,7 @@ public class KafkaEnumeratorTest {
 
     private static final int READER0 = 0;
     private static final int READER1 = 1;
+    private static final int READER2 = 2;
     private static final Set<String> PRE_EXISTING_TOPICS =
             new HashSet<>(Arrays.asList(TOPIC1, TOPIC2));
     private static final int PARTITION_DISCOVERY_CALLABLE_INDEX = 0;
@@ -399,20 +400,49 @@ public class KafkaEnumeratorTest {
                 KafkaSourceEnumerator enumerator = createEnumerator(context, false)) {
             enumerator.start();
 
-            // No reader is registered, so the state should be empty
+            // Step1: Before first discovery, so the state should be empty
             final KafkaSourceEnumState state1 = enumerator.snapshotState(1L);
             assertThat(state1.assignedPartitions()).isEmpty();
+            assertThat(state1.unassignedInitialPartitons()).isEmpty();
+            assertThat(state1.initialDiscoveryFinished()).isFalse();
 
             registerReader(context, enumerator, READER0);
             registerReader(context, enumerator, READER1);
-            runOneTimePartitionDiscovery(context);
 
-            // The state should contain splits assigned to READER0 and READER1
-            final KafkaSourceEnumState state2 = enumerator.snapshotState(1L);
+            // Step2: First partition discovery after start, but no assignments to readers
+            context.runNextOneTimeCallable();
+            final KafkaSourceEnumState state2 = enumerator.snapshotState(2L);
+            assertThat(state2.assignedPartitions()).isEmpty();
+            assertThat(state2.unassignedInitialPartitons()).isNotEmpty();
+            assertThat(state2.initialDiscoveryFinished()).isTrue();
+
+            // Step3: Assign partials partitions to reader0 and reader1
+            context.runNextOneTimeCallable();
+
+            // The state should contain splits assigned to READER0 and READER1, but no READER2
+            // register.
+            // Thus, both assignedPartitions and unassignedInitialPartitons are not empty.
+            final KafkaSourceEnumState state3 = enumerator.snapshotState(3L);
             verifySplitAssignmentWithPartitions(
                     getExpectedAssignments(
                             new HashSet<>(Arrays.asList(READER0, READER1)), PRE_EXISTING_TOPICS),
-                    state2.assignedPartitions());
+                    state3.assignedPartitions());
+            assertThat(state3.unassignedInitialPartitons()).isNotEmpty();
+            assertThat(state3.initialDiscoveryFinished()).isTrue();
+            // total partitions of state2 and state3  are equal
+            // state2 only includes unassignedInitialPartitons
+            // state3 includes unassignedInitialPartitons + assignedPartitions
+            Set<TopicPartition> allPartitionOfState3 = new HashSet<>();
+            allPartitionOfState3.addAll(state3.unassignedInitialPartitons());
+            allPartitionOfState3.addAll(state3.assignedPartitions());
+            assertThat(state2.unassignedInitialPartitons()).isEqualTo(allPartitionOfState3);
+
+            // Step4: register READER2, then all partitions are assigned
+            registerReader(context, enumerator, READER2);
+            final KafkaSourceEnumState state4 = enumerator.snapshotState(4L);
+            assertThat(state4.assignedPartitions()).isEqualTo(allPartitionOfState3);
+            assertThat(state4.unassignedInitialPartitons()).isEmpty();
+            assertThat(state4.initialDiscoveryFinished()).isTrue();
         }
     }
 
