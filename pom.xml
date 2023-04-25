@@ -45,8 +45,9 @@ under the License.
     <modules>
         <module>flink-connector-kafka</module>
         <module>flink-sql-connector-kafka</module>
-        <module>flink-connector-kafka-e2e-tests</module>
         <module>flink-formats-kafka</module>
+        <module>flink-examples-kafka</module>
+        <module>flink-connector-kafka-e2e-tests</module>
         <module>flink-confluent-schema-registry-e2e-tests</module>
     </modules>
 
