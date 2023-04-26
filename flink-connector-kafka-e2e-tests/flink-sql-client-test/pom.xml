@@ -20,9 +20,9 @@ under the License.
 		 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 		 xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<parent>
-		<artifactId>flink-end-to-end-tests</artifactId>
 		<groupId>org.apache.flink</groupId>
-		<version>1.18-SNAPSHOT</version>
+		<artifactId>flink-connector-kafka-e2e-tests</artifactId>
+		<version>3.1-SNAPSHOT</version>
 	</parent>
 	<modelVersion>4.0.0</modelVersion>
 
@@ -34,13 +34,13 @@ under the License.
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-table-common</artifactId>
-			<version>${project.version}</version>
+			<version>${flink.version}</version>
 			<scope>provided</scope>
 		</dependency>
 
 		<dependency>
 			<groupId>org.apache.flink</groupId>
-			<artifactId>flink-end-to-end-tests-common</artifactId>
+			<artifactId>flink-end-to-end-tests-common-kafka</artifactId>
 			<version>${project.version}</version>
 		</dependency>
 
@@ -61,7 +61,7 @@ under the License.
 		<dependency>
 			<groupId>org.apache.kafka</groupId>
 			<artifactId>kafka-clients</artifactId>
-			<version>3.2.3</version>
+			<version>${kafka.version}</version>
 			<scope>test</scope>
 		</dependency>
 		<dependency>
@@ -128,7 +128,7 @@ under the License.
 								<artifactItem>
 									<groupId>org.apache.flink</groupId>
 									<artifactId>flink-test-utils</artifactId>
-									<version>${project.version}</version>
+									<version>${flink.version}</version>
 									<type>jar</type>
 								</artifactItem>
 							</artifactItems>

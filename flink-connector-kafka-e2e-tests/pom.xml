@@ -37,6 +37,7 @@ under the License.
         <module>flink-streaming-kafka-test</module>
         <module>flink-streaming-kafka-test-base</module>
         <module>flink-end-to-end-tests-common-kafka</module>
+        <module>flink-sql-client-test</module>
     </modules>
 
     <properties>
