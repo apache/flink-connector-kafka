@@ -22,18 +22,72 @@ import org.apache.flink.annotation.Internal;
 
 import org.apache.kafka.common.TopicPartition;
 
+import java.util.HashSet;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /** The state of Kafka source enumerator. */
 @Internal
 public class KafkaSourceEnumState {
-    private final Set<TopicPartition> assignedPartitions;
+    /** Partitions with status: ASSIGNED or UNASSIGNED_INITIAL. */
+    private final Set<TopicPartitionAndAssignmentStatus> partitions;
+    /**
+     * this flag will be marked as true if inital partitions are discovered after enumerator starts.
+     */
+    private final boolean initialDiscoveryFinished;
 
-    KafkaSourceEnumState(Set<TopicPartition> assignedPartitions) {
-        this.assignedPartitions = assignedPartitions;
+    public KafkaSourceEnumState(
+            Set<TopicPartitionAndAssignmentStatus> partitions, boolean initialDiscoveryFinished) {
+        this.partitions = partitions;
+        this.initialDiscoveryFinished = initialDiscoveryFinished;
+    }
+
+    KafkaSourceEnumState(
+            Set<TopicPartition> assignPartitions,
+            Set<TopicPartition> unassignedInitialPartitions,
+            boolean initialDiscoveryFinished) {
+        this.partitions = new HashSet<>();
+        partitions.addAll(
+                assignPartitions.stream()
+                        .map(
+                                topicPartition ->
+                                        new TopicPartitionAndAssignmentStatus(
+                                                topicPartition, AssignmentStatus.ASSIGNED))
+                        .collect(Collectors.toSet()));
+        partitions.addAll(
+                unassignedInitialPartitions.stream()
+                        .map(
+                                topicPartition ->
+                                        new TopicPartitionAndAssignmentStatus(
+                                                topicPartition,
+                                                AssignmentStatus.UNASSIGNED_INITIAL))
+                        .collect(Collectors.toSet()));
+        this.initialDiscoveryFinished = initialDiscoveryFinished;
+    }
+
+    public Set<TopicPartitionAndAssignmentStatus> partitions() {
+        return partitions;
     }
 
     public Set<TopicPartition> assignedPartitions() {
-        return assignedPartitions;
+        return filterPartitionsByAssignmentStatus(AssignmentStatus.ASSIGNED);
+    }
+
+    public Set<TopicPartition> unassignedInitialPartitions() {
+        return filterPartitionsByAssignmentStatus(AssignmentStatus.UNASSIGNED_INITIAL);
+    }
+
+    public boolean initialDiscoveryFinished() {
+        return initialDiscoveryFinished;
+    }
+
+    private Set<TopicPartition> filterPartitionsByAssignmentStatus(
+            AssignmentStatus assignmentStatus) {
+        return partitions.stream()
+                .filter(
+                        partitionWithStatus ->
+                                partitionWithStatus.assignmentStatus().equals(assignmentStatus))
+                .map(TopicPartitionAndAssignmentStatus::topicPartition)
+                .collect(Collectors.toSet());
     }
 }
