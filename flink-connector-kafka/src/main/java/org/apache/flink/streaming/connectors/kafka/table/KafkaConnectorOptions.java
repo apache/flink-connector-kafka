@@ -188,9 +188,11 @@ public class KafkaConnectorOptions {
     public static final ConfigOption<Duration> SCAN_TOPIC_PARTITION_DISCOVERY =
             ConfigOptions.key("scan.topic-partition-discovery.interval")
                     .durationType()
-                    .noDefaultValue()
+                    .defaultValue(Duration.ofMinutes(5))
                     .withDescription(
-                            "Optional interval for consumer to discover dynamically created Kafka partitions periodically.");
+                            "Optional interval for consumer to discover dynamically created Kafka partitions periodically."
+                                    + "The value 0 disables the partition discovery."
+                                    + "The default value is 5 minutes, which is equal to the default value of metadata.max.age.ms in Kafka.");
 
     // --------------------------------------------------------------------------------------------
     // Sink specific options

@@ -201,11 +201,11 @@ public class KafkaDynamicTableFactory
         final Properties properties = getKafkaProperties(context.getCatalogTable().getOptions());
 
         // add topic-partition discovery
-        final Optional<Long> partitionDiscoveryInterval =
-                tableOptions.getOptional(SCAN_TOPIC_PARTITION_DISCOVERY).map(Duration::toMillis);
+        final Duration partitionDiscoveryInterval =
+                tableOptions.get(SCAN_TOPIC_PARTITION_DISCOVERY);
         properties.setProperty(
                 KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(),
-                partitionDiscoveryInterval.orElse(-1L).toString());
+                Long.toString(partitionDiscoveryInterval.toMillis()));
 
         final DataType physicalDataType = context.getPhysicalRowDataType();
 
