@@ -22,6 +22,7 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 
+import java.time.Duration;
 import java.util.Properties;
 import java.util.function.Function;
 
@@ -38,10 +39,11 @@ public class KafkaSourceOptions {
     public static final ConfigOption<Long> PARTITION_DISCOVERY_INTERVAL_MS =
             ConfigOptions.key("partition.discovery.interval.ms")
                     .longType()
-                    .noDefaultValue()
+                    .defaultValue(Duration.ofMinutes(5).toMillis())
                     .withDescription(
                             "The interval in milliseconds for the Kafka source to discover "
-                                    + "the new partitions. A non-positive value disables the partition discovery.");
+                                    + "the new partitions. A non-positive value disables the partition discovery."
+                                    + "The default value is 5 minutes, which is equal to the default value of metadata.max.age.ms in Kafka.");
 
     public static final ConfigOption<Boolean> REGISTER_KAFKA_CONSUMER_METRICS =
             ConfigOptions.key("register.consumer.metrics")
