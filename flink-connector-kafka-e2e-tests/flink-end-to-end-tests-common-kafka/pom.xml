@@ -91,7 +91,7 @@ under the License.
             <!-- Used by maven-dependency-plugin -->
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-sql-avro-confluent-registry</artifactId>
-            <version>${project.version}</version>
+            <version>${flink.version}</version>
             <scope>test</scope>
         </dependency>
 
@@ -194,7 +194,7 @@ under the License.
                         <artifactItem>
                             <groupId>org.apache.flink</groupId>
                             <artifactId>flink-sql-avro-confluent-registry</artifactId>
-                            <version>${project.version}</version>
+                            <version>${flink.version}</version>
                             <destFileName>avro-confluent.jar</destFileName>
                             <type>jar</type>
                             <outputDirectory>${project.build.directory}/dependencies</outputDirectory>
