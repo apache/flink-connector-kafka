@@ -240,7 +240,7 @@ prefixed with either the `'key'` or `'value'` plus format identifier.
 {{< tab "SQL" >}}
 ```sql
 CREATE TABLE KafkaTable (
-  `ts` TIMESTAMP(3) METADATA FROM 'timestamp',
+  `ts` TIMESTAMP_LTZ(3) METADATA FROM 'timestamp',
   `user_id` BIGINT,
   `item_id` BIGINT,
   `behavior` STRING,
