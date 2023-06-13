@@ -48,7 +48,7 @@ CREATE TABLE KafkaTable (
   `user_id` BIGINT,
   `item_id` BIGINT,
   `behavior` STRING,
-  `ts` TIMESTAMP(3) METADATA FROM 'timestamp'
+  `ts` TIMESTAMP_LTZ(3) METADATA FROM 'timestamp'
 ) WITH (
   'connector' = 'kafka',
   'topic' = 'user_behavior',
@@ -127,7 +127,7 @@ CREATE TABLE KafkaTable (
 
 ```sql
 CREATE TABLE KafkaTable (
-  `event_time` TIMESTAMP(3) METADATA FROM 'timestamp',
+  `event_time` TIMESTAMP_LTZ(3) METADATA FROM 'timestamp',
   `partition` BIGINT METADATA VIRTUAL,
   `offset` BIGINT METADATA VIRTUAL,
   `user_id` BIGINT,
@@ -151,7 +151,7 @@ CREATE TABLE KafkaTable (
 
 ```sql
 CREATE TABLE KafkaTable (
-  `event_time` TIMESTAMP(3) METADATA FROM 'value.source.timestamp' VIRTUAL,  -- from Debezium format
+  `event_time` TIMESTAMP_LTZ(3) METADATA FROM 'value.source.timestamp' VIRTUAL,  -- from Debezium format
   `origin_table` STRING METADATA FROM 'value.source.table' VIRTUAL, -- from Debezium format
   `partition_id` BIGINT METADATA FROM 'partition' VIRTUAL,  -- from Kafka connector
   `offset` BIGINT METADATA VIRTUAL,  -- from Kafka connector
@@ -389,7 +389,7 @@ Kafka 消息的消息键和消息体部分都可以使用某种 [格式]({{< ref
 
 ```sql
 CREATE TABLE KafkaTable (
-  `ts` TIMESTAMP(3) METADATA FROM 'timestamp',
+  `ts` TIMESTAMP_LTZ(3) METADATA FROM 'timestamp',
   `user_id` BIGINT,
   `item_id` BIGINT,
   `behavior` STRING
@@ -415,7 +415,7 @@ ROW<`user_id` BIGINT, `item_id` BIGINT, `behavior` STRING>
 
 ```sql
 CREATE TABLE KafkaTable (
-  `ts` TIMESTAMP(3) METADATA FROM 'timestamp',
+  `ts` TIMESTAMP_LTZ(3) METADATA FROM 'timestamp',
   `user_id` BIGINT,
   `item_id` BIGINT,
   `behavior` STRING
@@ -579,7 +579,7 @@ CREATE TABLE KafkaTable (
   `user_id` BIGINT,
   `item_id` BIGINT,
   `behavior` STRING,
-  `ts` TIMESTAMP(3) METADATA FROM 'timestamp'
+  `ts` TIMESTAMP_LTZ(3) METADATA FROM 'timestamp'
 ) WITH (
   'connector' = 'kafka',
   ...
@@ -594,7 +594,7 @@ CREATE TABLE KafkaTable (
   `user_id` BIGINT,
   `item_id` BIGINT,
   `behavior` STRING,
-  `ts` TIMESTAMP(3) METADATA FROM 'timestamp'
+  `ts` TIMESTAMP_LTZ(3) METADATA FROM 'timestamp'
 ) WITH (
   'connector' = 'kafka',
   ...
