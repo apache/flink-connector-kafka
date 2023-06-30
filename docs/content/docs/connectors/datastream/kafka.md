@@ -469,24 +469,21 @@ For detailed explanations of security configurations, please refer to
 ## Kafka Rack Awareness
 
 Kafka Rack Awareness allows flink to select and control the cloud region and availability zone configured by the use of rackId, this feature could allow a significant cost reduction in the cloud provider bill and achieve a better networking performance when connecting to closer and more reliable networks.
+A client's rack is indicated using the `client.rack` config, and should correspond to a broker's `broker.rack` config.
+
+https://kafka.apache.org/documentation/#consumerconfigs_client.rack
 
 ### RackId
 
-setRackId is the variable where the desired or available availability zones get stored. If provided, the Supplier will be run when the consumer is set up on the Task Manager, and the consumer's client.rack configuration will be set to the value.
-
-https://kafka.apache.org/documentation/#consumerconfigs_client.rack
+setRackIdSupplier() is the Builder method allows us to determine the consumer's rack. If provided, the Supplier will be run when the consumer is set up on the Task Manager, and the consumer's `client.rack` configuration will be set to the value.
 
 One of the ways this can be implemented is by making setRackId equal to an environment variable within your taskManager, for instance:
 
 ```
-.setRackId(() -> System.getenv("TM_NODE_AZ"))
+.setRackIdSupplier(() -> System.getenv("TM_NODE_AZ"))
 ```
 
-The "TM_NODE_AZ" is the name of the environment variable in the TaskManager image that contains the available Network zones we want to use. 
-
-Another implementation option could be extracting the AZ directly from AWS CLI or API.
-
-Additional validation is added to ensure any input to the supplier gets properly configured by the consumer and ensures null values are handled properly.
+The "TM_NODE_AZ" is the name of the environment variable in the TaskManager container that contains the zone we want to use.
 
 ### Behind the Scene
 {{< hint info >}}

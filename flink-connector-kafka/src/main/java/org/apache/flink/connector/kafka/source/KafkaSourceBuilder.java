@@ -366,7 +366,7 @@ public class KafkaSourceBuilder<OUT> {
      * @param rackIdCallback callback to provide Kafka consumer client.rack
      * @return this KafkaSourceBuilder
      */
-    public KafkaSourceBuilder<OUT> setRackId(Supplier<String> rackIdCallback) {
+    public KafkaSourceBuilder<OUT> setRackIdSupplier(Supplier<String> rackIdCallback) {
         this.rackIdSupplier = rackIdCallback;
         return this;
     }
