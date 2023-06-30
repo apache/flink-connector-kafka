@@ -272,6 +272,7 @@ public class KafkaPartitionSplitReader
      * @param consumerProps Consumer Property.
      * @param rackIdSupplier Rack Id's.
      */
+    @VisibleForTesting
     void setConsumerClientRack(Properties consumerProps, Supplier<String> rackIdSupplier) {
         if (rackIdSupplier != null) {
             String rackId = rackIdSupplier.get();
