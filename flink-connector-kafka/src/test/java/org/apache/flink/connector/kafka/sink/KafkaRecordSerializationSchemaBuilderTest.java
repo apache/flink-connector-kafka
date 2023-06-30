@@ -28,12 +28,16 @@ import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableMap;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.Configurable;
+import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.header.internals.RecordHeader;
+import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -143,6 +147,26 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
         final ProducerRecord<byte[], byte[]> record = schema.serialize("a", sinkContext, null);
         assertThat(record.partition()).isEqualTo(partition);
         assertThat(opened.get()).isTrue();
+    }
+
+    @Test
+    public void testSerializeRecordWithHeaderProvider() throws Exception {
+        final HeaderProvider<String> headerProvider =
+                (ignored) ->
+                        new RecordHeaders(ImmutableList.of(new RecordHeader("a", "a".getBytes())));
+
+        final KafkaRecordSerializationSchema<String> schema =
+                KafkaRecordSerializationSchema.builder()
+                        .setTopic(DEFAULT_TOPIC)
+                        .setValueSerializationSchema(new SimpleStringSchema())
+                        .setHeaderProvider(headerProvider)
+                        .build();
+        final ProducerRecord<byte[], byte[]> record = schema.serialize("a", null, null);
+        assertThat(record).isNotNull();
+        assertThat(record.headers())
+                .singleElement()
+                .extracting(Header::key, Header::value)
+                .containsExactly("a", "a".getBytes(StandardCharsets.UTF_8));
     }
 
     @Test

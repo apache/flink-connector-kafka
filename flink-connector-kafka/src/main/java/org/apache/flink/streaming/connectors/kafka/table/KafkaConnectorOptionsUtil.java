@@ -189,7 +189,7 @@ class KafkaConnectorOptionsUtil {
                         });
     }
 
-    private static void validateScanBoundedMode(ReadableConfig tableOptions) {
+    static void validateScanBoundedMode(ReadableConfig tableOptions) {
         tableOptions
                 .getOptional(SCAN_BOUNDED_MODE)
                 .ifPresent(

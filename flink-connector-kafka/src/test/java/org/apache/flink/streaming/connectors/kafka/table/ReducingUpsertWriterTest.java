@@ -20,6 +20,7 @@ package org.apache.flink.streaming.connectors.kafka.table;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.operators.ProcessingTimeService;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.api.connector.sink2.StatefulSink;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.catalog.Column;
@@ -262,6 +263,50 @@ public class ReducingUpsertWriterTest {
         compareCompactedResult(expected, writer.rowDataCollectors);
     }
 
+    @Test
+    public void testWriteDataWithNullTimestamp() throws Exception {
+        final MockedSinkWriter writer = new MockedSinkWriter();
+        final ReducingUpsertWriter<?> bufferedWriter = createBufferedWriter(writer);
+
+        bufferedWriter.write(
+                GenericRowData.ofKind(
+                        INSERT,
+                        1001,
+                        StringData.fromString("Java public for dummies"),
+                        StringData.fromString("Tan Ah Teck"),
+                        11.11,
+                        11,
+                        null),
+                new SinkWriter.Context() {
+                    @Override
+                    public long currentWatermark() {
+                        throw new UnsupportedOperationException("Not implemented.");
+                    }
+
+                    @Override
+                    public Long timestamp() {
+                        return null;
+                    }
+                });
+
+        bufferedWriter.flush(true);
+
+        final HashMap<Integer, List<RowData>> expected = new HashMap<>();
+        expected.put(
+                1001,
+                Collections.singletonList(
+                        GenericRowData.ofKind(
+                                UPDATE_AFTER,
+                                1001,
+                                StringData.fromString("Java public for dummies"),
+                                StringData.fromString("Tan Ah Teck"),
+                                11.11,
+                                11,
+                                null)));
+
+        compareCompactedResult(expected, writer.rowDataCollectors);
+    }
+
     private void compareCompactedResult(
             Map<Integer, List<RowData>> expected, List<RowData> actual) {
         Map<Integer, List<RowData>> actualMap = new HashMap<>();
@@ -340,8 +385,13 @@ public class ReducingUpsertWriterTest {
         @Override
         public void write(RowData element, Context context)
                 throws IOException, InterruptedException {
-            assertThat(Instant.ofEpochMilli(context.timestamp()))
-                    .isEqualTo(element.getTimestamp(TIMESTAMP_INDICES, 3).toInstant());
+            // Allow comparison between null timestamps
+            if (context.timestamp() == null) {
+                assertThat(element.getTimestamp(TIMESTAMP_INDICES, 3)).isNull();
+            } else {
+                assertThat(Instant.ofEpochMilli(context.timestamp()))
+                        .isEqualTo(element.getTimestamp(TIMESTAMP_INDICES, 3).toInstant());
+            }
             rowDataCollectors.add(element);
         }
 
