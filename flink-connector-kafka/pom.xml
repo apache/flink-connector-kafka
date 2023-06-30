@@ -72,6 +72,13 @@ under the License.
             <version>${kafka.version}</version>
         </dependency>
 
+        <!-- When flink-core bump to commons-collections4, we can remove it.-->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-collections4</artifactId>
+            <version>4.4</version>
+        </dependency>
+
         <!-- Tests -->
 
         <dependency>

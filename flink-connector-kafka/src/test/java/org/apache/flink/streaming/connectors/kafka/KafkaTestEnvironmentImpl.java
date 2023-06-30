@@ -30,7 +30,7 @@ import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartiti
 import org.apache.flink.streaming.util.serialization.KeyedSerializationSchema;
 import org.apache.flink.util.DockerImageVersions;
 
-import org.apache.commons.collections.list.UnmodifiableList;
+import org.apache.commons.collections4.list.UnmodifiableList;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.admin.TopicDescription;
