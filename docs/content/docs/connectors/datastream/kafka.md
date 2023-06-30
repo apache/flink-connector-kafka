@@ -467,7 +467,7 @@ For detailed explanations of security configurations, please refer to
 
 ## Kafka Rack Awareness
 
-Kafka Rack Awareness allows flink to select and control the cloud region and availability zone configured by the use of rackId, this feature could allow a significant cost reduction in the cloud provider bill and achieve a better networking performance when connecting to closer and more reliable networks.
+Kafka rack awareness allows Flink to select and control the cloud region and availability zone that Kafka consumers read from, based on the Rack ID. This feature reduces network costs and latency since it allows consumers to connect to the closest Kafka brokers, possibly colocated in the same cloud region and availability zone.
 
 ### RackId
 
