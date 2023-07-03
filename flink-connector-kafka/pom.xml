@@ -72,6 +72,14 @@ under the License.
             <version>${kafka.version}</version>
         </dependency>
 
+        <!-- Others -->
+
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-collections4</artifactId>
+            <version>4.4</version>
+        </dependency>
+
         <!-- Tests -->
 
         <dependency>
