@@ -28,6 +28,8 @@ import java.util.Map;
 
 /**
  * An implementation of {@link OffsetsInitializer} to initialize the offsets based on a timestamp.
+ * If the message meeting the requirement of the timestamp have not been produced to Kafka yet, just
+ * use the latest offset.
  *
  * <p>Package private and should be instantiated via {@link OffsetsInitializer}.
  */
