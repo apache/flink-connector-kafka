@@ -33,7 +33,7 @@ import java.util.Collection;
  * A wrapper of a {@link Sink}. It will buffer the data emitted by the wrapper {@link SinkWriter}
  * and only emit it when the buffer is full or a timer is triggered or a checkpoint happens.
  *
- * <p>The sink provides eventual consistency guarantees without under {@link
+ * <p>The sink provides eventual consistency guarantees under {@link
  * org.apache.flink.connector.base.DeliveryGuarantee#AT_LEAST_ONCE} because the updates are
  * idempotent therefore duplicates have no effect.
  */
