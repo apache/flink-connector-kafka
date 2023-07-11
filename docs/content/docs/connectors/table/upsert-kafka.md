@@ -304,7 +304,7 @@ Besides enabling Flink's checkpointing, you can also choose three different mode
   or `read_committed` - the latter one is the default value) for any application consuming records
   from Kafka.
 
-Please refer to [Kafka documentation]({{< ref "docs/connectors/datastream/kafka" >}}#kafka-producers-and-fault-tolerance) for more caveats about delivery guarantees.
+Please refer to [Kafka connector documentation]({{< ref "docs/connectors/datastream/kafka" >}}#kafka-producers-and-fault-tolerance) for more caveats about delivery guarantees.
 
 ### Source Per-Partition Watermarks
 
