@@ -519,6 +519,26 @@ public class KafkaEnumeratorTest {
                 .isEqualTo(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.defaultValue());
     }
 
+    @Test
+    public void testDisablePartitionDiscovery() {
+        Properties props = new Properties();
+        props.setProperty(
+                KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), String.valueOf(0));
+        KafkaSourceEnumerator enumerator =
+                new KafkaSourceEnumerator(
+                        KafkaSubscriber.getTopicListSubscriber(Arrays.asList(TOPIC1, TOPIC2)),
+                        OffsetsInitializer.earliest(),
+                        new NoStoppingOffsetsInitializer(),
+                        props,
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS),
+                        Boundedness.CONTINUOUS_UNBOUNDED,
+                        new KafkaSourceEnumState(
+                                Collections.emptySet(), Collections.emptySet(), false));
+        long partitionDiscoveryIntervalMs =
+                (long) Whitebox.getInternalState(enumerator, "partitionDiscoveryIntervalMs");
+        assertThat(partitionDiscoveryIntervalMs).isEqualTo(0);
+    }
+
     // -------------- some common startup sequence ---------------
 
     private void startEnumeratorAndRegisterReaders(
