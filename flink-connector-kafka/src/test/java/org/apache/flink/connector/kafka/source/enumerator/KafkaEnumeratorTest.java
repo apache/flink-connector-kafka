@@ -229,8 +229,8 @@ public class KafkaEnumeratorTest {
     public void testRunWithDiscoverPartitionsOnceWithZeroMsToCheckNoMoreSplit() throws Throwable {
         try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
-                // set partitionDiscoveryIntervalMs = 0
-                KafkaSourceEnumerator enumerator = createEnumerator(context, 0L)) {
+                // Disable periodic partition discovery
+                KafkaSourceEnumerator enumerator = createEnumerator(context, false)) {
 
             // Start the enumerator, and it should schedule a one time task to discover and assign
             // partitions.
@@ -358,7 +358,6 @@ public class KafkaEnumeratorTest {
                 KafkaSourceEnumerator enumerator =
                         createEnumerator(
                                 context2,
-                                ENABLE_PERIODIC_PARTITION_DISCOVERY ? 1 : -1,
                                 OffsetsInitializer.earliest(),
                                 PRE_EXISTING_TOPICS,
                                 preexistingAssignments,
@@ -390,7 +389,6 @@ public class KafkaEnumeratorTest {
                 KafkaSourceEnumerator enumerator =
                         createEnumerator(
                                 context,
-                                ENABLE_PERIODIC_PARTITION_DISCOVERY ? 1 : -1,
                                 OffsetsInitializer.earliest(),
                                 PRE_EXISTING_TOPICS,
                                 Collections.emptySet(),
@@ -502,41 +500,30 @@ public class KafkaEnumeratorTest {
     }
 
     @Test
-    public void testEnablePartitionDiscoveryByDefault() {
-        KafkaSourceEnumerator enumerator =
-                new KafkaSourceEnumerator(
-                        KafkaSubscriber.getTopicListSubscriber(Arrays.asList(TOPIC1, TOPIC2)),
-                        OffsetsInitializer.earliest(),
-                        new NoStoppingOffsetsInitializer(),
-                        new Properties(),
-                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS),
-                        Boundedness.CONTINUOUS_UNBOUNDED,
-                        new KafkaSourceEnumState(
-                                Collections.emptySet(), Collections.emptySet(), false));
-        long partitionDiscoveryIntervalMs =
-                (long) Whitebox.getInternalState(enumerator, "partitionDiscoveryIntervalMs");
-        assertThat(partitionDiscoveryIntervalMs)
-                .isEqualTo(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.defaultValue());
+    public void testEnablePartitionDiscoveryByDefault() throws Throwable {
+        try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                KafkaSourceEnumerator enumerator = createEnumerator(context, new Properties())) {
+            enumerator.start();
+            long partitionDiscoveryIntervalMs =
+                    (long) Whitebox.getInternalState(enumerator, "partitionDiscoveryIntervalMs");
+            assertThat(partitionDiscoveryIntervalMs)
+                    .isEqualTo(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.defaultValue());
+            assertThat(context.getPeriodicCallables()).isNotEmpty();
+        }
     }
 
     @Test
-    public void testDisablePartitionDiscovery() {
+    public void testDisablePartitionDiscovery() throws Throwable {
         Properties props = new Properties();
         props.setProperty(
                 KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), String.valueOf(0));
-        KafkaSourceEnumerator enumerator =
-                new KafkaSourceEnumerator(
-                        KafkaSubscriber.getTopicListSubscriber(Arrays.asList(TOPIC1, TOPIC2)),
-                        OffsetsInitializer.earliest(),
-                        new NoStoppingOffsetsInitializer(),
-                        props,
-                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS),
-                        Boundedness.CONTINUOUS_UNBOUNDED,
-                        new KafkaSourceEnumState(
-                                Collections.emptySet(), Collections.emptySet(), false));
-        long partitionDiscoveryIntervalMs =
-                (long) Whitebox.getInternalState(enumerator, "partitionDiscoveryIntervalMs");
-        assertThat(partitionDiscoveryIntervalMs).isEqualTo(0);
+        try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                KafkaSourceEnumerator enumerator = createEnumerator(context, props)) {
+            enumerator.start();
+            assertThat(context.getPeriodicCallables()).isEmpty();
+        }
     }
 
     // -------------- some common startup sequence ---------------
@@ -577,13 +564,9 @@ public class KafkaEnumeratorTest {
     }
 
     private KafkaSourceEnumerator createEnumerator(
-            MockSplitEnumeratorContext<KafkaPartitionSplit> enumContext,
-            long partitionDiscoveryIntervalMs) {
+            MockSplitEnumeratorContext<KafkaPartitionSplit> enumContext, Properties properties) {
         return createEnumerator(
-                enumContext,
-                partitionDiscoveryIntervalMs,
-                EXCLUDE_DYNAMIC_TOPIC,
-                OffsetsInitializer.earliest());
+                enumContext, properties, EXCLUDE_DYNAMIC_TOPIC, OffsetsInitializer.earliest());
     }
 
     private KafkaSourceEnumerator createEnumerator(
@@ -595,20 +578,23 @@ public class KafkaEnumeratorTest {
         if (includeDynamicTopic) {
             topics.add(DYNAMIC_TOPIC_NAME);
         }
+        Properties props = new Properties();
+        props.setProperty(
+                KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(),
+                enablePeriodicPartitionDiscovery ? "1" : "-1");
         return createEnumerator(
                 enumContext,
-                enablePeriodicPartitionDiscovery ? 1 : -1,
                 startingOffsetsInitializer,
                 topics,
                 Collections.emptySet(),
                 Collections.emptySet(),
                 false,
-                new Properties());
+                props);
     }
 
     private KafkaSourceEnumerator createEnumerator(
             MockSplitEnumeratorContext<KafkaPartitionSplit> enumContext,
-            long partitionDiscoveryIntervalMs,
+            Properties props,
             boolean includeDynamicTopic,
             OffsetsInitializer startingOffsetsInitializer) {
         List<String> topics = new ArrayList<>(PRE_EXISTING_TOPICS);
@@ -617,13 +603,12 @@ public class KafkaEnumeratorTest {
         }
         return createEnumerator(
                 enumContext,
-                partitionDiscoveryIntervalMs,
                 startingOffsetsInitializer,
                 topics,
                 Collections.emptySet(),
                 Collections.emptySet(),
                 false,
-                new Properties());
+                props);
     }
 
     /**
@@ -632,7 +617,6 @@ public class KafkaEnumeratorTest {
      */
     private KafkaSourceEnumerator createEnumerator(
             MockSplitEnumeratorContext<KafkaPartitionSplit> enumContext,
-            long partitionDiscoveryIntervalMs,
             OffsetsInitializer startingOffsetsInitializer,
             Collection<String> topicsToSubscribe,
             Set<TopicPartition> assignedPartitions,
@@ -651,9 +635,6 @@ public class KafkaEnumeratorTest {
         Properties props =
                 new Properties(KafkaSourceTestEnv.getConsumerProperties(StringDeserializer.class));
         KafkaSourceEnumerator.deepCopyProperties(overrideProperties, props);
-        props.setProperty(
-                KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(),
-                String.valueOf(partitionDiscoveryIntervalMs));
 
         return new KafkaSourceEnumerator(
                 subscriber,
