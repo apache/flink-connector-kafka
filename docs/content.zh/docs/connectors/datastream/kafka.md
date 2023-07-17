@@ -229,7 +229,7 @@ Kafka consumer 的配置可以参考 [Apache Kafka 文档](http://kafka.apache.o
 
 ### 动态分区检查
 为了在不重启 Flink 作业的情况下处理 Topic 扩容或新建 Topic 等场景，可以将 Kafka Source 配置为在提供的 Topic / Partition 
-订阅模式下定期检查新分区。要启用动态分区检查，请将 ```partition.discovery.interval.ms``` 设置为非负值：
+订阅模式下定期检查新分区。要启用动态分区检查，请将 ```partition.discovery.interval.ms``` 设置为正值：
 
 
 {{< tabs "KafkaSource#PartitionDiscovery" >}}
@@ -248,7 +248,7 @@ KafkaSource.builder() \
 {{< /tabs >}}
 
 {{< hint warning >}}
-分区检查功能默认**不开启**。需要显式地设置分区检查间隔才能启用此功能。
+分区检查间隔默认为5分钟。需要显式地设置分区检查间隔为非正数才能关闭此功能。
 {{< /hint >}}
 
 ### 事件时间和水印

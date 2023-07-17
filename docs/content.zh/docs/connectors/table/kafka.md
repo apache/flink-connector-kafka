@@ -338,9 +338,9 @@ CREATE TABLE KafkaTable (
     <tr>
       <td><h5>scan.topic-partition-discovery.interval</h5></td>
       <td>可选</td>
-      <td style="word-wrap: break-word;">（无）</td>
+      <td style="word-wrap: break-word;">5分钟</td>
       <td>Duration</td>
-      <td>Consumer 定期探测动态创建的 Kafka topic 和 partition 的时间间隔。</td>
+      <td>Consumer 定期探测动态创建的 Kafka topic 和 partition 的时间间隔。需要显式地设置'scan.topic-partition-discovery.interval'为0才能关闭此功能</td>
     </tr>
     <tr>
       <td><h5>sink.partitioner</h5></td>
