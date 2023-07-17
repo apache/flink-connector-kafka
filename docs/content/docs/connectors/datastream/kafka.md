@@ -264,7 +264,7 @@ KafkaSource.builder() \
 {{< /tabs >}}
 
 {{< hint warning >}}
-The partition discovery interval is 5 minutes by default.To **disable** this feature, you need to explicitly set the partition discovery interval to a non-positive value.
+The partition discovery interval is 5 minutes by default. To **disable** this feature, you need to explicitly set the partition discovery interval to a non-positive value.
 {{< /hint >}}
 
 ### Event Time and Watermarks

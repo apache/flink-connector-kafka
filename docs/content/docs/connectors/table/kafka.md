@@ -366,7 +366,7 @@ Connector Options
       <td>yes</td>
       <td style="word-wrap: break-word;">5 minutes</td>
       <td>Duration</td>
-      <td>Interval for consumer to discover dynamically created Kafka topics and partitions periodically.To disable this feature, you need to explicitly set the 'scan.topic-partition-discovery.interval' value to 0.</td>
+      <td>Interval for consumer to discover dynamically created Kafka topics and partitions periodically. To disable this feature, you need to explicitly set the 'scan.topic-partition-discovery.interval' value to 0.</td>
     </tr>
     <tr>
       <td><h5>sink.partitioner</h5></td>
