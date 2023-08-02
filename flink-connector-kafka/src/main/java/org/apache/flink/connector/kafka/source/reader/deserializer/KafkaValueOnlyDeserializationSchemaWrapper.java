@@ -20,6 +20,7 @@ package org.apache.flink.connector.kafka.source.reader.deserializer;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.connector.kafka.source.util.ExtractPayloadSourceRecordUtil;
 import org.apache.flink.util.Collector;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -35,9 +36,17 @@ import java.io.IOException;
 class KafkaValueOnlyDeserializationSchemaWrapper<T> implements KafkaRecordDeserializationSchema<T> {
     private static final long serialVersionUID = 1L;
     private final DeserializationSchema<T> deserializationSchema;
+    private final boolean valueIncludeKafkaConnectJsonSchema;
 
     KafkaValueOnlyDeserializationSchemaWrapper(DeserializationSchema<T> deserializationSchema) {
+        this(deserializationSchema, false);
+    }
+
+    KafkaValueOnlyDeserializationSchemaWrapper(
+            DeserializationSchema<T> deserializationSchema,
+            boolean valueIncludeKafkaConnectJsonSchema) {
         this.deserializationSchema = deserializationSchema;
+        this.valueIncludeKafkaConnectJsonSchema = valueIncludeKafkaConnectJsonSchema;
     }
 
     @Override
@@ -48,7 +57,10 @@ class KafkaValueOnlyDeserializationSchemaWrapper<T> implements KafkaRecordDeseri
     @Override
     public void deserialize(ConsumerRecord<byte[], byte[]> message, Collector<T> out)
             throws IOException {
-        deserializationSchema.deserialize(message.value(), out);
+        byte[] extractValue =
+                ExtractPayloadSourceRecordUtil.extractPayloadIfIncludeConnectSchema(
+                        message.value(), valueIncludeKafkaConnectJsonSchema);
+        deserializationSchema.deserialize(extractValue, out);
     }
 
     @Override

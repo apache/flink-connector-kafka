@@ -171,6 +171,9 @@ public class KafkaDynamicSource
 
     protected final String tableIdentifier;
 
+    protected final boolean keyIncludeKafkaConnectJsonSchema;
+    protected final boolean valueIncludeKafkaConnectJsonSchema;
+
     public KafkaDynamicSource(
             DataType physicalDataType,
             @Nullable DecodingFormat<DeserializationSchema<RowData>> keyDecodingFormat,
@@ -189,6 +192,48 @@ public class KafkaDynamicSource
             long boundedTimestampMillis,
             boolean upsertMode,
             String tableIdentifier) {
+        this(
+                physicalDataType,
+                keyDecodingFormat,
+                valueDecodingFormat,
+                keyProjection,
+                valueProjection,
+                keyPrefix,
+                topics,
+                topicPattern,
+                properties,
+                startupMode,
+                specificStartupOffsets,
+                startupTimestampMillis,
+                boundedMode,
+                specificBoundedOffsets,
+                boundedTimestampMillis,
+                upsertMode,
+                tableIdentifier,
+                false,
+                false);
+    }
+
+    public KafkaDynamicSource(
+            DataType physicalDataType,
+            @Nullable DecodingFormat<DeserializationSchema<RowData>> keyDecodingFormat,
+            DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat,
+            int[] keyProjection,
+            int[] valueProjection,
+            @Nullable String keyPrefix,
+            @Nullable List<String> topics,
+            @Nullable Pattern topicPattern,
+            Properties properties,
+            StartupMode startupMode,
+            Map<KafkaTopicPartition, Long> specificStartupOffsets,
+            long startupTimestampMillis,
+            BoundedMode boundedMode,
+            Map<KafkaTopicPartition, Long> specificBoundedOffsets,
+            long boundedTimestampMillis,
+            boolean upsertMode,
+            String tableIdentifier,
+            boolean keyIncludeKafkaConnectJsonSchema,
+            boolean valueIncludeKafkaConnectJsonSchema) {
         // Format attributes
         this.physicalDataType =
                 Preconditions.checkNotNull(
@@ -228,6 +273,8 @@ public class KafkaDynamicSource
         this.boundedTimestampMillis = boundedTimestampMillis;
         this.upsertMode = upsertMode;
         this.tableIdentifier = tableIdentifier;
+        this.keyIncludeKafkaConnectJsonSchema = keyIncludeKafkaConnectJsonSchema;
+        this.valueIncludeKafkaConnectJsonSchema = valueIncludeKafkaConnectJsonSchema;
     }
 
     @Override
@@ -344,7 +391,9 @@ public class KafkaDynamicSource
                         specificBoundedOffsets,
                         boundedTimestampMillis,
                         upsertMode,
-                        tableIdentifier);
+                        tableIdentifier,
+                        keyIncludeKafkaConnectJsonSchema,
+                        valueIncludeKafkaConnectJsonSchema);
         copy.producedDataType = producedDataType;
         copy.metadataKeys = metadataKeys;
         copy.watermarkStrategy = watermarkStrategy;
@@ -384,7 +433,9 @@ public class KafkaDynamicSource
                 && boundedTimestampMillis == that.boundedTimestampMillis
                 && Objects.equals(upsertMode, that.upsertMode)
                 && Objects.equals(tableIdentifier, that.tableIdentifier)
-                && Objects.equals(watermarkStrategy, that.watermarkStrategy);
+                && Objects.equals(watermarkStrategy, that.watermarkStrategy)
+                && keyIncludeKafkaConnectJsonSchema == that.keyIncludeKafkaConnectJsonSchema
+                && valueIncludeKafkaConnectJsonSchema == that.valueIncludeKafkaConnectJsonSchema;
     }
 
     @Override
@@ -550,7 +601,9 @@ public class KafkaDynamicSource
                 hasMetadata,
                 metadataConverters,
                 producedTypeInfo,
-                upsertMode);
+                upsertMode,
+                keyIncludeKafkaConnectJsonSchema,
+                valueIncludeKafkaConnectJsonSchema);
     }
 
     private @Nullable DeserializationSchema<RowData> createDeserialization(

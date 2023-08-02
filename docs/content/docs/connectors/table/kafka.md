@@ -369,6 +369,20 @@ Connector Options
       <td>Interval for consumer to discover dynamically created Kafka topics and partitions periodically. To disable this feature, you need to explicitly set the 'scan.topic-partition-discovery.interval' value to 0.</td>
     </tr>
     <tr>
+      <td><h5>record.key.include.kafka.connect.json.schema</h5></td>
+      <td>optional</td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>The record key from Kafka contains the JSON schema of Kafka connect. If it defaults to false, it does not need to be parsed. If it is configured to true, it needs to be parsed.</td>
+    </tr>
+    <tr>
+      <td><h5>record.value.include.kafka.connect.json.schema</h5></td>
+      <td>optional</td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>The record value from Kafka contains the JSON schema of Kafka connect. If it defaults to false, it does not need to be parsed. If it is configured to true, it needs to be parsed.</td>
+    </tr>
+    <tr>
       <td><h5>sink.partitioner</h5></td>
       <td>optional</td>
       <td>yes</td>

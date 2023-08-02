@@ -25,6 +25,8 @@ import org.apache.flink.formats.json.JsonDeserializationSchema;
 import org.apache.flink.streaming.util.serialization.JSONKeyValueDeserializationSchema;
 import org.apache.flink.util.Collector;
 
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -32,6 +34,10 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.Configurable;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.SchemaBuilder;
+import org.apache.kafka.connect.data.Struct;
+import org.apache.kafka.connect.json.JsonConverter;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -105,6 +111,25 @@ public class KafkaRecordDeserializationSchemaTest {
     }
 
     @Test
+    public void testKafkaValueDeserializationSchemaWrapperWithKafkaConnectSchema()
+            throws Exception {
+        final ConsumerRecord<byte[], byte[]> consumerRecord = getConsumerRecordFromSourceRecord();
+        KafkaRecordDeserializationSchema<JsonNode> schema =
+                KafkaRecordDeserializationSchema.valueOnly(
+                        new JsonDeserializationSchema<>(JsonNode.class), true);
+        schema.open(new DummyInitializationContext());
+        SimpleCollector<JsonNode> collector = new SimpleCollector<>();
+        schema.deserialize(consumerRecord, collector);
+
+        assertThat(collector.list).hasSize(1);
+        JsonNode deserializedValue = collector.list.get(0);
+
+        assertThat(deserializedValue.get("word").asText()).isEqualTo("world");
+        assertThat(deserializedValue.get("key")).isNull();
+        assertThat(deserializedValue.get("metadata")).isNull();
+    }
+
+    @Test
     public void testKafkaValueDeserializerWrapper() throws Exception {
         final String topic = "Topic";
         byte[] value = new StringSerializer().serialize(topic, "world");
@@ -142,6 +167,26 @@ public class KafkaRecordDeserializationSchemaTest {
         assertThat(config).isEqualTo(configurableConfiguration);
         assertThat(isKeyDeserializer).isFalse();
         assertThat(configuration).isEmpty();
+    }
+
+    private ConsumerRecord<byte[], byte[]> getConsumerRecordFromSourceRecord() {
+        Schema schema =
+                SchemaBuilder.struct()
+                        .field("index", Schema.INT32_SCHEMA)
+                        .field("word", Schema.STRING_SCHEMA)
+                        .build();
+        Struct value = new Struct(schema);
+        value.put("index", 4);
+        value.put("word", "world");
+
+        JsonConverter converter = new JsonConverter();
+        Map<String, Object> config = new HashMap<>();
+        config.put("converter.type", "value");
+        config.put("schemas.enable", true);
+        converter.configure(config);
+
+        byte[] serializedValue = converter.fromConnectData("topic#2", schema, value);
+        return new ConsumerRecord<>("topic#2", 3, 4L, null, serializedValue);
     }
 
     private ConsumerRecord<byte[], byte[]> getConsumerRecord() throws JsonProcessingException {

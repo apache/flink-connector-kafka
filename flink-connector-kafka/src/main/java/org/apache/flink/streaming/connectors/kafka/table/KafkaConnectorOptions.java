@@ -194,6 +194,20 @@ public class KafkaConnectorOptions {
                                     + "The value 0 disables the partition discovery."
                                     + "The default value is 5 minutes, which is equal to the default value of metadata.max.age.ms in Kafka.");
 
+    public static final ConfigOption<Boolean> RECORD_KEY_INCLUDE_KAFKA_CONNECT_JSON_SCHEMA =
+            ConfigOptions.key("record.key.include.kafka.connect.json.schema")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "The record key from Kafka contains the JSON schema of Kafka connect. If it defaults to false, it does not need to be parsed. If it is configured to true, it needs to be parsed.");
+
+    public static final ConfigOption<Boolean> RECORD_VALUE_INCLUDE_KAFKA_CONNECT_JSON_SCHEMA =
+            ConfigOptions.key("record.value.include.kafka.connect.json.schema")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "The record value from Kafka contains the JSON schema of Kafka connect. If it defaults to false, it does not need to be parsed. If it is configured to true, it needs to be parsed.");
+
     // --------------------------------------------------------------------------------------------
     // Sink specific options
     // --------------------------------------------------------------------------------------------

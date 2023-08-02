@@ -71,6 +71,8 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.KEY_FORMAT;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.PROPS_BOOTSTRAP_SERVERS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.PROPS_GROUP_ID;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.RECORD_KEY_INCLUDE_KAFKA_CONNECT_JSON_SCHEMA;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.RECORD_VALUE_INCLUDE_KAFKA_CONNECT_JSON_SCHEMA;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_BOUNDED_MODE;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_BOUNDED_SPECIFIC_OFFSETS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_BOUNDED_TIMESTAMP_MILLIS;
@@ -152,6 +154,8 @@ public class KafkaDynamicTableFactory
         options.add(SCAN_BOUNDED_MODE);
         options.add(SCAN_BOUNDED_SPECIFIC_OFFSETS);
         options.add(SCAN_BOUNDED_TIMESTAMP_MILLIS);
+        options.add(RECORD_KEY_INCLUDE_KAFKA_CONNECT_JSON_SCHEMA);
+        options.add(RECORD_VALUE_INCLUDE_KAFKA_CONNECT_JSON_SCHEMA);
         return options;
     }
 
@@ -215,6 +219,16 @@ public class KafkaDynamicTableFactory
 
         final String keyPrefix = tableOptions.getOptional(KEY_FIELDS_PREFIX).orElse(null);
 
+        final boolean keyIncludeKafkaConnectJsonSchema =
+                tableOptions
+                        .getOptional(RECORD_KEY_INCLUDE_KAFKA_CONNECT_JSON_SCHEMA)
+                        .orElse(false);
+
+        final boolean valueIncludeKafkaConnectJsonSchema =
+                tableOptions
+                        .getOptional(RECORD_VALUE_INCLUDE_KAFKA_CONNECT_JSON_SCHEMA)
+                        .orElse(false);
+
         return createKafkaTableSource(
                 physicalDataType,
                 keyDecodingFormat.orElse(null),
@@ -231,7 +245,9 @@ public class KafkaDynamicTableFactory
                 boundedOptions.boundedMode,
                 boundedOptions.specificOffsets,
                 boundedOptions.boundedTimestampMillis,
-                context.getObjectIdentifier().asSummaryString());
+                context.getObjectIdentifier().asSummaryString(),
+                keyIncludeKafkaConnectJsonSchema,
+                valueIncludeKafkaConnectJsonSchema);
     }
 
     @Override
@@ -395,7 +411,9 @@ public class KafkaDynamicTableFactory
             BoundedMode boundedMode,
             Map<KafkaTopicPartition, Long> specificEndOffsets,
             long endTimestampMillis,
-            String tableIdentifier) {
+            String tableIdentifier,
+            boolean keyIncludeKafkaConnectJsonSchema,
+            boolean valueIncludeKafkaConnectJsonSchema) {
         return new KafkaDynamicSource(
                 physicalDataType,
                 keyDecodingFormat,
@@ -413,7 +431,9 @@ public class KafkaDynamicTableFactory
                 specificEndOffsets,
                 endTimestampMillis,
                 false,
-                tableIdentifier);
+                tableIdentifier,
+                keyIncludeKafkaConnectJsonSchema,
+                valueIncludeKafkaConnectJsonSchema);
     }
 
     protected KafkaDynamicSink createKafkaTableSink(
