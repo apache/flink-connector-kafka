@@ -455,7 +455,7 @@ public class KafkaSourceBuilder<OUT> {
         maybeOverride(
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
                 startingOffsetsInitializer.getAutoOffsetResetStrategy().name().toLowerCase(),
-                true);
+                false);
 
         // If the source is bounded, do not run periodic partition discovery.
         maybeOverride(
