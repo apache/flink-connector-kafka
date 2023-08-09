@@ -1,0 +1,19 @@
+- streamId: stream0
+  clusterMetadataList:
+    - clusterId: cluster0
+      bootstrapServers: bootstrap-server-0:443
+      topics:
+        - topic0
+        - topic1
+    - clusterId: cluster1
+      bootstrapServers: bootstrap-server-1:443
+      topics:
+        - topic2
+        - topic3
+- streamId: stream1
+  clusterMetadataList:
+    - clusterId: cluster2
+      bootstrapServers: bootstrap-server-2:443
+      topics:
+        - topic4
+        - topic5

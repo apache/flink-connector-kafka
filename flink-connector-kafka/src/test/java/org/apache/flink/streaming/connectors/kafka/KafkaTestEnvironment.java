@@ -39,6 +39,8 @@ import java.util.Properties;
 public abstract class KafkaTestEnvironment {
     /** Configuration class for {@link KafkaTestEnvironment}. */
     public static class Config {
+
+        private int numKafkaClusters = 1;
         private int kafkaServersNumber = 1;
         private Properties kafkaServerProperties = null;
         private boolean secureMode = false;
