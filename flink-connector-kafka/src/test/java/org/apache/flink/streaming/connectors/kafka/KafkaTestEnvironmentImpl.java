@@ -169,8 +169,13 @@ public class KafkaTestEnvironmentImpl extends KafkaTestEnvironment {
     @Override
     public void createTestTopic(
             String topic, int numberOfPartitions, int replicationFactor, Properties properties) {
+        createNewTopic(topic, numberOfPartitions, replicationFactor, getStandardProperties());
+    }
+
+    public static void createNewTopic(
+            String topic, int numberOfPartitions, int replicationFactor, Properties properties) {
         LOG.info("Creating topic {}", topic);
-        try (AdminClient adminClient = AdminClient.create(getStandardProperties())) {
+        try (AdminClient adminClient = AdminClient.create(properties)) {
             NewTopic topicObj = new NewTopic(topic, numberOfPartitions, (short) replicationFactor);
             adminClient.createTopics(Collections.singleton(topicObj)).all().get();
             CommonTestUtils.waitUtil(

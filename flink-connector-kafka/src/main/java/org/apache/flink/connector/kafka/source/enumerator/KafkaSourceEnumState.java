@@ -42,7 +42,7 @@ public class KafkaSourceEnumState {
         this.initialDiscoveryFinished = initialDiscoveryFinished;
     }
 
-    KafkaSourceEnumState(
+    public KafkaSourceEnumState(
             Set<TopicPartition> assignPartitions,
             Set<TopicPartition> unassignedInitialPartitions,
             boolean initialDiscoveryFinished) {
