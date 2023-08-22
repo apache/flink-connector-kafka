@@ -36,6 +36,14 @@ public class KafkaSourceOptions {
                     .noDefaultValue()
                     .withDescription("The prefix to use for the Kafka consumers.");
 
+    public static final ConfigOption<String> COMPLETE_CLIENT_ID =
+            ConfigOptions.key("client.id.complete")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                        "The complete client ID to use for Kafka consumers. If provided this will "
+                            + "take precedence over prefixes and subtask ID suffixes.");
+
     public static final ConfigOption<Long> PARTITION_DISCOVERY_INTERVAL_MS =
             ConfigOptions.key("partition.discovery.interval.ms")
                     .longType()
