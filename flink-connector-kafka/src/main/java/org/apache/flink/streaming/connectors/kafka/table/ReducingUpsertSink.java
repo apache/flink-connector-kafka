@@ -19,7 +19,8 @@ package org.apache.flink.streaming.connectors.kafka.table;
 
 import org.apache.flink.api.connector.sink.Sink;
 import org.apache.flink.api.connector.sink.SinkWriter;
-import org.apache.flink.api.connector.sink2.StatefulSink;
+import org.apache.flink.api.connector.sink2.Committer;
+import org.apache.flink.connector.kafka.sink.TwoPhaseCommittingStatefulSink;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.DataType;
@@ -32,19 +33,21 @@ import java.util.Collection;
  * A wrapper of a {@link Sink}. It will buffer the data emitted by the wrapper {@link SinkWriter}
  * and only emit it when the buffer is full or a timer is triggered or a checkpoint happens.
  *
- * <p>The sink provides eventual consistency guarantees without the need of a two-phase protocol
- * because the updates are idempotent therefore duplicates have no effect.
+ * <p>The sink provides eventual consistency guarantees under {@link
+ * org.apache.flink.connector.base.DeliveryGuarantee#AT_LEAST_ONCE} because the updates are
+ * idempotent therefore duplicates have no effect.
  */
-class ReducingUpsertSink<WriterState> implements StatefulSink<RowData, WriterState> {
+class ReducingUpsertSink<WriterState, Comm>
+        implements TwoPhaseCommittingStatefulSink<RowData, WriterState, Comm> {
 
-    private final StatefulSink<RowData, WriterState> wrappedSink;
+    private final TwoPhaseCommittingStatefulSink<RowData, WriterState, Comm> wrappedSink;
     private final DataType physicalDataType;
     private final int[] keyProjection;
     private final SinkBufferFlushMode bufferFlushMode;
     private final SerializableFunction<RowData, RowData> valueCopyFunction;
 
     ReducingUpsertSink(
-            StatefulSink<RowData, WriterState> wrappedSink,
+            TwoPhaseCommittingStatefulSink<RowData, WriterState, Comm> wrappedSink,
             DataType physicalDataType,
             int[] keyProjection,
             SinkBufferFlushMode bufferFlushMode,
@@ -57,12 +60,11 @@ class ReducingUpsertSink<WriterState> implements StatefulSink<RowData, WriterSta
     }
 
     @Override
-    public StatefulSinkWriter<RowData, WriterState> createWriter(InitContext context)
-            throws IOException {
-        final StatefulSinkWriter<RowData, WriterState> wrapperWriter =
-                wrappedSink.createWriter(context);
+    public TwoPhaseCommittingStatefulSink.PrecommittingStatefulSinkWriter<
+                    RowData, WriterState, Comm>
+            createWriter(InitContext context) throws IOException {
         return new ReducingUpsertWriter<>(
-                wrapperWriter,
+                wrappedSink.createWriter(context),
                 physicalDataType,
                 keyProjection,
                 bufferFlushMode,
@@ -71,12 +73,25 @@ class ReducingUpsertSink<WriterState> implements StatefulSink<RowData, WriterSta
     }
 
     @Override
-    public StatefulSinkWriter<RowData, WriterState> restoreWriter(
-            InitContext context, Collection<WriterState> recoveredState) throws IOException {
-        final StatefulSinkWriter<RowData, WriterState> wrapperWriter =
-                wrappedSink.restoreWriter(context, recoveredState);
+    public Committer<Comm> createCommitter() throws IOException {
+        return wrappedSink.createCommitter();
+    }
+
+    @Override
+    public SimpleVersionedSerializer<Comm> getCommittableSerializer() {
+        return wrappedSink.getCommittableSerializer();
+    }
+
+    @Override
+    public TwoPhaseCommittingStatefulSink.PrecommittingStatefulSinkWriter<
+                    RowData, WriterState, Comm>
+            restoreWriter(InitContext context, Collection<WriterState> recoveredState)
+                    throws IOException {
+        final TwoPhaseCommittingStatefulSink.PrecommittingStatefulSinkWriter<
+                        RowData, WriterState, Comm>
+                wrappedWriter = wrappedSink.restoreWriter(context, recoveredState);
         return new ReducingUpsertWriter<>(
-                wrapperWriter,
+                wrappedWriter,
                 physicalDataType,
                 keyProjection,
                 bufferFlushMode,

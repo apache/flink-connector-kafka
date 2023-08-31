@@ -44,7 +44,11 @@ public class KafkaSourceEnumStateSerializerTest {
 
     @Test
     public void testEnumStateSerde() throws IOException {
-        final KafkaSourceEnumState state = new KafkaSourceEnumState(constructTopicPartitions());
+        final KafkaSourceEnumState state =
+                new KafkaSourceEnumState(
+                        constructTopicPartitions(0),
+                        constructTopicPartitions(NUM_PARTITIONS_PER_TOPIC),
+                        true);
         final KafkaSourceEnumStateSerializer serializer = new KafkaSourceEnumStateSerializer();
 
         final byte[] bytes = serializer.serialize(state);
@@ -53,37 +57,53 @@ public class KafkaSourceEnumStateSerializerTest {
                 serializer.deserialize(serializer.getVersion(), bytes);
 
         assertThat(restoredState.assignedPartitions()).isEqualTo(state.assignedPartitions());
+        assertThat(restoredState.unassignedInitialPartitions())
+                .isEqualTo(state.unassignedInitialPartitions());
+        assertThat(restoredState.initialDiscoveryFinished()).isTrue();
     }
 
     @Test
     public void testBackwardCompatibility() throws IOException {
 
-        final Set<TopicPartition> topicPartitions = constructTopicPartitions();
+        final Set<TopicPartition> topicPartitions = constructTopicPartitions(0);
         final Map<Integer, Set<KafkaPartitionSplit>> splitAssignments =
                 toSplitAssignments(topicPartitions);
 
         // Create bytes in the way of KafkaEnumStateSerializer version 0 doing serialization
-        final byte[] bytes =
+        final byte[] bytesV0 =
                 SerdeUtils.serializeSplitAssignments(
                         splitAssignments, new KafkaPartitionSplitSerializer());
+        // Create bytes in the way of KafkaEnumStateSerializer version 1 doing serialization
+        final byte[] bytesV1 =
+                KafkaSourceEnumStateSerializer.serializeTopicPartitions(topicPartitions);
 
-        // Deserialize above bytes with KafkaEnumStateSerializer version 1 to check backward
+        // Deserialize above bytes with KafkaEnumStateSerializer version 2 to check backward
         // compatibility
-        final KafkaSourceEnumState kafkaSourceEnumState =
-                new KafkaSourceEnumStateSerializer().deserialize(0, bytes);
+        final KafkaSourceEnumState kafkaSourceEnumStateV0 =
+                new KafkaSourceEnumStateSerializer().deserialize(0, bytesV0);
+        final KafkaSourceEnumState kafkaSourceEnumStateV1 =
+                new KafkaSourceEnumStateSerializer().deserialize(1, bytesV1);
 
-        assertThat(kafkaSourceEnumState.assignedPartitions()).isEqualTo(topicPartitions);
+        assertThat(kafkaSourceEnumStateV0.assignedPartitions()).isEqualTo(topicPartitions);
+        assertThat(kafkaSourceEnumStateV0.unassignedInitialPartitions()).isEmpty();
+        assertThat(kafkaSourceEnumStateV0.initialDiscoveryFinished()).isTrue();
+
+        assertThat(kafkaSourceEnumStateV1.assignedPartitions()).isEqualTo(topicPartitions);
+        assertThat(kafkaSourceEnumStateV1.unassignedInitialPartitions()).isEmpty();
+        assertThat(kafkaSourceEnumStateV1.initialDiscoveryFinished()).isTrue();
     }
 
-    private Set<TopicPartition> constructTopicPartitions() {
+    private Set<TopicPartition> constructTopicPartitions(int startPartition) {
         // Create topic partitions for readers.
         // Reader i will be assigned with NUM_PARTITIONS_PER_TOPIC splits, with topic name
         // "topic-{i}" and
-        // NUM_PARTITIONS_PER_TOPIC partitions.
+        // NUM_PARTITIONS_PER_TOPIC partitions. The starting partition number is startPartition
         // Totally NUM_READERS * NUM_PARTITIONS_PER_TOPIC partitions will be created.
         Set<TopicPartition> topicPartitions = new HashSet<>();
         for (int readerId = 0; readerId < NUM_READERS; readerId++) {
-            for (int partition = 0; partition < NUM_PARTITIONS_PER_TOPIC; partition++) {
+            for (int partition = startPartition;
+                    partition < startPartition + NUM_PARTITIONS_PER_TOPIC;
+                    partition++) {
                 topicPartitions.add(new TopicPartition(TOPIC_PREFIX + readerId, partition));
             }
         }

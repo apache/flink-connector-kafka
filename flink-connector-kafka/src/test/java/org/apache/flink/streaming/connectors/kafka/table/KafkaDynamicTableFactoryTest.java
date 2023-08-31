@@ -1095,6 +1095,82 @@ public class KafkaDynamicTableFactoryTest {
                                 + " guarantee the semantic of primary key.");
     }
 
+    @Test
+    public void testDiscoverPartitionByDefault() {
+        Map<String, String> tableSourceOptions =
+                getModifiedOptions(
+                        getBasicSourceOptions(),
+                        options -> options.remove("scan.topic-partition-discovery.interval"));
+        final KafkaDynamicSource actualSource =
+                (KafkaDynamicSource) createTableSource(SCHEMA, tableSourceOptions);
+        Properties props = new Properties();
+        props.putAll(KAFKA_SOURCE_PROPERTIES);
+        // The default partition discovery interval is 5 minutes
+        props.setProperty("partition.discovery.interval.ms", "300000");
+        final Map<KafkaTopicPartition, Long> specificOffsets = new HashMap<>();
+        specificOffsets.put(new KafkaTopicPartition(TOPIC, PARTITION_0), OFFSET_0);
+        specificOffsets.put(new KafkaTopicPartition(TOPIC, PARTITION_1), OFFSET_1);
+        final DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat =
+                new DecodingFormatMock(",", true);
+        // Test scan source equals
+        final KafkaDynamicSource expectedKafkaSource =
+                createExpectedScanSource(
+                        SCHEMA_DATA_TYPE,
+                        null,
+                        valueDecodingFormat,
+                        new int[0],
+                        new int[] {0, 1, 2},
+                        null,
+                        Collections.singletonList(TOPIC),
+                        null,
+                        props,
+                        StartupMode.SPECIFIC_OFFSETS,
+                        specificOffsets,
+                        0);
+        assertThat(actualSource).isEqualTo(expectedKafkaSource);
+        ScanTableSource.ScanRuntimeProvider provider =
+                actualSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
+        assertKafkaSource(provider);
+    }
+
+    @Test
+    public void testDisableDiscoverPartition() {
+        Map<String, String> tableSourceOptions =
+                getModifiedOptions(
+                        getBasicSourceOptions(),
+                        options -> options.put("scan.topic-partition-discovery.interval", "0"));
+        final KafkaDynamicSource actualSource =
+                (KafkaDynamicSource) createTableSource(SCHEMA, tableSourceOptions);
+        Properties props = new Properties();
+        props.putAll(KAFKA_SOURCE_PROPERTIES);
+        // Disable discovery if the partition discovery interval is 0 minutes
+        props.setProperty("partition.discovery.interval.ms", "0");
+        final Map<KafkaTopicPartition, Long> specificOffsets = new HashMap<>();
+        specificOffsets.put(new KafkaTopicPartition(TOPIC, PARTITION_0), OFFSET_0);
+        specificOffsets.put(new KafkaTopicPartition(TOPIC, PARTITION_1), OFFSET_1);
+        final DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat =
+                new DecodingFormatMock(",", true);
+        // Test scan source equals
+        final KafkaDynamicSource expectedKafkaSource =
+                createExpectedScanSource(
+                        SCHEMA_DATA_TYPE,
+                        null,
+                        valueDecodingFormat,
+                        new int[0],
+                        new int[] {0, 1, 2},
+                        null,
+                        Collections.singletonList(TOPIC),
+                        null,
+                        props,
+                        StartupMode.SPECIFIC_OFFSETS,
+                        specificOffsets,
+                        0);
+        assertThat(actualSource).isEqualTo(expectedKafkaSource);
+        ScanTableSource.ScanRuntimeProvider provider =
+                actualSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
+        assertKafkaSource(provider);
+    }
+
     // --------------------------------------------------------------------------------------------
     // Utilities
     // --------------------------------------------------------------------------------------------

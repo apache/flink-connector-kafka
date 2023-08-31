@@ -245,7 +245,7 @@ it is configured:
 ### Dynamic Partition Discovery
 In order to handle scenarios like topic scaling-out or topic creation without restarting the Flink
 job, Kafka source can be configured to periodically discover new partitions under provided 
-topic-partition subscribing pattern. To enable partition discovery, set a non-negative value for 
+topic-partition subscribing pattern. To enable partition discovery, set a positive value for 
 property ```partition.discovery.interval.ms```:
 
 {{< tabs "KafkaSource#PartitionDiscovery" >}}
@@ -264,8 +264,7 @@ KafkaSource.builder() \
 {{< /tabs >}}
 
 {{< hint warning >}}
-Partition discovery is **disabled** by default. You need to explicitly set the partition discovery
-interval to enable this feature.
+The partition discovery interval is 5 minutes by default. To **disable** this feature, you need to explicitly set the partition discovery interval to a non-positive value.
 {{< /hint >}}
 
 ### Event Time and Watermarks

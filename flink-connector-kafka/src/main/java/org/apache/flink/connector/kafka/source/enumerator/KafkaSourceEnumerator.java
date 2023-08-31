@@ -65,6 +65,7 @@ public class KafkaSourceEnumerator
     private final KafkaSubscriber subscriber;
     private final OffsetsInitializer startingOffsetInitializer;
     private final OffsetsInitializer stoppingOffsetInitializer;
+    private final OffsetsInitializer newDiscoveryOffsetsInitializer;
     private final Properties properties;
     private final long partitionDiscoveryIntervalMs;
     private final SplitEnumeratorContext<KafkaPartitionSplit> context;
@@ -72,6 +73,12 @@ public class KafkaSourceEnumerator
 
     /** Partitions that have been assigned to readers. */
     private final Set<TopicPartition> assignedPartitions;
+
+    /**
+     * The partitions that have been discovered during initialization but not assigned to readers
+     * yet.
+     */
+    private final Set<TopicPartition> unassignedInitialPartitions;
 
     /**
      * The discovered and initialized partition splits that are waiting for owner reader to be
@@ -88,6 +95,8 @@ public class KafkaSourceEnumerator
     // This flag will be marked as true if periodically partition discovery is disabled AND the
     // initializing partition discovery has finished.
     private boolean noMoreNewPartitionSplits = false;
+    // this flag will be marked as true if initial partitions are discovered after enumerator starts
+    private boolean initialDiscoveryFinished;
 
     public KafkaSourceEnumerator(
             KafkaSubscriber subscriber,
@@ -103,7 +112,7 @@ public class KafkaSourceEnumerator
                 properties,
                 context,
                 boundedness,
-                Collections.emptySet());
+                new KafkaSourceEnumState(Collections.emptySet(), Collections.emptySet(), false));
     }
 
     public KafkaSourceEnumerator(
@@ -113,15 +122,16 @@ public class KafkaSourceEnumerator
             Properties properties,
             SplitEnumeratorContext<KafkaPartitionSplit> context,
             Boundedness boundedness,
-            Set<TopicPartition> assignedPartitions) {
+            KafkaSourceEnumState kafkaSourceEnumState) {
         this.subscriber = subscriber;
         this.startingOffsetInitializer = startingOffsetInitializer;
         this.stoppingOffsetInitializer = stoppingOffsetInitializer;
+        this.newDiscoveryOffsetsInitializer = OffsetsInitializer.earliest();
         this.properties = properties;
         this.context = context;
         this.boundedness = boundedness;
 
-        this.assignedPartitions = new HashSet<>(assignedPartitions);
+        this.assignedPartitions = new HashSet<>(kafkaSourceEnumState.assignedPartitions());
         this.pendingPartitionSplitAssignment = new HashMap<>();
         this.partitionDiscoveryIntervalMs =
                 KafkaSourceOptions.getOption(
@@ -129,6 +139,9 @@ public class KafkaSourceEnumerator
                         KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS,
                         Long::parseLong);
         this.consumerGroupId = properties.getProperty(ConsumerConfig.GROUP_ID_CONFIG);
+        this.unassignedInitialPartitions =
+                new HashSet<>(kafkaSourceEnumState.unassignedInitialPartitions());
+        this.initialDiscoveryFinished = kafkaSourceEnumState.initialDiscoveryFinished();
     }
 
     /**
@@ -195,7 +208,8 @@ public class KafkaSourceEnumerator
 
     @Override
     public KafkaSourceEnumState snapshotState(long checkpointId) throws Exception {
-        return new KafkaSourceEnumState(assignedPartitions);
+        return new KafkaSourceEnumState(
+                assignedPartitions, unassignedInitialPartitions, initialDiscoveryFinished);
     }
 
     @Override
@@ -234,6 +248,12 @@ public class KafkaSourceEnumerator
             throw new FlinkRuntimeException(
                     "Failed to list subscribed topic partitions due to ", t);
         }
+
+        if (!initialDiscoveryFinished) {
+            unassignedInitialPartitions.addAll(fetchedPartitions);
+            initialDiscoveryFinished = true;
+        }
+
         final PartitionChange partitionChange = getPartitionChange(fetchedPartitions);
         if (partitionChange.isEmpty()) {
             return;
@@ -266,10 +286,18 @@ public class KafkaSourceEnumerator
     private PartitionSplitChange initializePartitionSplits(PartitionChange partitionChange) {
         Set<TopicPartition> newPartitions =
                 Collections.unmodifiableSet(partitionChange.getNewPartitions());
-        OffsetsInitializer.PartitionOffsetsRetriever offsetsRetriever = getOffsetsRetriever();
 
-        Map<TopicPartition, Long> startingOffsets =
-                startingOffsetInitializer.getPartitionOffsets(newPartitions, offsetsRetriever);
+        OffsetsInitializer.PartitionOffsetsRetriever offsetsRetriever = getOffsetsRetriever();
+        // initial partitions use OffsetsInitializer specified by the user while new partitions use
+        // EARLIEST
+        Map<TopicPartition, Long> startingOffsets = new HashMap<>();
+        startingOffsets.putAll(
+                newDiscoveryOffsetsInitializer.getPartitionOffsets(
+                        newPartitions, offsetsRetriever));
+        startingOffsets.putAll(
+                startingOffsetInitializer.getPartitionOffsets(
+                        unassignedInitialPartitions, offsetsRetriever));
+
         Map<TopicPartition, Long> stoppingOffsets =
                 stoppingOffsetInitializer.getPartitionOffsets(newPartitions, offsetsRetriever);
 
@@ -344,7 +372,10 @@ public class KafkaSourceEnumerator
 
                 // Mark pending partitions as already assigned
                 pendingAssignmentForReader.forEach(
-                        split -> assignedPartitions.add(split.getTopicPartition()));
+                        split -> {
+                            assignedPartitions.add(split.getTopicPartition());
+                            unassignedInitialPartitions.remove(split.getTopicPartition());
+                        });
             }
         }
 
@@ -539,9 +570,9 @@ public class KafkaSourceEnumerator
          * the beginning offset, end offset as well as the offset matching a timestamp in
          * partitions.
          *
-         * @see KafkaAdminClient#listOffsets(Map)
          * @param topicPartitionOffsets The mapping from partition to the OffsetSpec to look up.
          * @return The list offsets result.
+         * @see KafkaAdminClient#listOffsets(Map)
          */
         private Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo> listOffsets(
                 Map<TopicPartition, OffsetSpec> topicPartitionOffsets) {
