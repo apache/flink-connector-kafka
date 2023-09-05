@@ -74,8 +74,6 @@ import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.TestLoggerExtension;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
-
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.OffsetAndTimestamp;
 import org.apache.kafka.common.TopicPartition;
@@ -87,6 +85,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -618,7 +617,11 @@ public class KafkaDynamicTableFactoryTest {
 
     @Test
     public void testTableSinkSemanticTranslation() {
-        final List<String> semantics = ImmutableList.of("exactly-once", "at-least-once", "none");
+        final List<String> semantics = new ArrayList<>(3);
+        semantics.add("exactly-once");
+        semantics.add("at-least-once");
+        semantics.add("none");
+
         final EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat =
                 new EncodingFormatMock(",");
         for (final String semantic : semantics) {

@@ -31,10 +31,6 @@ import org.apache.flink.runtime.checkpoint.CheckpointIDCounter;
 import org.apache.flink.streaming.connectors.kafka.internals.metrics.KafkaMetricMutableWrapper;
 import org.apache.flink.util.FlinkRuntimeException;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
-import org.apache.flink.shaded.guava30.com.google.common.collect.Lists;
-import org.apache.flink.shaded.guava30.com.google.common.io.Closer;
-
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
@@ -49,14 +45,17 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
 import java.util.function.Consumer;
 
 import static org.apache.flink.util.IOUtils.closeAll;
@@ -104,8 +103,9 @@ class KafkaWriter<IN>
     // producer pool only used for exactly once
     private final Deque<FlinkKafkaInternalProducer<byte[], byte[]>> producerPool =
             new ArrayDeque<>();
-    private final Closer closer = Closer.create();
     private long lastCheckpointId;
+
+    private final Set<AutoCloseable> closeables = new HashSet<>();
 
     private boolean closed = false;
     private long lastSync = System.currentTimeMillis();
@@ -178,7 +178,7 @@ class KafkaWriter<IN>
         } else if (deliveryGuarantee == DeliveryGuarantee.AT_LEAST_ONCE
                 || deliveryGuarantee == DeliveryGuarantee.NONE) {
             this.currentProducer = new FlinkKafkaInternalProducer<>(this.kafkaProducerConfig, null);
-            closer.register(this.currentProducer);
+            closeables.add(this.currentProducer);
             initKafkaMetrics(this.currentProducer);
         } else {
             throw new UnsupportedOperationException(
@@ -236,7 +236,7 @@ class KafkaWriter<IN>
             currentProducer = getTransactionalProducer(checkpointId + 1);
             currentProducer.beginTransaction();
         }
-        return ImmutableList.of(kafkaWriterState);
+        return Collections.singletonList(kafkaWriterState);
     }
 
     @Override
@@ -245,12 +245,12 @@ class KafkaWriter<IN>
         LOG.debug("Closing writer with {}", currentProducer);
         closeAll(
                 this::abortCurrentProducer,
-                closer,
                 producerPool::clear,
                 () -> {
                     checkState(currentProducer.isClosed());
                     currentProducer = null;
                 });
+        closeAll(closeables);
 
         // Rethrow exception for the case in which close is called before writer() and flush().
         checkAsyncException();
@@ -279,7 +279,8 @@ class KafkaWriter<IN>
 
     void abortLingeringTransactions(
             Collection<KafkaWriterState> recoveredStates, long startCheckpointId) {
-        List<String> prefixesToAbort = Lists.newArrayList(transactionalIdPrefix);
+        List<String> prefixesToAbort = new ArrayList<>();
+        prefixesToAbort.add(transactionalIdPrefix);
 
         final Optional<KafkaWriterState> lastStateOpt = recoveredStates.stream().findFirst();
         if (lastStateOpt.isPresent()) {
@@ -337,7 +338,7 @@ class KafkaWriter<IN>
         FlinkKafkaInternalProducer<byte[], byte[]> producer = producerPool.poll();
         if (producer == null) {
             producer = new FlinkKafkaInternalProducer<>(kafkaProducerConfig, transactionalId);
-            closer.register(producer);
+            closeables.add(producer);
             producer.initTransactions();
             initKafkaMetrics(producer);
         } else {
@@ -452,12 +453,9 @@ class KafkaWriter<IN>
                     asyncProducerException = decorateException(metadata, exception, producer);
                 }
 
+                // Checking for exceptions from previous writes
                 mailboxExecutor.submit(
-                        () -> {
-                            // Checking for exceptions from previous writes
-                            checkAsyncException();
-                        },
-                        "Update error metric");
+                        KafkaWriter.this::checkAsyncException, "Update error metric");
             }
 
             if (metadataConsumer != null) {

@@ -20,8 +20,6 @@ package org.apache.flink.streaming.connectors.kafka;
 
 import org.apache.flink.streaming.connectors.kafka.internals.FlinkKafkaInternalProducer;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.Iterables;
-
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -241,7 +239,7 @@ public class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
                 records = kafkaConsumer.poll(Duration.ofMillis(10000));
             }
 
-            ConsumerRecord<String, String> record = Iterables.getOnlyElement(records);
+            ConsumerRecord<String, String> record = records.iterator().next();
             assertThat(record.key()).isEqualTo(expectedKey);
             assertThat(record.value()).isEqualTo(expectedValue);
         }

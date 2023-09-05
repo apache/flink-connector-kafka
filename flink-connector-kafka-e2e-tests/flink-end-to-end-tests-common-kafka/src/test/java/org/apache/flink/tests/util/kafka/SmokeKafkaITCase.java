@@ -29,8 +29,6 @@ import org.apache.flink.test.resources.ResourceTestUtils;
 import org.apache.flink.test.util.JobSubmission;
 import org.apache.flink.util.TestLoggerExtension;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.Lists;
-
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -56,6 +54,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -136,12 +135,10 @@ class SmokeKafkaITCase {
 
         // create the required topics
         final short replicationFactor = 1;
-        admin.createTopics(
-                        Lists.newArrayList(
-                                new NewTopic(inputTopic, 1, replicationFactor),
-                                new NewTopic(outputTopic, 1, replicationFactor)))
-                .all()
-                .get();
+        List<NewTopic> topics = new ArrayList<>(2);
+        topics.add(new NewTopic(inputTopic, 1, replicationFactor));
+        topics.add(new NewTopic(outputTopic, 1, replicationFactor));
+        admin.createTopics(topics).all().get();
 
         producer.send(new ProducerRecord<>(inputTopic, 1));
         producer.send(new ProducerRecord<>(inputTopic, 2));
