@@ -22,8 +22,6 @@ import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.util.Preconditions;
 
-import org.apache.flink.shaded.guava30.com.google.common.base.Joiner;
-
 import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.Callback;
@@ -51,10 +49,12 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.Future;
+import java.util.stream.Collectors;
 
 /** Internal flink kafka producer. */
 @PublicEvolving
@@ -169,7 +169,9 @@ public class FlinkKafkaInternalProducer<K, V> implements Producer<K, V> {
                 LOG.debug(
                         "Closed internal KafkaProducer {}. Stacktrace: {}",
                         System.identityHashCode(this),
-                        Joiner.on("\n").join(Thread.currentThread().getStackTrace()));
+                        Arrays.stream(Thread.currentThread().getStackTrace())
+                                .map(StackTraceElement::toString)
+                                .collect(Collectors.joining("\n")));
             }
             closed = true;
         }

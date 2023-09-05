@@ -80,8 +80,6 @@ import org.apache.flink.testutils.junit.RetryOnException;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.ExceptionUtils;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.Iterables;
-
 import org.apache.commons.io.output.ByteArrayOutputStream;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
@@ -104,6 +102,7 @@ import java.util.BitSet;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -258,7 +257,10 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
         } while (System.nanoTime() < deadline);
 
         // cancel the job & wait for the job to finish
-        client.cancel(Iterables.getOnlyElement(getRunningJobs(client))).get();
+        final Iterator<JobID> it = getRunningJobs(client).iterator();
+        final JobID jobId = it.next();
+        client.cancel(jobId).get();
+        assertThat(it.hasNext()).isFalse();
         runner.join();
 
         final Throwable t = errorRef.get();
@@ -349,7 +351,10 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
         } while (System.nanoTime() < deadline);
 
         // cancel the job & wait for the job to finish
-        client.cancel(Iterables.getOnlyElement(getRunningJobs(client))).get();
+        final Iterator<JobID> it = getRunningJobs(client).iterator();
+        final JobID jobId = it.next();
+        client.cancel(jobId).get();
+        assertThat(it.hasNext()).isFalse();
         runner.join();
 
         final Throwable t = errorRef.get();

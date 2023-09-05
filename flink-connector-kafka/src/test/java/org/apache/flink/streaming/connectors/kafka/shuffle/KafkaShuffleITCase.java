@@ -34,9 +34,6 @@ import org.apache.flink.streaming.connectors.kafka.internals.KafkaShuffleFetcher
 import org.apache.flink.streaming.connectors.kafka.internals.KafkaShuffleFetcher.KafkaShuffleWatermark;
 import org.apache.flink.util.PropertiesUtil;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.Iterables;
-import org.apache.flink.shaded.guava30.com.google.common.collect.Lists;
-
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.Rule;
 import org.junit.Test;
@@ -374,17 +371,16 @@ public class KafkaShuffleITCase extends KafkaShuffleTestBase {
 
         // Records in a single partition are kept in order
         Collection<ConsumerRecord<byte[], byte[]>> records =
-                Iterables.getOnlyElement(
-                        testKafkaShuffleProducer(
-                                        topic(
-                                                "test_serde-" + UUID.randomUUID(),
-                                                timeCharacteristic),
-                                        env,
-                                        1,
-                                        1,
-                                        numElementsPerProducer,
-                                        timeCharacteristic)
-                                .values());
+                testKafkaShuffleProducer(
+                                topic("test_serde-" + UUID.randomUUID(), timeCharacteristic),
+                                env,
+                                1,
+                                1,
+                                numElementsPerProducer,
+                                timeCharacteristic)
+                        .values()
+                        .iterator()
+                        .next();
 
         switch (timeCharacteristic) {
             case ProcessingTime:
@@ -516,7 +512,7 @@ public class KafkaShuffleITCase extends KafkaShuffleTestBase {
                         r -> {
                             final int partition = r.partition();
                             if (!results.containsKey(partition)) {
-                                results.put(partition, Lists.newArrayList());
+                                results.put(partition, new ArrayList<>());
                             }
                             results.get(partition).add(r);
                         });

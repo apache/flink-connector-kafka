@@ -23,9 +23,6 @@ import org.apache.flink.connector.testutils.formats.DummyInitializationContext;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
 import org.apache.flink.util.TestLogger;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
-import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableMap;
-
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.Configurable;
 import org.apache.kafka.common.header.Header;
@@ -38,6 +35,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -153,7 +151,8 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
     public void testSerializeRecordWithHeaderProvider() throws Exception {
         final HeaderProvider<String> headerProvider =
                 (ignored) ->
-                        new RecordHeaders(ImmutableList.of(new RecordHeader("a", "a".getBytes())));
+                        new RecordHeaders(
+                                Collections.singletonList(new RecordHeader("a", "a".getBytes())));
 
         final KafkaRecordSerializationSchema<String> schema =
                 KafkaRecordSerializationSchema.builder()
@@ -186,7 +185,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
 
     @Test
     public void testKafkaKeySerializerWrapperWithoutConfigurable() throws Exception {
-        final Map<String, String> config = ImmutableMap.of("simpleKey", "simpleValue");
+        final Map<String, String> config = Collections.singletonMap("simpleKey", "simpleValue");
         final KafkaRecordSerializationSchema<String> schema =
                 KafkaRecordSerializationSchema.builder()
                         .setTopic(DEFAULT_TOPIC)
@@ -203,7 +202,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
 
     @Test
     public void testKafkaValueSerializerWrapperWithoutConfigurable() throws Exception {
-        final Map<String, String> config = ImmutableMap.of("simpleKey", "simpleValue");
+        final Map<String, String> config = Collections.singletonMap("simpleKey", "simpleValue");
         final KafkaRecordSerializationSchema<String> schema =
                 KafkaRecordSerializationSchema.builder()
                         .setTopic(DEFAULT_TOPIC)
@@ -217,7 +216,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
 
     @Test
     public void testSerializeRecordWithKafkaSerializer() throws Exception {
-        final Map<String, String> config = ImmutableMap.of("configKey", "configValue");
+        final Map<String, String> config = Collections.singletonMap("configKey", "configValue");
         final KafkaRecordSerializationSchema<String> schema =
                 KafkaRecordSerializationSchema.builder()
                         .setTopic(DEFAULT_TOPIC)
@@ -285,7 +284,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
                             KafkaRecordSerializationSchemaBuilder<String>,
                             KafkaRecordSerializationSchemaBuilder<String>>>
             valueSerializationSetter() {
-        return ImmutableList.of(
+        return Arrays.asList(
                 (b) -> b.setKafkaValueSerializer(StringSerializer.class),
                 (b) -> b.setValueSerializationSchema(new SimpleStringSchema()),
                 (b) ->
@@ -298,7 +297,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
                             KafkaRecordSerializationSchemaBuilder<String>,
                             KafkaRecordSerializationSchemaBuilder<String>>>
             keySerializationSetter() {
-        return ImmutableList.of(
+        return Arrays.asList(
                 (b) -> b.setKafkaKeySerializer(StringSerializer.class),
                 (b) -> b.setKeySerializationSchema(new SimpleStringSchema()),
                 (b) ->

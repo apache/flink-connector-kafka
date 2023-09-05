@@ -52,8 +52,6 @@ import org.apache.flink.util.NetUtils;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.TemporaryClassLoaderContext;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.Lists;
-
 import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.Producer;
@@ -1200,8 +1198,10 @@ public class FlinkKafkaProducer<IN>
         if (semantic != FlinkKafkaProducer.Semantic.EXACTLY_ONCE) {
             nextTransactionalIdHint = null;
         } else {
-            ArrayList<FlinkKafkaProducer.NextTransactionalIdHint> transactionalIdHints =
-                    Lists.newArrayList(nextTransactionalIdHintState.get());
+            List<FlinkKafkaProducer.NextTransactionalIdHint> transactionalIdHints =
+                    new ArrayList<>();
+            nextTransactionalIdHintState.get().forEach(transactionalIdHints::add);
+
             if (transactionalIdHints.size() > 1) {
                 throw new IllegalStateException(
                         "There should be at most one next transactional id hint written by the first subtask");
@@ -1444,8 +1444,9 @@ public class FlinkKafkaProducer<IN>
                 context.getOperatorStateStore()
                         .getUnionListState(NEXT_TRANSACTIONAL_ID_HINT_DESCRIPTOR_V2);
 
-        ArrayList<NextTransactionalIdHint> oldTransactionalIdHints =
-                Lists.newArrayList(oldNextTransactionalIdHintState.get());
+        List<NextTransactionalIdHint> oldTransactionalIdHints = new ArrayList<>();
+        oldNextTransactionalIdHintState.get().forEach(oldTransactionalIdHints::add);
+
         if (!oldTransactionalIdHints.isEmpty()) {
             nextTransactionalIdHintState.addAll(oldTransactionalIdHints);
             // clear old state
