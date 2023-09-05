@@ -19,10 +19,10 @@ package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.util.TestLogger;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableMap;
-
 import org.junit.Test;
 
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -32,18 +32,30 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class TransactionToAbortCheckerTest extends TestLogger {
 
     public static final String ABORT = "abort";
+    public static final String KEEP = "keep";
 
     @Test
     public void testMustAbortTransactionsWithSameSubtaskIdAndHigherCheckpointOffset() {
+        Map<Integer, Long> offsetMapping = new HashMap<>(2);
+        offsetMapping.put(0, 1L);
+        offsetMapping.put(2, 3L);
         final TransactionsToAbortChecker checker =
-                new TransactionsToAbortChecker(2, ImmutableMap.of(0, 1L, 2, 3L), 0);
+                new TransactionsToAbortChecker(2, offsetMapping, 0);
 
         // abort recovered subtasksId with equal or higher checkpoint offset
-        final Map<Integer, Map<Long, String>> openTransactions =
-                ImmutableMap.of(
-                        0, ImmutableMap.of(2L, ABORT, 1L, ABORT),
-                        2, ImmutableMap.of(3L, ABORT, 4L, ABORT),
-                        3, ImmutableMap.of(3L, "keep", 4L, "keep"));
+        final Map<Integer, Map<Long, String>> openTransactions = new HashMap<>(3);
+        final Map<Long, String> subtask0 = new HashMap<>();
+        subtask0.put(1L, ABORT);
+        subtask0.put(2L, ABORT);
+        openTransactions.put(0, subtask0);
+        final Map<Long, String> subtask2 = new HashMap<>();
+        subtask2.put(3L, ABORT);
+        subtask2.put(4L, ABORT);
+        openTransactions.put(2, subtask2);
+        final Map<Long, String> subtask3 = new HashMap<>();
+        subtask3.put(3L, KEEP);
+        subtask3.put(4L, KEEP);
+        openTransactions.put(3, subtask3);
 
         final List<String> transactionsToAbort = checker.getTransactionsToAbort(openTransactions);
         assertThat(transactionsToAbort).hasSize(4);
@@ -53,16 +65,18 @@ public class TransactionToAbortCheckerTest extends TestLogger {
     @Test
     public void testMustAbortTransactionsIfLowestCheckpointOffsetIsMinimumOffset() {
         final TransactionsToAbortChecker checker =
-                new TransactionsToAbortChecker(2, ImmutableMap.of(0, 1L), 0);
+                new TransactionsToAbortChecker(2, Collections.singletonMap(0, 1L), 0);
 
         // abort recovered subtasksId with equal or higher checkpoint offset
-        final Map<Integer, Map<Long, String>> openTransactions =
-                ImmutableMap.of(
-                        0, ImmutableMap.of(2L, ABORT, 1L, ABORT),
-                        2, ImmutableMap.of(1L, ABORT),
-                        3, ImmutableMap.of(1L, "keep"),
-                        4, ImmutableMap.of(1L, ABORT),
-                        5, ImmutableMap.of(1L, "keep"));
+        final Map<Integer, Map<Long, String>> openTransactions = new HashMap<>(5);
+        final Map<Long, String> subtask0 = new HashMap<>();
+        subtask0.put(1L, ABORT);
+        subtask0.put(2L, ABORT);
+        openTransactions.put(0, subtask0);
+        openTransactions.put(2, Collections.singletonMap(1L, ABORT));
+        openTransactions.put(3, Collections.singletonMap(1L, KEEP));
+        openTransactions.put(4, Collections.singletonMap(1L, ABORT));
+        openTransactions.put(5, Collections.singletonMap(1L, KEEP));
 
         final List<String> transactionsToAbort = checker.getTransactionsToAbort(openTransactions);
         assertThat(transactionsToAbort).hasSize(4);

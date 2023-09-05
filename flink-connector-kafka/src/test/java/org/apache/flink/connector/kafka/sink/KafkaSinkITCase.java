@@ -60,8 +60,6 @@ import org.apache.flink.testutils.junit.SharedReference;
 import org.apache.flink.util.DockerImageVersions;
 import org.apache.flink.util.TestLogger;
 
-import org.apache.flink.shaded.guava30.com.google.common.base.Joiner;
-
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.CreateTopicsResult;
@@ -88,6 +86,7 @@ import javax.annotation.Nullable;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -624,7 +623,11 @@ public class KafkaSinkITCase extends TestLogger {
     }
 
     private String format(Map.Entry<Thread, StackTraceElement[]> leak) {
-        return leak.getKey().getName() + ":\n" + Joiner.on("\n").join(leak.getValue());
+        String stackTrace =
+                Arrays.stream(leak.getValue())
+                        .map(StackTraceElement::toString)
+                        .collect(Collectors.joining("\n"));
+        return leak.getKey().getName() + ":\n" + stackTrace;
     }
 
     private boolean findAliveKafkaThread(Map.Entry<Thread, StackTraceElement[]> threadStackTrace) {
