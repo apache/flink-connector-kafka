@@ -18,7 +18,6 @@
 
 package org.apache.flink.streaming.connectors.kafka;
 
-import java.util.Iterator;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.JobStatus;
@@ -103,6 +102,7 @@ import java.util.BitSet;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
