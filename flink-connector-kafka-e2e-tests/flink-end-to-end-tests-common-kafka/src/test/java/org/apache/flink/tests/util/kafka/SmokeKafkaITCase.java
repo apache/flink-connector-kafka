@@ -54,7 +54,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -135,10 +135,12 @@ class SmokeKafkaITCase {
 
         // create the required topics
         final short replicationFactor = 1;
-        List<NewTopic> topics = new ArrayList<>(2);
-        topics.add(new NewTopic(inputTopic, 1, replicationFactor));
-        topics.add(new NewTopic(outputTopic, 1, replicationFactor));
-        admin.createTopics(topics).all().get();
+        admin.createTopics(
+                        Arrays.asList(
+                                new NewTopic(inputTopic, 1, replicationFactor),
+                                new NewTopic(outputTopic, 1, replicationFactor)))
+                .all()
+                .get();
 
         producer.send(new ProducerRecord<>(inputTopic, 1));
         producer.send(new ProducerRecord<>(inputTopic, 2));

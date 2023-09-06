@@ -85,7 +85,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -617,11 +616,7 @@ public class KafkaDynamicTableFactoryTest {
 
     @Test
     public void testTableSinkSemanticTranslation() {
-        final List<String> semantics = new ArrayList<>(3);
-        semantics.add("exactly-once");
-        semantics.add("at-least-once");
-        semantics.add("none");
-
+        final List<String> semantics = Arrays.asList("exactly-once", "at-least-once", "none");
         final EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat =
                 new EncodingFormatMock(",");
         for (final String semantic : semantics) {

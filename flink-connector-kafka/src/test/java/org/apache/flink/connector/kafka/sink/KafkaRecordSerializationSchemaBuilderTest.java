@@ -35,7 +35,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -284,18 +284,12 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
                             KafkaRecordSerializationSchemaBuilder<String>,
                             KafkaRecordSerializationSchemaBuilder<String>>>
             valueSerializationSetter() {
-        List<
-                        Function<
-                                KafkaRecordSerializationSchemaBuilder<String>,
-                                KafkaRecordSerializationSchemaBuilder<String>>>
-                ret = new ArrayList<>();
-        ret.add(b -> b.setKafkaValueSerializer(StringSerializer.class));
-        ret.add(b -> b.setValueSerializationSchema(new SimpleStringSchema()));
-        ret.add(
-                b ->
+        return Arrays.asList(
+                (b) -> b.setKafkaValueSerializer(StringSerializer.class),
+                (b) -> b.setValueSerializationSchema(new SimpleStringSchema()),
+                (b) ->
                         b.setKafkaValueSerializer(
                                 ConfigurableStringSerializer.class, Collections.emptyMap()));
-        return ret;
     }
 
     private static List<
@@ -303,19 +297,12 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
                             KafkaRecordSerializationSchemaBuilder<String>,
                             KafkaRecordSerializationSchemaBuilder<String>>>
             keySerializationSetter() {
-        List<
-                        Function<
-                                KafkaRecordSerializationSchemaBuilder<String>,
-                                KafkaRecordSerializationSchemaBuilder<String>>>
-                ret = new ArrayList<>();
-
-        ret.add(b -> b.setKafkaKeySerializer(StringSerializer.class));
-        ret.add(b -> b.setKeySerializationSchema(new SimpleStringSchema()));
-        ret.add(
-                b ->
+        return Arrays.asList(
+                (b) -> b.setKafkaKeySerializer(StringSerializer.class),
+                (b) -> b.setKeySerializationSchema(new SimpleStringSchema()),
+                (b) ->
                         b.setKafkaKeySerializer(
                                 ConfigurableStringSerializer.class, Collections.emptyMap()));
-        return ret;
     }
 
     /**

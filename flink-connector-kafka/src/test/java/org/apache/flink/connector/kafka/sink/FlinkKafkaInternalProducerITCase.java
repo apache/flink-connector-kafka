@@ -41,7 +41,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.Duration;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 import java.util.function.Consumer;
@@ -172,10 +172,9 @@ class FlinkKafkaInternalProducerITCase {
     }
 
     private static List<Consumer<FlinkKafkaInternalProducer<?, ?>>> provideTransactionsFinalizer() {
-        List<Consumer<FlinkKafkaInternalProducer<?, ?>>> ret = new ArrayList<>();
-        ret.add(FlinkKafkaInternalProducer::commitTransaction);
-        ret.add(FlinkKafkaInternalProducer::abortTransaction);
-        return ret;
+        return Arrays.asList(
+                FlinkKafkaInternalProducer::commitTransaction,
+                FlinkKafkaInternalProducer::abortTransaction);
     }
 
     private void assertNumTransactions(int numTransactions, String transactionIdPrefix) {
