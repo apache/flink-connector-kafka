@@ -243,7 +243,8 @@ class KafkaWriter<IN>
         LOG.debug("Closing writer with {}", currentProducer);
         closeAll(this::abortCurrentProducer, producerPool::clear);
         closeAll(producerCloseables);
-        checkState(currentProducer.isClosed());
+        checkState(
+                currentProducer.isClosed(), "Could not close current producer " + currentProducer);
         currentProducer = null;
 
         // Rethrow exception for the case in which close is called before writer() and flush().
