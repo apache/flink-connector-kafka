@@ -50,12 +50,10 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
-import java.util.Set;
 import java.util.function.Consumer;
 
 import static org.apache.flink.util.IOUtils.closeAll;
@@ -105,7 +103,7 @@ class KafkaWriter<IN>
             new ArrayDeque<>();
     private long lastCheckpointId;
 
-    private final Set<AutoCloseable> closeables = new HashSet<>();
+    private final Deque<AutoCloseable> producerCloseables = new ArrayDeque<>();
 
     private boolean closed = false;
     private long lastSync = System.currentTimeMillis();
@@ -178,7 +176,7 @@ class KafkaWriter<IN>
         } else if (deliveryGuarantee == DeliveryGuarantee.AT_LEAST_ONCE
                 || deliveryGuarantee == DeliveryGuarantee.NONE) {
             this.currentProducer = new FlinkKafkaInternalProducer<>(this.kafkaProducerConfig, null);
-            closeables.add(this.currentProducer);
+            producerCloseables.add(this.currentProducer);
             initKafkaMetrics(this.currentProducer);
         } else {
             throw new UnsupportedOperationException(
@@ -243,14 +241,11 @@ class KafkaWriter<IN>
     public void close() throws Exception {
         closed = true;
         LOG.debug("Closing writer with {}", currentProducer);
-        closeAll(
-                this::abortCurrentProducer,
-                producerPool::clear,
-                () -> {
-                    checkState(currentProducer.isClosed());
-                    currentProducer = null;
-                });
-        closeAll(closeables);
+        closeAll(this::abortCurrentProducer, producerPool::clear);
+        closeAll(producerCloseables);
+        checkState(currentProducer.isClosed());
+        currentProducer = null;
+
         // Rethrow exception for the case in which close is called before writer() and flush().
         checkAsyncException();
     }
@@ -337,7 +332,7 @@ class KafkaWriter<IN>
         FlinkKafkaInternalProducer<byte[], byte[]> producer = producerPool.poll();
         if (producer == null) {
             producer = new FlinkKafkaInternalProducer<>(kafkaProducerConfig, transactionalId);
-            closeables.add(producer);
+            producerCloseables.add(producer);
             producer.initTransactions();
             initKafkaMetrics(producer);
         } else {
