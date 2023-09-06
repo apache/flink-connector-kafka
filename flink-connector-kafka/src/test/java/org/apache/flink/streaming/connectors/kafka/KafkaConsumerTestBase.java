@@ -18,6 +18,7 @@
 
 package org.apache.flink.streaming.connectors.kafka;
 
+import java.util.Iterator;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.JobStatus;
@@ -256,7 +257,10 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
         } while (System.nanoTime() < deadline);
 
         // cancel the job & wait for the job to finish
-        client.cancel(getRunningJobs(client).iterator().next()).get();
+        final Iterator<JobID> it = getRunningJobs(client).iterator();
+        final JobID jobId = it.next();
+        client.cancel(jobId).get();
+        assertThat(it.hasNext()).isFalse();
         runner.join();
 
         final Throwable t = errorRef.get();
@@ -347,7 +351,10 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
         } while (System.nanoTime() < deadline);
 
         // cancel the job & wait for the job to finish
-        client.cancel(getRunningJobs(client).iterator().next()).get();
+        final Iterator<JobID> it = getRunningJobs(client).iterator();
+        final JobID jobId = it.next();
+        client.cancel(jobId).get();
+        assertThat(it.hasNext()).isFalse();
         runner.join();
 
         final Throwable t = errorRef.get();
