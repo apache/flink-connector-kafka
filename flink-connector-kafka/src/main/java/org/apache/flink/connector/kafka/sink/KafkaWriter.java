@@ -251,7 +251,6 @@ class KafkaWriter<IN>
                     currentProducer = null;
                 });
         closeAll(closeables);
-
         // Rethrow exception for the case in which close is called before writer() and flush().
         checkAsyncException();
     }
