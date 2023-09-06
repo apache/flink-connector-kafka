@@ -455,7 +455,11 @@ class KafkaWriter<IN>
 
                 // Checking for exceptions from previous writes
                 mailboxExecutor.submit(
-                        KafkaWriter.this::checkAsyncException, "Update error metric");
+                        () -> {
+                            // Checking for exceptions from previous writes
+                            checkAsyncException();
+                        },
+                        "Update error metric");
             }
 
             if (metadataConsumer != null) {
