@@ -572,8 +572,8 @@ Source 输出的 watermark 由读取的分区中最小的 watermark 决定。
 请参阅 [Kafka watermark 策略]({{< ref "docs/dev/datastream/event-time/generating_watermarks" >}}#watermark-策略和-kafka-连接器) 以获取更多细节。
 
 ### 安全
-要启用加密和认证相关的安全配置，只需将安全配置加上 "properties." 前缀配置在 Kafka 表上即可。下面的代码片段展示了如何配置 Kafka 表以使用
-PLAIN 作为 SASL 机制并提供 JAAS 配置：
+要启用加密和认证相关的安全配置，只需将安全配置加上 "properties." 前缀配置在 Kafka 表上即可。下面的代码片段展示了当依赖 SQL client JAR 时， 如何配置 Kafka 表
+以使用 PLAIN 作为 SASL 机制并提供 JAAS 配置：
 ```sql
 CREATE TABLE KafkaTable (
   `user_id` BIGINT,
@@ -585,10 +585,10 @@ CREATE TABLE KafkaTable (
   ...
   'properties.security.protocol' = 'SASL_PLAINTEXT',
   'properties.sasl.mechanism' = 'PLAIN',
-  'properties.sasl.jaas.config' = 'org.apache.kafka.common.security.plain.PlainLoginModule required username=\"username\" password=\"password\";'
+  'properties.sasl.jaas.config' = 'org.apache.flink.kafka.shaded.org.apache.kafka.common.security.plain.PlainLoginModule required username=\"username\" password=\"password\";'
 )
 ```
-另一个更复杂的例子，使用 SASL_SSL 作为安全协议并使用 SCRAM-SHA-256 作为 SASL 机制：
+另一个更复杂的例子，当依赖 SQL client JAR 时，使用 SASL_SSL 作为安全协议并使用 SCRAM-SHA-256 作为 SASL 机制：
 ```sql
 CREATE TABLE KafkaTable (
   `user_id` BIGINT,
@@ -610,13 +610,13 @@ CREATE TABLE KafkaTable (
   /* 将 SASL 机制配置为 as SCRAM-SHA-256 */
   'properties.sasl.mechanism' = 'SCRAM-SHA-256',
   /* 配置 JAAS */
-  'properties.sasl.jaas.config' = 'org.apache.kafka.common.security.scram.ScramLoginModule required username=\"username\" password=\"password\";'
+  'properties.sasl.jaas.config' = 'org.apache.flink.kafka.shaded.org.apache.kafka.common.security.scram.ScramLoginModule required username=\"username\" password=\"password\";'
 )
 ```
 
-如果在作业 JAR 中 Kafka 客户端依赖的类路径被重置了（relocate class），登录模块（login module）的类路径可能会不同，因此请根据登录模块在
-JAR 中实际的类路径来改写以上配置。例如在 SQL client JAR 中，Kafka client 依赖被重置在了 `org.apache.flink.kafka.shaded.org.apache.kafka` 路径下，
-因此 plain 登录模块的类路径应写为 `org.apache.flink.kafka.shaded.org.apache.kafka.common.security.plain.PlainLoginModule`。
+在作业 JAR 中 Kafka 客户端依赖的类路径被重置了（relocate class），登录模块（login module）的类路径可能会不同，因此需要根据登录模块在
+JAR 中实际的类路径来改写以上配置。在 SQL client JAR 中，Kafka client 依赖被重置在了 `org.apache.flink.kafka.shaded.org.apache.kafka`
+路径下，因此以上的代码片段中 plain 登录模块的类路径写为 `org.apache.flink.kafka.shaded.org.apache.kafka.common.security.plain.PlainLoginModule`。
 
 关于安全配置的详细描述，请参阅 <a href="https://kafka.apache.org/documentation/#security">Apache Kafka 文档中的"安全"一节</a>。
 

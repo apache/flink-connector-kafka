@@ -629,7 +629,7 @@ for more details.
 ### Security
 In order to enable security configurations including encryption and authentication, you just need to setup security
 configurations with "properties." prefix in table options. The code snippet below shows configuring Kafka table to
-use PLAIN as SASL mechanism and provide JAAS configuration:
+use PLAIN as SASL mechanism and provide JAAS configuration when using SQL client JAR :
 ```sql
 CREATE TABLE KafkaTable (
   `user_id` BIGINT,
@@ -644,7 +644,7 @@ CREATE TABLE KafkaTable (
   'properties.sasl.jaas.config' = 'org.apache.kafka.common.security.plain.PlainLoginModule required username=\"username\" password=\"password\";'
 )
 ```
-For a more complex example, use SASL_SSL as the security protocol and use SCRAM-SHA-256 as SASL mechanism:
+For a more complex example, use SASL_SSL as the security protocol and use SCRAM-SHA-256 as SASL mechanism when using SQL client JAR :
 ```sql
 CREATE TABLE KafkaTable (
   `user_id` BIGINT,
@@ -672,8 +672,9 @@ CREATE TABLE KafkaTable (
 
 Please note that the class path of the login module in `sasl.jaas.config` might be different if you relocate Kafka
 client dependencies, so you may need to rewrite it with the actual class path of the module in the JAR.
-For example if you are using SQL client JAR, which has relocate Kafka client dependencies to `org.apache.flink.kafka.shaded.org.apache.kafka`,
-the path of plain login module should be `org.apache.flink.kafka.shaded.org.apache.kafka.common.security.plain.PlainLoginModule` instead.
+SQL client JAR has relocated Kafka client dependencies to `org.apache.flink.kafka.shaded.org.apache.kafka`,
+then the path of plain login module in code snippets above need to be
+`org.apache.flink.kafka.shaded.org.apache.kafka.common.security.plain.PlainLoginModule` when using SQL client JAR.
 
 For detailed explanations of security configurations, please refer to
 <a href="https://kafka.apache.org/documentation/#security">the "Security" section in Apache Kafka documentation</a>.
