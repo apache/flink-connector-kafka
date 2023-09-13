@@ -24,6 +24,7 @@ import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.util.Collector;
+import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.SerializedValue;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -141,6 +142,12 @@ public class KafkaFetcher<T> extends AbstractFetcher<T, TopicPartition> {
 
                     partitionConsumerRecordsHandler(partitionRecords, partition);
                 }
+            }
+        } catch (Handover.ClosedException ex) {
+            if (running) {
+                // rethrow, only if we are running, if fetcher is not running we should not throw
+                // the ClosedException, as we are stopping gracefully
+                ExceptionUtils.rethrowException(ex);
             }
         } finally {
             // this signals the consumer thread that no more work is to be done
