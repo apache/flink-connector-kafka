@@ -145,7 +145,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
      */
     @Before
     public void setClientAndEnsureNoJobIsLingering() throws Exception {
-        client = flink.getClusterClient();
+        client = MINI_CLUSTER_RESOURCE.getClusterClient();
         waitUntilNoJobIsRunning(client);
     }
 
