@@ -19,8 +19,6 @@ package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.util.TestLoggerExtension;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.Lists;
-
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -43,6 +41,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 import java.util.function.Consumer;
@@ -173,7 +172,7 @@ class FlinkKafkaInternalProducerITCase {
     }
 
     private static List<Consumer<FlinkKafkaInternalProducer<?, ?>>> provideTransactionsFinalizer() {
-        return Lists.newArrayList(
+        return Arrays.asList(
                 FlinkKafkaInternalProducer::commitTransaction,
                 FlinkKafkaInternalProducer::abortTransaction);
     }

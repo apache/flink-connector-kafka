@@ -34,8 +34,6 @@ import org.apache.flink.runtime.metrics.groups.UnregisteredMetricGroups;
 import org.apache.flink.util.TestLoggerExtension;
 import org.apache.flink.util.UserCodeClassLoader;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
-
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
@@ -60,6 +58,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -545,7 +544,7 @@ public class KafkaWriterITCase {
                 new SinkInitContext(sinkWriterMetricGroup, timeService, metadataConsumer),
                 new DummyRecordSerializer(),
                 new DummySchemaContext(),
-                ImmutableList.of());
+                Collections.emptyList());
     }
 
     private KafkaWriter<Integer> createWriterWithConfiguration(
@@ -557,7 +556,7 @@ public class KafkaWriterITCase {
                 sinkInitContext,
                 new DummyRecordSerializer(),
                 new DummySchemaContext(),
-                ImmutableList.of());
+                Collections.emptyList());
     }
 
     private static Properties getKafkaClientConfiguration() {
