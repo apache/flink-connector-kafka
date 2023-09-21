@@ -57,6 +57,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -167,7 +168,9 @@ public class KafkaSource<OUT>
                                 props,
                                 readerContext,
                                 kafkaSourceReaderMetrics,
-                                rackIdSupplier.get());
+                                Optional.ofNullable(rackIdSupplier)
+                                        .map(Supplier::get)
+                                        .orElse(null));
         KafkaRecordEmitter<OUT> recordEmitter = new KafkaRecordEmitter<>(deserializationSchema);
 
         return new KafkaSourceReader<>(

@@ -322,7 +322,6 @@ public class KafkaPartitionSplitReaderTest {
 
     @Test
     public void testConsumerClientRackSupplier() {
-        AtomicReference<Boolean> supplierCalled = new AtomicReference<>(false);
         String rackId = "use1-az1";
         Properties properties = new Properties();
         KafkaPartitionSplitReader reader =
@@ -330,7 +329,6 @@ public class KafkaPartitionSplitReaderTest {
                         properties,
                         UnregisteredMetricsGroup.createSourceReaderMetricGroup(),
                         rackId);
-        assertThat(supplierCalled.get()).isEqualTo(true);
 
         // Here we call the helper function directly, because the KafkaPartitionSplitReader
         // doesn't allow us to examine the final ConsumerConfig object
