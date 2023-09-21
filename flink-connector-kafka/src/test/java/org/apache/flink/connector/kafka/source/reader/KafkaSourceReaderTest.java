@@ -54,7 +54,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.mockito.Spy;
+import org.mockito.Mockito;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -275,7 +275,8 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
                                 Boundedness.CONTINUOUS_UNBOUNDED,
                                 new TestingReaderContext(),
                                 (ignore) -> {},
-                                properties, null)) {
+                                properties,
+                                null)) {
             reader.addSplits(
                     getSplits(numSplits, NUM_RECORDS_PER_SPLIT, Boundedness.CONTINUOUS_UNBOUNDED));
             ValidatingSourceOutput output = new ValidatingSourceOutput();
@@ -483,20 +484,43 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
         }
     }
 
-    @Spy
-    SerializableSupplier<String> rackIdSupplier;
+    @Test
+    public void testThatReaderDoesNotCallRackIdSupplierOnInit() throws Exception {
+        SerializableSupplier<String> rackIdSupplier = Mockito.mock(SerializableSupplier.class);
+
+        try (KafkaSourceReader<Integer> reader =
+                (KafkaSourceReader<Integer>)
+                        createReader(
+                                Boundedness.CONTINUOUS_UNBOUNDED,
+                                new TestingReaderContext(),
+                                (ignore) -> {},
+                                new Properties(),
+                                rackIdSupplier)) {
+            // Do nothing here
+        }
+
+        verify(rackIdSupplier, never()).get();
+    }
 
     @Test
-    public void testThatReaderDoesNotCallRackIdSupplier() throws Exception {
+    public void testThatReaderDoesCallRackIdSupplierOnSplitAssignment() throws Exception {
+        SerializableSupplier<String> rackIdSupplier = Mockito.mock(SerializableSupplier.class);
+        Mockito.when(rackIdSupplier.get()).thenReturn("use1-az1");
+
         try (KafkaSourceReader<Integer> reader =
-                     (KafkaSourceReader<Integer>)
-                             createReader(
-                                     Boundedness.CONTINUOUS_UNBOUNDED,
-                                     new TestingReaderContext(),
-                                     (ignore) -> {},
-                                     new Properties(), rackIdSupplier)) {
-            verify(rackIdSupplier, never()).get();
+                (KafkaSourceReader<Integer>)
+                        createReader(
+                                Boundedness.CONTINUOUS_UNBOUNDED,
+                                new TestingReaderContext(),
+                                (ignore) -> {},
+                                new Properties(),
+                                rackIdSupplier)) {
+            reader.addSplits(
+                    Collections.singletonList(
+                            new KafkaPartitionSplit(new TopicPartition(TOPIC, 1), 1L)));
         }
+
+        verify(rackIdSupplier).get();
     }
 
     // ------------------------------------------
