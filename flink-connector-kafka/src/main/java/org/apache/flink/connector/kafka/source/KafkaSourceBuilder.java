@@ -26,6 +26,7 @@ import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsIni
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializerValidator;
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
+import org.apache.flink.util.function.SerializableSupplier;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.TopicPartition;
@@ -40,7 +41,6 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Random;
 import java.util.Set;
-import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
@@ -103,7 +103,7 @@ public class KafkaSourceBuilder<OUT> {
     // The configurations.
     protected Properties props;
     // Client rackId supplier
-    private Supplier<String> rackIdSupplier;
+    private SerializableSupplier<String> rackIdSupplier;
 
     KafkaSourceBuilder() {
         this.subscriber = null;
@@ -366,7 +366,7 @@ public class KafkaSourceBuilder<OUT> {
      * @param rackIdCallback callback to provide Kafka consumer client.rack
      * @return this KafkaSourceBuilder
      */
-    public KafkaSourceBuilder<OUT> setRackIdSupplier(Supplier<String> rackIdCallback) {
+    public KafkaSourceBuilder<OUT> setRackIdSupplier(SerializableSupplier<String> rackIdCallback) {
         this.rackIdSupplier = rackIdCallback;
         return this;
     }

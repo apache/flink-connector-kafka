@@ -64,7 +64,6 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Supplier;
 
 import static org.apache.flink.connector.kafka.testutils.KafkaSourceTestEnv.NUM_RECORDS_PER_PARTITION;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -325,22 +324,17 @@ public class KafkaPartitionSplitReaderTest {
     public void testConsumerClientRackSupplier() {
         AtomicReference<Boolean> supplierCalled = new AtomicReference<>(false);
         String rackId = "use1-az1";
-        Supplier<String> rackIdSupplier =
-                () -> {
-                    supplierCalled.set(true);
-                    return rackId;
-                };
         Properties properties = new Properties();
         KafkaPartitionSplitReader reader =
                 createReader(
                         properties,
                         UnregisteredMetricsGroup.createSourceReaderMetricGroup(),
-                        rackIdSupplier);
+                        rackId);
         assertThat(supplierCalled.get()).isEqualTo(true);
 
         // Here we call the helper function directly, because the KafkaPartitionSplitReader
         // doesn't allow us to examine the final ConsumerConfig object
-        reader.setConsumerClientRack(properties, rackIdSupplier);
+        reader.setConsumerClientRack(properties, rackId);
         assertThat(properties.get(ConsumerConfig.CLIENT_RACK_CONFIG)).isEqualTo(rackId);
     }
 
@@ -348,16 +342,15 @@ public class KafkaPartitionSplitReaderTest {
     @NullAndEmptySource
     public void testSetConsumerClientRackIgnoresNullAndEmpty(String rackId) {
         Properties properties = new Properties();
-        Supplier<String> rackIdSupplier = () -> rackId;
         KafkaPartitionSplitReader reader =
                 createReader(
                         properties,
                         UnregisteredMetricsGroup.createSourceReaderMetricGroup(),
-                        rackIdSupplier);
+                        rackId);
 
         // Here we call the helper function directly, because the KafkaPartitionSplitReader
         // doesn't allow us to examine the final ConsumerConfig object
-        reader.setConsumerClientRack(properties, rackIdSupplier);
+        reader.setConsumerClientRack(properties, rackId);
         assertThat(properties.containsKey(ConsumerConfig.CLIENT_RACK_CONFIG)).isFalse();
     }
 
@@ -425,13 +418,13 @@ public class KafkaPartitionSplitReaderTest {
 
     private KafkaPartitionSplitReader createReader(
             Properties additionalProperties, SourceReaderMetricGroup sourceReaderMetricGroup) {
-        return createReader(additionalProperties, sourceReaderMetricGroup, () -> null);
+        return createReader(additionalProperties, sourceReaderMetricGroup, null);
     }
 
     private KafkaPartitionSplitReader createReader(
             Properties additionalProperties,
             SourceReaderMetricGroup sourceReaderMetricGroup,
-            Supplier<String> rackIdSupplier) {
+            String rackId) {
         Properties props = new Properties();
         props.putAll(KafkaSourceTestEnv.getConsumerProperties(ByteArrayDeserializer.class));
         props.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "none");
@@ -444,7 +437,7 @@ public class KafkaPartitionSplitReaderTest {
                 props,
                 new TestingReaderContext(new Configuration(), sourceReaderMetricGroup),
                 kafkaSourceReaderMetrics,
-                rackIdSupplier);
+                rackId);
     }
 
     private Map<String, KafkaPartitionSplit> assignSplits(

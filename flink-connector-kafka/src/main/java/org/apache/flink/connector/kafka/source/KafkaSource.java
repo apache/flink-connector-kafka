@@ -49,6 +49,7 @@ import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplitSerializ
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.util.UserCodeClassLoader;
+import org.apache.flink.util.function.SerializableSupplier;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 
@@ -99,7 +100,7 @@ public class KafkaSource<OUT>
     // The configurations.
     private final Properties props;
     // Client rackId callback
-    private final Supplier<String> rackIdSupplier;
+    private final SerializableSupplier<String> rackIdSupplier;
 
     KafkaSource(
             KafkaSubscriber subscriber,
@@ -108,7 +109,7 @@ public class KafkaSource<OUT>
             Boundedness boundedness,
             KafkaRecordDeserializationSchema<OUT> deserializationSchema,
             Properties props,
-            Supplier<String> rackIdSupplier) {
+            SerializableSupplier<String> rackIdSupplier) {
         this.subscriber = subscriber;
         this.startingOffsetsInitializer = startingOffsetsInitializer;
         this.stoppingOffsetsInitializer = stoppingOffsetsInitializer;
@@ -163,7 +164,10 @@ public class KafkaSource<OUT>
         Supplier<KafkaPartitionSplitReader> splitReaderSupplier =
                 () ->
                         new KafkaPartitionSplitReader(
-                                props, readerContext, kafkaSourceReaderMetrics, rackIdSupplier);
+                                props,
+                                readerContext,
+                                kafkaSourceReaderMetrics,
+                                rackIdSupplier.get());
         KafkaRecordEmitter<OUT> recordEmitter = new KafkaRecordEmitter<>(deserializationSchema);
 
         return new KafkaSourceReader<>(
