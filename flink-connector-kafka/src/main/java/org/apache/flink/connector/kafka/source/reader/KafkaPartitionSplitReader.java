@@ -80,14 +80,14 @@ public class KafkaPartitionSplitReader
             Properties props,
             SourceReaderContext context,
             KafkaSourceReaderMetrics kafkaSourceReaderMetrics) {
-        this(props, context, kafkaSourceReaderMetrics, () -> null);
+        this(props, context, kafkaSourceReaderMetrics, null);
     }
 
     public KafkaPartitionSplitReader(
             Properties props,
             SourceReaderContext context,
             KafkaSourceReaderMetrics kafkaSourceReaderMetrics,
-            Supplier<String> rackIdSupplier) {
+            String rackIdSupplier) {
         this.subtaskId = context.getIndexOfSubtask();
         this.kafkaSourceReaderMetrics = kafkaSourceReaderMetrics;
         Properties consumerProps = new Properties();
@@ -270,15 +270,12 @@ public class KafkaPartitionSplitReader
      * client.rack Consumer Config.
      *
      * @param consumerProps Consumer Property.
-     * @param rackIdSupplier Rack Id's.
+     * @param rackId Rack Id's.
      */
     @VisibleForTesting
-    void setConsumerClientRack(Properties consumerProps, Supplier<String> rackIdSupplier) {
-        if (rackIdSupplier != null) {
-            String rackId = rackIdSupplier.get();
-            if (rackId != null && !rackId.isEmpty()) {
-                consumerProps.setProperty(ConsumerConfig.CLIENT_RACK_CONFIG, rackId);
-            }
+    void setConsumerClientRack(Properties consumerProps, String rackId) {
+        if (rackId != null && !rackId.isEmpty()) {
+            consumerProps.setProperty(ConsumerConfig.CLIENT_RACK_CONFIG, rackId);
         }
     }
 
