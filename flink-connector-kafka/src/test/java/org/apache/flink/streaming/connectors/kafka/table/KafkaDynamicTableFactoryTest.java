@@ -478,13 +478,17 @@ public class KafkaDynamicTableFactoryTest {
                     OffsetsInitializer offsetsInitializer =
                             KafkaSourceTestUtils.getStoppingOffsetsInitializer(source);
                     TopicPartition partition = new TopicPartition(TOPIC, 0);
+                    long endOffsets = 123L;
                     Map<TopicPartition, Long> partitionOffsets =
                             offsetsInitializer.getPartitionOffsets(
                                     Collections.singletonList(partition),
-                                    MockPartitionOffsetsRetriever.noInteractions());
+                                    MockPartitionOffsetsRetriever.latest(
+                                            (tps) ->
+                                                    Collections.singletonMap(
+                                                            partition, endOffsets)));
                     assertThat(partitionOffsets)
                             .containsOnlyKeys(partition)
-                            .containsEntry(partition, KafkaPartitionSplit.LATEST_OFFSET);
+                            .containsEntry(partition, endOffsets);
                 });
     }
 
@@ -609,6 +613,17 @@ public class KafkaDynamicTableFactoryTest {
                 TimestampOffsetsRetriever retriever, OffsetsRetriever endOffsets) {
             return new MockPartitionOffsetsRetriever(
                     UNSUPPORTED_RETRIEVAL, endOffsets, UNSUPPORTED_RETRIEVAL, retriever);
+        }
+
+        public static MockPartitionOffsetsRetriever latest(OffsetsRetriever endOffsets) {
+            return new MockPartitionOffsetsRetriever(
+                    UNSUPPORTED_RETRIEVAL,
+                    endOffsets,
+                    UNSUPPORTED_RETRIEVAL,
+                    partitions -> {
+                        throw new UnsupportedOperationException(
+                                "The method was not supposed to be called");
+                    });
         }
 
         private MockPartitionOffsetsRetriever(

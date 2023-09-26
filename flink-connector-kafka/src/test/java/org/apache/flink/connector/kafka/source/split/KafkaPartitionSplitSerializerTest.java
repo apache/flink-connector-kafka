@@ -36,11 +36,7 @@ public class KafkaPartitionSplitSerializerTest {
         Long normalOffset = 1L;
         TopicPartition topicPartition = new TopicPartition(topic, 1);
         List<Long> stoppingOffsets =
-                Lists.newArrayList(
-                        KafkaPartitionSplit.COMMITTED_OFFSET,
-                        KafkaPartitionSplit.LATEST_OFFSET,
-                        offsetZero,
-                        normalOffset);
+                Lists.newArrayList(KafkaPartitionSplit.COMMITTED_OFFSET, offsetZero, normalOffset);
         KafkaPartitionSplitSerializer splitSerializer = new KafkaPartitionSplitSerializer();
         for (Long stoppingOffset : stoppingOffsets) {
             KafkaPartitionSplit kafkaPartitionSplit =

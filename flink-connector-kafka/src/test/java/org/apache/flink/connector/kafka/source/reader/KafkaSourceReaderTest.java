@@ -392,7 +392,9 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
         // Normal split with NUM_RECORDS_PER_SPLIT records
         final KafkaPartitionSplit normalSplit =
                 new KafkaPartitionSplit(
-                        new TopicPartition(TOPIC, 0), 0, KafkaPartitionSplit.LATEST_OFFSET);
+                        new TopicPartition(TOPIC, 0),
+                        0,
+                        KafkaSourceTestEnv.NUM_RECORDS_PER_PARTITION);
         // Empty split with no record
         final KafkaPartitionSplit emptySplit =
                 new KafkaPartitionSplit(

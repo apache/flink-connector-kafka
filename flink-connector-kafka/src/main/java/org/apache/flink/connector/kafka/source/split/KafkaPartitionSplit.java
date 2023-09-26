@@ -35,7 +35,8 @@ import java.util.Set;
 public class KafkaPartitionSplit implements SourceSplit {
     public static final long NO_STOPPING_OFFSET = Long.MIN_VALUE;
     // Indicating the split should consume from the latest.
-    public static final long LATEST_OFFSET = -1;
+    // @deprecated Only be used for compatibility with the history state, see FLINK-28303
+    @Deprecated public static final long LATEST_OFFSET = -1;
     // Indicating the split should consume from the earliest.
     public static final long EARLIEST_OFFSET = -2;
     // Indicating the split should consume from the last committed offset.
@@ -43,9 +44,9 @@ public class KafkaPartitionSplit implements SourceSplit {
 
     // Valid special starting offsets
     public static final Set<Long> VALID_STARTING_OFFSET_MARKERS =
-            new HashSet<>(Arrays.asList(EARLIEST_OFFSET, LATEST_OFFSET, COMMITTED_OFFSET));
+            new HashSet<>(Arrays.asList(EARLIEST_OFFSET, COMMITTED_OFFSET));
     public static final Set<Long> VALID_STOPPING_OFFSET_MARKERS =
-            new HashSet<>(Arrays.asList(LATEST_OFFSET, COMMITTED_OFFSET, NO_STOPPING_OFFSET));
+            new HashSet<>(Arrays.asList(COMMITTED_OFFSET, NO_STOPPING_OFFSET));
 
     private final TopicPartition tp;
     private final long startingOffset;
@@ -132,8 +133,8 @@ public class KafkaPartitionSplit implements SourceSplit {
                     String.format(
                             "Invalid starting offset %d is specified for partition %s. "
                                     + "It should either be non-negative or be one of the "
-                                    + "[%d(earliest), %d(latest), %d(committed)].",
-                            startingOffset, tp, LATEST_OFFSET, EARLIEST_OFFSET, COMMITTED_OFFSET));
+                                    + "[%d(earliest), %d(committed)].",
+                            startingOffset, tp, EARLIEST_OFFSET, COMMITTED_OFFSET));
         }
 
         if (stoppingOffset < 0 && !VALID_STOPPING_OFFSET_MARKERS.contains(stoppingOffset)) {
@@ -141,12 +142,8 @@ public class KafkaPartitionSplit implements SourceSplit {
                     String.format(
                             "Illegal stopping offset %d is specified for partition %s. "
                                     + "It should either be non-negative or be one of the "
-                                    + "[%d(latest), %d(committed), %d(Long.MIN_VALUE, no_stopping_offset)].",
-                            stoppingOffset,
-                            tp,
-                            LATEST_OFFSET,
-                            COMMITTED_OFFSET,
-                            NO_STOPPING_OFFSET));
+                                    + "[%d(committed), %d(Long.MIN_VALUE, no_stopping_offset)].",
+                            stoppingOffset, tp, COMMITTED_OFFSET, NO_STOPPING_OFFSET));
         }
     }
 }
