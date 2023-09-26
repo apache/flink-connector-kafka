@@ -68,6 +68,17 @@ public final class MockPartitionOffsetsRetriever
                 UNSUPPORTED_RETRIEVAL, endOffsets, UNSUPPORTED_RETRIEVAL, retriever);
     }
 
+    public static MockPartitionOffsetsRetriever latest(OffsetsRetriever endOffsets) {
+        return new MockPartitionOffsetsRetriever(
+                UNSUPPORTED_RETRIEVAL,
+                endOffsets,
+                UNSUPPORTED_RETRIEVAL,
+                partitions -> {
+                    throw new UnsupportedOperationException(
+                            "The method was not supposed to be called");
+                });
+    }
+
     private MockPartitionOffsetsRetriever(
             OffsetsRetriever committedOffsets,
             OffsetsRetriever endOffsets,

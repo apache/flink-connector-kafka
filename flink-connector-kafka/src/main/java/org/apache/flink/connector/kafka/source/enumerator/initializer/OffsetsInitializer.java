@@ -155,8 +155,7 @@ public interface OffsetsInitializer extends Serializable {
      * @return an {@link OffsetsInitializer} which initializes the offsets to the latest offsets.
      */
     static OffsetsInitializer latest() {
-        return new ReaderHandledOffsetsInitializer(
-                KafkaPartitionSplit.LATEST_OFFSET, OffsetResetStrategy.LATEST);
+        return new LatestOffsetsInitializer();
     }
 
     /**
