@@ -177,9 +177,7 @@ public class KafkaPartitionSplitReader
         // Starting offsets.
         Map<TopicPartition, Long> partitionsStartingFromSpecifiedOffsets = new HashMap<>();
         List<TopicPartition> partitionsStartingFromEarliest = new ArrayList<>();
-        List<TopicPartition> partitionsStartingFromLatest = new ArrayList<>();
         // Stopping offsets.
-        List<TopicPartition> partitionsStoppingAtLatest = new ArrayList<>();
         Set<TopicPartition> partitionsStoppingAtCommitted = new HashSet<>();
 
         // Parse the starting and stopping offsets.
@@ -191,10 +189,8 @@ public class KafkaPartitionSplitReader
                             parseStartingOffsets(
                                     s,
                                     partitionsStartingFromEarliest,
-                                    partitionsStartingFromLatest,
                                     partitionsStartingFromSpecifiedOffsets);
-                            parseStoppingOffsets(
-                                    s, partitionsStoppingAtLatest, partitionsStoppingAtCommitted);
+                            parseStoppingOffsets(s, partitionsStoppingAtCommitted);
                             // Track the new topic partition in metrics
                             kafkaSourceReaderMetrics.registerTopicPartition(s.getTopicPartition());
                         });
@@ -206,10 +202,9 @@ public class KafkaPartitionSplitReader
         // Seek on the newly assigned partitions to their stating offsets.
         seekToStartingOffsets(
                 partitionsStartingFromEarliest,
-                partitionsStartingFromLatest,
                 partitionsStartingFromSpecifiedOffsets);
         // Setup the stopping offsets.
-        acquireAndSetStoppingOffsets(partitionsStoppingAtLatest, partitionsStoppingAtCommitted);
+        acquireAndSetStoppingOffsets(partitionsStoppingAtCommitted);
 
         // After acquiring the starting and stopping offsets, remove the empty splits if necessary.
         removeEmptySplits();
@@ -259,14 +254,11 @@ public class KafkaPartitionSplitReader
     private void parseStartingOffsets(
             KafkaPartitionSplit split,
             List<TopicPartition> partitionsStartingFromEarliest,
-            List<TopicPartition> partitionsStartingFromLatest,
             Map<TopicPartition, Long> partitionsStartingFromSpecifiedOffsets) {
         TopicPartition tp = split.getTopicPartition();
         // Parse starting offsets.
         if (split.getStartingOffset() == KafkaPartitionSplit.EARLIEST_OFFSET) {
             partitionsStartingFromEarliest.add(tp);
-        } else if (split.getStartingOffset() == KafkaPartitionSplit.LATEST_OFFSET) {
-            partitionsStartingFromLatest.add(tp);
         } else if (split.getStartingOffset() == KafkaPartitionSplit.COMMITTED_OFFSET) {
             // Do nothing here, the consumer will first try to get the committed offsets of
             // these partitions by default.
@@ -277,7 +269,6 @@ public class KafkaPartitionSplitReader
 
     private void parseStoppingOffsets(
             KafkaPartitionSplit split,
-            List<TopicPartition> partitionsStoppingAtLatest,
             Set<TopicPartition> partitionsStoppingAtCommitted) {
         TopicPartition tp = split.getTopicPartition();
         split.getStoppingOffset()
@@ -285,8 +276,6 @@ public class KafkaPartitionSplitReader
                         stoppingOffset -> {
                             if (stoppingOffset >= 0) {
                                 stoppingOffsets.put(tp, stoppingOffset);
-                            } else if (stoppingOffset == KafkaPartitionSplit.LATEST_OFFSET) {
-                                partitionsStoppingAtLatest.add(tp);
                             } else if (stoppingOffset == KafkaPartitionSplit.COMMITTED_OFFSET) {
                                 partitionsStoppingAtCommitted.add(tp);
                             } else {
@@ -301,17 +290,11 @@ public class KafkaPartitionSplitReader
 
     private void seekToStartingOffsets(
             List<TopicPartition> partitionsStartingFromEarliest,
-            List<TopicPartition> partitionsStartingFromLatest,
             Map<TopicPartition, Long> partitionsStartingFromSpecifiedOffsets) {
 
         if (!partitionsStartingFromEarliest.isEmpty()) {
             LOG.trace("Seeking starting offsets to beginning: {}", partitionsStartingFromEarliest);
             consumer.seekToBeginning(partitionsStartingFromEarliest);
-        }
-
-        if (!partitionsStartingFromLatest.isEmpty()) {
-            LOG.trace("Seeking starting offsets to end: {}", partitionsStartingFromLatest);
-            consumer.seekToEnd(partitionsStartingFromLatest);
         }
 
         if (!partitionsStartingFromSpecifiedOffsets.isEmpty()) {
@@ -323,10 +306,7 @@ public class KafkaPartitionSplitReader
     }
 
     private void acquireAndSetStoppingOffsets(
-            List<TopicPartition> partitionsStoppingAtLatest,
             Set<TopicPartition> partitionsStoppingAtCommitted) {
-        Map<TopicPartition, Long> endOffset = consumer.endOffsets(partitionsStoppingAtLatest);
-        stoppingOffsets.putAll(endOffset);
         if (!partitionsStoppingAtCommitted.isEmpty()) {
             retryOnWakeup(
                             () -> consumer.committed(partitionsStoppingAtCommitted),

@@ -245,8 +245,8 @@ public class KafkaPartitionSplitReaderTest {
         final KafkaPartitionSplit emptySplit =
                 new KafkaPartitionSplit(
                         new TopicPartition(TOPIC2, 0),
-                        KafkaPartitionSplit.LATEST_OFFSET,
-                        KafkaPartitionSplit.LATEST_OFFSET);
+                        KafkaSourceTestEnv.NUM_RECORDS_PER_PARTITION,
+                        KafkaSourceTestEnv.NUM_RECORDS_PER_PARTITION);
         final KafkaPartitionSplit emptySplitWithZeroStoppingOffset =
                 new KafkaPartitionSplit(new TopicPartition(TOPIC3, 0), 0, 0);
 

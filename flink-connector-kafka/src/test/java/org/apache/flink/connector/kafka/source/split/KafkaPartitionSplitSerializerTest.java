@@ -38,7 +38,6 @@ public class KafkaPartitionSplitSerializerTest {
         List<Long> stoppingOffsets =
                 Lists.newArrayList(
                         KafkaPartitionSplit.COMMITTED_OFFSET,
-                        KafkaPartitionSplit.LATEST_OFFSET,
                         offsetZero,
                         normalOffset);
         KafkaPartitionSplitSerializer splitSerializer = new KafkaPartitionSplitSerializer();

@@ -300,7 +300,7 @@ public class KafkaEnumeratorTest {
                     getAllAssignSplits(context, PRE_EXISTING_TOPICS);
             assertThat(initialPartitionAssign)
                     .extracting(KafkaPartitionSplit::getStartingOffset)
-                    .containsOnly(KafkaPartitionSplit.LATEST_OFFSET);
+                    .containsOnly((long) KafkaSourceTestEnv.NUM_RECORDS_PER_PARTITION);
             List<KafkaPartitionSplit> newPartitionAssign =
                     getAllAssignSplits(context, Collections.singleton(DYNAMIC_TOPIC_NAME));
             assertThat(newPartitionAssign)

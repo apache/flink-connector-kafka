@@ -45,8 +45,7 @@ class ReaderHandledOffsetsInitializer implements OffsetsInitializer, OffsetsInit
 
     /**
      * The only valid value for startingOffset is following. {@link
-     * KafkaPartitionSplit#EARLIEST_OFFSET EARLIEST_OFFSET}, {@link
-     * KafkaPartitionSplit#LATEST_OFFSET LATEST_OFFSET}, {@link KafkaPartitionSplit#COMMITTED_OFFSET
+     * KafkaPartitionSplit#EARLIEST_OFFSET EARLIEST_OFFSET}, {@link KafkaPartitionSplit#COMMITTED_OFFSET
      * COMMITTED_OFFSET}
      */
     ReaderHandledOffsetsInitializer(long startingOffset, OffsetResetStrategy offsetResetStrategy) {
