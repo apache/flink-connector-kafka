@@ -25,7 +25,8 @@ import java.util.Collection;
 import java.util.Map;
 
 /**
- * An implementation of {@link OffsetsInitializer} to initialize the offsets based on a latest-offset.
+ * An implementation of {@link OffsetsInitializer} to initialize the offsets based on a
+ * latest-offset.
  *
  * <p>Package private and should be instantiated via {@link OffsetsInitializer}.
  */

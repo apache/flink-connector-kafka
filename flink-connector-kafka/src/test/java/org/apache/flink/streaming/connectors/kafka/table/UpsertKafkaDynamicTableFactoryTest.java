@@ -470,7 +470,9 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                             offsetsInitializer.getPartitionOffsets(
                                     Collections.singletonList(partition),
                                     MockPartitionOffsetsRetriever.latest(
-                                            (tps) -> Collections.singletonMap(partition, endOffsets)));
+                                            (tps) ->
+                                                    Collections.singletonMap(
+                                                            partition, endOffsets)));
                     assertThat(partitionOffsets)
                             .containsOnlyKeys(partition)
                             .containsEntry(partition, endOffsets);

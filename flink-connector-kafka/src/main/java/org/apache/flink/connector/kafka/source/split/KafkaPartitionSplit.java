@@ -77,8 +77,7 @@ public class KafkaPartitionSplit implements SourceSplit {
     }
 
     public Optional<Long> getStoppingOffset() {
-        return stoppingOffset >= 0
-                        || stoppingOffset == COMMITTED_OFFSET
+        return stoppingOffset >= 0 || stoppingOffset == COMMITTED_OFFSET
                 ? Optional.of(stoppingOffset)
                 : Optional.empty();
     }
@@ -139,10 +138,7 @@ public class KafkaPartitionSplit implements SourceSplit {
                             "Illegal stopping offset %d is specified for partition %s. "
                                     + "It should either be non-negative or be one of the "
                                     + "[%d(committed), %d(Long.MIN_VALUE, no_stopping_offset)].",
-                            stoppingOffset,
-                            tp,
-                            COMMITTED_OFFSET,
-                            NO_STOPPING_OFFSET));
+                            stoppingOffset, tp, COMMITTED_OFFSET, NO_STOPPING_OFFSET));
         }
     }
 }
