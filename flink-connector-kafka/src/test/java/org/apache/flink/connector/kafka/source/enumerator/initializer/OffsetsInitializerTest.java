@@ -84,7 +84,7 @@ public class OffsetsInitializerTest {
         assertThat(offsets).hasSameSizeAs(partitions);
         assertThat(offsets.keySet()).containsAll(partitions);
         for (long offset : offsets.values()) {
-            assertThat(offset).isEqualTo((long) KafkaSourceTestEnv.NUM_RECORDS_PER_PARTITION);
+            assertThat(offset).isEqualTo(KafkaSourceTestEnv.NUM_RECORDS_PER_PARTITION);
         }
         assertThat(initializer.getAutoOffsetResetStrategy()).isEqualTo(OffsetResetStrategy.LATEST);
     }
