@@ -110,6 +110,13 @@ public class KafkaPartitionSplitReader
             markEmptySplitsAsFinished(recordsBySplits);
             return recordsBySplits;
         }
+
+        // Track the record fetch lag
+        consumerRecords
+                .iterator()
+                .forEachRemaining(
+                        record -> kafkaSourceReaderMetrics.recordFetched(record.timestamp()));
+
         KafkaPartitionSplitRecords recordsBySplits =
                 new KafkaPartitionSplitRecords(consumerRecords, kafkaSourceReaderMetrics);
         List<TopicPartition> finishedPartitions = new ArrayList<>();

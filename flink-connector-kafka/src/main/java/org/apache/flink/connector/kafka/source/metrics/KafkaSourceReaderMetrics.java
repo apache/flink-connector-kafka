@@ -19,6 +19,8 @@
 package org.apache.flink.connector.kafka.source.metrics;
 
 import org.apache.flink.annotation.PublicEvolving;
+import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.api.common.eventtime.TimestampAssigner;
 import org.apache.flink.connector.kafka.MetricUtil;
 import org.apache.flink.connector.kafka.source.reader.KafkaSourceReader;
 import org.apache.flink.metrics.Counter;
@@ -26,6 +28,7 @@ import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.OperatorIOMetricGroup;
 import org.apache.flink.metrics.groups.SourceReaderMetricGroup;
 import org.apache.flink.runtime.metrics.MetricNames;
+import org.apache.flink.runtime.metrics.groups.InternalSourceReaderMetricGroup;
 import org.apache.flink.runtime.metrics.groups.TaskIOMetricGroup;
 
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -107,6 +110,12 @@ public class KafkaSourceReaderMetrics {
     /** Number of bytes consumed total at the latest {@link #updateNumBytesInCounter()}. */
     private long latestBytesConsumedTotal;
 
+    /** The last event time of consumption */
+    private long lastEventTime = TimestampAssigner.NO_TIMESTAMP;
+
+    /** The last consumption time */
+    private long lastFetchedTime = TimestampAssigner.NO_TIMESTAMP;
+
     public KafkaSourceReaderMetrics(SourceReaderMetricGroup sourceReaderMetricGroup) {
         this.sourceReaderMetricGroup = sourceReaderMetricGroup;
         this.kafkaSourceReaderMetricGroup =
@@ -115,6 +124,8 @@ public class KafkaSourceReaderMetrics {
                 this.kafkaSourceReaderMetricGroup.counter(COMMITS_SUCCEEDED_METRIC_COUNTER);
         this.commitsFailed =
                 this.kafkaSourceReaderMetricGroup.counter(COMMITS_FAILED_METRIC_COUNTER);
+        sourceReaderMetricGroup.gauge(
+                MetricNames.CURRENT_FETCH_EVENT_TIME_LAG, this::getFetchTimeLag);
     }
 
     /**
@@ -178,6 +189,15 @@ public class KafkaSourceReaderMetrics {
     /** Mark a failure commit. */
     public void recordFailedCommit() {
         commitsFailed.inc();
+    }
+
+    /**
+     * Called when a new record was fetched with the given timestamp. {@link
+     * TimestampAssigner#NO_TIMESTAMP} should be indicated that the record did not have a timestamp.
+     */
+    public void recordFetched(long timestamp) {
+        lastEventTime = timestamp < 0 ? TimestampAssigner.NO_TIMESTAMP : timestamp;
+        lastFetchedTime = System.currentTimeMillis();
     }
 
     /**
@@ -316,6 +336,13 @@ public class KafkaSourceReaderMetrics {
                     e);
             return null;
         }
+    }
+
+    @VisibleForTesting
+    long getFetchTimeLag() {
+        return lastEventTime != TimestampAssigner.NO_TIMESTAMP
+                ? lastFetchedTime - lastEventTime
+                : InternalSourceReaderMetricGroup.UNDEFINED;
     }
 
     private static class Offset {

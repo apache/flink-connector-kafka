@@ -127,6 +127,22 @@ public class KafkaSourceReaderMetricsTest {
         assertThat(commitsFailedCounter.get().getCount()).isEqualTo(1L);
     }
 
+    @Test
+    public void testCurrentFetchTimeLag() {
+        MetricListener metricListener = new MetricListener();
+        final KafkaSourceReaderMetrics kafkaSourceReaderMetrics =
+                new KafkaSourceReaderMetrics(
+                        InternalSourceReaderMetricGroup.mock(metricListener.getMetricGroup()));
+        assertThat(kafkaSourceReaderMetrics.getFetchTimeLag())
+                .isEqualTo(InternalSourceReaderMetricGroup.UNDEFINED);
+        kafkaSourceReaderMetrics.recordFetched(-1696075536284L);
+        assertThat(kafkaSourceReaderMetrics.getFetchTimeLag())
+                .isEqualTo(InternalSourceReaderMetricGroup.UNDEFINED);
+        kafkaSourceReaderMetrics.recordFetched(1696075536284L);
+        assertThat(kafkaSourceReaderMetrics.getFetchTimeLag())
+                .isNotEqualTo(InternalSourceReaderMetricGroup.UNDEFINED);
+    }
+
     // ----------- Assertions --------------
 
     private void assertCurrentOffset(
