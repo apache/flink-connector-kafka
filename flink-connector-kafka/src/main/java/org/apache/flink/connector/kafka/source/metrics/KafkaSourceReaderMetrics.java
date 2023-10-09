@@ -110,10 +110,10 @@ public class KafkaSourceReaderMetrics {
     /** Number of bytes consumed total at the latest {@link #updateNumBytesInCounter()}. */
     private long latestBytesConsumedTotal;
 
-    /** The last event time of consumption */
+    /** The last event time of consumption. */
     private long lastEventTime = TimestampAssigner.NO_TIMESTAMP;
 
-    /** The last consumption time */
+    /** The last consumption time. */
     private long lastFetchedTime = TimestampAssigner.NO_TIMESTAMP;
 
     public KafkaSourceReaderMetrics(SourceReaderMetricGroup sourceReaderMetricGroup) {
