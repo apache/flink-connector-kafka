@@ -23,6 +23,10 @@ concurrency:
   cancel-in-progress: true
 jobs:
   compile_and_test:
+    strategy:
+      matrix:
+        flink: [ 1.17-SNAPSHOT, 1.18-SNAPSHOT ]
     uses: apache/flink-connector-shared-utils/.github/workflows/ci.yml@ci_utils
     with:
-      flink_version: 1.17.0
+      flink_version: ${{ matrix.flink }}
+      run_dependency_convergence: false
