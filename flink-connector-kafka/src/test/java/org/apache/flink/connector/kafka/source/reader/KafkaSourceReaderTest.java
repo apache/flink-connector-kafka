@@ -59,6 +59,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -183,7 +184,26 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
                 (KafkaSourceReader<Integer>)
                         createReader(Boundedness.CONTINUOUS_UNBOUNDED, groupId)) {
             reader.snapshotState(100L);
-            reader.notifyCheckpointComplete(100L);
+            reader.snapshotState(101L);
+            reader.snapshotState(102L);
+
+            // After each snapshot, a new entry should have been added to the offsets-to-commit
+            // cache for the checkpoint
+            final Map<Long, Map<TopicPartition, OffsetAndMetadata>> expectedOffsetsToCommit =
+                    new HashMap<>();
+            expectedOffsetsToCommit.put(100L, new HashMap<>());
+            expectedOffsetsToCommit.put(101L, new HashMap<>());
+            expectedOffsetsToCommit.put(102L, new HashMap<>());
+            assertThat(reader.getOffsetsToCommit()).isEqualTo(expectedOffsetsToCommit);
+
+            // only notify up to checkpoint 101L; all offsets prior to 101L should be evicted from
+            // cache, leaving only 102L
+            reader.notifyCheckpointComplete(101L);
+
+            final Map<Long, Map<TopicPartition, OffsetAndMetadata>>
+                    expectedOffsetsToCommitAfterNotify = new HashMap<>();
+            expectedOffsetsToCommitAfterNotify.put(102L, new HashMap<>());
+            assertThat(reader.getOffsetsToCommit()).isEqualTo(expectedOffsetsToCommitAfterNotify);
         }
         // Verify the committed offsets.
         try (AdminClient adminClient = KafkaSourceTestEnv.getAdminClient()) {
