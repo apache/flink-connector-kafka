@@ -81,15 +81,24 @@ public class KafkaRecordDeserializationSchemaTest {
     @Test
     public void testKafkaValueDeserializationSchemaWrapper() throws Exception {
         final ConsumerRecord<byte[], byte[]> consumerRecord = getConsumerRecord();
-        KafkaRecordDeserializationSchema<ObjectNode> schema =
-                KafkaRecordDeserializationSchema.valueOnly(
-                        new JsonDeserializationSchema<>(ObjectNode.class));
+        KafkaRecordDeserializationSchema<
+                        org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node
+                                .ObjectNode>
+                schema =
+                        KafkaRecordDeserializationSchema.valueOnly(
+                                new JsonDeserializationSchema<>(
+                                        org.apache.flink.shaded.jackson2.com.fasterxml.jackson
+                                                .databind.node.ObjectNode.class));
         schema.open(new DummyInitializationContext());
-        SimpleCollector<ObjectNode> collector = new SimpleCollector<>();
+        SimpleCollector<
+                        org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node
+                                .ObjectNode>
+                collector = new SimpleCollector<>();
         schema.deserialize(consumerRecord, collector);
 
         assertThat(collector.list).hasSize(1);
-        ObjectNode deserializedValue = collector.list.get(0);
+        org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ObjectNode
+                deserializedValue = collector.list.get(0);
 
         assertThat(deserializedValue.get("word").asText()).isEqualTo("world");
         assertThat(deserializedValue.get("key")).isNull();
