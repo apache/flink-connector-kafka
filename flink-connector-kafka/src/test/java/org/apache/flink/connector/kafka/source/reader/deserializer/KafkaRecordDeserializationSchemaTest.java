@@ -96,13 +96,14 @@ public class KafkaRecordDeserializationSchemaTest {
                 collector = new SimpleCollector<>();
         schema.deserialize(consumerRecord, collector);
 
-        assertThat(collector.list).hasSize(1);
-        org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ObjectNode
-                deserializedValue = collector.list.get(0);
-
-        assertThat(deserializedValue.get("word").asText()).isEqualTo("world");
-        assertThat(deserializedValue.get("key")).isNull();
-        assertThat(deserializedValue.get("metadata")).isNull();
+        assertThat(collector.list)
+                .hasSize(1)
+                .allSatisfy(
+                        deserializedValue -> {
+                            assertThat(deserializedValue.get("word").asText()).isEqualTo("world");
+                            assertThat(deserializedValue.get("key")).isNull();
+                            assertThat(deserializedValue.get("metadata")).isNull();
+                        });
     }
 
     @Test
