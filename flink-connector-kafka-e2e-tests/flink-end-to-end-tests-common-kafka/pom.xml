@@ -155,7 +155,7 @@ under the License.
 		<dependency>
 			<groupId>com.google.guava</groupId>
 			<artifactId>guava</artifactId>
-			<version>30.1.1-jre</version>
+			<version>32.1.2-jre</version>
 		</dependency>
     </dependencies>
 
@@ -234,7 +234,7 @@ under the License.
 						<artifactItem>
 							<groupId>com.google.guava</groupId>
 							<artifactId>guava</artifactId>
-							<version>30.1.1-jre</version>
+							<version>32.1.2-jre</version>
 							<destFileName>guava.jar</destFileName>
 							<type>jar</type>
 							<outputDirectory>${project.build.directory}/dependencies</outputDirectory>
