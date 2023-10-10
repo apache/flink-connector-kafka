@@ -132,9 +132,13 @@ public class KafkaSourceReader<T>
         Map<TopicPartition, OffsetAndMetadata> committedPartitions =
                 offsetsToCommit.get(checkpointId);
         if (committedPartitions == null) {
-            LOG.debug(
-                    "Offsets for checkpoint {} either do not exist or have already been committed.",
-                    checkpointId);
+            LOG.debug("Offsets for checkpoint {} have already been committed.", checkpointId);
+            return;
+        }
+
+        if (committedPartitions.isEmpty()) {
+            LOG.debug("There are no offsets to commit for checkpoint {}.", checkpointId);
+            removeAllOffsetsToCommitUpToCheckpoint(checkpointId);
             return;
         }
 
@@ -167,12 +171,15 @@ public class KafkaSourceReader<T>
                                                 entry ->
                                                         committedPartitions.containsKey(
                                                                 entry.getKey()));
-                                while (!offsetsToCommit.isEmpty()
-                                        && offsetsToCommit.firstKey() <= checkpointId) {
-                                    offsetsToCommit.remove(offsetsToCommit.firstKey());
-                                }
+                                removeAllOffsetsToCommitUpToCheckpoint(checkpointId);
                             }
                         });
+    }
+
+    private void removeAllOffsetsToCommitUpToCheckpoint(long checkpointId) {
+        while (!offsetsToCommit.isEmpty() && offsetsToCommit.firstKey() <= checkpointId) {
+            offsetsToCommit.remove(offsetsToCommit.firstKey());
+        }
     }
 
     @Override
