@@ -405,6 +405,13 @@ under the License.
                 <version>2.1</version>
             </dependency>
 
+            <!-- For dependency convergence -->
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-compress</artifactId>
+                <version>1.22</version>
+            </dependency>
+
             <dependency>
                 <groupId>org.testcontainers</groupId>
                 <artifactId>testcontainers-bom</artifactId>
