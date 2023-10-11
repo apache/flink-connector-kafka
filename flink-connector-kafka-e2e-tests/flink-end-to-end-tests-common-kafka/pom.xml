@@ -106,6 +106,12 @@ under the License.
             <artifactId>kafka-avro-serializer</artifactId>
             <version>${confluent.version}</version>
             <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.google.guava</groupId>
+                    <artifactId>guava</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
@@ -118,6 +124,10 @@ under the License.
                     <groupId>org.apache.kafka</groupId>
                     <artifactId>kafka-clients</artifactId>
                 </exclusion>
+                    <exclusion>
+                        <groupId>com.google.guava</groupId>
+                        <artifactId>guava</artifactId>
+                    </exclusion>
             </exclusions>
         </dependency>
 
