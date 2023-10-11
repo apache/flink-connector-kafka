@@ -957,8 +957,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         // in order to make sure the topic can be created.
         final String topic = "latest_offset_resume_topic_" + format + "_" + UUID.randomUUID();
         createTestTopic(topic, 6, 1);
+        env.setParallelism(1);
 
-        // ---------- Consume stream from Kafka -------------------
+        // ---------- Produce data into Kafka's partition 0-6 -------------------
 
         String groupId = getStandardProps().getProperty("group.id");
         String bootstraps = getBootstrapServers();
@@ -981,7 +982,12 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         tEnv.executeSql(createTable);
 
-        env.setParallelism(1);
+        String initialValues =
+                "INSERT INTO kafka VALUES (0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0)";
+        tEnv.executeSql(initialValues).await();
+
+        // ---------- Consume stream from Kafka -------------------
+
         String createSink =
                 "CREATE TABLE MySink(\n"
                         + "  `id` INT,\n"
@@ -996,10 +1002,10 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         // ---------- Produce data into Kafka's partition 0-2 -------------------
 
-        String initialValues = "INSERT INTO kafka VALUES (0, 0), (1, 0), (2, 0)";
-        tEnv.executeSql(initialValues).await();
+        String moreValues = "INSERT INTO kafka VALUES (0, 1), (1, 1), (2, 1)";
+        tEnv.executeSql(moreValues).await();
 
-        final List<String> expected = Arrays.asList("+I[0, 0]", "+I[1, 0]", "+I[2, 0]");
+        final List<String> expected = Arrays.asList("+I[0, 1]", "+I[1, 1]", "+I[2, 1]");
         KafkaTableTestUtils.waitingExpectedResults("MySink", expected, Duration.ofSeconds(5));
 
         // ---------- Stop the consume job with savepoint  -------------------
@@ -1014,7 +1020,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         // ---------- Produce data into Kafka's partition 0-5 -------------------
 
         String produceValuesBeforeResume =
-                "INSERT INTO kafka VALUES (0, 1), (1, 1), (2, 1), (3, 0), (4, 0), (5, 0)";
+                "INSERT INTO kafka VALUES (0, 2), (1, 2), (2, 2), (3, 1), (4, 1), (5, 1)";
         tEnv.executeSql(produceValuesBeforeResume).await();
 
         // ---------- Resume the consume job from savepoint  -------------------
@@ -1033,41 +1039,41 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         final List<String> afterResumeExpected =
                 Arrays.asList(
-                        "+I[0, 0]",
-                        "+I[1, 0]",
-                        "+I[2, 0]",
                         "+I[0, 1]",
                         "+I[1, 1]",
                         "+I[2, 1]",
-                        "+I[3, 0]",
-                        "+I[4, 0]",
-                        "+I[5, 0]");
-        KafkaTableTestUtils.waitingExpectedResults(
-                "MySink", afterResumeExpected, Duration.ofSeconds(5));
-
-        // ---------- Produce data into Kafka's partition 0-5 -------------------
-
-        String produceValuesAfterResume =
-                "INSERT INTO kafka VALUES (0, 2), (1, 2), (2, 2), (3, 1), (4, 1), (5, 1)";
-        this.tEnv.executeSql(produceValuesAfterResume).await();
-
-        final List<String> afterProduceExpected =
-                Arrays.asList(
-                        "+I[0, 0]",
-                        "+I[1, 0]",
-                        "+I[2, 0]",
-                        "+I[0, 1]",
-                        "+I[1, 1]",
-                        "+I[2, 1]",
-                        "+I[3, 0]",
-                        "+I[4, 0]",
-                        "+I[5, 0]",
                         "+I[0, 2]",
                         "+I[1, 2]",
                         "+I[2, 2]",
                         "+I[3, 1]",
                         "+I[4, 1]",
                         "+I[5, 1]");
+        KafkaTableTestUtils.waitingExpectedResults(
+                "MySink", afterResumeExpected, Duration.ofSeconds(5));
+
+        // ---------- Produce data into Kafka's partition 0-5 -------------------
+
+        String produceValuesAfterResume =
+                "INSERT INTO kafka VALUES (0, 3), (1, 3), (2, 3), (3, 2), (4, 2), (5, 2)";
+        this.tEnv.executeSql(produceValuesAfterResume).await();
+
+        final List<String> afterProduceExpected =
+                Arrays.asList(
+                        "+I[0, 1]",
+                        "+I[1, 1]",
+                        "+I[2, 1]",
+                        "+I[0, 2]",
+                        "+I[1, 2]",
+                        "+I[2, 2]",
+                        "+I[3, 1]",
+                        "+I[4, 1]",
+                        "+I[5, 1]",
+                        "+I[0, 3]",
+                        "+I[1, 3]",
+                        "+I[2, 3]",
+                        "+I[3, 2]",
+                        "+I[4, 2]",
+                        "+I[5, 2]");
         KafkaTableTestUtils.waitingExpectedResults(
                 "MySink", afterProduceExpected, Duration.ofSeconds(5));
 
