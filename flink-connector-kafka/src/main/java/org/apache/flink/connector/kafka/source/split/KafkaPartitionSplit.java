@@ -44,9 +44,9 @@ public class KafkaPartitionSplit implements SourceSplit {
 
     // Valid special starting offsets
     public static final Set<Long> VALID_STARTING_OFFSET_MARKERS =
-            new HashSet<>(Arrays.asList(EARLIEST_OFFSET, COMMITTED_OFFSET));
+            new HashSet<>(Arrays.asList(EARLIEST_OFFSET, LATEST_OFFSET, COMMITTED_OFFSET));
     public static final Set<Long> VALID_STOPPING_OFFSET_MARKERS =
-            new HashSet<>(Arrays.asList(COMMITTED_OFFSET, NO_STOPPING_OFFSET));
+            new HashSet<>(Arrays.asList(LATEST_OFFSET, COMMITTED_OFFSET, NO_STOPPING_OFFSET));
 
     private final TopicPartition tp;
     private final long startingOffset;
