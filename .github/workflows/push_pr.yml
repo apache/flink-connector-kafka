@@ -25,7 +25,7 @@ jobs:
   compile_and_test:
     strategy:
       matrix:
-        flink: [ 1.17.1 ]
+        flink: [ 1.17.1, 1.18.0 ]
     uses: apache/flink-connector-shared-utils/.github/workflows/ci.yml@ci_utils
     with:
       flink_version: ${{ matrix.flink }}
