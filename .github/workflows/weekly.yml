@@ -38,9 +38,6 @@ jobs:
         }, {
           flink: 1.18.0,
           branch: main
-        }, {
-          flink: 1.19-SNAPSHOT,
-          branch: main
         }]
     uses: apache/flink-connector-shared-utils/.github/workflows/ci.yml@ci_utils
     with:
