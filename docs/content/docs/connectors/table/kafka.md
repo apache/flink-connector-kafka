@@ -35,7 +35,7 @@ The Kafka connector allows for reading data from and writing data into Kafka top
 Dependencies
 ------------
 
-{{< sql_download_table "kafka" >}}
+{{< sql_connector_download_table "kafka" >}}
 
 The Kafka connector is not part of the binary distribution.
 See how to link with it for cluster execution [here]({{< ref "docs/dev/configuration/overview" >}}).
