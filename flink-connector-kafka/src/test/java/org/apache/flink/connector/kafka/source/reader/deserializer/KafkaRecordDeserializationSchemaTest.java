@@ -44,7 +44,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for KafkaRecordDeserializationSchema. */
-public class KafkaRecordDeserializationSchemaTest {
+class KafkaRecordDeserializationSchemaTest {
 
     private static final ObjectMapper OBJECT_MAPPER = JacksonMapperFactory.createObjectMapper();
 
@@ -52,8 +52,8 @@ public class KafkaRecordDeserializationSchemaTest {
     private static Map<String, ?> configuration;
     private static boolean isKeyDeserializer;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    void setUp() {
         configurableConfiguration = new HashMap<>(1);
         configuration = new HashMap<>(1);
         isKeyDeserializer = false;
