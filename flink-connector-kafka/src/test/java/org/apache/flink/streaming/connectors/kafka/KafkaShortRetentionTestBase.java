@@ -30,7 +30,7 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.streaming.api.functions.source.RichParallelSourceFunction;
-import org.apache.flink.test.util.MiniClusterWithClientResource;
+import org.apache.flink.test.junit5.MiniClusterExtension;
 import org.apache.flink.util.InstantiationUtil;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -65,8 +65,8 @@ class KafkaShortRetentionTestBase implements Serializable {
     private static Properties standardProps;
 
     @Container
-    public static MiniClusterWithClientResource flink =
-            new MiniClusterWithClientResource(
+    public static MiniClusterExtension flink =
+            new MiniClusterExtension (
                     new MiniClusterResourceConfiguration.Builder()
                             .setConfiguration(getConfiguration())
                             .setNumberTaskManagers(NUM_TMS)
