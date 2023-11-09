@@ -35,16 +35,18 @@ import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.utils.EncodingUtils;
 import org.apache.flink.test.util.SuccessException;
+import org.apache.flink.testutils.junit.extensions.parameterized.Parameter;
+import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension;
+import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
 import org.apache.flink.types.Row;
 
 import org.apache.kafka.clients.consumer.NoOffsetForPartitionException;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.assertj.core.api.Assertions;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -76,21 +78,21 @@ import static org.assertj.core.api.Assertions.fail;
 import static org.assertj.core.api.HamcrestCondition.matching;
 
 /** Basic IT cases for the Kafka table source and sink. */
-@RunWith(Parameterized.class)
-public class KafkaTableITCase extends KafkaTableTestBase {
+@ExtendWith(ParameterizedTestExtension.class)
+class KafkaTableITCase extends KafkaTableTestBase {
 
     private static final String JSON_FORMAT = "json";
     private static final String AVRO_FORMAT = "avro";
     private static final String CSV_FORMAT = "csv";
 
-    @Parameterized.Parameter public String format;
+    @Parameter public String format;
 
-    @Parameterized.Parameters(name = "format = {0}")
+    @Parameters(name = "format = {0}")
     public static Collection<String> parameters() {
         return Arrays.asList(JSON_FORMAT, AVRO_FORMAT, CSV_FORMAT);
     }
 
-    @Before
+    @BeforeEach
     public void before() {
         // we have to use single parallelism,
         // because we will count the messages in sink to terminate the job
@@ -98,7 +100,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testKafkaSourceSink() throws Exception {
+    void testKafkaSourceSink() throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "tstopic_" + format + "_" + UUID.randomUUID();
@@ -189,7 +191,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testKafkaSourceSinkWithBoundedSpecificOffsets() throws Exception {
+    void testKafkaSourceSinkWithBoundedSpecificOffsets() throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "bounded_" + format + "_" + UUID.randomUUID();
@@ -243,7 +245,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testKafkaSourceSinkWithBoundedTimestamp() throws Exception {
+    void testKafkaSourceSinkWithBoundedTimestamp() throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "bounded_" + format + "_" + UUID.randomUUID();
@@ -300,7 +302,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testKafkaTableWithMultipleTopics() throws Exception {
+    void testKafkaTableWithMultipleTopics() throws Exception {
         // ---------- create source and sink tables -------------------
         String tableTemp =
                 "create table %s (\n"
@@ -393,7 +395,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testKafkaSourceSinkWithMetadata() throws Exception {
+    void testKafkaSourceSinkWithMetadata() throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "metadata_topic_" + format + "_" + UUID.randomUUID();
@@ -485,7 +487,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testKafkaSourceSinkWithKeyAndPartialValue() throws Exception {
+    void testKafkaSourceSinkWithKeyAndPartialValue() throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "key_partial_value_topic_" + format + "_" + UUID.randomUUID();
@@ -566,7 +568,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testKafkaSourceSinkWithKeyAndFullValue() throws Exception {
+    void testKafkaSourceSinkWithKeyAndFullValue() throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "key_full_value_topic_" + format + "_" + UUID.randomUUID();
@@ -644,7 +646,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testKafkaTemporalJoinChangelog() throws Exception {
+    void testKafkaTemporalJoinChangelog() throws Exception {
         // Set the session time zone to UTC, because the next `METADATA FROM
         // 'value.source.timestamp'` DDL
         // will use the session time zone when convert the changelog time from milliseconds to
@@ -787,7 +789,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testPerPartitionWatermarkKafka() throws Exception {
+    void testPerPartitionWatermarkKafka() throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "per_partition_watermark_topic_" + format + "_" + UUID.randomUUID();
@@ -877,7 +879,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testPerPartitionWatermarkWithIdleSource() throws Exception {
+    void testPerPartitionWatermarkWithIdleSource() throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "idle_partition_watermark_topic_" + format + "_" + UUID.randomUUID();
@@ -952,7 +954,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testLatestOffsetStrategyResume() throws Exception {
+    void testLatestOffsetStrategyResume() throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "latest_offset_resume_topic_" + format + "_" + UUID.randomUUID();
@@ -1084,17 +1086,17 @@ public class KafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testStartFromGroupOffsetsLatest() throws Exception {
+    void testStartFromGroupOffsetsLatest() throws Exception {
         testStartFromGroupOffsets("latest");
     }
 
     @Test
-    public void testStartFromGroupOffsetsEarliest() throws Exception {
+    void testStartFromGroupOffsetsEarliest() throws Exception {
         testStartFromGroupOffsets("earliest");
     }
 
     @Test
-    public void testStartFromGroupOffsetsNone() {
+    void testStartFromGroupOffsetsNone() {
         Assertions.assertThatThrownBy(() -> testStartFromGroupOffsetsWithNoneResetStrategy())
                 .satisfies(FlinkAssertions.anyCauseMatches(NoOffsetForPartitionException.class));
     }

@@ -31,12 +31,15 @@ import org.apache.flink.streaming.runtime.operators.util.AssignerWithPeriodicWat
 import org.apache.flink.streaming.runtime.operators.util.AssignerWithPunctuatedWatermarksAdapter;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.streaming.runtime.tasks.TestProcessingTimeService;
+import org.apache.flink.testutils.junit.extensions.parameterized.Parameter;
+import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension;
+import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
 import org.apache.flink.util.SerializedValue;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.junit.experimental.runners.Enclosed;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -54,14 +57,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for the watermarking behaviour of {@link AbstractFetcher}. */
 @SuppressWarnings("serial")
-@RunWith(Enclosed.class)
-public class AbstractFetcherWatermarksTest {
+class AbstractFetcherWatermarksTest {
 
     /** Tests with watermark generators that have a periodic nature. */
-    @RunWith(Parameterized.class)
+    @ExtendWith(ParameterizedTestExtension.class)
     public static class PeriodicWatermarksSuite {
 
-        @Parameterized.Parameters
+        @Parameters
         public static Collection<WatermarkStrategy<Long>> getParams() {
             return Arrays.asList(
                     new AssignerWithPeriodicWatermarksAdapter.Strategy<>(
@@ -70,10 +72,10 @@ public class AbstractFetcherWatermarksTest {
                             .withTimestampAssigner((event, previousTimestamp) -> event));
         }
 
-        @Parameterized.Parameter public WatermarkStrategy<Long> testWmStrategy;
+        @Parameter public WatermarkStrategy<Long> testWmStrategy;
 
         @Test
-        public void testPeriodicWatermarks() throws Exception {
+        void testPeriodicWatermarks() throws Exception {
             final String testTopic = "test topic name";
             Map<KafkaTopicPartition, Long> originalPartitions = new HashMap<>();
             originalPartitions.put(
@@ -161,7 +163,7 @@ public class AbstractFetcherWatermarksTest {
         }
 
         @Test
-        public void testSkipCorruptedRecordWithPeriodicWatermarks() throws Exception {
+        void testSkipCorruptedRecordWithPeriodicWatermarks() throws Exception {
             final String testTopic = "test topic name";
             Map<KafkaTopicPartition, Long> originalPartitions = new HashMap<>();
             originalPartitions.put(
@@ -212,7 +214,7 @@ public class AbstractFetcherWatermarksTest {
         }
 
         @Test
-        public void testPeriodicWatermarksWithNoSubscribedPartitionsShouldYieldNoWatermarks()
+        void testPeriodicWatermarksWithNoSubscribedPartitionsShouldYieldNoWatermarks()
                 throws Exception {
             final String testTopic = "test topic name";
             Map<KafkaTopicPartition, Long> originalPartitions = new HashMap<>();
@@ -248,7 +250,7 @@ public class AbstractFetcherWatermarksTest {
     public static class PunctuatedWatermarksSuite {
 
         @Test
-        public void testSkipCorruptedRecordWithPunctuatedWatermarks() throws Exception {
+        void testSkipCorruptedRecordWithPunctuatedWatermarks() throws Exception {
             final String testTopic = "test topic name";
             Map<KafkaTopicPartition, Long> originalPartitions = new HashMap<>();
             originalPartitions.put(
@@ -296,7 +298,7 @@ public class AbstractFetcherWatermarksTest {
         }
 
         @Test
-        public void testPunctuatedWatermarks() throws Exception {
+        void testPunctuatedWatermarks() throws Exception {
             final String testTopic = "test topic name";
             Map<KafkaTopicPartition, Long> originalPartitions = new HashMap<>();
             originalPartitions.put(

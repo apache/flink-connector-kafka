@@ -24,12 +24,13 @@ import org.apache.flink.table.api.Table;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.table.utils.LegacyRowResource;
+import org.apache.flink.testutils.junit.extensions.parameterized.Parameter;
+import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension;
+import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
 import org.apache.flink.types.Row;
 
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -56,27 +57,25 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.HamcrestCondition.matching;
 
 /** Upsert-kafka IT cases. */
-@RunWith(Parameterized.class)
+@ExtendWith(ParameterizedTestExtension.class)
 public class UpsertKafkaTableITCase extends KafkaTableTestBase {
 
     private static final String JSON_FORMAT = "json";
     private static final String CSV_FORMAT = "csv";
     private static final String AVRO_FORMAT = "avro";
 
-    @Parameterized.Parameter public String format;
+    @Parameter public String format;
 
-    @Parameterized.Parameters(name = "format = {0}")
+    @Parameters(name = "format = {0}")
     public static Object[] parameters() {
         return new Object[] {JSON_FORMAT, CSV_FORMAT, AVRO_FORMAT};
     }
-
-    @Rule public final LegacyRowResource usesLegacyRows = LegacyRowResource.INSTANCE;
 
     private static final String USERS_TOPIC = "users";
     private static final String WORD_COUNT_TOPIC = "word_count";
 
     @Test
-    public void testAggregate() throws Exception {
+    void testAggregate() throws Exception {
         String topic = WORD_COUNT_TOPIC + "_" + format;
         createTestTopic(topic, 4, 1);
         // -------------   test   ---------------
@@ -87,7 +86,7 @@ public class UpsertKafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testTemporalJoin() throws Exception {
+    void testTemporalJoin() throws Exception {
         String topic = USERS_TOPIC + "_" + format;
         createTestTopic(topic, 2, 1);
         // -------------   test   ---------------
@@ -110,7 +109,7 @@ public class UpsertKafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testBufferedUpsertSink() throws Exception {
+    void testBufferedUpsertSink() throws Exception {
         final String topic = "buffered_upsert_topic_" + format;
         createTestTopic(topic, 1, 1);
         String bootstraps = getBootstrapServers();
@@ -199,7 +198,7 @@ public class UpsertKafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testBufferedUpsertSinkWithoutAssigningWatermark() throws Exception {
+    void testBufferedUpsertSinkWithoutAssigningWatermark() throws Exception {
         final String topic = "buffered_upsert_topic_without_assigning_watermark_" + format;
         createTestTopic(topic, 1, 1);
         String bootstraps = getBootstrapServers();
@@ -264,7 +263,7 @@ public class UpsertKafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testSourceSinkWithKeyAndPartialValue() throws Exception {
+    void testSourceSinkWithKeyAndPartialValue() throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "key_partial_value_topic_" + format;
@@ -362,7 +361,7 @@ public class UpsertKafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testKafkaSourceSinkWithKeyAndFullValue() throws Exception {
+    void testKafkaSourceSinkWithKeyAndFullValue() throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "key_full_value_topic_" + format;
@@ -457,7 +456,7 @@ public class UpsertKafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testUpsertKafkaSourceSinkWithBoundedSpecificOffsets() throws Exception {
+    void testUpsertKafkaSourceSinkWithBoundedSpecificOffsets() throws Exception {
         final String topic = "bounded_upsert_" + format + "_" + UUID.randomUUID();
         createTestTopic(topic, 1, 1);
 
@@ -510,7 +509,7 @@ public class UpsertKafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testUpsertKafkaSourceSinkWithBoundedTimestamp() throws Exception {
+    void testUpsertKafkaSourceSinkWithBoundedTimestamp() throws Exception {
         final String topic = "bounded_upsert_" + format + "_" + UUID.randomUUID();
         createTestTopic(topic, 1, 1);
 
@@ -596,7 +595,7 @@ public class UpsertKafkaTableITCase extends KafkaTableTestBase {
      * results.
      */
     @Test
-    public void testUpsertKafkaSourceSinkWithZeroLengthBoundedness() throws Exception {
+    void testUpsertKafkaSourceSinkWithZeroLengthBoundedness() throws Exception {
         final String topic = "bounded_upsert_" + format + "_" + UUID.randomUUID();
         createTestTopic(topic, 1, 1);
 

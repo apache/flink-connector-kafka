@@ -18,14 +18,14 @@
 
 package org.apache.flink.streaming.connectors.kafka;
 
-import org.junit.BeforeClass;
+import org.junit.jupiter.api.BeforeAll;
 
 /** IT cases for the {@link FlinkKafkaProducer}. */
 @SuppressWarnings("serial")
-public class KafkaProducerAtLeastOnceITCase extends KafkaProducerTestBase {
+class KafkaProducerAtLeastOnceITCase extends KafkaProducerTestBase {
 
-    @BeforeClass
-    public static void prepare() throws Exception {
+    @BeforeAll
+    protected static void prepare() throws Exception {
         KafkaProducerTestBase.prepare();
         ((KafkaTestEnvironmentImpl) kafkaServer)
                 .setProducerSemantic(FlinkKafkaProducer.Semantic.AT_LEAST_ONCE);

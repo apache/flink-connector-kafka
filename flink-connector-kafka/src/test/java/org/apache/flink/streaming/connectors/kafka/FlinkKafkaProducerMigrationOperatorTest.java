@@ -19,9 +19,9 @@
 package org.apache.flink.streaming.connectors.kafka;
 
 import org.apache.flink.FlinkVersion;
+import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
 
-import org.junit.Ignore;
-import org.junit.runners.Parameterized;
+import org.junit.jupiter.api.Disabled;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -34,8 +34,8 @@ import java.util.Collection;
  * by the {@link #getOperatorSnapshotPath(FlinkVersion)} method then copy the resource to the path
  * also specified by the {@link #getOperatorSnapshotPath(FlinkVersion)} method.
  */
-public class FlinkKafkaProducerMigrationOperatorTest extends FlinkKafkaProducerMigrationTest {
-    @Parameterized.Parameters(name = "Migration Savepoint: {0}")
+class FlinkKafkaProducerMigrationOperatorTest extends FlinkKafkaProducerMigrationTest {
+    @Parameters(name = "Migration Savepoint: {0}")
     public static Collection<FlinkVersion> parameters() {
         return Arrays.asList(
                 FlinkVersion.v1_8, FlinkVersion.v1_9, FlinkVersion.v1_10, FlinkVersion.v1_11);
@@ -52,7 +52,7 @@ public class FlinkKafkaProducerMigrationOperatorTest extends FlinkKafkaProducerM
                 + "-snapshot";
     }
 
-    @Ignore
+    @Disabled
     @Override
     public void writeSnapshot() throws Exception {
         throw new UnsupportedOperationException();

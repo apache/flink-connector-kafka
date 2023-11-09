@@ -18,7 +18,7 @@
 
 package org.apache.flink.streaming.connectors.kafka.internals;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -27,10 +27,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
 /** Tests for the {@link KafkaTopicPartition}. */
-public class KafkaTopicPartitionTest {
+class KafkaTopicPartitionTest {
 
     @Test
-    public void validateUid() {
+    void validateUid() {
         Field uidField;
         try {
             uidField = KafkaTopicPartition.class.getDeclaredField("serialVersionUID");

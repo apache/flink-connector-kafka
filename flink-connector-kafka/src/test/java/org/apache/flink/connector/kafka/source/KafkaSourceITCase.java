@@ -83,7 +83,7 @@ import static org.apache.flink.connector.kafka.testutils.KafkaSourceExternalCont
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unite test class for {@link KafkaSource}. */
-public class KafkaSourceITCase {
+class KafkaSourceITCase {
     private static final String TOPIC1 = "topic1";
     private static final String TOPIC2 = "topic2";
 
@@ -168,7 +168,7 @@ public class KafkaSourceITCase {
         }
 
         @Test
-        public void testValueOnlyDeserializer() throws Exception {
+    void testValueOnlyDeserializer() throws Exception {
             KafkaSource<Integer> source =
                     KafkaSource.<Integer>builder()
                             .setBootstrapServers(KafkaSourceTestEnv.brokerConnectionStrings)
@@ -265,7 +265,7 @@ public class KafkaSourceITCase {
         }
 
         @Test
-        public void testPerPartitionWatermark() throws Throwable {
+    void testPerPartitionWatermark() throws Throwable {
             String watermarkTopic = "watermarkTestTopic-" + UUID.randomUUID();
             KafkaSourceTestEnv.createTestTopic(watermarkTopic, 2, 1);
             List<ProducerRecord<String, Integer>> records =
@@ -312,7 +312,7 @@ public class KafkaSourceITCase {
         }
 
         @Test
-        public void testConsumingEmptyTopic() throws Throwable {
+    void testConsumingEmptyTopic() throws Throwable {
             String emptyTopic = "emptyTopic-" + UUID.randomUUID();
             KafkaSourceTestEnv.createTestTopic(emptyTopic, 3, 1);
             KafkaSource<PartitionAndValue> source =
@@ -337,7 +337,7 @@ public class KafkaSourceITCase {
         }
 
         @Test
-        public void testConsumingTopicWithEmptyPartitions() throws Throwable {
+    void testConsumingTopicWithEmptyPartitions() throws Throwable {
             String topicWithEmptyPartitions = "topicWithEmptyPartitions-" + UUID.randomUUID();
             KafkaSourceTestEnv.createTestTopic(
                     topicWithEmptyPartitions, KafkaSourceTestEnv.NUM_PARTITIONS, 1);

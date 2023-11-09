@@ -461,7 +461,7 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
     }
 
     @Test
-    public void testSupportsPausingOrResumingSplits() throws Exception {
+    void testSupportsPausingOrResumingSplits() throws Exception {
         final Set<String> finishedSplits = new HashSet<>();
 
         try (final KafkaSourceReader<Integer> reader =
@@ -507,7 +507,7 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
     }
 
     @Test
-    public void testThatReaderDoesNotCallRackIdSupplierOnInit() throws Exception {
+    void testThatReaderDoesNotCallRackIdSupplierOnInit() throws Exception {
         SerializableSupplier<String> rackIdSupplier = Mockito.mock(SerializableSupplier.class);
 
         try (KafkaSourceReader<Integer> reader =
@@ -525,7 +525,7 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
     }
 
     @Test
-    public void testThatReaderDoesCallRackIdSupplierOnSplitAssignment() throws Exception {
+    void testThatReaderDoesCallRackIdSupplierOnSplitAssignment() throws Exception {
         SerializableSupplier<String> rackIdSupplier = Mockito.mock(SerializableSupplier.class);
         Mockito.when(rackIdSupplier.get()).thenReturn("use1-az1");
 
