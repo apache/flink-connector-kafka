@@ -95,9 +95,6 @@ public abstract class KafkaTestBase {
 
     public static List<KafkaClusterTestEnvMetadata> kafkaClusters = new ArrayList<>();
 
-    @TempDir
-    public static File temporaryFolder;
-
     public static Properties secureProps = new Properties();
 
     // ------------------------------------------------------------------------
