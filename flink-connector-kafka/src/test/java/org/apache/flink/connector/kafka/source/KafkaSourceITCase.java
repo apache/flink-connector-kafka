@@ -167,7 +167,7 @@ class KafkaSourceITCase {
             executeAndVerify(env, stream);
         }
 
-        @Test
+    @Test
     void testValueOnlyDeserializer() throws Exception {
             KafkaSource<Integer> source =
                     KafkaSource.<Integer>builder()
@@ -264,7 +264,7 @@ class KafkaSourceITCase {
             executeAndVerify(env, stream);
         }
 
-        @Test
+    @Test
     void testPerPartitionWatermark() throws Throwable {
             String watermarkTopic = "watermarkTestTopic-" + UUID.randomUUID();
             KafkaSourceTestEnv.createTestTopic(watermarkTopic, 2, 1);
@@ -311,7 +311,7 @@ class KafkaSourceITCase {
             env.execute();
         }
 
-        @Test
+    @Test
     void testConsumingEmptyTopic() throws Throwable {
             String emptyTopic = "emptyTopic-" + UUID.randomUUID();
             KafkaSourceTestEnv.createTestTopic(emptyTopic, 3, 1);
@@ -336,7 +336,7 @@ class KafkaSourceITCase {
             }
         }
 
-        @Test
+    @Test
     void testConsumingTopicWithEmptyPartitions() throws Throwable {
             String topicWithEmptyPartitions = "topicWithEmptyPartitions-" + UUID.randomUUID();
             KafkaSourceTestEnv.createTestTopic(
