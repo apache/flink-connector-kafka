@@ -91,8 +91,6 @@ public abstract class KafkaTestBase extends TestLogger {
 
     public static KafkaTestEnvironment kafkaServer;
 
-    @TempDir public static File temporaryFolder;
-
     public static Properties secureProps = new Properties();
 
     // ------------------------------------------------------------------------
