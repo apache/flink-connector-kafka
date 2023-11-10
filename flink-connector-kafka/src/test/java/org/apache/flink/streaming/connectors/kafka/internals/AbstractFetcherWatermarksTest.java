@@ -37,9 +37,7 @@ import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
 import org.apache.flink.util.SerializedValue;
 
 import org.junit.jupiter.api.Test;
-import org.junit.experimental.runners.Enclosed;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.junit.runner.RunWith;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
