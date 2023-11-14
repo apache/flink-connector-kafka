@@ -47,7 +47,7 @@ key will fall into the same partition.
 Dependencies
 ------------
 
-{{< sql_connector_download_table "upsert-kafka" >}}
+{{< sql_connector_download_table "kafka" >}}
 
 The Upsert Kafka connector is not part of the binary distribution.
 See how to link with it for cluster execution [here]({{< ref "docs/dev/configuration/overview" >}}).
