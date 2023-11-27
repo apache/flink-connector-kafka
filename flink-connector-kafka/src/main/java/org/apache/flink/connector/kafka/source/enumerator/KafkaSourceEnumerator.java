@@ -112,7 +112,8 @@ public class KafkaSourceEnumerator
                 properties,
                 context,
                 boundedness,
-                new KafkaSourceEnumState(Collections.emptySet(), Collections.emptySet(), false));
+                new KafkaSourceEnumState(
+                        Collections.emptySet(), Collections.emptySet(), false, false));
     }
 
     public KafkaSourceEnumerator(
@@ -142,6 +143,7 @@ public class KafkaSourceEnumerator
         this.unassignedInitialPartitions =
                 new HashSet<>(kafkaSourceEnumState.unassignedInitialPartitions());
         this.initialDiscoveryFinished = kafkaSourceEnumState.initialDiscoveryFinished();
+        this.noMoreNewPartitionSplits = kafkaSourceEnumState.noMoreNewPartitionSplits();
     }
 
     /**
@@ -209,7 +211,10 @@ public class KafkaSourceEnumerator
     @Override
     public KafkaSourceEnumState snapshotState(long checkpointId) throws Exception {
         return new KafkaSourceEnumState(
-                assignedPartitions, unassignedInitialPartitions, initialDiscoveryFinished);
+                assignedPartitions,
+                unassignedInitialPartitions,
+                initialDiscoveryFinished,
+                noMoreNewPartitionSplits);
     }
 
     @Override

@@ -54,7 +54,7 @@ public class KafkaSourceEnumStateSerializer
     private static final int VERSION_1 = 1;
     /**
      * state of VERSION_2 contains initialDiscoveryFinished and partitions with different assignment
-     * status.
+     * status, as well as noMoreNewPartitionSplits.
      */
     private static final int VERSION_2 = 2;
 
@@ -69,6 +69,7 @@ public class KafkaSourceEnumStateSerializer
     public byte[] serialize(KafkaSourceEnumState enumState) throws IOException {
         Set<TopicPartitionAndAssignmentStatus> partitions = enumState.partitions();
         boolean initialDiscoveryFinished = enumState.initialDiscoveryFinished();
+        boolean noMoreNewPartitionSplits = enumState.noMoreNewPartitionSplits();
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 DataOutputStream out = new DataOutputStream(baos)) {
             out.writeInt(partitions.size());
@@ -78,6 +79,7 @@ public class KafkaSourceEnumStateSerializer
                 out.writeInt(topicPartitionAndAssignmentStatus.assignmentStatus().getStatusCode());
             }
             out.writeBoolean(initialDiscoveryFinished);
+            out.writeBoolean(noMoreNewPartitionSplits);
             out.flush();
             return baos.toByteArray();
         }
@@ -91,7 +93,7 @@ public class KafkaSourceEnumStateSerializer
             case VERSION_1:
                 final Set<TopicPartition> assignedPartitions =
                         deserializeTopicPartitions(serialized);
-                return new KafkaSourceEnumState(assignedPartitions, new HashSet<>(), true);
+                return new KafkaSourceEnumState(assignedPartitions, new HashSet<>(), true, false);
             case VERSION_0:
                 Map<Integer, Set<KafkaPartitionSplit>> currentPartitionAssignment =
                         SerdeUtils.deserializeSplitAssignments(
@@ -103,7 +105,8 @@ public class KafkaSourceEnumStateSerializer
                                         split ->
                                                 currentAssignedSplits.add(
                                                         split.getTopicPartition())));
-                return new KafkaSourceEnumState(currentAssignedSplits, new HashSet<>(), true);
+                return new KafkaSourceEnumState(
+                        currentAssignedSplits, new HashSet<>(), true, false);
             default:
                 throw new IOException(
                         String.format(
@@ -152,11 +155,13 @@ public class KafkaSourceEnumStateSerializer
                                 AssignmentStatus.ofStatusCode(statusCode)));
             }
             final boolean initialDiscoveryFinished = in.readBoolean();
+            final boolean noMoreNewPartitionSplits = in.readBoolean();
             if (in.available() > 0) {
                 throw new IOException("Unexpected trailing bytes in serialized topic partitions");
             }
 
-            return new KafkaSourceEnumState(partitions, initialDiscoveryFinished);
+            return new KafkaSourceEnumState(
+                    partitions, initialDiscoveryFinished, noMoreNewPartitionSplits);
         }
     }
 

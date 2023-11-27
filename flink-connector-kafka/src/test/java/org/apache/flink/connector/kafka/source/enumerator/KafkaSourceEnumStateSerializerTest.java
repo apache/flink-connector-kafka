@@ -48,6 +48,7 @@ public class KafkaSourceEnumStateSerializerTest {
                 new KafkaSourceEnumState(
                         constructTopicPartitions(0),
                         constructTopicPartitions(NUM_PARTITIONS_PER_TOPIC),
+                        true,
                         true);
         final KafkaSourceEnumStateSerializer serializer = new KafkaSourceEnumStateSerializer();
 
@@ -60,6 +61,7 @@ public class KafkaSourceEnumStateSerializerTest {
         assertThat(restoredState.unassignedInitialPartitions())
                 .isEqualTo(state.unassignedInitialPartitions());
         assertThat(restoredState.initialDiscoveryFinished()).isTrue();
+        assertThat(restoredState.noMoreNewPartitionSplits()).isTrue();
     }
 
     @Test
@@ -87,10 +89,12 @@ public class KafkaSourceEnumStateSerializerTest {
         assertThat(kafkaSourceEnumStateV0.assignedPartitions()).isEqualTo(topicPartitions);
         assertThat(kafkaSourceEnumStateV0.unassignedInitialPartitions()).isEmpty();
         assertThat(kafkaSourceEnumStateV0.initialDiscoveryFinished()).isTrue();
+        assertThat(kafkaSourceEnumStateV0.noMoreNewPartitionSplits()).isFalse();
 
         assertThat(kafkaSourceEnumStateV1.assignedPartitions()).isEqualTo(topicPartitions);
         assertThat(kafkaSourceEnumStateV1.unassignedInitialPartitions()).isEmpty();
         assertThat(kafkaSourceEnumStateV1.initialDiscoveryFinished()).isTrue();
+        assertThat(kafkaSourceEnumStateV1.noMoreNewPartitionSplits()).isFalse();
     }
 
     private Set<TopicPartition> constructTopicPartitions(int startPartition) {

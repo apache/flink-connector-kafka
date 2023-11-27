@@ -363,6 +363,7 @@ public class KafkaEnumeratorTest {
                                 preexistingAssignments,
                                 Collections.emptySet(),
                                 true,
+                                false,
                                 new Properties())) {
             enumerator.start();
             runPeriodicPartitionDiscovery(context2);
@@ -393,6 +394,7 @@ public class KafkaEnumeratorTest {
                                 PRE_EXISTING_TOPICS,
                                 Collections.emptySet(),
                                 Collections.emptySet(),
+                                false,
                                 false,
                                 properties)) {
             enumerator.start();
@@ -589,6 +591,7 @@ public class KafkaEnumeratorTest {
                 Collections.emptySet(),
                 Collections.emptySet(),
                 false,
+                false,
                 props);
     }
 
@@ -608,6 +611,7 @@ public class KafkaEnumeratorTest {
                 Collections.emptySet(),
                 Collections.emptySet(),
                 false,
+                false,
                 props);
     }
 
@@ -622,6 +626,7 @@ public class KafkaEnumeratorTest {
             Set<TopicPartition> assignedPartitions,
             Set<TopicPartition> unassignedInitialPartitions,
             boolean initialDiscoveryFinished,
+            boolean noMoreNewPartitionSplits,
             Properties overrideProperties) {
         // Use a TopicPatternSubscriber so that no exception if a subscribed topic hasn't been
         // created yet.
@@ -644,7 +649,10 @@ public class KafkaEnumeratorTest {
                 enumContext,
                 Boundedness.CONTINUOUS_UNBOUNDED,
                 new KafkaSourceEnumState(
-                        assignedPartitions, unassignedInitialPartitions, initialDiscoveryFinished));
+                        assignedPartitions,
+                        unassignedInitialPartitions,
+                        initialDiscoveryFinished,
+                        noMoreNewPartitionSplits));
     }
 
     // ---------------------

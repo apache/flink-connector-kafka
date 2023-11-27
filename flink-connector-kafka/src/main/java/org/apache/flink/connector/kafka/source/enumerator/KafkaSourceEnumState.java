@@ -35,17 +35,23 @@ public class KafkaSourceEnumState {
      * this flag will be marked as true if inital partitions are discovered after enumerator starts.
      */
     private final boolean initialDiscoveryFinished;
+    /** this flag will be marked as true if all partition splits are already assigned. */
+    private final boolean noMoreNewPartitionSplits;
 
     public KafkaSourceEnumState(
-            Set<TopicPartitionAndAssignmentStatus> partitions, boolean initialDiscoveryFinished) {
+            Set<TopicPartitionAndAssignmentStatus> partitions,
+            boolean initialDiscoveryFinished,
+            boolean noMoreNewPartitionSplits) {
         this.partitions = partitions;
         this.initialDiscoveryFinished = initialDiscoveryFinished;
+        this.noMoreNewPartitionSplits = noMoreNewPartitionSplits;
     }
 
     KafkaSourceEnumState(
             Set<TopicPartition> assignPartitions,
             Set<TopicPartition> unassignedInitialPartitions,
-            boolean initialDiscoveryFinished) {
+            boolean initialDiscoveryFinished,
+            boolean noMoreNewPartitionSplits) {
         this.partitions = new HashSet<>();
         partitions.addAll(
                 assignPartitions.stream()
@@ -63,6 +69,7 @@ public class KafkaSourceEnumState {
                                                 AssignmentStatus.UNASSIGNED_INITIAL))
                         .collect(Collectors.toSet()));
         this.initialDiscoveryFinished = initialDiscoveryFinished;
+        this.noMoreNewPartitionSplits = noMoreNewPartitionSplits;
     }
 
     public Set<TopicPartitionAndAssignmentStatus> partitions() {
@@ -79,6 +86,10 @@ public class KafkaSourceEnumState {
 
     public boolean initialDiscoveryFinished() {
         return initialDiscoveryFinished;
+    }
+
+    public boolean noMoreNewPartitionSplits() {
+        return noMoreNewPartitionSplits;
     }
 
     private Set<TopicPartition> filterPartitionsByAssignmentStatus(
