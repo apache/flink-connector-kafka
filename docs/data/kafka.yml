@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-version: 3.0.1
+version: 3.0.2
 flink_compatibility: [1.17, 1.18]
 variants:
   - maven: flink-connector-kafka
