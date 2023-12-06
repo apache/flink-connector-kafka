@@ -42,13 +42,13 @@ FLINK_PYTHON_DIR=$(dirname "$CURRENT_DIR")
 FLINK_SOURCE_DIR=$(dirname "$FLINK_PYTHON_DIR")
 
 # set the FLINK_TEST_LIB_DIR to "flink-connector-kafka"
-export FLINK_TEST_LIB_DIR="$FLINK_SOURCE_DIR"
+export FLINK_TEST_LIBS="${FLINK_SOURCE_DIR}/flink-python/target/test-dependencies/*"
 
 # Temporarily update the installed 'pyflink_gateway_server.py' files with the new one
 # Needed only until Flink 1.19 release
-echo "Checking ${FLINK_TEST_LIB_DIR} for 'pyflink_gateway_server.py'"
-find "${FLINK_TEST_LIB_DIR}/flink-python" -name pyflink_gateway_server.py
-find "${FLINK_TEST_LIB_DIR}/flink-python/.tox" -name pyflink_gateway_server.py -exec cp "${FLINK_TEST_LIB_DIR}/flink-python/pyflink/pyflink_gateway_server.py" {} \;
+echo "Checking ${FLINK_SOURCE_DIR} for 'pyflink_gateway_server.py'"
+find "${FLINK_SOURCE_DIR}/flink-python" -name pyflink_gateway_server.py
+find "${FLINK_SOURCE_DIR}/flink-python/.tox" -name pyflink_gateway_server.py -exec cp "${FLINK_SOURCE_DIR}/flink-python/pyflink/pyflink_gateway_server.py" {} \;
 
 # python test
 test_all_modules

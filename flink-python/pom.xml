@@ -91,6 +91,7 @@ under the License.
                                 <delete file="${project.basedir}/dev/install_command.sh"/>
                                 <delete file="${project.basedir}/dev/lint-python.sh"/>
                                 <delete file="${project.basedir}/dev/build-wheels.sh"/>
+                                <delete file="${project.basedir}/dev/glibc_version_fix.h"/>
                                 <delete file="${project.basedir}/dev/dev-requirements.txt"/>
                                 <delete file="${project.basedir}/pyflink/datastream/connectors/kafka_connector_version.py"/>
                             </target>
@@ -173,7 +174,7 @@ under the License.
                             <goal>download-single</goal>
                         </goals>
                         <configuration>
-                            <url>https://raw.githubusercontent.com/apache/flink/release-${flink.version}/flink-python/dev/install_command.sh</url>
+                            <url>https://raw.githubusercontent.com/pvary/flink-connector-shared-utils/ci_utils/python/install_command.sh</url>
                             <toDir>${project.basedir}/dev</toDir>
                             <skip>${python.infra.download.skip}</skip>
                         </configuration>
@@ -185,7 +186,7 @@ under the License.
                             <goal>download-single</goal>
                         </goals>
                         <configuration>
-                            <url>https://raw.githubusercontent.com/apache/flink/release-${flink.version}/flink-python/dev/lint-python.sh</url>
+                            <url>https://raw.githubusercontent.com/pvary/flink-connector-shared-utils/ci_utils/python/lint-python.sh</url>
                             <toDir>${project.basedir}/dev</toDir>
                             <skip>${python.infra.download.skip}</skip>
                         </configuration>
@@ -197,7 +198,19 @@ under the License.
                             <goal>download-single</goal>
                         </goals>
                         <configuration>
-                            <url>https://raw.githubusercontent.com/apache/flink/release-${flink.version}/flink-python/dev/build-wheels.sh</url>
+                            <url>https://raw.githubusercontent.com/pvary/flink-connector-shared-utils/ci_utils/python/build-wheels.sh</url>
+                            <toDir>${project.basedir}/dev</toDir>
+                            <skip>${python.infra.download.skip}</skip>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>download-build-version-header</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>download-single</goal>
+                        </goals>
+                        <configuration>
+                            <url>https://raw.githubusercontent.com/pvary/flink-connector-shared-utils/ci_utils/python/glibc_version_fix.h</url>
                             <toDir>${project.basedir}/dev</toDir>
                             <skip>${python.infra.download.skip}</skip>
                         </configuration>
