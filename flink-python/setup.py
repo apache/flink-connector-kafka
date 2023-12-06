@@ -26,7 +26,7 @@ from setuptools import setup
 from shutil import copy, rmtree
 from xml.etree import ElementTree as ET
 
-PACKAGE_NAME = 'apache-flink-connectors-kafka'
+PACKAGE_NAME = 'apache-flink-connector-kafka'
 # Source files, directories
 CURRENT_DIR = os.path.abspath(os.path.dirname(__file__))
 POM_FILE = os.path.join(CURRENT_DIR, '../pom.xml')

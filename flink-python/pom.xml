@@ -32,7 +32,7 @@ under the License.
     <artifactId>flink-connector-kafka-python</artifactId>
     <name>Flink : Connectors : SQL : Kafka : Python</name>
 
-    <packaging>jar</packaging>
+    <packaging>pom</packaging>
 
     <properties>
     </properties>
