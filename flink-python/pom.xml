@@ -174,7 +174,7 @@ under the License.
                             <goal>download-single</goal>
                         </goals>
                         <configuration>
-                            <url>https://raw.githubusercontent.com/pvary/flink-connector-shared-utils/ci_utils/python/install_command.sh</url>
+                            <url>https://raw.githubusercontent.com/apache/flink-connector-shared-utils/ci_utils/python/install_command.sh</url>
                             <toDir>${project.basedir}/dev</toDir>
                             <skip>${python.infra.download.skip}</skip>
                         </configuration>
@@ -186,7 +186,7 @@ under the License.
                             <goal>download-single</goal>
                         </goals>
                         <configuration>
-                            <url>https://raw.githubusercontent.com/pvary/flink-connector-shared-utils/ci_utils/python/lint-python.sh</url>
+                            <url>https://raw.githubusercontent.com/apache/flink-connector-shared-utils/ci_utils/python/lint-python.sh</url>
                             <toDir>${project.basedir}/dev</toDir>
                             <skip>${python.infra.download.skip}</skip>
                         </configuration>
@@ -198,7 +198,7 @@ under the License.
                             <goal>download-single</goal>
                         </goals>
                         <configuration>
-                            <url>https://raw.githubusercontent.com/pvary/flink-connector-shared-utils/ci_utils/python/build-wheels.sh</url>
+                            <url>https://raw.githubusercontent.com/apache/flink-connector-shared-utils/ci_utils/python/build-wheels.sh</url>
                             <toDir>${project.basedir}/dev</toDir>
                             <skip>${python.infra.download.skip}</skip>
                         </configuration>
@@ -210,7 +210,7 @@ under the License.
                             <goal>download-single</goal>
                         </goals>
                         <configuration>
-                            <url>https://raw.githubusercontent.com/pvary/flink-connector-shared-utils/ci_utils/python/glibc_version_fix.h</url>
+                            <url>https://raw.githubusercontent.com/apache/flink-connector-shared-utils/ci_utils/python/glibc_version_fix.h</url>
                             <toDir>${project.basedir}/dev</toDir>
                             <skip>${python.infra.download.skip}</skip>
                         </configuration>
