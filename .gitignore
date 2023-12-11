@@ -36,3 +36,19 @@ tools/flink
 tools/flink-*
 tools/releasing/release
 tools/japicmp-output
+
+# Generated file, do not store in git
+flink-python/pyflink/datastream/connectors/kafka_connector_version.py
+flink-python/apache_flink_connectors_kafka.egg-info/
+flink-python/.tox/
+flink-python/build
+flink-python/dist
+flink-python/dev/download
+flink-python/dev/.conda/
+flink-python/dev/log/
+flink-python/dev/.stage.txt
+flink-python/dev/install_command.sh
+flink-python/dev/lint-python.sh
+flink-python/dev/build-wheels.sh
+flink-python/dev/glibc_version_fix.h
+flink-python/dev/dev-requirements.txt

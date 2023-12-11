@@ -46,6 +46,7 @@ under the License.
         <module>flink-connector-kafka</module>
         <module>flink-sql-connector-kafka</module>
         <module>flink-connector-kafka-e2e-tests</module>
+        <module>flink-python</module>
     </modules>
 
     <properties>

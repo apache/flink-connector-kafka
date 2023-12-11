@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.apache.flink</groupId>
+        <artifactId>flink-connector-kafka-parent</artifactId>
+        <version>3.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>flink-connector-kafka-python</artifactId>
+    <name>Flink : Connectors : SQL : Kafka : Python</name>
+
+    <packaging>pom</packaging>
+
+    <properties>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-sql-connector-kafka</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-runtime</artifactId>
+            <version>${flink.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-streaming-java</artifactId>
+            <version>${flink.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-connector-test-utils</artifactId>
+            <version>${flink.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-sql-avro</artifactId>
+            <version>${flink.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>clean</id>
+                        <phase>clean</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <delete dir="${project.basedir}/.tox"/>
+                                <delete dir="${project.basedir}/apache_flink_connectors_kafka.egg-info"/>
+                                <delete dir="${project.basedir}/dev/.conda"/>
+                                <delete dir="${project.basedir}/dev/download"/>
+                                <delete dir="${project.basedir}/dev/log"/>
+                                <delete dir="${project.basedir}/build"/>
+                                <delete dir="${project.basedir}/dist"/>
+                                <delete dir="${project.basedir}/pyflink/lib"/>
+                                <delete file="${project.basedir}/dev/.stage.txt"/>
+                                <delete file="${project.basedir}/dev/install_command.sh"/>
+                                <delete file="${project.basedir}/dev/lint-python.sh"/>
+                                <delete file="${project.basedir}/dev/build-wheels.sh"/>
+                                <delete file="${project.basedir}/dev/glibc_version_fix.h"/>
+                                <delete file="${project.basedir}/dev/dev-requirements.txt"/>
+                                <delete file="${project.basedir}/pyflink/datastream/connectors/kafka_connector_version.py"/>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy</goal>
+                        </goals>
+                        <configuration>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>org.apache.flink</groupId>
+                                    <artifactId>flink-sql-connector-kafka</artifactId>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.apache.flink</groupId>
+                                    <artifactId>flink-runtime</artifactId>
+                                    <!-- Don't use test-jar type because of a bug in the plugin (MDEP-587). -->
+                                    <classifier>tests</classifier>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.apache.flink</groupId>
+                                    <artifactId>flink-streaming-java</artifactId>
+                                    <!-- Don't use test-jar type because of a bug in the plugin (MDEP-587). -->
+                                    <classifier>tests</classifier>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.apache.flink</groupId>
+                                    <artifactId>flink-connector-test-utils</artifactId>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.apache.flink</groupId>
+                                    <artifactId>flink-test-utils</artifactId>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.apache.flink</groupId>
+                                    <artifactId>flink-sql-avro</artifactId>
+                                </artifactItem>
+                            </artifactItems>
+                            <outputDirectory>${project.build.directory}/test-dependencies</outputDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy-dependencies</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <includeGroupIds>junit</includeGroupIds>
+                            <outputDirectory>${project.build.directory}/test-dependencies</outputDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Download the testing infra sources from the Flink main repository -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>wagon-maven-plugin</artifactId>
+                <version>2.0.2</version>
+                <executions>
+                    <execution>
+                        <id>download-install</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>download-single</goal>
+                        </goals>
+                        <configuration>
+                            <url>https://raw.githubusercontent.com/apache/flink-connector-shared-utils/ci_utils/python/install_command.sh</url>
+                            <toDir>${project.basedir}/dev</toDir>
+                            <skip>${python.infra.download.skip}</skip>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>download-lint</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>download-single</goal>
+                        </goals>
+                        <configuration>
+                            <url>https://raw.githubusercontent.com/apache/flink-connector-shared-utils/ci_utils/python/lint-python.sh</url>
+                            <toDir>${project.basedir}/dev</toDir>
+                            <skip>${python.infra.download.skip}</skip>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>download-build-wheels</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>download-single</goal>
+                        </goals>
+                        <configuration>
+                            <url>https://raw.githubusercontent.com/apache/flink-connector-shared-utils/ci_utils/python/build-wheels.sh</url>
+                            <toDir>${project.basedir}/dev</toDir>
+                            <skip>${python.infra.download.skip}</skip>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>download-build-version-header</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>download-single</goal>
+                        </goals>
+                        <configuration>
+                            <url>https://raw.githubusercontent.com/apache/flink-connector-shared-utils/ci_utils/python/glibc_version_fix.h</url>
+                            <toDir>${project.basedir}/dev</toDir>
+                            <skip>${python.infra.download.skip}</skip>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
