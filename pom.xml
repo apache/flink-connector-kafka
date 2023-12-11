@@ -78,6 +78,13 @@ under the License.
         <log4j.version>2.17.1</log4j.version>
 
         <flink.parent.artifactId>flink-connector-kafka-parent</flink.parent.artifactId>
+
+        <!-- This property should contain the add-opens/add-exports commands required for the tests
+         in the given connector's module to pass.
+         It MUST be a space-separated list not containing any newlines,
+         of entries in the form '[-]{2}add-[opens|exports]=<module>/<package>=ALL-UNNAMED'.-->
+        <flink.connector.module.config/>
+        <flink.surefire.baseArgLine>-XX:+UseG1GC -Xms256m -XX:+IgnoreUnrecognizedVMOptions ${flink.connector.module.config}</flink.surefire.baseArgLine>
     </properties>
 
     <dependencies>

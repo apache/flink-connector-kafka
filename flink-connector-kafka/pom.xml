@@ -34,6 +34,14 @@ under the License.
 
     <packaging>jar</packaging>
 
+    <properties>
+        <flink.connector.module.config><!--
+        FlinkKafkaProducerBaseTest --> --add-opens=java.base/java.lang=ALL-UNNAMED <!--
+        FlinkKafkaProducerBaseTest --> --add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED <!--
+        FlinkKafkaConsumerBaseTest --> --add-opens=java.base/java.util=ALL-UNNAMED <!--
+        KafkaProducerExactlyOnceITCase --> --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED </flink.connector.module.config>
+    </properties>
+
     <dependencies>
 
         <!-- Core -->
