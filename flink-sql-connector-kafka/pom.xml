@@ -69,6 +69,7 @@ under the License.
                                 <includes>
                                     <include>org.apache.flink:flink-connector-kafka</include>
                                     <include>org.apache.kafka:*</include>
+                                    <include>org.apache.commons:commons-collections4</include>
                                 </includes>
                             </artifactSet>
                             <filters>
@@ -89,6 +90,10 @@ under the License.
                                 <relocation>
                                     <pattern>org.apache.kafka</pattern>
                                     <shadedPattern>org.apache.flink.kafka.shaded.org.apache.kafka</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.commons</pattern>
+                                    <shadedPattern>org.apache.flink.kafka.shaded.org.apache.commons</shadedPattern>
                                 </relocation>
                             </relocations>
                         </configuration>

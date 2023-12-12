@@ -30,7 +30,7 @@ import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartiti
 import org.apache.flink.streaming.util.serialization.KeyedSerializationSchema;
 import org.apache.flink.util.DockerImageVersions;
 
-import org.apache.commons.collections.list.UnmodifiableList;
+import org.apache.commons.collections4.list.UnmodifiableList;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.admin.TopicDescription;
@@ -250,7 +250,9 @@ public class KafkaTestEnvironmentImpl extends KafkaTestEnvironment {
     @SuppressWarnings("unchecked")
     public <K, V> Collection<ConsumerRecord<K, V>> getAllRecordsFromTopic(
             Properties properties, String topic) {
-        return UnmodifiableList.decorate(KafkaUtil.drainAllRecordsFromTopic(topic, properties));
+        List<ConsumerRecord<byte[], byte[]>> records =
+                KafkaUtil.drainAllRecordsFromTopic(topic, properties);
+        return UnmodifiableList.unmodifiableList((List) records);
     }
 
     @Override
