@@ -34,13 +34,13 @@ import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.test.util.MiniClusterWithClientResource;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.junit.ClassRule;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestInstance.Lifecycle;
 import org.junit.jupiter.api.io.TempDir;
+import org.testcontainers.junit.jupiter.Container;
 
 import java.nio.file.Path;
 import java.util.Properties;
@@ -48,10 +48,10 @@ import java.util.concurrent.CountDownLatch;
 
 /** ITCase tests class for {@link FlinkKafkaConsumer}. */
 @TestInstance(Lifecycle.PER_CLASS)
-public class FlinkKafkaConsumerITCase {
+class FlinkKafkaConsumerITCase {
     private static final String TOPIC1 = "FlinkKafkaConsumerITCase_topic1";
 
-    @ClassRule
+    @Container
     public static final MiniClusterWithClientResource MINI_CLUSTER =
             new MiniClusterWithClientResource(
                     new MiniClusterResourceConfiguration.Builder()
@@ -71,7 +71,7 @@ public class FlinkKafkaConsumerITCase {
     }
 
     @Test
-    public void testStopWithSavepoint(@TempDir Path savepointsDir) throws Exception {
+    void testStopWithSavepoint(@TempDir Path savepointsDir) throws Exception {
         Configuration config =
                 new Configuration()
                         .set(

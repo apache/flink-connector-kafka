@@ -17,9 +17,7 @@
 
 package org.apache.flink.connector.kafka.sink;
 
-import org.apache.flink.util.TestLogger;
-
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -29,13 +27,13 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link TransactionsToAbortChecker}. */
-public class TransactionToAbortCheckerTest extends TestLogger {
+class TransactionToAbortCheckerTest {
 
     public static final String ABORT = "abort";
     public static final String KEEP = "keep";
 
     @Test
-    public void testMustAbortTransactionsWithSameSubtaskIdAndHigherCheckpointOffset() {
+    void testMustAbortTransactionsWithSameSubtaskIdAndHigherCheckpointOffset() {
         Map<Integer, Long> offsetMapping = new HashMap<>(2);
         offsetMapping.put(0, 1L);
         offsetMapping.put(2, 3L);
@@ -63,7 +61,7 @@ public class TransactionToAbortCheckerTest extends TestLogger {
     }
 
     @Test
-    public void testMustAbortTransactionsIfLowestCheckpointOffsetIsMinimumOffset() {
+    void testMustAbortTransactionsIfLowestCheckpointOffsetIsMinimumOffset() {
         final TransactionsToAbortChecker checker =
                 new TransactionsToAbortChecker(2, Collections.singletonMap(0, 1L), 0);
 

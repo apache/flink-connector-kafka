@@ -27,10 +27,10 @@ import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.streaming.util.OperatorSnapshotUtil;
 import org.apache.flink.streaming.util.serialization.KeyedSerializationSchema;
 
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Ignore;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,20 +79,20 @@ public abstract class KafkaMigrationTestBase extends KafkaTestBase {
      * Override {@link KafkaTestBase}. Kafka Migration Tests are starting up Kafka/ZooKeeper cluster
      * manually
      */
-    @BeforeClass
-    public static void prepare() throws Exception {}
+    @BeforeAll
+    protected static void prepare() throws Exception {}
 
     /**
      * Override {@link KafkaTestBase}. Kafka Migration Tests are starting up Kafka/ZooKeeper cluster
      * manually
      */
-    @AfterClass
-    public static void shutDownServices() throws Exception {}
+    @AfterAll
+    protected static void shutDownServices() throws Exception {}
 
     /** Manually run this to write binary snapshot data. */
-    @Ignore
+    @Disabled
     @Test
-    public void writeSnapshot() throws Exception {
+    void writeSnapshot() throws Exception {
         try {
             checkState(flinkGenerateSavepointVersion.isPresent());
             startClusters();
@@ -129,7 +129,7 @@ public abstract class KafkaMigrationTestBase extends KafkaTestBase {
 
     @SuppressWarnings("warning")
     @Test
-    public void testRestoreProducer() throws Exception {
+    void testRestoreProducer() throws Exception {
         try {
             startClusters();
 

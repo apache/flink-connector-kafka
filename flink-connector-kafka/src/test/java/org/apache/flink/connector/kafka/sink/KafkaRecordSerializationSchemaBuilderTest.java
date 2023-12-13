@@ -21,8 +21,8 @@ import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.connector.testutils.formats.DummyInitializationContext;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
-import org.apache.flink.util.TestLogger;
 
+import org.apache.flink.util.TestLoggerExtension;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.Configurable;
 import org.apache.kafka.common.header.Header;
@@ -31,8 +31,9 @@ import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -47,7 +48,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link KafkaRecordSerializationSchemaBuilder}. */
-public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
+@ExtendWith({TestLoggerExtension.class})
+class KafkaRecordSerializationSchemaBuilderTest {
 
     private static final String DEFAULT_TOPIC = "test";
 
@@ -55,25 +57,25 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
     private static Map<String, ?> configuration;
     private static boolean isKeySerializer;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    void setUp() {
         configurableConfiguration = new HashMap<>();
         configuration = new HashMap<>();
         isKeySerializer = false;
     }
 
     @Test
-    public void testDoNotAllowMultipleKeySerializer() {
+    void testDoNotAllowMultipleKeySerializer() {
         assertOnlyOneSerializerAllowed(keySerializationSetter());
     }
 
     @Test
-    public void testDoNotAllowMultipleValueSerializer() {
+    void testDoNotAllowMultipleValueSerializer() {
         assertOnlyOneSerializerAllowed(valueSerializationSetter());
     }
 
     @Test
-    public void testDoNotAllowMultipleTopicSelector() {
+    void testDoNotAllowMultipleTopicSelector() {
         assertThatThrownBy(
                         () ->
                                 KafkaRecordSerializationSchema.builder()
@@ -89,7 +91,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
     }
 
     @Test
-    public void testExpectTopicSelector() {
+    void testExpectTopicSelector() {
         assertThatThrownBy(
                         KafkaRecordSerializationSchema.builder()
                                         .setValueSerializationSchema(new SimpleStringSchema())
@@ -98,13 +100,13 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
     }
 
     @Test
-    public void testExpectValueSerializer() {
+    void testExpectValueSerializer() {
         assertThatThrownBy(KafkaRecordSerializationSchema.builder().setTopic(DEFAULT_TOPIC)::build)
                 .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
-    public void testSerializeRecordWithTopicSelector() {
+    void testSerializeRecordWithTopicSelector() {
         final TopicSelector<String> topicSelector =
                 (e) -> {
                     if (e.equals("a")) {
@@ -129,7 +131,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
     }
 
     @Test
-    public void testSerializeRecordWithPartitioner() throws Exception {
+    void testSerializeRecordWithPartitioner() throws Exception {
         AtomicBoolean opened = new AtomicBoolean(false);
         final int partition = 5;
         final FlinkKafkaPartitioner<Object> partitioner =
@@ -148,7 +150,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
     }
 
     @Test
-    public void testSerializeRecordWithHeaderProvider() throws Exception {
+    void testSerializeRecordWithHeaderProvider() throws Exception {
         final HeaderProvider<String> headerProvider =
                 (ignored) ->
                         new RecordHeaders(
@@ -169,7 +171,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
     }
 
     @Test
-    public void testSerializeRecordWithKey() {
+    void testSerializeRecordWithKey() {
         final SerializationSchema<String> serializationSchema = new SimpleStringSchema();
         final KafkaRecordSerializationSchema<String> schema =
                 KafkaRecordSerializationSchema.builder()
@@ -184,7 +186,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
     }
 
     @Test
-    public void testKafkaKeySerializerWrapperWithoutConfigurable() throws Exception {
+    void testKafkaKeySerializerWrapperWithoutConfigurable() throws Exception {
         final Map<String, String> config = Collections.singletonMap("simpleKey", "simpleValue");
         final KafkaRecordSerializationSchema<String> schema =
                 KafkaRecordSerializationSchema.builder()
@@ -201,7 +203,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
     }
 
     @Test
-    public void testKafkaValueSerializerWrapperWithoutConfigurable() throws Exception {
+    void testKafkaValueSerializerWrapperWithoutConfigurable() throws Exception {
         final Map<String, String> config = Collections.singletonMap("simpleKey", "simpleValue");
         final KafkaRecordSerializationSchema<String> schema =
                 KafkaRecordSerializationSchema.builder()
@@ -215,7 +217,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
     }
 
     @Test
-    public void testSerializeRecordWithKafkaSerializer() throws Exception {
+    void testSerializeRecordWithKafkaSerializer() throws Exception {
         final Map<String, String> config = Collections.singletonMap("configKey", "configValue");
         final KafkaRecordSerializationSchema<String> schema =
                 KafkaRecordSerializationSchema.builder()
@@ -231,7 +233,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
     }
 
     @Test
-    public void testSerializeRecordWithTimestamp() {
+    void testSerializeRecordWithTimestamp() {
         final SerializationSchema<String> serializationSchema = new SimpleStringSchema();
         final KafkaRecordSerializationSchema<String> schema =
                 KafkaRecordSerializationSchema.builder()

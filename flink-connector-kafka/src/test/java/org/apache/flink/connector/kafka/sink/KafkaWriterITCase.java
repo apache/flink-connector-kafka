@@ -96,17 +96,17 @@ public class KafkaWriterITCase {
                     .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS);
 
     @BeforeAll
-    public static void beforeAll() {
+    static void beforeAll() {
         KAFKA_CONTAINER.start();
     }
 
     @AfterAll
-    public static void afterAll() {
+    static void afterAll() {
         KAFKA_CONTAINER.stop();
     }
 
     @BeforeEach
-    public void setUp(TestInfo testInfo) {
+    void setUp(TestInfo testInfo) {
         metricListener = new MetricListener();
         timeService = new TriggerTimeService();
         topic = testInfo.getDisplayName().replaceAll("\\W", "");
@@ -129,7 +129,7 @@ public class KafkaWriterITCase {
     }
 
     @Test
-    public void testIncreasingRecordBasedCounters() throws Exception {
+    void testIncreasingRecordBasedCounters() throws Exception {
         final OperatorIOMetricGroup operatorIOMetricGroup =
                 UnregisteredMetricGroups.createUnregisteredOperatorMetricGroup().getIOMetricGroup();
         final InternalSinkWriterMetricGroup metricGroup =
@@ -166,7 +166,7 @@ public class KafkaWriterITCase {
     }
 
     @Test
-    public void testCurrentSendTimeMetric() throws Exception {
+    void testCurrentSendTimeMetric() throws Exception {
         final InternalSinkWriterMetricGroup metricGroup =
                 InternalSinkWriterMetricGroup.mock(metricListener.getMetricGroup());
         try (final KafkaWriter<Integer> writer =
@@ -328,7 +328,7 @@ public class KafkaWriterITCase {
     }
 
     @Test
-    public void testMetadataPublisher() throws Exception {
+    void testMetadataPublisher() throws Exception {
         List<String> metadataList = new ArrayList<>();
         try (final KafkaWriter<Integer> writer =
                 createWriterWithConfiguration(

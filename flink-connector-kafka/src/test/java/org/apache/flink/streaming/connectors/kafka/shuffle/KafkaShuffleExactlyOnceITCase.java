@@ -27,11 +27,11 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.connectors.kafka.testutils.FailingIdentityMapper;
 import org.apache.flink.streaming.connectors.kafka.testutils.ValidatingExactlyOnceSink;
 
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.Timeout;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static org.apache.flink.streaming.api.TimeCharacteristic.EventTime;
 import static org.apache.flink.streaming.api.TimeCharacteristic.IngestionTime;
@@ -39,9 +39,8 @@ import static org.apache.flink.streaming.api.TimeCharacteristic.ProcessingTime;
 import static org.apache.flink.test.util.TestUtils.tryExecute;
 
 /** Failure Recovery IT Test for KafkaShuffle. */
-public class KafkaShuffleExactlyOnceITCase extends KafkaShuffleTestBase {
-
-    @Rule public final Timeout timeout = Timeout.millis(600000L);
+@Timeout(value = 60000L, unit = TimeUnit.MILLISECONDS)
+class KafkaShuffleExactlyOnceITCase extends KafkaShuffleTestBase {
 
     /**
      * Failure Recovery after processing 2/3 data with time characteristic: ProcessingTime.
@@ -49,7 +48,7 @@ public class KafkaShuffleExactlyOnceITCase extends KafkaShuffleTestBase {
      * <p>Producer Parallelism = 1; Kafka Partition # = 1; Consumer Parallelism = 1.
      */
     @Test
-    public void testFailureRecoveryProcessingTime() throws Exception {
+    void testFailureRecoveryProcessingTime() throws Exception {
         testKafkaShuffleFailureRecovery(1000, ProcessingTime);
     }
 
@@ -59,7 +58,7 @@ public class KafkaShuffleExactlyOnceITCase extends KafkaShuffleTestBase {
      * <p>Producer Parallelism = 1; Kafka Partition # = 1; Consumer Parallelism = 1.
      */
     @Test
-    public void testFailureRecoveryIngestionTime() throws Exception {
+    void testFailureRecoveryIngestionTime() throws Exception {
         testKafkaShuffleFailureRecovery(1000, IngestionTime);
     }
 
@@ -69,7 +68,7 @@ public class KafkaShuffleExactlyOnceITCase extends KafkaShuffleTestBase {
      * <p>Producer Parallelism = 1; Kafka Partition # = 1; Consumer Parallelism = 1.
      */
     @Test
-    public void testFailureRecoveryEventTime() throws Exception {
+    void testFailureRecoveryEventTime() throws Exception {
         testKafkaShuffleFailureRecovery(1000, EventTime);
     }
 
@@ -79,7 +78,7 @@ public class KafkaShuffleExactlyOnceITCase extends KafkaShuffleTestBase {
      * <p>Producer Parallelism = 2; Kafka Partition # = 3; Consumer Parallelism = 3.
      */
     @Test
-    public void testAssignedToPartitionFailureRecoveryProcessingTime() throws Exception {
+    void testAssignedToPartitionFailureRecoveryProcessingTime() throws Exception {
         testAssignedToPartitionFailureRecovery(500, ProcessingTime);
     }
 
@@ -89,7 +88,7 @@ public class KafkaShuffleExactlyOnceITCase extends KafkaShuffleTestBase {
      * <p>Producer Parallelism = 2; Kafka Partition # = 3; Consumer Parallelism = 3.
      */
     @Test
-    public void testAssignedToPartitionFailureRecoveryIngestionTime() throws Exception {
+    void testAssignedToPartitionFailureRecoveryIngestionTime() throws Exception {
         testAssignedToPartitionFailureRecovery(500, IngestionTime);
     }
 
@@ -99,7 +98,7 @@ public class KafkaShuffleExactlyOnceITCase extends KafkaShuffleTestBase {
      * <p>Producer Parallelism = 2; Kafka Partition # = 3; Consumer Parallelism = 3.
      */
     @Test
-    public void testAssignedToPartitionFailureRecoveryEventTime() throws Exception {
+    void testAssignedToPartitionFailureRecoveryEventTime() throws Exception {
         testAssignedToPartitionFailureRecovery(500, EventTime);
     }
 

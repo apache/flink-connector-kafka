@@ -32,8 +32,8 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.Configurable;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -44,7 +44,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for KafkaRecordDeserializationSchema. */
-public class KafkaRecordDeserializationSchemaTest {
+class KafkaRecordDeserializationSchemaTest {
 
     private static final ObjectMapper OBJECT_MAPPER = JacksonMapperFactory.createObjectMapper();
 
@@ -52,15 +52,15 @@ public class KafkaRecordDeserializationSchemaTest {
     private static Map<String, ?> configuration;
     private static boolean isKeyDeserializer;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    void setUp() {
         configurableConfiguration = new HashMap<>(1);
         configuration = new HashMap<>(1);
         isKeyDeserializer = false;
     }
 
     @Test
-    public void testKafkaDeserializationSchemaWrapper() throws Exception {
+    void testKafkaDeserializationSchemaWrapper() throws Exception {
         final ConsumerRecord<byte[], byte[]> consumerRecord = getConsumerRecord();
         KafkaRecordDeserializationSchema<ObjectNode> schema =
                 KafkaRecordDeserializationSchema.of(new JSONKeyValueDeserializationSchema(true));
@@ -79,7 +79,7 @@ public class KafkaRecordDeserializationSchemaTest {
     }
 
     @Test
-    public void testKafkaValueDeserializationSchemaWrapper() throws Exception {
+    void testKafkaValueDeserializationSchemaWrapper() throws Exception {
         final ConsumerRecord<byte[], byte[]> consumerRecord = getConsumerRecord();
         KafkaRecordDeserializationSchema<
                         org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node
@@ -105,7 +105,7 @@ public class KafkaRecordDeserializationSchemaTest {
     }
 
     @Test
-    public void testKafkaValueDeserializerWrapper() throws Exception {
+    void testKafkaValueDeserializerWrapper() throws Exception {
         final String topic = "Topic";
         byte[] value = new StringSerializer().serialize(topic, "world");
         final ConsumerRecord<byte[], byte[]> consumerRecord =
@@ -122,7 +122,7 @@ public class KafkaRecordDeserializationSchemaTest {
     }
 
     @Test
-    public void testKafkaValueDeserializerWrapperWithoutConfigurable() throws Exception {
+    void testKafkaValueDeserializerWrapperWithoutConfigurable() throws Exception {
         final Map<String, String> config = Collections.singletonMap("simpleKey", "simpleValue");
         KafkaRecordDeserializationSchema<String> schema =
                 KafkaRecordDeserializationSchema.valueOnly(SimpleStringSerializer.class, config);
@@ -133,7 +133,7 @@ public class KafkaRecordDeserializationSchemaTest {
     }
 
     @Test
-    public void testKafkaValueDeserializerWrapperWithConfigurable() throws Exception {
+    void testKafkaValueDeserializerWrapperWithConfigurable() throws Exception {
         final Map<String, String> config = Collections.singletonMap("configKey", "configValue");
         KafkaRecordDeserializationSchema<String> schema =
                 KafkaRecordDeserializationSchema.valueOnly(

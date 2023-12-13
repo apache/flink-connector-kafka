@@ -40,18 +40,18 @@ import org.apache.flink.streaming.connectors.kafka.internals.KafkaTopicPartition
 import org.apache.flink.test.util.SuccessException;
 import org.apache.flink.util.Collector;
 
-import org.junit.BeforeClass;
+import org.junit.jupiter.api.BeforeAll;
 
 import java.util.Random;
 
 import static org.apache.flink.streaming.api.TimeCharacteristic.EventTime;
 
 /** Base Test Class for KafkaShuffle. */
-public class KafkaShuffleTestBase extends KafkaConsumerTestBase {
+class KafkaShuffleTestBase extends KafkaConsumerTestBase {
     static final long INIT_TIMESTAMP = System.currentTimeMillis();
 
-    @BeforeClass
-    public static void prepare() throws Exception {
+    @BeforeAll
+    protected static void prepare() throws Exception {
         KafkaProducerTestBase.prepare();
         ((KafkaTestEnvironmentImpl) kafkaServer)
                 .setProducerSemantic(FlinkKafkaProducer.Semantic.EXACTLY_ONCE);
