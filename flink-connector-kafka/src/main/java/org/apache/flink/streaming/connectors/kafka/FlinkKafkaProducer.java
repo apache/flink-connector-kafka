@@ -972,8 +972,7 @@ public class FlinkKafkaProducer<IN>
             try {
                 super.close();
             } catch (Exception e) {
-                LOG.error("Error close currentTransactionHolder in TwoPhaseCommitSinkFunction.", e);
-                asyncException = ExceptionUtils.firstOrSuppressed(e, asyncException);
+                LOG.warn("Error close currentTransactionHolder in TwoPhaseCommitSinkFunction.", e);
             }
             // make sure we propagate pending errors
             checkErroneous();
