@@ -919,11 +919,13 @@ public class DynamicKafkaSourceEnumeratorTest {
 
     private static class TestKafkaEnumContextProxyFactory
             implements StoppableKafkaEnumContextProxy.StoppableKafkaEnumContextProxyFactory {
+
         @Override
         public StoppableKafkaEnumContextProxy create(
                 SplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext,
                 String kafkaClusterId,
-                KafkaMetadataService kafkaMetadataService) {
+                KafkaMetadataService kafkaMetadataService,
+                Runnable signalNoMoreSplitsCallback) {
             return new TestKafkaEnumContextProxy(
                     kafkaClusterId,
                     kafkaMetadataService,
@@ -939,7 +941,7 @@ public class DynamicKafkaSourceEnumeratorTest {
                 String kafkaClusterId,
                 KafkaMetadataService kafkaMetadataService,
                 MockSplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext) {
-            super(kafkaClusterId, kafkaMetadataService, enumContext);
+            super(kafkaClusterId, kafkaMetadataService, enumContext, null);
             this.enumContext = enumContext;
         }
 

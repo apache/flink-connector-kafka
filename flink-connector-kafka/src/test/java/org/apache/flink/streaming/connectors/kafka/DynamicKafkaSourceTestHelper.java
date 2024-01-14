@@ -204,6 +204,7 @@ public class DynamicKafkaSourceTestHelper extends KafkaTestBase {
             throws Throwable {
         Properties props = new Properties();
         props.putAll(clusterProperties);
+        props.setProperty(ProducerConfig.ACKS_CONFIG, "all");
         props.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, keySerializerClass.getName());
         props.setProperty(
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, valueSerializerClass.getName());
@@ -219,8 +220,9 @@ public class DynamicKafkaSourceTestHelper extends KafkaTestBase {
                 };
         try (KafkaProducer<K, V> producer = new KafkaProducer<>(props)) {
             for (ProducerRecord<K, V> record : records) {
-                producer.send(record, callback).get();
+                producer.send(record, callback);
             }
+            producer.flush();
         }
         if (sendingError.get() != null) {
             throw sendingError.get();

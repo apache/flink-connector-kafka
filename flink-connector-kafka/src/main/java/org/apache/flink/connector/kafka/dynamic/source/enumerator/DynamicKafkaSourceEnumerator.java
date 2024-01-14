@@ -96,6 +96,7 @@ public class DynamicKafkaSourceEnumerator
     private int kafkaMetadataServiceDiscoveryFailureCount;
     private Map<String, Set<String>> latestClusterTopicsMap;
     private Set<KafkaStream> latestKafkaStreams;
+    private boolean firstDiscoveryComplete;
 
     public DynamicKafkaSourceEnumerator(
             KafkaStreamSubscriber kafkaStreamSubscriber,
@@ -151,6 +152,7 @@ public class DynamicKafkaSourceEnumerator
                         DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_FAILURE_THRESHOLD,
                         Integer::parseInt);
         this.kafkaMetadataServiceDiscoveryFailureCount = 0;
+        this.firstDiscoveryComplete = false;
 
         this.kafkaMetadataService = kafkaMetadataService;
         this.stoppableKafkaEnumContextProxyFactory = stoppableKafkaEnumContextProxyFactory;
@@ -212,32 +214,27 @@ public class DynamicKafkaSourceEnumerator
 
     private void handleNoMoreSplits() {
         if (Boundedness.BOUNDED.equals(boundedness)) {
-            enumContext.runInCoordinatorThread(
-                    () -> {
-                        boolean allEnumeratorsHaveSignalledNoMoreSplits = true;
-                        for (StoppableKafkaEnumContextProxy context :
-                                clusterEnumContextMap.values()) {
-                            allEnumeratorsHaveSignalledNoMoreSplits =
-                                    allEnumeratorsHaveSignalledNoMoreSplits
-                                            && context.isNoMoreSplits();
-                        }
+            boolean allEnumeratorsHaveSignalledNoMoreSplits = true;
+            for (StoppableKafkaEnumContextProxy context : clusterEnumContextMap.values()) {
+                allEnumeratorsHaveSignalledNoMoreSplits =
+                        allEnumeratorsHaveSignalledNoMoreSplits && context.isNoMoreSplits();
+            }
 
-                        if (allEnumeratorsHaveSignalledNoMoreSplits) {
-                            logger.info(
-                                    "Signal no more splits to all readers: {}",
-                                    enumContext.registeredReaders().keySet());
-                            enumContext
-                                    .registeredReaders()
-                                    .keySet()
-                                    .forEach(enumContext::signalNoMoreSplits);
-                        }
-                    });
+            if (firstDiscoveryComplete && allEnumeratorsHaveSignalledNoMoreSplits) {
+                logger.info(
+                        "Signal no more splits to all readers: {}",
+                        enumContext.registeredReaders().keySet());
+                enumContext.registeredReaders().keySet().forEach(enumContext::signalNoMoreSplits);
+            } else {
+                logger.info("Not ready to notify no more splits to readers.");
+            }
         }
     }
 
     // --------------- private methods for metadata discovery ---------------
 
     private void onHandleSubscribedStreamsFetch(Set<KafkaStream> fetchedKafkaStreams, Throwable t) {
+        firstDiscoveryComplete = true;
         Set<KafkaStream> handledFetchKafkaStreams =
                 handleFetchSubscribedStreamsError(fetchedKafkaStreams, t);
 
@@ -370,9 +367,19 @@ public class DynamicKafkaSourceEnumerator
             Set<String> topics,
             KafkaSourceEnumState kafkaSourceEnumState,
             Properties fetchedProperties) {
+        final Runnable signalNoMoreSplitsCallback;
+        if (Boundedness.BOUNDED.equals(boundedness)) {
+            signalNoMoreSplitsCallback = this::handleNoMoreSplits;
+        } else {
+            signalNoMoreSplitsCallback = null;
+        }
+
         StoppableKafkaEnumContextProxy context =
                 stoppableKafkaEnumContextProxyFactory.create(
-                        enumContext, kafkaClusterId, kafkaMetadataService);
+                        enumContext,
+                        kafkaClusterId,
+                        kafkaMetadataService,
+                        signalNoMoreSplitsCallback);
 
         Properties consumerProps = new Properties();
         KafkaPropertiesUtil.copyProperties(fetchedProperties, consumerProps);

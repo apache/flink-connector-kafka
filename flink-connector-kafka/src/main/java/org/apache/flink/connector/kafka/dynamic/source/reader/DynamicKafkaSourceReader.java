@@ -132,8 +132,8 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
 
     @Override
     public InputStatus pollNext(ReaderOutput<T> readerOutput) throws Exception {
-        // do not return end of input if no more splits has not yet been signaled
-        if (!isNoMoreSplits && clusterReaderMap.isEmpty()) {
+        // at startup, do not return end of input if metadata event has not been received
+        if (clusterReaderMap.isEmpty()) {
             return logAndReturnInputStatus(InputStatus.NOTHING_AVAILABLE);
         }
 

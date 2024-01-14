@@ -34,6 +34,8 @@ import org.apache.kafka.common.KafkaException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -69,6 +71,7 @@ public class StoppableKafkaEnumContextProxy
     private final KafkaMetadataService kafkaMetadataService;
     private final SplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext;
     private final ScheduledExecutorService subEnumeratorWorker;
+    private final Runnable signalNoMoreSplitsCallback;
     private boolean noMoreSplits = false;
     private volatile boolean isClosing;
 
@@ -79,17 +82,20 @@ public class StoppableKafkaEnumContextProxy
      *     KafkaSourceEnumerator
      * @param kafkaMetadataService the Kafka metadata service to facilitate error handling
      * @param enumContext the underlying enumerator context
+     * @param signalNoMoreSplitsCallback the callback when signal no more splits is invoked
      */
     public StoppableKafkaEnumContextProxy(
             String kafkaClusterId,
             KafkaMetadataService kafkaMetadataService,
-            SplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext) {
+            SplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext,
+            @Nullable Runnable signalNoMoreSplitsCallback) {
         this.kafkaClusterId = kafkaClusterId;
         this.kafkaMetadataService = kafkaMetadataService;
         this.enumContext = enumContext;
         this.subEnumeratorWorker =
                 Executors.newScheduledThreadPool(
                         1, new ExecutorThreadFactory(kafkaClusterId + "-enum-worker"));
+        this.signalNoMoreSplitsCallback = signalNoMoreSplitsCallback;
         this.isClosing = false;
     }
 
@@ -147,8 +153,14 @@ public class StoppableKafkaEnumContextProxy
 
     @Override
     public void signalNoMoreSplits(int subtask) {
-        // there are no more splits for this cluster
+        // There are no more splits for this cluster, but we need to wait until all clusters are
+        // finished with their respective split discoveries. In the Kafka Source, this is called in
+        // the coordinator thread, ensuring thread safety, for all source readers at the same time.
         noMoreSplits = true;
+        if (signalNoMoreSplitsCallback != null) {
+            // Thread safe idempotent callback
+            signalNoMoreSplitsCallback.run();
+        }
     }
 
     /** Execute the one time callables in the coordinator. */
@@ -286,12 +298,19 @@ public class StoppableKafkaEnumContextProxy
         StoppableKafkaEnumContextProxy create(
                 SplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext,
                 String kafkaClusterId,
-                KafkaMetadataService kafkaMetadataService);
+                KafkaMetadataService kafkaMetadataService,
+                Runnable signalNoMoreSplitsCallback);
 
         static StoppableKafkaEnumContextProxyFactory getDefaultFactory() {
-            return (enumContext, kafkaClusterId, kafkaMetadataService) ->
+            return (enumContext,
+                    kafkaClusterId,
+                    kafkaMetadataService,
+                    signalNoMoreSplitsCallback) ->
                     new StoppableKafkaEnumContextProxy(
-                            kafkaClusterId, kafkaMetadataService, enumContext);
+                            kafkaClusterId,
+                            kafkaMetadataService,
+                            enumContext,
+                            signalNoMoreSplitsCallback);
         }
     }
 }

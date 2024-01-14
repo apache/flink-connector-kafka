@@ -150,7 +150,8 @@ public class StoppableKafkaEnumContextProxyTest {
         return new StoppableKafkaEnumContextProxy(
                 contextKafkaCluster,
                 new MockKafkaMetadataService(Collections.singleton(mockStream)),
-                enumContext);
+                enumContext,
+                null);
     }
 
     // this modeled after `KafkaSourceEnumerator` topic partition subscription to throw the same
