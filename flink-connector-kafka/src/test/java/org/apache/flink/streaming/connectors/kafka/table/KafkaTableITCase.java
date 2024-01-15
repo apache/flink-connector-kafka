@@ -1099,6 +1099,94 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                 .satisfies(FlinkAssertions.anyCauseMatches(NoOffsetForPartitionException.class));
     }
 
+    @Test
+    public void testChangingSubscribedTopicsBeforeResuming() throws Exception {
+        // we always use a different topic name for each parameterized topic,
+        // in order to make sure the topic can be created.
+        final String topicA =
+                "change_subscribed_topic_resume_topic_" + format + "_" + UUID.randomUUID();
+        createTestTopic(topicA, 1, 1);
+        final String topicB =
+                "change_subscribed_topic_resume_topic_" + format + "_" + UUID.randomUUID();
+        createTestTopic(topicB, 1, 1);
+        env.setParallelism(1);
+
+        final String createTableFormat =
+                "CREATE TABLE %s (\n"
+                        + "  `id` INT,\n"
+                        + "  `value` INT\n"
+                        + ") WITH (\n"
+                        + "  'connector' = 'kafka',\n"
+                        + "  'topic' = '%s',\n"
+                        + "  'properties.bootstrap.servers' = '"
+                        + getBootstrapServers()
+                        + "',\n"
+                        + "  'scan.startup.mode' = 'latest-offset',\n"
+                        + "  'format' = '"
+                        + format
+                        + "'\n"
+                        + ")";
+
+        // ---------- Submit the consume job -------------------
+
+        tEnv.executeSql(
+                String.format(createTableFormat, "kafka", String.join(";", topicA, topicB)));
+
+        String createSink =
+                "CREATE TABLE MySink(\n"
+                        + "  `id` INT,\n"
+                        + "  `value` INT\n"
+                        + ") WITH (\n"
+                        + "  'connector' = 'values'\n"
+                        + ")";
+        tEnv.executeSql(createSink);
+
+        String executeInsert = "INSERT INTO MySink SELECT `id`, `value` FROM kafka";
+        TableResult tableResult = tEnv.executeSql(executeInsert);
+
+        // ---------- Produce data into TopicA and TopicB -------------------
+
+        tEnv.executeSql(String.format(createTableFormat, "topicA", topicA));
+        tEnv.executeSql("INSERT INTO topicA VALUES (0, 1)").await();
+
+        tEnv.executeSql(String.format(createTableFormat, "topicB", topicB));
+        tEnv.executeSql("INSERT INTO topicB VALUES (1, 1)").await();
+
+        final List<String> expected = Arrays.asList("+I[0, 1]", "+I[1, 1]");
+        KafkaTableTestUtils.waitingExpectedResults("MySink", expected, Duration.ofSeconds(5));
+
+        // ---------- Stop the consume job with savepoint  -------------------
+
+        String savepointBasePath = getTempDirPath("test-change-subscribed-topic-resume-savepoint");
+        assert tableResult.getJobClient().isPresent();
+        JobClient client = tableResult.getJobClient().get();
+        String savepointPath =
+                client.stopWithSavepoint(false, savepointBasePath, SavepointFormatType.DEFAULT)
+                        .get();
+
+        // ---------- Resume job from savepoint, the topic list without topicA ----------
+
+        Configuration configuration = new Configuration();
+        configuration.set(SavepointConfigOptions.SAVEPOINT_PATH, savepointPath);
+        configuration.set(CoreOptions.DEFAULT_PARALLELISM, 1);
+        StreamExecutionEnvironment env =
+                StreamExecutionEnvironment.getExecutionEnvironment(configuration);
+        StreamTableEnvironment tEnv = StreamTableEnvironment.create(env);
+        env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
+
+        tEnv.executeSql(String.format(createTableFormat, "kafka", topicB));
+        tEnv.executeSql(createSink);
+        Assertions.assertThatThrownBy(() -> tEnv.executeSql(executeInsert).await())
+                .rootCause()
+                .isExactlyInstanceOf(IllegalStateException.class);
+
+        // ------------- cleanup -------------------
+
+        tableResult.getJobClient().ifPresent(JobClient::cancel);
+        deleteTestTopic(topicA);
+        deleteTestTopic(topicB);
+    }
+
     private List<String> appendNewData(
             String topic, String tableName, String groupId, int targetNum) throws Exception {
         waitUtil(

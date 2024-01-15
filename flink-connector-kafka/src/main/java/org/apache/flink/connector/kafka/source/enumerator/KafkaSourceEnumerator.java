@@ -162,6 +162,8 @@ public class KafkaSourceEnumerator
     @Override
     public void start() {
         adminClient = getKafkaAdminClient();
+        validateTopicPartitions(
+                subscriber.getSubscribedTopicPartitions(adminClient), assignedPartitions);
         if (partitionDiscoveryIntervalMs > 0) {
             LOG.info(
                     "Starting the KafkaSourceEnumerator for consumer group {} "
@@ -220,6 +222,29 @@ public class KafkaSourceEnumerator
     }
 
     // ----------------- private methods -------------------
+
+    /**
+     * Verify that the subscribed topic partitions match the assigned topic partitions.
+     *
+     * @param subscribed Set of subscribed {@link TopicPartition}s
+     * @param assigned Set of assigned {@link TopicPartition}s
+     */
+    private void validateTopicPartitions(
+            Set<TopicPartition> subscribed, Set<TopicPartition> assigned) {
+        Set<String> subscribedTopics =
+                subscribed.stream().map(TopicPartition::topic).collect(Collectors.toSet());
+        Set<String> assignedTopics =
+                assigned.stream().map(TopicPartition::topic).collect(Collectors.toSet());
+        if (!subscribedTopics.containsAll(assignedTopics)) {
+            throw new IllegalStateException(
+                    "Job cannot recover from checkpoint/savepoint because the subscribed topics do not contain all assigned topics. "
+                            + "Please check your subscribed topic or start without checkpoint/savepoint. "
+                            + "Subscribed: "
+                            + subscribedTopics
+                            + ", Assigned: "
+                            + assignedTopics);
+        }
+    }
 
     /**
      * List subscribed topic partitions on Kafka brokers.
