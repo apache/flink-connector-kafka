@@ -27,20 +27,26 @@ jobs:
     strategy:
       matrix:
         flink_branches: [{
+          flink: 1.17-SNAPSHOT,
+          branch: main
+        }, {
+          flink: 1.18-SNAPSHOT,
+          jdk: '8, 11, 17',
+          branch: main
+        }, {
+          flink: 1.19-SNAPSHOT,
+          jdk: '8, 11, 17, 21',
+          branch: main
+        }, {
           flink: 1.17.1,
           branch: v3.0
         }, {
           flink: 1.18.0,
           branch: v3.0
-        }, {
-          flink: 1.17.1,
-          branch: main
-        }, {
-          flink: 1.18.0,
-          branch: main
         }]
     uses: apache/flink-connector-shared-utils/.github/workflows/ci.yml@ci_utils
     with:
       flink_version: ${{ matrix.flink_branches.flink }}
       connector_branch: ${{ matrix.flink_branches.branch }}
+      jdk_version: ${{ matrix.flink_branches.jdk || '8, 11' }}
       run_dependency_convergence: false
