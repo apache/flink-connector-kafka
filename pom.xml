@@ -424,7 +424,7 @@ under the License.
             <dependency>
                 <groupId>org.apache.commons</groupId>
                 <artifactId>commons-compress</artifactId>
-                <version>1.22</version>
+                <version>1.25.0</version>
             </dependency>
 
             <dependency>
