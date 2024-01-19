@@ -39,7 +39,7 @@ public class DynamicKafkaSourceOptions {
                     .longType()
                     .defaultValue(-1L)
                     .withDescription(
-                            "The interval in milliseconds for the sink to discover "
+                            "The interval in milliseconds for the source to discover "
                                     + "the changes in stream metadata. A non-positive value disables the stream metadata discovery.");
 
     public static final ConfigOption<Integer> STREAM_METADATA_DISCOVERY_FAILURE_THRESHOLD =
@@ -49,7 +49,7 @@ public class DynamicKafkaSourceOptions {
                     .withDescription(
                             "The number of consecutive failures before letting the exception from Kafka metadata service discovery "
                                     + "trigger jobmanager failure and global failover. The default is one to at least catch startup "
-                                    + "failures. This is only implemented for the source");
+                                    + "failures.");
 
     @Internal
     public static <T> T getOption(

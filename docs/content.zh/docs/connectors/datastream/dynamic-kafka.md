@@ -3,7 +3,7 @@ title: Dynamic Kafka
 weight: 3
 type: docs
 aliases:
-  - /dev/connectors/dynamic-kafka.html
+- /dev/connectors/dynamic-kafka.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -26,10 +26,10 @@ under the License.
 
 # Dynamic Kafka Source _`Experimental`_
 
-Flink provides an [Apache Kafka](https://kafka.apache.org) connector for reading data from Kafka topics from one or more Kafka clusters. 
-The Dynamic Kafka connector discovers the clusters and topics using a Kafka metadata service and can achieve reading in a dynamic fashion, facilitating changes in 
-topics and/or clusters, without requiring a job restart. This is especially useful when you need to read a new Kafka cluster/topic and/or stop reading 
-an existing Kafka cluster/topic (cluster migration/failover/other infrastructure changes) and when you need direct integration with Hybrid Source. The solution 
+Flink provides an [Apache Kafka](https://kafka.apache.org) connector for reading data from Kafka topics from one or more Kafka clusters.
+The Dynamic Kafka connector discovers the clusters and topics using a Kafka metadata service and can achieve reading in a dynamic fashion, facilitating changes in
+topics and/or clusters, without requiring a job restart. This is especially useful when you need to read a new Kafka cluster/topic and/or stop reading
+an existing Kafka cluster/topic (cluster migration/failover/other infrastructure changes) and when you need direct integration with Hybrid Source. The solution
 makes these operations automated so that they are transparent to Kafka consumers.
 
 ## Dependency
@@ -49,9 +49,9 @@ This part describes the Dynamic Kafka Source based on the new
 
 ### Usage
 
-Dynamic Kafka Source provides a builder class to initialize the DynamicKafkaSource. The code snippet 
-below shows how to build a DynamicKafkaSource to consume messages from the earliest offset of the 
-stream "input-stream" and deserialize only the value of the 
+Dynamic Kafka Source provides a builder class to initialize the DynamicKafkaSource. The code snippet
+below shows how to build a DynamicKafkaSource to consume messages from the earliest offset of the
+stream "input-stream" and deserialize only the value of the
 ConsumerRecord as a string, using "MyKafkaMetadataService" to resolve the cluster(s) and topic(s)
 corresponding to "input-stream".
 
@@ -60,14 +60,14 @@ corresponding to "input-stream".
 ```java
 
 DynamicKafkaSource<String> source = DynamicKafkaSource.<String>builder()
-    .setKafkaMetadataService(new MyKafkaMetadataService())
-    .setStreamIds(Collections.singleton("input-stream"))
-    .setStartingOffsets(OffsetsInitializer.earliest())
-    .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(StringDeserializer.class))
-    .setProperties(properties)
-    .build();
+        .setKafkaMetadataService(new MyKafkaMetadataService())
+        .setStreamIds(Collections.singleton("input-stream"))
+        .setStartingOffsets(OffsetsInitializer.earliest())
+        .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(StringDeserializer.class))
+        .setProperties(properties)
+        .build();
 
-env.fromSource(source, WatermarkStrategy.noWatermarks(), "Dynamic Kafka Source");
+        env.fromSource(source, WatermarkStrategy.noWatermarks(), "Dynamic Kafka Source");
 ```
 {{< /tab >}}
 {{< /tabs >}}
@@ -98,14 +98,14 @@ The Dynamic Kafka Source provides 2 ways of subscribing to Kafka stream(s).
 
 ### Kafka Metadata Service
 
-An interface is provided to resolve the logical Kafka stream(s) into the corresponding physical 
+An interface is provided to resolve the logical Kafka stream(s) into the corresponding physical
 topic(s) and cluster(s). Typically, these implementations are based on services that align well
-with internal Kafka infrastructure--if that is not available, an in-memory implementation 
+with internal Kafka infrastructure--if that is not available, an in-memory implementation
 would also work. An example of in-memory implementation can be found in our tests.
 
 This source achieves its dynamic characteristic by periodically polling this Kafka metadata service
-for any changes to the Kafka stream(s) and reconciling the reader tasks to subscribe to the new 
-Kafka metadata returned by the service. For example, in the case of a Kafka migration, the source would 
+for any changes to the Kafka stream(s) and reconciling the reader tasks to subscribe to the new
+Kafka metadata returned by the service. For example, in the case of a Kafka migration, the source would
 swap from one cluster to the new cluster when the service makes that change in the Kafka stream metadata.
 
 ### Additional Properties
@@ -194,9 +194,9 @@ the KafkaSourceReader metrics that are also reported.
 
 ### Additional Details
 
-For additional details on deserialization, event time and watermarks, idleness, consumer offset 
-committing, security, and more, you can refer to the [Kafka Source documentation]({{< ref "docs/connectors/datastream/kafka" >}}#kafka-source). This is possible because the 
-Dynamic Kafka Source leverages components of the Kafka Source, and the implementation will be 
+For additional details on deserialization, event time and watermarks, idleness, consumer offset
+committing, security, and more, you can refer to the [Kafka Source documentation]({{< ref "docs/connectors/datastream/kafka" >}}#kafka-source). This is possible because the
+Dynamic Kafka Source leverages components of the Kafka Source, and the implementation will be
 discussed in the next section.
 
 ### Behind the Scene
@@ -221,24 +221,24 @@ You can check the class `DynamicKafkaSourceSplit` for more details.
 #### Split Enumerator
 
 This enumerator is responsible for discovering and assigning splits from one or more clusters. At startup, the
-enumerator will discover metadata belonging to the Kafka stream ids. Using the metadata, it can 
+enumerator will discover metadata belonging to the Kafka stream ids. Using the metadata, it can
 initialize KafkaSourceEnumerators to handle the functions of assigning splits to the readers. In addition,
-source events will be sent to the source reader to reconcile the metadata. This enumerator has the ability to poll the 
-KafkaMetadataService, periodically for stream discovery. In addition, restarting enumerators when metadata changes involve 
+source events will be sent to the source reader to reconcile the metadata. This enumerator has the ability to poll the
+KafkaMetadataService, periodically for stream discovery. In addition, restarting enumerators when metadata changes involve
 clearing outdated metrics since clusters may be removed and so should their metrics.
 
 #### Source Reader
 
-This reader is responsible for reading from one or more clusters and using the KafkaSourceReader to fetch 
+This reader is responsible for reading from one or more clusters and using the KafkaSourceReader to fetch
 records from topics and clusters based on the metadata. When new metadata is discovered by the enumerator,
-the reader will reconcile metadata changes to possibly restart the KafkaSourceReader to read from the new 
+the reader will reconcile metadata changes to possibly restart the KafkaSourceReader to read from the new
 set of topics and clusters.
 
 #### Kafka Metadata Service
 
 This interface represents the source of truth for the current metadata for the configured Kafka stream ids.
-Metadata that is removed in between polls is considered non-active (e.g. removing a cluster from the 
-return value, means that a cluster is non-active and should not be read from). The cluster metadata 
+Metadata that is removed in between polls is considered non-active (e.g. removing a cluster from the
+return value, means that a cluster is non-active and should not be read from). The cluster metadata
 contains an immutable Kafka cluster id, the set of topics, and properties needed to connect to the
 Kafka cluster.
 
