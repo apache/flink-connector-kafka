@@ -20,6 +20,7 @@ package org.apache.flink.connector.kafka.dynamic.source;
 
 import org.apache.flink.annotation.Experimental;
 import org.apache.flink.api.connector.source.Boundedness;
+import org.apache.flink.connector.base.source.reader.RecordEvaluator;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.KafkaStreamSetSubscriber;
 import org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.KafkaStreamSubscriber;
@@ -52,6 +53,7 @@ public class DynamicKafkaSourceBuilder<T> {
     private OffsetsInitializer stoppingOffsetsInitializer;
     private Boundedness boundedness;
     private final Properties props;
+    private RecordEvaluator<T> eofRecordEvaluator;
 
     DynamicKafkaSourceBuilder() {
         this.kafkaStreamSubscriber = null;
@@ -141,6 +143,18 @@ public class DynamicKafkaSourceBuilder<T> {
     }
 
     /**
+     * Set the {@link RecordEvaluator}.
+     *
+     * @param eofRecordEvaluator the {@link RecordEvaluator}.
+     * @return the builder.
+     */
+    public DynamicKafkaSourceBuilder<T> setEofRecordEvaluator(
+            RecordEvaluator<T> eofRecordEvaluator) {
+        this.eofRecordEvaluator = eofRecordEvaluator;
+        return this;
+    }
+
+    /**
      * Set the starting offsets of the stream. This will be applied to all clusters.
      *
      * @param startingOffsetsInitializer the {@link OffsetsInitializer}.
@@ -217,7 +231,8 @@ public class DynamicKafkaSourceBuilder<T> {
                 startingOffsetsInitializer,
                 stoppingOffsetsInitializer,
                 props,
-                boundedness);
+                boundedness,
+                eofRecordEvaluator);
     }
 
     // Below are utility methods, code and structure are mostly copied over from KafkaSourceBuilder
