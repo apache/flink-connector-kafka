@@ -487,6 +487,21 @@ public class KafkaWriterITCase {
         }
     }
 
+    @Test
+    public void testAtLeastOnceFlushGate() throws Exception {
+        Properties properties = getKafkaClientConfiguration();
+        try (final KafkaWriter<Integer> writer =
+                createWriterWithConfiguration(properties, DeliveryGuarantee.AT_LEAST_ONCE)) {
+            writer.write(1, SINK_WRITER_CONTEXT);
+            assertThat(writer.getCurrentProducer().getPendingRecordsCount())
+                    .as("should have one pending record")
+                    .isEqualTo(1);
+            assertThatCode(() -> writer.flush(false))
+                    .as("should not throw exception")
+                    .doesNotThrowAnyException();
+        }
+    }
+
     private void assertKafkaMetricNotPresent(
             DeliveryGuarantee guarantee, String configKey, String configValue) throws Exception {
         final Properties config = getKafkaClientConfiguration();
