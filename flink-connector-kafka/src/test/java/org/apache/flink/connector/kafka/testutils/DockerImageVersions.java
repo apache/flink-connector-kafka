@@ -24,7 +24,7 @@ package org.apache.flink.connector.kafka.testutils;
  */
 public class DockerImageVersions {
 
-    public static final String KAFKA = "confluentinc/cp-kafka:7.2.2";
+    public static final String KAFKA = "confluentinc/cp-kafka:7.4.4";
 
     public static final String SCHEMA_REGISTRY = "confluentinc/cp-schema-registry:7.4.4";
 
