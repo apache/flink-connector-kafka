@@ -18,8 +18,6 @@
 
 package org.apache.flink.connector.kafka.testutils;
 
-import org.apache.flink.util.DockerImageVersions;
-
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.utility.DockerImageName;
