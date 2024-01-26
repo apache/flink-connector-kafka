@@ -25,7 +25,7 @@ under the License.
     <parent>
         <groupId>org.apache.flink</groupId>
         <artifactId>flink-connector-kafka-parent</artifactId>
-        <version>3.1-SNAPSHOT</version>
+        <version>3.1.0</version>
     </parent>
 
     <packaging>pom</packaging>
