@@ -167,8 +167,10 @@ public class KafkaDynamicTableFactory
                         SCAN_TOPIC_PARTITION_DISCOVERY,
                         SCAN_STARTUP_TIMESTAMP_MILLIS,
                         SINK_PARTITIONER,
-                        SINK_PARALLELISM,
-                        TRANSACTIONAL_ID_PREFIX)
+                        TRANSACTIONAL_ID_PREFIX,
+                        SCAN_BOUNDED_MODE,
+                        SCAN_BOUNDED_SPECIFIC_OFFSETS,
+                        SCAN_BOUNDED_TIMESTAMP_MILLIS)
                 .collect(Collectors.toSet());
     }
 
