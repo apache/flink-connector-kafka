@@ -38,6 +38,7 @@ jobs:
           branch: v3.1
         }, {
           flink: 1.18.1,
+          jdk: '8, 11, 17',
           branch: v3.1
         }, {
           flink: 1.17.2,
