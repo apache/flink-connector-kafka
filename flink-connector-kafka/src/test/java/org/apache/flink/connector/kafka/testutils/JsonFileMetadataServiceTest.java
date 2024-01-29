@@ -34,15 +34,15 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** A test class for {@link YamlFileMetadataService}. */
-public class YamlFileMetadataServiceTest {
+/** A test class for {@link JsonFileMetadataService}. */
+public class JsonFileMetadataServiceTest {
 
     @Test
     public void testParseFile() throws IOException {
-        YamlFileMetadataService yamlFileMetadataService =
-                new YamlFileMetadataService(
-                        Resources.getResource("stream-metadata.yaml").getPath(), Duration.ZERO);
-        Set<KafkaStream> kafkaStreams = yamlFileMetadataService.parseFile();
+        JsonFileMetadataService jsonFileMetadataService =
+                new JsonFileMetadataService(
+                        Resources.getResource("stream-metadata.json").getPath(), Duration.ZERO);
+        Set<KafkaStream> kafkaStreams = jsonFileMetadataService.parseFile();
 
         Properties propertiesForCluster0 = new Properties();
         propertiesForCluster0.setProperty(

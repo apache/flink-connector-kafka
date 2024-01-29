@@ -18,10 +18,10 @@
 
 package org.apache.flink.connector.kafka.source.reader.deserializer;
 
+import org.apache.flink.api.common.serialization.AbstractDeserializationSchema;
 import org.apache.flink.connector.kafka.util.JacksonMapperFactory;
 import org.apache.flink.connector.testutils.formats.DummyInitializationContext;
 import org.apache.flink.connector.testutils.source.deserialization.TestingDeserializationContext;
-import org.apache.flink.formats.json.JsonDeserializationSchema;
 import org.apache.flink.streaming.util.serialization.JSONKeyValueDeserializationSchema;
 import org.apache.flink.util.Collector;
 
@@ -35,6 +35,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -81,24 +82,14 @@ public class KafkaRecordDeserializationSchemaTest {
     @Test
     public void testKafkaValueDeserializationSchemaWrapper() throws Exception {
         final ConsumerRecord<byte[], byte[]> consumerRecord = getConsumerRecord();
-        KafkaRecordDeserializationSchema<
-                        org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node
-                                .ObjectNode>
-                schema =
-                        KafkaRecordDeserializationSchema.valueOnly(
-                                new JsonDeserializationSchema<>(
-                                        org.apache.flink.shaded.jackson2.com.fasterxml.jackson
-                                                .databind.node.ObjectNode.class));
+        KafkaRecordDeserializationSchema<ObjectNode> schema =
+                KafkaRecordDeserializationSchema.valueOnly(new SimpleDeserializationSchema());
         schema.open(new DummyInitializationContext());
-        SimpleCollector<
-                        org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node
-                                .ObjectNode>
-                collector = new SimpleCollector<>();
+        SimpleCollector<ObjectNode> collector = new SimpleCollector<>();
         schema.deserialize(consumerRecord, collector);
 
         assertThat(collector.list).hasSize(1);
-        org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ObjectNode
-                deserializedValue = collector.list.get(0);
+        ObjectNode deserializedValue = collector.list.get(0);
         assertThat(deserializedValue.get("word").asText()).isEqualTo("world");
         assertThat(deserializedValue.get("key")).isNull();
         assertThat(deserializedValue.get("metadata")).isNull();
@@ -168,6 +159,14 @@ public class KafkaRecordDeserializationSchemaTest {
         @Override
         public void close() {
             // do nothing
+        }
+    }
+
+    private static class SimpleDeserializationSchema
+            extends AbstractDeserializationSchema<ObjectNode> {
+        @Override
+        public ObjectNode deserialize(byte[] message) throws IOException {
+            return OBJECT_MAPPER.readValue(message, ObjectNode.class);
         }
     }
 

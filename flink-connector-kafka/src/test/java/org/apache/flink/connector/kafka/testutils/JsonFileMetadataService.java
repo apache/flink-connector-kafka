@@ -22,16 +22,10 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
+import org.apache.flink.connector.kafka.util.JacksonMapperFactory;
 
-import org.apache.flink.shaded.jackson2.org.yaml.snakeyaml.DumperOptions;
-import org.apache.flink.shaded.jackson2.org.yaml.snakeyaml.TypeDescription;
-import org.apache.flink.shaded.jackson2.org.yaml.snakeyaml.Yaml;
-import org.apache.flink.shaded.jackson2.org.yaml.snakeyaml.constructor.Constructor;
-import org.apache.flink.shaded.jackson2.org.yaml.snakeyaml.nodes.Node;
-import org.apache.flink.shaded.jackson2.org.yaml.snakeyaml.nodes.SequenceNode;
-import org.apache.flink.shaded.jackson2.org.yaml.snakeyaml.nodes.Tag;
-import org.apache.flink.shaded.jackson2.org.yaml.snakeyaml.representer.Representer;
-
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.type.TypeFactory;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableMap;
 import org.apache.kafka.clients.CommonClientConfigs;
@@ -58,47 +52,55 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Reads metadata from yaml file and lazily refreshes periodically. This implementation assumes that
- * specified topics exist in the clusters that are contained in the yaml metadata. Therefore, topic
+ * Reads metadata from JSON file and lazily refreshes periodically. This implementation assumes that
+ * specified topics exist in the clusters that are contained in the JSON metadata. Therefore, topic
  * is used as the stream name. This is designed to integrate with K8s configmap and cluster
  * migration.
  *
  * <p>Files must be of the form:
  *
  * <pre>{@code
- * - streamId: stream0
- *   clusterMetadataList:
- *     - clusterId: cluster0
- *       bootstrapServers: bootstrap-server-0:443
- *       topics:
- *         - topic0
- *         - topic1
- *     - clusterId: cluster1
- *       bootstrapServers: bootstrap-server-1:443
- *       topics:
- *         - topic2
- *         - topic3
- * - streamId: stream1
- *   clusterMetadataList:
- *     - clusterId: cluster2
- *       bootstrapServers: bootstrap-server-2:443
- *       topics:
- *         - topic4
- *         - topic5
+ * [
+ *   {
+ *     "streamId": "stream0",
+ *     "clusterMetadataList": [
+ *       {
+ *         "clusterId": "cluster0",
+ *         "bootstrapServers": "bootstrap-server-0:443",
+ *         "topics": ["topic0", "topic1"]
+ *       },
+ *       {
+ *         "clusterId": "cluster1",
+ *         "bootstrapServers": "bootstrap-server-1:443",
+ *         "topics": ["topic2", "topic3"]
+ *       }
+ *     ]
+ *   },
+ *   {
+ *     "streamId": "stream1",
+ *     "clusterMetadataList": [
+ *       {
+ *         "clusterId": "cluster2",
+ *         "bootstrapServers": "bootstrap-server-2:443",
+ *         "topics": ["topic4", "topic5"]
+ *       }
+ *     ]
+ *   }
+ * ]
  * }</pre>
  *
  * <p>Typically, usage will look like: first consuming from one cluster, second adding new cluster
- * and consuming from both clusters, and third consuming from only from the new cluster after all
- * data from the old cluster has been read.
+ * and consuming from both clusters, and third consuming from only the new cluster after all data
+ * from the old cluster has been read.
  */
-public class YamlFileMetadataService implements KafkaMetadataService {
-    private static final Logger logger = LoggerFactory.getLogger(YamlFileMetadataService.class);
+public class JsonFileMetadataService implements KafkaMetadataService {
+    private static final Logger logger = LoggerFactory.getLogger(JsonFileMetadataService.class);
+    private static final ObjectMapper OBJECT_MAPPER = JacksonMapperFactory.createObjectMapper();
     private final String metadataFilePath;
     private final Duration refreshInterval;
     private Instant lastRefresh;
     // current metadata should be accessed from #getAllStreams()
     private transient Set<KafkaStream> streamMetadata;
-    private transient Yaml yaml;
 
     /**
      * Constructs a metadata service based on cluster information stored in a file.
@@ -106,7 +108,7 @@ public class YamlFileMetadataService implements KafkaMetadataService {
      * @param metadataFilePath location of the metadata file
      * @param metadataTtl ttl of metadata that controls how often to refresh
      */
-    public YamlFileMetadataService(String metadataFilePath, Duration metadataTtl) {
+    public JsonFileMetadataService(String metadataFilePath, Duration metadataTtl) {
         this.metadataFilePath = metadataFilePath;
         this.refreshInterval = metadataTtl;
         this.lastRefresh = Instant.MIN;
@@ -150,33 +152,34 @@ public class YamlFileMetadataService implements KafkaMetadataService {
     public void close() throws Exception {}
 
     /**
-     * A utility method for writing metadata in the expected yaml format.
+     * A utility method for writing metadata in JSON format.
      *
      * @param streamMetadata list of {@link StreamMetadata}
      * @param metadataFile the metadata {@link File}
      */
-    public static void saveToYaml(List<StreamMetadata> streamMetadata, File metadataFile)
+    public static void saveToJson(List<StreamMetadata> streamMetadata, File metadataFile)
             throws IOException {
         logger.debug("Writing stream infos to file: {}", streamMetadata);
-        Yaml yaml = initYamlParser();
-        FileWriter fileWriter = new FileWriter(metadataFile, false);
-        yaml.dump(streamMetadata, fileWriter);
-        fileWriter.close();
+
+        try (FileWriter fileWriter = new FileWriter(metadataFile, false)) {
+            OBJECT_MAPPER.writeValue(fileWriter, streamMetadata);
+        }
     }
 
     /**
-     * A utility method for writing metadata in the expected yaml format.
+     * A utility method for writing metadata in JSON format.
      *
      * @param kafkaStreams list of {@link KafkaStream}
      * @param metadataFile the metadata {@link File}
      */
-    public static void saveToYamlFromKafkaStreams(List<KafkaStream> kafkaStreams, File metadataFile)
+    public static void saveToJsonFromKafkaStreams(List<KafkaStream> kafkaStreams, File metadataFile)
             throws IOException {
-        saveToYaml(
+        List<StreamMetadata> streamMetadataList =
                 kafkaStreams.stream()
-                        .map(YamlFileMetadataService::convertToStreamMetadata)
-                        .collect(Collectors.toList()),
-                metadataFile);
+                        .map(JsonFileMetadataService::convertToStreamMetadata)
+                        .collect(Collectors.toList());
+
+        saveToJson(streamMetadataList, metadataFile);
     }
 
     private static StreamMetadata convertToStreamMetadata(KafkaStream kafkaStream) {
@@ -210,12 +213,12 @@ public class YamlFileMetadataService implements KafkaMetadataService {
 
     @VisibleForTesting
     Set<KafkaStream> parseFile() throws IOException {
-        if (yaml == null) {
-            yaml = initYamlParser();
-        }
-
         List<StreamMetadata> streamMetadataList =
-                yaml.load(Files.newInputStream(Paths.get(metadataFilePath)));
+                OBJECT_MAPPER.readValue(
+                        Files.newInputStream(Paths.get(metadataFilePath)),
+                        TypeFactory.defaultInstance()
+                                .constructCollectionType(List.class, StreamMetadata.class));
+
         if (logger.isDebugEnabled()) {
             logger.debug(
                     "Input stream of metadata file has size: {}",
@@ -252,37 +255,7 @@ public class YamlFileMetadataService implements KafkaMetadataService {
         return kafkaStreams;
     }
 
-    private static Yaml initYamlParser() {
-        Representer representer = new Representer();
-        representer.addClassTag(StreamMetadata.class, Tag.MAP);
-        TypeDescription typeDescription = new TypeDescription(StreamMetadata.class);
-        representer.addTypeDescription(typeDescription);
-        representer.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
-        return new Yaml(new ListConstructor<>(StreamMetadata.class), representer);
-    }
-
-    /** A custom constructor is required to read yaml lists at the root. */
-    private static class ListConstructor<T> extends Constructor {
-        private final Class<T> clazz;
-
-        public ListConstructor(final Class<T> clazz) {
-            this.clazz = clazz;
-        }
-
-        @Override
-        protected Object constructObject(final Node node) {
-            if (node instanceof SequenceNode && isRootNode(node)) {
-                ((SequenceNode) node).setListType(clazz);
-            }
-            return super.constructObject(node);
-        }
-
-        private boolean isRootNode(final Node node) {
-            return node.getStartMark().getIndex() == 0;
-        }
-    }
-
-    /** Internal class for snake yaml parsing. A mutable, no arg, public class is required. */
+    /** Internal class for JSON parsing. A mutable, no arg, public class is required. */
     public static class StreamMetadata {
 
         private String streamId;

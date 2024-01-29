@@ -29,9 +29,9 @@ import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.connector.kafka.testutils.DynamicKafkaSourceExternalContextFactory;
+import org.apache.flink.connector.kafka.testutils.JsonFileMetadataService;
 import org.apache.flink.connector.kafka.testutils.MockKafkaMetadataService;
 import org.apache.flink.connector.kafka.testutils.TwoKafkaContainers;
-import org.apache.flink.connector.kafka.testutils.YamlFileMetadataService;
 import org.apache.flink.connector.testframe.environment.MiniClusterTestEnvironment;
 import org.apache.flink.connector.testframe.external.DefaultContainerizedExternalSystem;
 import org.apache.flink.connector.testframe.junit.annotations.TestContext;
@@ -272,8 +272,8 @@ public class DynamicKafkaSourceITTest extends TestLogger {
             // create new metadata file to consume from 1 cluster
             String testStreamId = "test-file-metadata-service-stream";
             File metadataFile = File.createTempFile(testDir.getPath() + "/metadata", ".yaml");
-            YamlFileMetadataService yamlFileMetadataService =
-                    new YamlFileMetadataService(metadataFile.getPath(), Duration.ofMillis(100));
+            JsonFileMetadataService jsonFileMetadataService =
+                    new JsonFileMetadataService(metadataFile.getPath(), Duration.ofMillis(100));
             writeClusterMetadataToFile(
                     metadataFile,
                     testStreamId,
@@ -284,7 +284,7 @@ public class DynamicKafkaSourceITTest extends TestLogger {
             DynamicKafkaSource<Integer> dynamicKafkaSource =
                     DynamicKafkaSource.<Integer>builder()
                             .setStreamIds(Collections.singleton(testStreamId))
-                            .setKafkaMetadataService(yamlFileMetadataService)
+                            .setKafkaMetadataService(jsonFileMetadataService)
                             .setDeserializer(
                                     KafkaRecordDeserializationSchema.valueOnly(
                                             IntegerDeserializer.class))
@@ -397,8 +397,8 @@ public class DynamicKafkaSourceITTest extends TestLogger {
 
             // create new metadata file to consume from 1 cluster
             File metadataFile = File.createTempFile(testDir.getPath() + "/metadata", ".yaml");
-            YamlFileMetadataService yamlFileMetadataService =
-                    new YamlFileMetadataService(metadataFile.getPath(), Duration.ofMillis(100));
+            JsonFileMetadataService jsonFileMetadataService =
+                    new JsonFileMetadataService(metadataFile.getPath(), Duration.ofMillis(100));
 
             Set<KafkaStream> kafkaStreams =
                     getKafkaStreams(
@@ -424,7 +424,7 @@ public class DynamicKafkaSourceITTest extends TestLogger {
             DynamicKafkaSource<Integer> dynamicKafkaSource =
                     DynamicKafkaSource.<Integer>builder()
                             .setStreamPattern(Pattern.compile("stream-pattern-test-.+"))
-                            .setKafkaMetadataService(yamlFileMetadataService)
+                            .setKafkaMetadataService(jsonFileMetadataService)
                             .setDeserializer(
                                     KafkaRecordDeserializationSchema.valueOnly(
                                             IntegerDeserializer.class))
@@ -498,8 +498,8 @@ public class DynamicKafkaSourceITTest extends TestLogger {
             // create new metadata file to consume from 1 cluster
             String testStreamId = "test-file-metadata-service-stream";
             File metadataFile = File.createTempFile(testDir.getPath() + "/metadata", ".yaml");
-            YamlFileMetadataService yamlFileMetadataService =
-                    new YamlFileMetadataService(metadataFile.getPath(), Duration.ofMillis(100));
+            JsonFileMetadataService jsonFileMetadataService =
+                    new JsonFileMetadataService(metadataFile.getPath(), Duration.ofMillis(100));
             writeClusterMetadataToFile(
                     metadataFile,
                     testStreamId,
@@ -510,7 +510,7 @@ public class DynamicKafkaSourceITTest extends TestLogger {
             DynamicKafkaSource<Integer> dynamicKafkaSource =
                     DynamicKafkaSource.<Integer>builder()
                             .setStreamIds(Collections.singleton(testStreamId))
-                            .setKafkaMetadataService(yamlFileMetadataService)
+                            .setKafkaMetadataService(jsonFileMetadataService)
                             .setDeserializer(
                                     KafkaRecordDeserializationSchema.valueOnly(
                                             IntegerDeserializer.class))
@@ -590,15 +590,15 @@ public class DynamicKafkaSourceITTest extends TestLogger {
 
         private void writeClusterMetadataToFile(File metadataFile, Set<KafkaStream> kafkaStreams)
                 throws IOException {
-            List<YamlFileMetadataService.StreamMetadata> streamMetadataList = new ArrayList<>();
+            List<JsonFileMetadataService.StreamMetadata> streamMetadataList = new ArrayList<>();
             for (KafkaStream kafkaStream : kafkaStreams) {
-                List<YamlFileMetadataService.StreamMetadata.ClusterMetadata> clusterMetadataList =
+                List<JsonFileMetadataService.StreamMetadata.ClusterMetadata> clusterMetadataList =
                         new ArrayList<>();
 
                 for (Map.Entry<String, ClusterMetadata> entry :
                         kafkaStream.getClusterMetadataMap().entrySet()) {
-                    YamlFileMetadataService.StreamMetadata.ClusterMetadata clusterMetadata =
-                            new YamlFileMetadataService.StreamMetadata.ClusterMetadata();
+                    JsonFileMetadataService.StreamMetadata.ClusterMetadata clusterMetadata =
+                            new JsonFileMetadataService.StreamMetadata.ClusterMetadata();
                     clusterMetadata.setClusterId(entry.getKey());
                     clusterMetadata.setBootstrapServers(
                             entry.getValue()
@@ -608,14 +608,14 @@ public class DynamicKafkaSourceITTest extends TestLogger {
                     clusterMetadataList.add(clusterMetadata);
                 }
 
-                YamlFileMetadataService.StreamMetadata streamMetadata =
-                        new YamlFileMetadataService.StreamMetadata();
+                JsonFileMetadataService.StreamMetadata streamMetadata =
+                        new JsonFileMetadataService.StreamMetadata();
                 streamMetadata.setStreamId(kafkaStream.getStreamId());
                 streamMetadata.setClusterMetadataList(clusterMetadataList);
                 streamMetadataList.add(streamMetadata);
             }
 
-            YamlFileMetadataService.saveToYaml(streamMetadataList, metadataFile);
+            JsonFileMetadataService.saveToJson(streamMetadataList, metadataFile);
         }
 
         private void writeClusterMetadataToFile(
@@ -624,20 +624,20 @@ public class DynamicKafkaSourceITTest extends TestLogger {
                 String topic,
                 List<KafkaTestBase.KafkaClusterTestEnvMetadata> kafkaClusterTestEnvMetadataList)
                 throws IOException {
-            List<YamlFileMetadataService.StreamMetadata.ClusterMetadata> clusterMetadata =
+            List<JsonFileMetadataService.StreamMetadata.ClusterMetadata> clusterMetadata =
                     kafkaClusterTestEnvMetadataList.stream()
                             .map(
                                     KafkaClusterTestEnvMetadata ->
-                                            new YamlFileMetadataService.StreamMetadata
+                                            new JsonFileMetadataService.StreamMetadata
                                                     .ClusterMetadata(
                                                     KafkaClusterTestEnvMetadata.getKafkaClusterId(),
                                                     KafkaClusterTestEnvMetadata
                                                             .getBrokerConnectionStrings(),
                                                     ImmutableList.of(topic)))
                             .collect(Collectors.toList());
-            YamlFileMetadataService.StreamMetadata streamMetadata =
-                    new YamlFileMetadataService.StreamMetadata(streamId, clusterMetadata);
-            YamlFileMetadataService.saveToYaml(
+            JsonFileMetadataService.StreamMetadata streamMetadata =
+                    new JsonFileMetadataService.StreamMetadata(streamId, clusterMetadata);
+            JsonFileMetadataService.saveToJson(
                     Collections.singletonList(streamMetadata), metadataFile);
         }
 
