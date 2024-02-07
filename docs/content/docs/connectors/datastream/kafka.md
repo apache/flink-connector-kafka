@@ -36,7 +36,7 @@ The version of the client it uses may change between Flink releases.
 Modern Kafka clients are backwards compatible with broker versions 0.10.0 or later.
 For details on Kafka compatibility, please refer to the official [Kafka documentation](https://kafka.apache.org/protocol.html#protocol_compatibility).
 
-{{< connector_artifact flink-connector-kafka 3.0.0 >}}
+{{< connector_artifact flink-connector-kafka kafka >}}
 
 Flink's streaming connectors are not part of the binary distribution.
 See how to link with them for cluster execution [here]({{< ref "docs/dev/configuration/overview" >}}).

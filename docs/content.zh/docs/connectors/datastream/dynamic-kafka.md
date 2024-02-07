@@ -36,7 +36,7 @@ makes these operations automated so that they are transparent to Kafka consumers
 
 For details on Kafka compatibility, please refer to the official [Kafka documentation](https://kafka.apache.org/protocol.html#protocol_compatibility).
 
-{{< connector_artifact flink-connector-kafka 3.1.0 >}}
+{{< connector_artifact flink-connector-kafka kafka >}}
 
 Flink's streaming connectors are not part of the binary distribution.
 See how to link with them for cluster execution [here]({{< ref "docs/dev/configuration/overview" >}}).
