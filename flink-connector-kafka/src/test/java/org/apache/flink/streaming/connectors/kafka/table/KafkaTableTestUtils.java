@@ -41,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.HamcrestCondition.matching;
@@ -98,8 +99,11 @@ public class KafkaTableTestUtils {
         Collections.sort(expected);
         CommonTestUtils.waitUtil(
                 () -> {
-                    List<String> actual = TestValuesTableFactory.getResults(sinkName);
-                    Collections.sort(actual);
+                    List<String> actual =
+                            TestValuesTableFactory.getResults(sinkName).stream()
+                                    .map(KafkaTableTestUtils::rowToString)
+                                    .sorted()
+                                    .collect(Collectors.toList());
                     return expected.equals(actual);
                 },
                 timeout,
@@ -122,6 +126,14 @@ public class KafkaTableTestUtils {
             assertThat(actualData.get(key))
                     .satisfies(
                             matching(TableTestMatchers.deepEqualTo(expectedData.get(key), false)));
+        }
+    }
+
+    private static String rowToString(Object o) {
+        if (o instanceof Row) {
+            return ((Row) o).toString();
+        } else {
+            return o.toString();
         }
     }
 }
