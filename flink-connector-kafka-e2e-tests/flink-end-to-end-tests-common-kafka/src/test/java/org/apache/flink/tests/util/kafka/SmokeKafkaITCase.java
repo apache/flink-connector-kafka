@@ -62,8 +62,8 @@ import java.util.Properties;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.connector.kafka.testutils.DockerImageVersions.KAFKA;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
-import static org.apache.flink.util.DockerImageVersions.KAFKA;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** smoke test for the kafka connectors. */

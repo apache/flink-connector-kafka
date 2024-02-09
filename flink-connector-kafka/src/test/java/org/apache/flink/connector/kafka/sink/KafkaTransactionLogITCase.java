@@ -44,8 +44,8 @@ import static org.apache.flink.connector.kafka.sink.KafkaTransactionLog.Transact
 import static org.apache.flink.connector.kafka.sink.KafkaTransactionLog.TransactionState.Ongoing;
 import static org.apache.flink.connector.kafka.sink.KafkaTransactionLog.TransactionState.PrepareAbort;
 import static org.apache.flink.connector.kafka.sink.KafkaTransactionLog.TransactionState.PrepareCommit;
+import static org.apache.flink.connector.kafka.testutils.DockerImageVersions.KAFKA;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
-import static org.apache.flink.util.DockerImageVersions.KAFKA;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link KafkaTransactionLog} to retrieve abortable Kafka transactions. */
