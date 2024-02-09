@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.tests.util.kafka.test;
+package org.apache.flink.connector.kafka.testutils;
 
 /**
  * Utility class for defining the image names and versions of Docker containers used during the Java
@@ -24,7 +24,9 @@ package org.apache.flink.tests.util.kafka.test;
  */
 public class DockerImageVersions {
 
-    public static final String KAFKA = "confluentinc/cp-kafka:7.2.2";
+    public static final String KAFKA = "confluentinc/cp-kafka:7.4.4";
 
-    public static final String SCHEMA_REGISTRY = "confluentinc/cp-schema-registry:7.2.2";
+    public static final String SCHEMA_REGISTRY = "confluentinc/cp-schema-registry:7.4.4";
+
+    public static final String ZOOKEEPER = "zookeeper:3.4.14";
 }
