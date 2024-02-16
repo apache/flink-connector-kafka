@@ -151,7 +151,6 @@ under the License.
         </dependency>
 
         <!-- Tests will have log4j as the default logging framework available -->
-
         <dependency>
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-slf4j-impl</artifactId>
@@ -193,7 +192,6 @@ under the License.
     <!-- This section defines the module versions that are used if nothing else is specified. -->
 
     <dependencyManagement>
-
         <dependencies>
             <!-- For dependency convergence -->
             <dependency>
@@ -230,6 +228,14 @@ under the License.
                 <groupId>org.apache.kafka</groupId>
                 <artifactId>kafka-clients</artifactId>
                 <version>${kafka.version}</version>
+            </dependency>
+
+            <!--Use org.apache.kafka.connect.json.JsonDeserializer to deserializer record-->
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>connect-json</artifactId>
+                <version>${kafka.version}</version>
+                <scope>test</scope>
             </dependency>
 
             <dependency>
@@ -434,7 +440,6 @@ under the License.
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-
         </dependencies>
     </dependencyManagement>
 

@@ -339,8 +339,22 @@ CREATE TABLE KafkaTable (
       <td><h5>scan.topic-partition-discovery.interval</h5></td>
       <td>可选</td>
       <td style="word-wrap: break-word;">5分钟</td>
-      <td>Duration</td>
+      <td>Boolean</td>
       <td>Consumer 定期探测动态创建的 Kafka topic 和 partition 的时间间隔。需要显式地设置'scan.topic-partition-discovery.interval'为0才能关闭此功能</td>
+    </tr>
+    <tr>
+      <td><h5>record.key.include.kafka.connect.json.schema</h5></td>
+      <td>可选</td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>判断ConsumerRecord key中是否是包含了schema信息的kafka connect SourceRecord, 若为true, 在解析过程中直接取payload, 转换成普通的对象数据.</td>
+    </tr>
+    <tr>
+      <td><h5>record.value.include.kafka.connect.json.schema</h5></td>
+      <td>可选</td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Duration</td>
+      <td>判断ConsumerRecord value中是否是包含了schema信息的kafka connect SourceRecord, 若为true, 在解析过程中直接取payload, 转换成普通的对象数据.</td>
     </tr>
     <tr>
       <td><h5>sink.partitioner</h5></td>
