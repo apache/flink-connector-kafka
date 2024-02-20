@@ -946,7 +946,6 @@ public class FlinkKafkaProducer<IN>
                         break;
                 }
             }
-            super.close();
         } catch (Exception e) {
             asyncException = ExceptionUtils.firstOrSuppressed(e, asyncException);
         } finally {
@@ -970,6 +969,11 @@ public class FlinkKafkaProducer<IN>
                                     LOG.warn("Error closing producer.", t);
                                 }
                             });
+            try {
+                super.close();
+            } catch (Exception e) {
+                LOG.warn("Error close currentTransactionHolder in TwoPhaseCommitSinkFunction.", e);
+            }
             // make sure we propagate pending errors
             checkErroneous();
         }
