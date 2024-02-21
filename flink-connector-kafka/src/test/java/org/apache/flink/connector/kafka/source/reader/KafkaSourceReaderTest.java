@@ -116,7 +116,7 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
                     "Waiting for offsets topic creation failed.");
         }
         KafkaSourceTestEnv.produceToKafka(
-                getRecords(), StringSerializer.class, IntegerSerializer.class);
+                getRecords(), StringSerializer.class, IntegerSerializer.class, null);
     }
 
     @AfterAll

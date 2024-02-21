@@ -249,7 +249,13 @@ public class KafkaSourceTestEnv extends KafkaTestBase {
 
     public static void produceToKafka(Collection<ProducerRecord<String, Integer>> records)
             throws Throwable {
-        produceToKafka(records, StringSerializer.class, IntegerSerializer.class);
+        produceToKafka(records, StringSerializer.class, IntegerSerializer.class, null);
+    }
+
+    public static void produceToKafka(
+            Collection<ProducerRecord<String, Integer>> records, Properties extraProps)
+            throws Throwable {
+        produceToKafka(records, StringSerializer.class, IntegerSerializer.class, extraProps);
     }
 
     public static void setupTopic(

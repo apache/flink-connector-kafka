@@ -80,6 +80,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.flink.connector.kafka.testutils.KafkaSourceExternalContext.SplitMappingMode.PARTITION;
 import static org.apache.flink.connector.kafka.testutils.KafkaSourceExternalContext.SplitMappingMode.TOPIC;
+import static org.apache.flink.streaming.connectors.kafka.KafkaTestBase.kafkaServer;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unite test class for {@link KafkaSource}. */
@@ -368,6 +369,40 @@ public class KafkaSourceITCase {
                             source,
                             WatermarkStrategy.noWatermarks(),
                             "testConsumingTopicWithEmptyPartitions"));
+        }
+
+        @Test
+        public void testConsumingTransactionalMessage() throws Throwable {
+            String transactionalTopic = "transactionalTopic-" + UUID.randomUUID();
+            KafkaSourceTestEnv.createTestTopic(
+                    transactionalTopic, KafkaSourceTestEnv.NUM_PARTITIONS, 1);
+            List<ProducerRecord<String, Integer>> records =
+                    KafkaSourceTestEnv.getRecordsForTopic(transactionalTopic);
+            KafkaSourceTestEnv.produceToKafka(
+                    records, kafkaServer.getTransactionalProducerConfig());
+            // After running KafkaSourceTestEnv.setupEarliestOffsets(transactionalTopic):
+            // - For each partition, records with offsets before partition number P are deleted.
+            //   - Partition 0: offset 0 is earliest
+            //   - Partition 5: offset 5 is earliest, 0-4 are deleted.
+            //   - Partition 9: offset 9 is earliest, 0-8 are deleted.
+            KafkaSourceTestEnv.setupEarliestOffsets(transactionalTopic);
+            KafkaSource<PartitionAndValue> source =
+                    KafkaSource.<PartitionAndValue>builder()
+                            .setBootstrapServers(KafkaSourceTestEnv.brokerConnectionStrings)
+                            .setTopics(transactionalTopic)
+                            .setGroupId("topic-with-transactional-message-test")
+                            .setDeserializer(new TestingKafkaRecordDeserializationSchema(false))
+                            .setStartingOffsets(OffsetsInitializer.earliest())
+                            .setBounded(OffsetsInitializer.latest())
+                            .build();
+            StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+            env.setParallelism(1);
+            executeAndVerify(
+                    env,
+                    env.fromSource(
+                            source,
+                            WatermarkStrategy.noWatermarks(),
+                            "testConsumingTransactionalMessage"));
         }
     }
 

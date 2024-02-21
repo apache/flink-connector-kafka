@@ -46,6 +46,8 @@ import org.junit.rules.TemporaryFolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -242,11 +244,15 @@ public abstract class KafkaTestBase extends TestLogger {
             Collection<ProducerRecord<K, V>> records,
             Class<? extends org.apache.kafka.common.serialization.Serializer<K>> keySerializerClass,
             Class<? extends org.apache.kafka.common.serialization.Serializer<V>>
-                    valueSerializerClass)
+                    valueSerializerClass,
+            @Nullable Properties extraProps)
             throws Throwable {
         Properties props = new Properties();
         props.putAll(standardProps);
         props.putAll(kafkaServer.getIdempotentProducerConfig());
+        if (extraProps != null) {
+            props.putAll(extraProps);
+        }
         props.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, keySerializerClass.getName());
         props.setProperty(
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, valueSerializerClass.getName());
@@ -261,8 +267,15 @@ public abstract class KafkaTestBase extends TestLogger {
                     }
                 };
         try (KafkaProducer<K, V> producer = new KafkaProducer<>(props)) {
+            if (props.containsKey(ProducerConfig.TRANSACTIONAL_ID_CONFIG)) {
+                producer.initTransactions();
+                producer.beginTransaction();
+            }
             for (ProducerRecord<K, V> record : records) {
                 producer.send(record, callback);
+            }
+            if (props.containsKey(ProducerConfig.TRANSACTIONAL_ID_CONFIG)) {
+                producer.commitTransaction();
             }
         }
         if (sendingError.get() != null) {
