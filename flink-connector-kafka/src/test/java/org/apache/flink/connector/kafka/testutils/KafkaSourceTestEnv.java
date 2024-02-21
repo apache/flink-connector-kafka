@@ -252,6 +252,12 @@ public class KafkaSourceTestEnv extends KafkaTestBase {
         produceToKafka(records, StringSerializer.class, IntegerSerializer.class);
     }
 
+    public static void produceTransactionalMessageToKafka(
+            Collection<ProducerRecord<String, Integer>> records) throws Throwable {
+        produceTransactionalMessageToKafka(
+                records, StringSerializer.class, IntegerSerializer.class);
+    }
+
     public static void setupTopic(
             String topic,
             boolean setupEarliestOffsets,

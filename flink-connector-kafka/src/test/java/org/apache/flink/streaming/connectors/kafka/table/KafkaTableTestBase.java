@@ -28,6 +28,7 @@ import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsResult;
 import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.clients.admin.RecordsToDelete;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.clients.admin.TopicListing;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -167,6 +168,24 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
             admin.deleteTopics(Collections.singletonList(topic)).all().get();
         } catch (Exception e) {
             throw new IllegalStateException(String.format("Fail to delete topic [%s].", topic), e);
+        }
+    }
+
+    public void deleteRecords(String topic, Map<Integer, Long> partitionOffsetsToDelete) {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, getBootstrapServers());
+
+        try (AdminClient admin = AdminClient.create(properties)) {
+            Map<TopicPartition, RecordsToDelete> recordsToDelete = new HashMap<>();
+            for (Map.Entry<Integer, Long> entry : partitionOffsetsToDelete.entrySet()) {
+                TopicPartition partition = new TopicPartition(topic, entry.getKey());
+                RecordsToDelete records = RecordsToDelete.beforeOffset(entry.getValue());
+                recordsToDelete.put(partition, records);
+            }
+            admin.deleteRecords(recordsToDelete).all().get();
+        } catch (Exception e) {
+            throw new IllegalStateException(
+                    String.format("Fail to delete records on topic [%s].", topic), e);
         }
     }
 

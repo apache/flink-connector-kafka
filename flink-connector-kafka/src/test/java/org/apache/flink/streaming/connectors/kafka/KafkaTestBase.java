@@ -270,6 +270,42 @@ public abstract class KafkaTestBase extends TestLogger {
         }
     }
 
+    public static <K, V> void produceTransactionalMessageToKafka(
+            Collection<ProducerRecord<K, V>> records,
+            Class<? extends org.apache.kafka.common.serialization.Serializer<K>> keySerializerClass,
+            Class<? extends org.apache.kafka.common.serialization.Serializer<V>>
+                    valueSerializerClass)
+            throws Throwable {
+        Properties props = new Properties();
+        props.putAll(standardProps);
+        props.putAll(kafkaServer.getIdempotentProducerConfig());
+        props.putAll(kafkaServer.getTransactionalProducerConfig());
+        props.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, keySerializerClass.getName());
+        props.setProperty(
+                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, valueSerializerClass.getName());
+
+        AtomicReference<Throwable> sendingError = new AtomicReference<>();
+        Callback callback =
+                (metadata, exception) -> {
+                    if (exception != null) {
+                        if (!sendingError.compareAndSet(null, exception)) {
+                            sendingError.get().addSuppressed(exception);
+                        }
+                    }
+                };
+        try (KafkaProducer<K, V> producer = new KafkaProducer<>(props)) {
+            producer.initTransactions();
+            producer.beginTransaction();
+            for (ProducerRecord<K, V> record : records) {
+                producer.send(record, callback);
+            }
+            producer.commitTransaction();
+        }
+        if (sendingError.get() != null) {
+            throw sendingError.get();
+        }
+    }
+
     /**
      * We manually handle the timeout instead of using JUnit's timeout to return failure instead of
      * timeout error. After timeout we assume that there are missing records and there is a bug, not
