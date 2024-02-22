@@ -21,6 +21,7 @@ package org.apache.flink.connector.kafka.source;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.connector.source.Boundedness;
+import org.apache.flink.connector.base.source.reader.RecordEvaluator;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.NoStoppingOffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializerValidator;
@@ -104,6 +105,7 @@ public class KafkaSourceBuilder<OUT> {
     protected Properties props;
     // Client rackId supplier
     private SerializableSupplier<String> rackIdSupplier;
+    private RecordEvaluator<OUT> eofRecordEvaluator;
 
     KafkaSourceBuilder() {
         this.subscriber = null;
@@ -351,6 +353,26 @@ public class KafkaSourceBuilder<OUT> {
     }
 
     /**
+     * Sets the optional {@link RecordEvaluator eofRecordEvaluator} for KafkaSource.
+     *
+     * <p>When the evaluator is specified, it is invoked for each de-serialized record to determine
+     * whether the corresponding split has reached end of stream. If a record is matched by the
+     * evaluator, the source would not emit this record as well as the following records in the same
+     * split.
+     *
+     * <p>Note that the evaluator works jointly with the stopping offsets specified by the {@link
+     * #setBounded(OffsetsInitializer)} or the {@link #setUnbounded(OffsetsInitializer)}. The source
+     * stops consuming from a split when any of these conditions is met.
+     *
+     * @param eofRecordEvaluator a {@link RecordEvaluator recordEvaluator}
+     * @return this KafkaSourceBuilder.
+     */
+    public KafkaSourceBuilder<OUT> setEofRecordEvaluator(RecordEvaluator<OUT> eofRecordEvaluator) {
+        this.eofRecordEvaluator = eofRecordEvaluator;
+        return this;
+    }
+
+    /**
      * Sets the client id prefix of this KafkaSource.
      *
      * @param prefix the client id prefix to use for this KafkaSource.
@@ -436,6 +458,7 @@ public class KafkaSourceBuilder<OUT> {
                 subscriber,
                 startingOffsetsInitializer,
                 stoppingOffsetsInitializer,
+                eofRecordEvaluator,
                 boundedness,
                 deserializationSchema,
                 props,

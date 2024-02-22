@@ -23,6 +23,7 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.source.reader.RecordEmitter;
+import org.apache.flink.connector.base.source.reader.RecordEvaluator;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.SingleThreadMultiplexSourceReaderBase;
 import org.apache.flink.connector.base.source.reader.synchronization.FutureCompletingBlockingQueue;
@@ -37,6 +38,8 @@ import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -68,8 +71,15 @@ public class KafkaSourceReader<T>
                     recordEmitter,
             Configuration config,
             SourceReaderContext context,
-            KafkaSourceReaderMetrics kafkaSourceReaderMetrics) {
-        super(elementsQueue, kafkaSourceFetcherManager, recordEmitter, config, context);
+            KafkaSourceReaderMetrics kafkaSourceReaderMetrics,
+            @Nullable RecordEvaluator<T> recordEvaluator) {
+        super(
+                elementsQueue,
+                kafkaSourceFetcherManager,
+                recordEmitter,
+                recordEvaluator,
+                config,
+                context);
         this.offsetsToCommit = Collections.synchronizedSortedMap(new TreeMap<>());
         this.offsetsOfFinishedSplits = new ConcurrentHashMap<>();
         this.kafkaSourceReaderMetrics = kafkaSourceReaderMetrics;
