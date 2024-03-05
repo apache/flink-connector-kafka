@@ -30,12 +30,15 @@ import org.apache.flink.util.Collector;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.header.Header;
 
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /** A specific {@link KafkaSerializationSchema} for {@link KafkaDynamicSource}. */
 class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<RowData> {
@@ -127,7 +130,11 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
             // collect tombstone messages in upsert mode by hand
             outputCollector.collect(null);
         } else {
-            valueDeserialization.deserialize(record.value(), outputCollector);
+            Map<String, Object> headersMap =  new HashMap<>();
+            for (Header header : record.headers()) {
+                headersMap.put(header.key(), header.value());
+            }
+            valueDeserialization.deserializeWithHeaders(record.value(), headersMap, outputCollector);
         }
         keyCollector.buffer.clear();
     }

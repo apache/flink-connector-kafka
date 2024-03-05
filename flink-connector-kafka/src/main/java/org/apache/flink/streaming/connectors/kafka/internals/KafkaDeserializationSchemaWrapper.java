@@ -24,6 +24,14 @@ import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 import org.apache.flink.util.Collector;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.header.Header;
+
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * A simple wrapper for using the DeserializationSchema with the KafkaDeserializationSchema
@@ -55,7 +63,11 @@ public class KafkaDeserializationSchemaWrapper<T> implements KafkaDeserializatio
     @Override
     public void deserialize(ConsumerRecord<byte[], byte[]> message, Collector<T> out)
             throws Exception {
-        deserializationSchema.deserialize(message.value(), out);
+        Map<String, Object> headersMapFromKafka = new HashMap<>();
+        for (Header header:message.headers()) {
+            headersMapFromKafka.put(header.key(), header.value());
+        }
+        deserializationSchema.deserializeWithHeaders(message.value(), headersMapFromKafka, out);
     }
 
     @Override
