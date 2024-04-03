@@ -65,7 +65,7 @@ class KafkaValueOnlyDeserializerWrapper<T> implements KafkaRecordDeserialization
                             InstantiationUtil.instantiate(
                                     deserializerClass.getName(),
                                     Deserializer.class,
-                                    getClass().getClassLoader());
+                                    userCodeClassLoader);
 
             if (deserializer instanceof Configurable) {
                 ((Configurable) deserializer).configure(config);
