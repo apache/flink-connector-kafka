@@ -71,7 +71,7 @@ class KafkaSerializerWrapper<IN> implements SerializationSchema<IN> {
                     InstantiationUtil.instantiate(
                             serializerClass.getName(),
                             Serializer.class,
-                            getClass().getClassLoader());
+                            userCodeClassLoader);
 
             if (serializer instanceof Configurable) {
                 ((Configurable) serializer).configure(config);
