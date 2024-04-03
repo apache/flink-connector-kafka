@@ -53,9 +53,11 @@ class TopicPatternSubscriber implements KafkaSubscriber {
                 (topicName, topicDescription) -> {
                     if (topicPattern.matcher(topicName).matches()) {
                         for (TopicPartitionInfo partition : topicDescription.partitions()) {
-                            subscribedTopicPartitions.add(
-                                    new TopicPartition(
-                                            topicDescription.name(), partition.partition()));
+                            if (partition.leader() != null) {
+                                subscribedTopicPartitions.add(
+                                        new TopicPartition(
+                                                topicDescription.name(), partition.partition()));
+                            }
                         }
                     }
                 });

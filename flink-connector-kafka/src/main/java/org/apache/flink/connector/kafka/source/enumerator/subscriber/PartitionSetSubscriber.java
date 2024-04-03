@@ -56,7 +56,7 @@ class PartitionSetSubscriber implements KafkaSubscriber {
 
         for (TopicPartition subscribedPartition : this.subscribedPartitions) {
             if (topicMetadata.containsKey(subscribedPartition.topic())
-                    && partitionExistsInTopic(
+                    && partitionExistsInTopicAndValid(
                             subscribedPartition, topicMetadata.get(subscribedPartition.topic()))) {
                 existingSubscribedPartitions.add(subscribedPartition);
             } else {
@@ -70,7 +70,9 @@ class PartitionSetSubscriber implements KafkaSubscriber {
         return existingSubscribedPartitions;
     }
 
-    private boolean partitionExistsInTopic(TopicPartition partition, TopicDescription topic) {
-        return topic.partitions().size() > partition.partition();
+    private boolean partitionExistsInTopicAndValid(
+            TopicPartition partition, TopicDescription topic) {
+        return topic.partitions().stream()
+                .anyMatch(p -> p.leader() != null && p.partition() == partition.partition());
     }
 }
