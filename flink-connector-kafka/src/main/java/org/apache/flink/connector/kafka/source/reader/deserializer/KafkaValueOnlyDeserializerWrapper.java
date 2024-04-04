@@ -55,17 +55,11 @@ class KafkaValueOnlyDeserializerWrapper<T> implements KafkaRecordDeserialization
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public void open(DeserializationSchema.InitializationContext context) throws Exception {
-        ClassLoader userCodeClassLoader = context.getUserCodeClassLoader().asClassLoader();
+        ClassLoader userCodeClassLoader = selectClassLoader(context);
         try (TemporaryClassLoaderContext ignored =
                 TemporaryClassLoaderContext.of(userCodeClassLoader)) {
-            deserializer =
-                    (Deserializer<T>)
-                            InstantiationUtil.instantiate(
-                                    deserializerClass.getName(),
-                                    Deserializer.class,
-                                    userCodeClassLoader);
+            initializeDeserializer(userCodeClassLoader);
 
             if (deserializer instanceof Configurable) {
                 ((Configurable) deserializer).configure(config);
@@ -102,5 +96,20 @@ class KafkaValueOnlyDeserializerWrapper<T> implements KafkaRecordDeserialization
     @Override
     public TypeInformation<T> getProducedType() {
         return TypeExtractor.createTypeInfo(Deserializer.class, deserializerClass, 0, null, null);
+    }
+
+    /**
+     * Selects the class loader to be used when instantiating the deserializer. Using a class loader
+     * with user code allows users to customize the deserializer.
+     */
+    protected ClassLoader selectClassLoader(DeserializationSchema.InitializationContext context) {
+        return context.getUserCodeClassLoader().asClassLoader();
+    }
+
+    @SuppressWarnings("unchecked")
+    protected void initializeDeserializer(ClassLoader classLoader) throws Exception {
+        deserializer =
+                InstantiationUtil.instantiate(
+                        deserializerClass.getName(), Deserializer.class, classLoader);
     }
 }

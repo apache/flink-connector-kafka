@@ -61,17 +61,12 @@ class KafkaSerializerWrapper<IN> implements SerializationSchema<IN> {
         this(serializerClass, isKey, Collections.emptyMap(), topicSelector);
     }
 
-    @SuppressWarnings("unchecked")
     @Override
     public void open(InitializationContext context) throws Exception {
-        final ClassLoader userCodeClassLoader = context.getUserCodeClassLoader().asClassLoader();
+        final ClassLoader userCodeClassLoader = selectClassLoader(context);
         try (TemporaryClassLoaderContext ignored =
                 TemporaryClassLoaderContext.of(userCodeClassLoader)) {
-            serializer =
-                    InstantiationUtil.instantiate(
-                            serializerClass.getName(),
-                            Serializer.class,
-                            userCodeClassLoader);
+            initializeSerializer(userCodeClassLoader);
 
             if (serializer instanceof Configurable) {
                 ((Configurable) serializer).configure(config);
@@ -87,5 +82,20 @@ class KafkaSerializerWrapper<IN> implements SerializationSchema<IN> {
     public byte[] serialize(IN element) {
         checkState(serializer != null, "Call open() once before trying to serialize elements.");
         return serializer.serialize(topicSelector.apply(element), element);
+    }
+
+    /**
+     * Selects the class loader to be used when instantiating the serializer. Using a class loader
+     * with user code allows users to customize the serializer.
+     */
+    protected ClassLoader selectClassLoader(InitializationContext context) {
+        return context.getUserCodeClassLoader().asClassLoader();
+    }
+
+    @SuppressWarnings("unchecked")
+    protected void initializeSerializer(ClassLoader classLoader) throws Exception {
+        serializer =
+                InstantiationUtil.instantiate(
+                        serializerClass.getName(), Serializer.class, classLoader);
     }
 }
