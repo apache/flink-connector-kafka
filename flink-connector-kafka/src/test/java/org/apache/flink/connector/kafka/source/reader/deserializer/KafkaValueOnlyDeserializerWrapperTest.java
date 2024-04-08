@@ -1,6 +1,7 @@
 package org.apache.flink.connector.kafka.source.reader.deserializer;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
+import org.apache.flink.connector.testutils.formats.DummyInitializationContext;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
 import org.apache.flink.util.FlinkUserCodeClassLoaders;
@@ -42,6 +43,16 @@ public class KafkaValueOnlyDeserializerWrapperTest {
                 });
 
         assertEquals(classLoader, wrapper.getClassLoaderUsed());
+    }
+
+    @Test
+    public void testDefaultClassLoaderIsUsed() throws Exception {
+        final KafkaValueOnlyDeserializerWrapperCaptureForTest wrapper =
+                new KafkaValueOnlyDeserializerWrapperCaptureForTest();
+        wrapper.open(new DummyInitializationContext());
+
+        assertEquals(
+                DummyInitializationContext.class.getClassLoader(), wrapper.getClassLoaderUsed());
     }
 
     static class KafkaValueOnlyDeserializerWrapperCaptureForTest

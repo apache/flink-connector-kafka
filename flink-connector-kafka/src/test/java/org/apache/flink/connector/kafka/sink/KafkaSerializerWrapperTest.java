@@ -1,6 +1,7 @@
 package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.api.common.serialization.SerializationSchema;
+import org.apache.flink.connector.testutils.formats.DummyInitializationContext;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
 import org.apache.flink.util.FlinkUserCodeClassLoaders;
@@ -41,6 +42,16 @@ public class KafkaSerializerWrapperTest {
                 });
 
         assertEquals(classLoader, wrapper.getClassLoaderUsed());
+    }
+
+    @Test
+    public void testDefaultClassLoaderIsUsed() throws Exception {
+        final KafkaSerializerWrapperCaptureForTest wrapper =
+                new KafkaSerializerWrapperCaptureForTest();
+        wrapper.open(new DummyInitializationContext());
+
+        assertEquals(
+                DummyInitializationContext.class.getClassLoader(), wrapper.getClassLoaderUsed());
     }
 
     static class KafkaSerializerWrapperCaptureForTest extends KafkaSerializerWrapper<String> {
