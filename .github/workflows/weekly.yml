@@ -16,7 +16,10 @@
 # limitations under the License.
 ################################################################################
 
-name: Nightly
+# We need to specify repo related information here since Apache INFRA doesn't differentiate
+# between several workflows with the same names while preparing a report for GHA usage
+# https://infra-reports.apache.org/#ghactions
+name: Weekly Flink Connector Kafka CI
 on:
   schedule:
     - cron: "0 0 * * 0"
