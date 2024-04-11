@@ -50,5 +50,23 @@ echo "Checking ${FLINK_SOURCE_DIR} for 'pyflink_gateway_server.py'"
 find "${FLINK_SOURCE_DIR}/flink-python" -name pyflink_gateway_server.py
 find "${FLINK_SOURCE_DIR}/flink-python/.tox" -name pyflink_gateway_server.py -exec cp "${FLINK_SOURCE_DIR}/flink-python/pyflink/pyflink_gateway_server.py" {} \;
 
+# Copy an empty flink-conf.yaml to conf/ folder, so that all Python tests on Flink 1.x can succeed.
+# This needs to be changed when adding support for Flink 2.0
+echo "Checking ${FLINK_SOURCE_DIR} for 'config.yaml'"
+find "${FLINK_SOURCE_DIR}/flink-python" -name config.yaml
+
+# For every occurrence of config.yaml (new YAML file since Flink 1.19), copy in the old flink-conf.yaml so that
+# is used over the new config.yaml file.
+#
+# Because our intention is to copy `flink-conf.yaml` into the same directory as `config.yaml` and not replace it,
+# we need to extract the directory from `{}` and then specify the target filename (`flink-conf.yaml`) explicitly.
+# Unfortunately, `find`'s `-exec` doesn't directly support manipulating `{}`. So we use a slightly modified shell command
+#
+# `"${1}"` and `"${2}"` correspond to the first and second arguments after the shell command.
+# In this case, `"${1}"` is the path to `flink-conf.yaml` and `"${2}"` is the path to each `config.yaml` found by `find`.
+# `$(dirname "${2}")` extracts the directory part of the path to `config.yaml`, and then `/flink-conf.yaml`
+# specifies the target filename within that directory.
+find "${FLINK_SOURCE_DIR}/flink-python/.tox" -name config.yaml -exec sh -c 'cp "${1}" "$(dirname "${2}")/flink-conf.yaml"' _ "${FLINK_SOURCE_DIR}/flink-python/pyflink/flink-conf.yaml" {} \;
+
 # python test
 test_all_modules
