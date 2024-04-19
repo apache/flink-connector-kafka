@@ -126,24 +126,21 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
 
             this.setupClassloader = relocatedDelegateSetupClass.getClassLoader();
             try (ThreadContextClassLoader ignored =
-                         new ThreadContextClassLoader(setupClassloader)) {
+                    new ThreadContextClassLoader(setupClassloader)) {
                 this.delegateSetup = relocatedDelegateSetupClass.newInstance();
             }
         }
 
         @Override
         public TypeSerializer<PreviousElementT> createPriorSerializer() {
-            ThreadContextClassLoader ignored =
-                    new ThreadContextClassLoader(setupClassloader);
+            ThreadContextClassLoader ignored = new ThreadContextClassLoader(setupClassloader);
             return delegateSetup.createPriorSerializer();
         }
 
         @Override
         public PreviousElementT createTestData() {
-            ThreadContextClassLoader ignored =
-                    new ThreadContextClassLoader(setupClassloader);
+            ThreadContextClassLoader ignored = new ThreadContextClassLoader(setupClassloader);
             return delegateSetup.createTestData();
-
         }
     }
 
@@ -162,32 +159,28 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
 
             this.verifierClassloader = relocatedDelegateVerifierClass.getClassLoader();
             try (ThreadContextClassLoader ignored =
-                         new ThreadContextClassLoader(verifierClassloader)) {
+                    new ThreadContextClassLoader(verifierClassloader)) {
                 this.delegateVerifier = relocatedDelegateVerifierClass.newInstance();
             }
         }
 
         @Override
         public TypeSerializer<UpgradedElementT> createUpgradedSerializer() {
-            ThreadContextClassLoader ignored =
-                    new ThreadContextClassLoader(verifierClassloader);
+            ThreadContextClassLoader ignored = new ThreadContextClassLoader(verifierClassloader);
             return delegateVerifier.createUpgradedSerializer();
         }
 
         @Override
         public Matcher<UpgradedElementT> testDataMatcher() {
-            ThreadContextClassLoader ignored =
-                    new ThreadContextClassLoader(verifierClassloader);
+            ThreadContextClassLoader ignored = new ThreadContextClassLoader(verifierClassloader);
             return delegateVerifier.testDataMatcher();
         }
 
         @Override
         public Matcher<TypeSerializerSchemaCompatibility<UpgradedElementT>>
-        schemaCompatibilityMatcher(FlinkVersion version) {
-            ThreadContextClassLoader ignored =
-                    new ThreadContextClassLoader(verifierClassloader);
+                schemaCompatibilityMatcher(FlinkVersion version) {
+            ThreadContextClassLoader ignored = new ThreadContextClassLoader(verifierClassloader);
             return delegateVerifier.schemaCompatibilityMatcher(version);
-
         }
     }
 
@@ -239,7 +232,7 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
         Files.createDirectories(getSerializerSnapshotFilePath(testSpecification).getParent());
 
         try (ThreadContextClassLoader ignored =
-                     new ThreadContextClassLoader(testSpecification.setup.setupClassloader)) {
+                new ThreadContextClassLoader(testSpecification.setup.setupClassloader)) {
             TypeSerializer<PreviousElementT> priorSerializer =
                     testSpecification.setup.createPriorSerializer();
 
@@ -273,7 +266,7 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
             TestSpecification<PreviousElementT, UpgradedElementT> testSpecification)
             throws Exception {
         try (ThreadContextClassLoader ignored =
-                     new ThreadContextClassLoader(testSpecification.verifier.verifierClassloader)) {
+                new ThreadContextClassLoader(testSpecification.verifier.verifierClassloader)) {
             assumeThat(TypeSerializerSchemaCompatibility.incompatible())
                     .as(
                             "This test only applies for test specifications that verify an upgraded serializer that is not incompatible.")
@@ -301,7 +294,7 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
             TestSpecification<PreviousElementT, UpgradedElementT> testSpecification)
             throws Exception {
         try (ThreadContextClassLoader ignored =
-                     new ThreadContextClassLoader(testSpecification.verifier.verifierClassloader)) {
+                new ThreadContextClassLoader(testSpecification.verifier.verifierClassloader)) {
             TypeSerializerSnapshot<UpgradedElementT> restoredSerializerSnapshot =
                     snapshotUnderTest(testSpecification);
             TypeSerializer<UpgradedElementT> upgradedSerializer =
@@ -324,7 +317,7 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
             TestSpecification<PreviousElementT, UpgradedElementT> testSpecification)
             throws Exception {
         try (ThreadContextClassLoader ignored =
-                     new ThreadContextClassLoader(testSpecification.verifier.verifierClassloader)) {
+                new ThreadContextClassLoader(testSpecification.verifier.verifierClassloader)) {
             TypeSerializerSnapshot<UpgradedElementT> restoredSerializerSnapshot =
                     snapshotUnderTest(testSpecification);
 
@@ -362,7 +355,7 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
             TestSpecification<PreviousElementT, UpgradedElementT> testSpecification)
             throws Exception {
         try (ThreadContextClassLoader ignored =
-                     new ThreadContextClassLoader(testSpecification.verifier.verifierClassloader)) {
+                new ThreadContextClassLoader(testSpecification.verifier.verifierClassloader)) {
             TypeSerializerSnapshot<UpgradedElementT> restoredSerializerSnapshot =
                     snapshotUnderTest(testSpecification);
             TypeSerializer<UpgradedElementT> upgradedSerializer =
@@ -393,7 +386,7 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
             TestSpecification<PreviousElementT, UpgradedElementT> testSpecification)
             throws Exception {
         try (ThreadContextClassLoader ignored =
-                     new ThreadContextClassLoader(testSpecification.verifier.verifierClassloader)) {
+                new ThreadContextClassLoader(testSpecification.verifier.verifierClassloader)) {
             TypeSerializerSnapshot<UpgradedElementT> restoredSerializerSnapshot =
                     snapshotUnderTest(testSpecification);
             TypeSerializer<UpgradedElementT> upgradedSerializer =

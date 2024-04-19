@@ -35,6 +35,8 @@ import org.apache.kafka.common.header.Header;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -58,6 +60,25 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
     private final TypeInformation<RowData> producedTypeInfo;
 
     private final boolean upsertMode;
+    private static Method deserializeWithAdditionalPropertiesMethod = null;
+    protected static final String IS_KEY = "IS_KEY";
+
+    protected static final String HEADERS = "HEADERS";
+
+    static {
+        Class<DeserializationSchema> deserializationSchemaClass = DeserializationSchema.class;
+        try {
+            deserializeWithAdditionalPropertiesMethod =
+                    deserializationSchemaClass.getDeclaredMethod(
+                            "deserializeWithAdditionalProperties",
+                            byte[].class,
+                            Map.class,
+                            Collector.class);
+
+        } catch (NoSuchMethodException e) {
+            // do nothing
+        }
+    }
 
     DynamicKafkaDeserializationSchema(
             int physicalArity,
@@ -112,14 +133,45 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
             throws Exception {
         // shortcut in case no output projection is required,
         // also not for a cartesian product with the keys
+        Map<String, Object> additionalParameters = new HashMap<>();
+        Map<String, Object> headers = new HashMap<>();
+        for (Header header : record.headers()) {
+            headers.put(header.key(), header.value());
+        }
+        additionalParameters.put(HEADERS, headers);
+
         if (keyDeserialization == null && !hasMetadata) {
-            valueDeserialization.deserialize(record.value(), collector);
+            if (deserializeWithAdditionalPropertiesMethod == null) {
+                valueDeserialization.deserialize(record.value(), collector);
+            } else {
+                additionalParameters.put(IS_KEY, false);
+                try {
+                    deserializeWithAdditionalPropertiesMethod.invoke(
+                            valueDeserialization, record.value(), additionalParameters, collector);
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                } catch (InvocationTargetException e) {
+                    throw new RuntimeException(e);
+                }
+            }
             return;
         }
 
         // buffer key(s)
         if (keyDeserialization != null) {
-            keyDeserialization.deserialize(record.key(), keyCollector);
+            if (deserializeWithAdditionalPropertiesMethod == null) {
+                keyDeserialization.deserialize(record.key(), keyCollector);
+            } else {
+                additionalParameters.put(IS_KEY, true);
+                try {
+                    deserializeWithAdditionalPropertiesMethod.invoke(
+                            keyDeserialization, record.key(), additionalParameters, keyCollector);
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                } catch (InvocationTargetException e) {
+                    throw new RuntimeException(e);
+                }
+            }
         }
 
         // project output while emitting values
@@ -130,11 +182,19 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
             // collect tombstone messages in upsert mode by hand
             outputCollector.collect(null);
         } else {
-            Map<String, Object> headersMap =  new HashMap<>();
-            for (Header header : record.headers()) {
-                headersMap.put(header.key(), header.value());
+            if (deserializeWithAdditionalPropertiesMethod == null) {
+                valueDeserialization.deserialize(record.value(), outputCollector);
+            } else {
+                additionalParameters.put(IS_KEY, false);
+                try {
+                    deserializeWithAdditionalPropertiesMethod.invoke(
+                            valueDeserialization, record.value(), additionalParameters, outputCollector);
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                } catch (InvocationTargetException e) {
+                    throw new RuntimeException(e);
+                }
             }
-            valueDeserialization.deserializeWithHeaders(record.value(), headersMap, outputCollector);
         }
         keyCollector.buffer.clear();
     }
