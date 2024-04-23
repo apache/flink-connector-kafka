@@ -1,5 +1,5 @@
 #
-#Fri Feb 10 21:57:58 CET 2023
+#Mon Apr 22 11:43:51 BST 2024
 Return\ and\ argument\ types\ of\ methods\ annotated\ with\ @Public\ must\ be\ annotated\ with\ @Public.=690729ae-756f-4ccc-831b-2667db3fdae5
 Connector\ production\ code\ must\ not\ depend\ on\ non-public\ API\ outside\ of\ connector\ packages=3030609a-c417-456d-af43-1799a4445197
 ITCASE\ tests\ should\ use\ a\ MiniCluster\ resource\ or\ extension=86dfd459-67a9-4b26-9b5c-0b0bbf22681a
@@ -8,3 +8,4 @@ Options\ for\ connectors\ and\ formats\ should\ reside\ in\ a\ consistent\ packa
 Tests\ inheriting\ from\ AbstractTestBase\ should\ have\ name\ ending\ with\ ITCase=cdd3929e-b7bc-4541-a0ae-46ed4fbb2001
 Return\ and\ argument\ types\ of\ methods\ annotated\ with\ @PublicEvolving\ must\ be\ annotated\ with\ @Public(Evolving).=d853eb69-8c04-4246-9a5e-4f5911286b1d
 Classes\ in\ API\ packages\ should\ have\ at\ least\ one\ API\ visibility\ annotation.=661bd4bd-792c-4ba4-af39-87b7d16dcf75
+Connector\ production\ code\ must\ depend\ only\ on\ public\ API\ when\ outside\ of\ connector\ packages=2b298fc7-53a2-4f81-b0d0-e2b38ebef0bb

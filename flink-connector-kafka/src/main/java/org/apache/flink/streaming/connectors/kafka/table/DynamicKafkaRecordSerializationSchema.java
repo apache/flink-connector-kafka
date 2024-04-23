@@ -61,6 +61,10 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
     private static Method serializeWithAdditionalPropertiesMethod = null;
 
     static {
+        initializeMethod();
+    }
+
+    protected static void initializeMethod() {
         Class<SerializationSchema> serializationSchemaClass = SerializationSchema.class;
         try {
             serializeWithAdditionalPropertiesMethod =
@@ -73,6 +77,11 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
         } catch (NoSuchMethodException e) {
             // do nothing
         }
+    }
+
+    /** for testing. */
+    protected static void nullifySerializeWithAdditionalPropertiesMethod() {
+        serializeWithAdditionalPropertiesMethod = null;
     }
 
     DynamicKafkaRecordSerializationSchema(
@@ -119,7 +128,7 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
 
         // shortcut in case no input projection is required
         if (keySerialization == null && !hasMetadata) {
-            byte[] valueSerialized =  getSerialized(consumedRow, inputMap, outputValueMap, false);
+            byte[] valueSerialized = getSerialized(consumedRow, inputMap, outputValueMap, false);
             if (serializeWithAdditionalPropertiesMethod == null) {
                 return new ProducerRecord<>(
                         topic,
@@ -133,7 +142,7 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
             } else {
                 List<Header> headers = new ArrayList<>();
                 Map<String, Object> headersToAddForValue =
-                            (Map<String, Object>) outputValueMap.get(HEADERS);
+                        (Map<String, Object>) outputValueMap.get(HEADERS);
                 if (!MapUtils.isEmpty(headersToAddForValue)) {
                     for (String headerKey : headersToAddForValue.keySet()) {
                         KafkaDynamicSink.KafkaHeader kafkaHeader =
@@ -149,7 +158,7 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
                                 null,
                                 valueSerialized,
                                 context.getPartitionsForTopic(topic)),
-                        null,    // timestamp will be current time
+                        null, // timestamp will be current time
                         null,
                         valueSerialized,
                         headers);
@@ -242,14 +251,20 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
     }
 
     /**
-     * Get the serialized row, depending on whether Flink has the additional parameters serialize method.
+     * Get the serialized row, depending on whether Flink has the additional parameters serialize
+     * method.
+     *
      * @param row row to serialize
      * @param inputMap input map to pass to the additional parameters serialize method
      * @param outputMap output map to pass to the additional parameters serialize method
      * @param isKey whether this is a key
      * @return serialized row
      */
-    private byte[] getSerialized(RowData row, Map<String, Object> inputMap, Map<String, Object> outputMap, boolean isKey) {
+    protected byte[] getSerialized(
+            RowData row,
+            Map<String, Object> inputMap,
+            Map<String, Object> outputMap,
+            boolean isKey) {
         final byte[] keySerialized;
         SerializationSchema<RowData> serialization = isKey ? keySerialization : valueSerialization;
         if (serializeWithAdditionalPropertiesMethod == null) {
@@ -309,6 +324,11 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
 
     @SuppressWarnings("unchecked")
     private <T> T readMetadata(RowData consumedRow, KafkaDynamicSink.WritableMetadata metadata) {
+        // TODO confirm this check is ok to add
+        if (metadataPositions.length == 0) {
+            return null;
+        }
+
         final int pos = metadataPositions[metadata.ordinal()];
         if (pos < 0) {
             return null;

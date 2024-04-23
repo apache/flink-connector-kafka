@@ -34,6 +34,7 @@ import org.apache.kafka.common.header.Header;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -66,6 +67,10 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
     protected static final String HEADERS = "HEADERS";
 
     static {
+        initializeMethod();
+    }
+
+    protected static void initializeMethod() {
         Class<DeserializationSchema> deserializationSchemaClass = DeserializationSchema.class;
         try {
             deserializeWithAdditionalPropertiesMethod =
@@ -78,6 +83,11 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
         } catch (NoSuchMethodException e) {
             // do nothing
         }
+    }
+
+    /** for testing. */
+    protected static void nullifyDeserializeWithAdditionalPropertiesMethod() {
+        deserializeWithAdditionalPropertiesMethod = null;
     }
 
     DynamicKafkaDeserializationSchema(
@@ -141,37 +151,13 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
         additionalParameters.put(HEADERS, headers);
 
         if (keyDeserialization == null && !hasMetadata) {
-            if (deserializeWithAdditionalPropertiesMethod == null) {
-                valueDeserialization.deserialize(record.value(), collector);
-            } else {
-                additionalParameters.put(IS_KEY, false);
-                try {
-                    deserializeWithAdditionalPropertiesMethod.invoke(
-                            valueDeserialization, record.value(), additionalParameters, collector);
-                } catch (IllegalAccessException e) {
-                    throw new RuntimeException(e);
-                } catch (InvocationTargetException e) {
-                    throw new RuntimeException(e);
-                }
-            }
+            doDeserialize(record, additionalParameters, collector, false);
             return;
         }
 
         // buffer key(s)
         if (keyDeserialization != null) {
-            if (deserializeWithAdditionalPropertiesMethod == null) {
-                keyDeserialization.deserialize(record.key(), keyCollector);
-            } else {
-                additionalParameters.put(IS_KEY, true);
-                try {
-                    deserializeWithAdditionalPropertiesMethod.invoke(
-                            keyDeserialization, record.key(), additionalParameters, keyCollector);
-                } catch (IllegalAccessException e) {
-                    throw new RuntimeException(e);
-                } catch (InvocationTargetException e) {
-                    throw new RuntimeException(e);
-                }
-            }
+            doDeserialize(record, additionalParameters, keyCollector, true);
         }
 
         // project output while emitting values
@@ -182,21 +168,60 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
             // collect tombstone messages in upsert mode by hand
             outputCollector.collect(null);
         } else {
-            if (deserializeWithAdditionalPropertiesMethod == null) {
-                valueDeserialization.deserialize(record.value(), outputCollector);
-            } else {
-                additionalParameters.put(IS_KEY, false);
-                try {
-                    deserializeWithAdditionalPropertiesMethod.invoke(
-                            valueDeserialization, record.value(), additionalParameters, outputCollector);
-                } catch (IllegalAccessException e) {
-                    throw new RuntimeException(e);
-                } catch (InvocationTargetException e) {
-                    throw new RuntimeException(e);
-                }
-            }
+            doDeserialize(record, additionalParameters, outputCollector, false);
         }
         keyCollector.buffer.clear();
+    }
+
+    private void doDeserialize(
+            ConsumerRecord<byte[], byte[]> record,
+            Map<String, Object> additionalParameters,
+            Collector<RowData> collector,
+            boolean isKey)
+            throws IOException {
+        if (deserializeWithAdditionalPropertiesMethod == null) {
+            if (isKey) {
+                keyDeserialization.deserialize(record.key(), collector);
+            } else {
+                valueDeserialization.deserialize(record.value(), collector);
+            }
+
+        } else {
+            additionalParameters.put(IS_KEY, isKey);
+            try {
+                if (isKey) {
+                    deserializeWithAdditionalPropertiesMethod.invoke(
+                            keyDeserialization, record.key(), additionalParameters, collector);
+                } else {
+                    deserializeWithAdditionalPropertiesMethod.invoke(
+                            valueDeserialization, record.value(), additionalParameters, collector);
+                }
+            } catch (IllegalAccessException e) {
+                throw new RuntimeException(e);
+            } catch (InvocationTargetException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    private void performDeserialiserialize(
+            ConsumerRecord<byte[], byte[]> record,
+            Collector<RowData> collector,
+            Map<String, Object> additionalParameters)
+            throws IOException {
+        if (deserializeWithAdditionalPropertiesMethod == null) {
+            valueDeserialization.deserialize(record.value(), collector);
+        } else {
+            additionalParameters.put(IS_KEY, false);
+            try {
+                deserializeWithAdditionalPropertiesMethod.invoke(
+                        valueDeserialization, record.value(), additionalParameters, collector);
+            } catch (IllegalAccessException e) {
+                throw new RuntimeException(e);
+            } catch (InvocationTargetException e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 
     @Override
