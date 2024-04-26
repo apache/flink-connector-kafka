@@ -29,6 +29,7 @@ import org.apache.kafka.clients.CommonClientConfigs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yaml.snakeyaml.DumperOptions;
+import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.TypeDescription;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.Constructor;
@@ -252,19 +253,25 @@ public class YamlFileMetadataService implements KafkaMetadataService {
     }
 
     private static Yaml initYamlParser() {
-        Representer representer = new Representer();
+        DumperOptions dumperOptions = new DumperOptions();
+        Representer representer = new Representer(dumperOptions);
         representer.addClassTag(StreamMetadata.class, Tag.MAP);
         TypeDescription typeDescription = new TypeDescription(StreamMetadata.class);
         representer.addTypeDescription(typeDescription);
         representer.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
-        return new Yaml(new ListConstructor<>(StreamMetadata.class), representer);
+        LoaderOptions loaderOptions = new LoaderOptions();
+        // Allow global tag for StreamMetadata
+        loaderOptions.setTagInspector(
+                tag -> tag.getClassName().equals(StreamMetadata.class.getName()));
+        return new Yaml(new ListConstructor<>(StreamMetadata.class, loaderOptions), representer);
     }
 
     /** A custom constructor is required to read yaml lists at the root. */
     private static class ListConstructor<T> extends Constructor {
         private final Class<T> clazz;
 
-        public ListConstructor(final Class<T> clazz) {
+        public ListConstructor(final Class<T> clazz, final LoaderOptions loaderOptions) {
+            super(loaderOptions);
             this.clazz = clazz;
         }
 
