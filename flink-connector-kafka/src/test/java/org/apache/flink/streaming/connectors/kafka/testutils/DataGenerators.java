@@ -217,7 +217,7 @@ public class DataGenerators {
             }
 
             @Override
-            public List<Transformation<?>> getTransitivePredecessors() {
+            protected List<Transformation<?>> getTransitivePredecessorsInternal() {
                 return null;
             }
 
