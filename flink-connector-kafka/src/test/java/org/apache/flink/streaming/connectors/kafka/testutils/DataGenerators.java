@@ -62,11 +62,11 @@ public class DataGenerators {
                                 // create a sequence
                                 int[] elements = new int[numElements];
                                 for (int i = 0, val = getRuntimeContext().getIndexOfThisSubtask();
-                                        i < numElements;
-                                        i++,
-                                                val +=
-                                                        getRuntimeContext()
-                                                                .getNumberOfParallelSubtasks()) {
+                                     i < numElements;
+                                     i++,
+                                             val +=
+                                                     getRuntimeContext()
+                                                             .getNumberOfParallelSubtasks()) {
 
                                     elements[i] = val;
                                 }
@@ -204,30 +204,6 @@ public class DataGenerators {
 
         public Throwable getError() {
             return this.error;
-        }
-
-        private static class MockTransformation extends Transformation<String> {
-            public MockTransformation() {
-                super("MockTransform", BasicTypeInfo.STRING_TYPE_INFO, 1);
-            }
-
-            @Override
-            protected List<Transformation<?>> getTransitivePredecessorsInternal() {
-                return null;
-            }
-
-            @Override
-            public List<Transformation<?>> getInputs() {
-                return Collections.emptyList();
-            }
-        }
-
-        private static class DummyStreamExecutionEnvironment extends StreamExecutionEnvironment {
-
-            @Override
-            public JobExecutionResult execute(StreamGraph streamGraph) throws Exception {
-                return null;
-            }
         }
     }
 }
