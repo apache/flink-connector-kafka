@@ -288,23 +288,34 @@ public class DynamicKafkaSourceEnumerator
 
         // create enumerators
         for (Entry<String, Set<String>> activeClusterTopics : latestClusterTopicsMap.entrySet()) {
-            final Set<TopicPartition> activeTopicPartitions = new HashSet<>();
-
-            if (dynamicKafkaSourceEnumState
+            KafkaSourceEnumState kafkaSourceEnumState =
+                    dynamicKafkaSourceEnumState
                             .getClusterEnumeratorStates()
-                            .get(activeClusterTopics.getKey())
-                    != null) {
-                Set<TopicPartition> oldTopicPartitions =
-                        dynamicKafkaSourceEnumState
-                                .getClusterEnumeratorStates()
-                                .get(activeClusterTopics.getKey())
-                                .assignedPartitions();
+                            .get(activeClusterTopics.getKey());
+
+            final KafkaSourceEnumState newKafkaSourceEnumState;
+            if (kafkaSourceEnumState != null) {
+                final Set<String> activeTopics = activeClusterTopics.getValue();
+
                 // filter out removed topics
-                for (TopicPartition oldTopicPartition : oldTopicPartitions) {
-                    if (activeClusterTopics.getValue().contains(oldTopicPartition.topic())) {
-                        activeTopicPartitions.add(oldTopicPartition);
-                    }
-                }
+                Set<TopicPartition> activeAssignedPartitions =
+                        kafkaSourceEnumState.assignedPartitions().stream()
+                                .filter(tp -> activeTopics.contains(tp.topic()))
+                                .collect(Collectors.toSet());
+                Set<TopicPartition> activeUnassignedInitialPartitions =
+                        kafkaSourceEnumState.unassignedInitialPartitions().stream()
+                                .filter(tp -> activeTopics.contains(tp.topic()))
+                                .collect(Collectors.toSet());
+
+                newKafkaSourceEnumState =
+                        new KafkaSourceEnumState(
+                                activeAssignedPartitions,
+                                activeUnassignedInitialPartitions,
+                                kafkaSourceEnumState.initialDiscoveryFinished());
+            } else {
+                newKafkaSourceEnumState =
+                        new KafkaSourceEnumState(
+                                Collections.emptySet(), Collections.emptySet(), false);
             }
 
             // restarts enumerator from state using only the active topic partitions, to avoid
@@ -312,12 +323,7 @@ public class DynamicKafkaSourceEnumerator
             createEnumeratorWithAssignedTopicPartitions(
                     activeClusterTopics.getKey(),
                     activeClusterTopics.getValue(),
-                    dynamicKafkaSourceEnumState
-                            .getClusterEnumeratorStates()
-                            .getOrDefault(
-                                    activeClusterTopics.getKey(),
-                                    new KafkaSourceEnumState(
-                                            Collections.emptySet(), Collections.emptySet(), false)),
+                    newKafkaSourceEnumState,
                     clusterProperties.get(activeClusterTopics.getKey()));
         }
 
