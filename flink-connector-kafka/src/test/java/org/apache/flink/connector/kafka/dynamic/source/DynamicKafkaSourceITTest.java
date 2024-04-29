@@ -82,6 +82,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static org.apache.flink.connector.kafka.dynamic.source.metrics.KafkaClusterMetricGroup.DYNAMIC_KAFKA_SOURCE_METRIC_GROUP;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -373,6 +374,132 @@ public class DynamicKafkaSourceITTest extends TestLogger {
         }
 
         @Test
+        void testTopicReAddMigrationUsingFileMetadataService() throws Throwable {
+            // setup topics
+            int kafkaClusterIdx = 0;
+            String topic1 = "test-topic-re-add-1";
+            String topic2 = "test-topic-re-add-2";
+            DynamicKafkaSourceTestHelper.createTopic(kafkaClusterIdx, topic1, NUM_PARTITIONS);
+            DynamicKafkaSourceTestHelper.createTopic(kafkaClusterIdx, topic2, NUM_PARTITIONS);
+
+            // Flink job config and env
+            StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+            env.setRestartStrategy(RestartStrategies.noRestart());
+            env.setParallelism(2);
+            Properties properties = new Properties();
+            properties.setProperty(
+                    KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "1000");
+            properties.setProperty(
+                    DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "5000");
+            properties.setProperty(
+                    DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_FAILURE_THRESHOLD.key(),
+                    "2");
+            properties.setProperty(CommonClientConfigs.GROUP_ID_CONFIG, "dynamic-kafka-src");
+
+            // create new metadata file to consume from 1 cluster
+            String testStreamId = "test-topic-re-add-stream";
+            File metadataFile = File.createTempFile(testDir.getPath() + "/metadata", ".yaml");
+            YamlFileMetadataService yamlFileMetadataService =
+                    new YamlFileMetadataService(metadataFile.getPath(), Duration.ofMillis(100));
+            writeClusterMetadataToFile(
+                    metadataFile,
+                    testStreamId,
+                    ImmutableList.of(topic1),
+                    ImmutableList.of(
+                            DynamicKafkaSourceTestHelper.getKafkaClusterTestEnvMetadata(
+                                    kafkaClusterIdx)));
+
+            DynamicKafkaSource<Integer> dynamicKafkaSource =
+                    DynamicKafkaSource.<Integer>builder()
+                            .setStreamIds(Collections.singleton(testStreamId))
+                            .setKafkaMetadataService(yamlFileMetadataService)
+                            .setDeserializer(
+                                    KafkaRecordDeserializationSchema.valueOnly(
+                                            IntegerDeserializer.class))
+                            .setStartingOffsets(OffsetsInitializer.earliest())
+                            .setProperties(properties)
+                            .build();
+
+            DataStreamSource<Integer> stream =
+                    env.fromSource(
+                            dynamicKafkaSource,
+                            WatermarkStrategy.noWatermarks(),
+                            "dynamic-kafka-src");
+            List<Integer> results = new ArrayList<>();
+
+            int stage1Records =
+                    DynamicKafkaSourceTestHelper.produceToKafka(
+                            kafkaClusterIdx, topic1, NUM_PARTITIONS, NUM_RECORDS_PER_SPLIT, 0);
+            int stage2Records =
+                    DynamicKafkaSourceTestHelper.produceToKafka(
+                            kafkaClusterIdx,
+                            topic2,
+                            NUM_PARTITIONS,
+                            NUM_RECORDS_PER_SPLIT,
+                            stage1Records);
+
+            try (CloseableIterator<Integer> iterator = stream.executeAndCollect()) {
+                CommonTestUtils.waitUtil(
+                        () -> {
+                            try {
+                                results.add(iterator.next());
+
+                                // switch to second topic after first is read
+                                if (results.size() == stage1Records) {
+                                    writeClusterMetadataToFile(
+                                            metadataFile,
+                                            testStreamId,
+                                            ImmutableList.of(topic2),
+                                            ImmutableList.of(
+                                                    DynamicKafkaSourceTestHelper
+                                                            .getKafkaClusterTestEnvMetadata(
+                                                                    kafkaClusterIdx)));
+                                }
+
+                                // re-add first topic again after second is read
+                                // produce another batch to first topic
+                                if (results.size() == stage2Records) {
+                                    DynamicKafkaSourceTestHelper.produceToKafka(
+                                            kafkaClusterIdx,
+                                            topic1,
+                                            NUM_PARTITIONS,
+                                            NUM_RECORDS_PER_SPLIT,
+                                            stage2Records);
+                                    writeClusterMetadataToFile(
+                                            metadataFile,
+                                            testStreamId,
+                                            ImmutableList.of(topic1, topic2),
+                                            ImmutableList.of(
+                                                    DynamicKafkaSourceTestHelper
+                                                            .getKafkaClusterTestEnvMetadata(
+                                                                    kafkaClusterIdx)));
+                                }
+                            } catch (NoSuchElementException e) {
+                                // swallow and wait
+                            } catch (IOException e) {
+                                throw new UncheckedIOException(e);
+                            } catch (Throwable e) {
+                                throw new RuntimeException(e);
+                            }
+
+                            // first batch of topic 1 * 2 + topic 2 + second batch of topic 1
+                            return results.size() == NUM_PARTITIONS * NUM_RECORDS_PER_SPLIT * 4;
+                        },
+                        Duration.ofSeconds(15),
+                        "Could not schedule callable within timeout");
+            }
+
+            // verify data
+            Stream<Integer> expectedFullRead =
+                    IntStream.range(0, NUM_PARTITIONS * NUM_RECORDS_PER_SPLIT * 3).boxed();
+            Stream<Integer> expectedReRead =
+                    IntStream.range(0, NUM_PARTITIONS * NUM_RECORDS_PER_SPLIT).boxed();
+            List<Integer> expectedResults =
+                    Stream.concat(expectedFullRead, expectedReRead).collect(Collectors.toList());
+            assertThat(results).containsExactlyInAnyOrderElementsOf(expectedResults);
+        }
+
+        @Test
         void testStreamPatternSubscriber() throws Throwable {
             DynamicKafkaSourceTestHelper.createTopic(0, "stream-pattern-test-1", NUM_PARTITIONS);
             int lastValueOffset =
@@ -621,7 +748,7 @@ public class DynamicKafkaSourceITTest extends TestLogger {
         private void writeClusterMetadataToFile(
                 File metadataFile,
                 String streamId,
-                String topic,
+                List<String> topics,
                 List<KafkaTestBase.KafkaClusterTestEnvMetadata> kafkaClusterTestEnvMetadataList)
                 throws IOException {
             List<YamlFileMetadataService.StreamMetadata.ClusterMetadata> clusterMetadata =
@@ -633,12 +760,25 @@ public class DynamicKafkaSourceITTest extends TestLogger {
                                                     KafkaClusterTestEnvMetadata.getKafkaClusterId(),
                                                     KafkaClusterTestEnvMetadata
                                                             .getBrokerConnectionStrings(),
-                                                    ImmutableList.of(topic)))
+                                                    topics))
                             .collect(Collectors.toList());
             YamlFileMetadataService.StreamMetadata streamMetadata =
                     new YamlFileMetadataService.StreamMetadata(streamId, clusterMetadata);
             YamlFileMetadataService.saveToYaml(
                     Collections.singletonList(streamMetadata), metadataFile);
+        }
+
+        private void writeClusterMetadataToFile(
+                File metadataFile,
+                String streamId,
+                String topic,
+                List<KafkaTestBase.KafkaClusterTestEnvMetadata> kafkaClusterTestEnvMetadataList)
+                throws IOException {
+            writeClusterMetadataToFile(
+                    metadataFile,
+                    streamId,
+                    ImmutableList.of(topic),
+                    kafkaClusterTestEnvMetadataList);
         }
 
         private Set<String> findMetrics(InMemoryReporter inMemoryReporter, String groupPattern) {

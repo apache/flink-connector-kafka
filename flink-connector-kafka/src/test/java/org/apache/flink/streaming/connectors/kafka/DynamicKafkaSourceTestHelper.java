@@ -32,6 +32,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -67,21 +68,25 @@ public class DynamicKafkaSourceTestHelper extends KafkaTestBase {
         return kafkaClusters.get(kafkaClusterIdx).getKafkaClusterId();
     }
 
+    public static Map<String, ClusterMetadata> getClusterMetadataMap(
+            int kafkaClusterIdx, String... topics) {
+        KafkaClusterTestEnvMetadata kafkaClusterTestEnvMetadata =
+                getKafkaClusterTestEnvMetadata(kafkaClusterIdx);
+
+        Set<String> topicsSet = new HashSet<>(Arrays.asList(topics));
+
+        ClusterMetadata clusterMetadata =
+                new ClusterMetadata(topicsSet, kafkaClusterTestEnvMetadata.getStandardProperties());
+
+        return Collections.singletonMap(
+                kafkaClusterTestEnvMetadata.getKafkaClusterId(), clusterMetadata);
+    }
+
     /** Stream is a topic across multiple clusters. */
     public static KafkaStream getKafkaStream(String topic) {
         Map<String, ClusterMetadata> clusterMetadataMap = new HashMap<>();
         for (int i = 0; i < NUM_KAFKA_CLUSTERS; i++) {
-            KafkaClusterTestEnvMetadata kafkaClusterTestEnvMetadata =
-                    getKafkaClusterTestEnvMetadata(i);
-
-            Set<String> topics = new HashSet<>();
-            topics.add(topic);
-
-            ClusterMetadata clusterMetadata =
-                    new ClusterMetadata(
-                            topics, kafkaClusterTestEnvMetadata.getStandardProperties());
-            clusterMetadataMap.put(
-                    kafkaClusterTestEnvMetadata.getKafkaClusterId(), clusterMetadata);
+            clusterMetadataMap.putAll(getClusterMetadataMap(i, topic));
         }
 
         return new KafkaStream(topic, clusterMetadataMap);

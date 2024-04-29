@@ -32,6 +32,8 @@ import org.apache.flink.connector.kafka.dynamic.source.GetMetadataUpdateEvent;
 import org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.KafkaStreamSetSubscriber;
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
+import org.apache.flink.connector.kafka.source.enumerator.AssignmentStatus;
+import org.apache.flink.connector.kafka.source.enumerator.TopicPartitionAndAssignmentStatus;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.NoStoppingOffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.testutils.MockKafkaMetadataService;
@@ -465,6 +467,91 @@ public class DynamicKafkaSourceEnumeratorTest {
     }
 
     @Test
+    public void testEnumeratorStateDoesNotContainStaleTopicPartitions() throws Throwable {
+        final String topic2 = TOPIC + "_2";
+
+        DynamicKafkaSourceTestHelper.createTopic(topic2, NUM_SPLITS_PER_CLUSTER, 1);
+        DynamicKafkaSourceTestHelper.produceToKafka(
+                topic2, NUM_SPLITS_PER_CLUSTER, NUM_RECORDS_PER_SPLIT);
+
+        final Set<KafkaStream> initialStreams =
+                Collections.singleton(
+                        new KafkaStream(
+                                TOPIC,
+                                DynamicKafkaSourceTestHelper.getClusterMetadataMap(
+                                        0, TOPIC, topic2)));
+
+        final Set<KafkaStream> updatedStreams =
+                Collections.singleton(
+                        new KafkaStream(
+                                TOPIC,
+                                DynamicKafkaSourceTestHelper.getClusterMetadataMap(0, TOPIC)));
+
+        try (MockKafkaMetadataService metadataService =
+                        new MockKafkaMetadataService(initialStreams);
+                MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                context,
+                                metadataService,
+                                (properties) ->
+                                        properties.setProperty(
+                                                DynamicKafkaSourceOptions
+                                                        .STREAM_METADATA_DISCOVERY_INTERVAL_MS
+                                                        .key(),
+                                                "1"))) {
+            enumerator.start();
+
+            context.runPeriodicCallable(0);
+
+            runAllOneTimeCallables(context);
+
+            mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, 0);
+            mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, 1);
+
+            DynamicKafkaSourceEnumState initialState = enumerator.snapshotState(-1);
+
+            assertThat(getFilteredTopicPartitions(initialState, TOPIC, AssignmentStatus.ASSIGNED))
+                    .hasSize(2);
+            assertThat(
+                            getFilteredTopicPartitions(
+                                    initialState, TOPIC, AssignmentStatus.UNASSIGNED_INITIAL))
+                    .hasSize(1);
+            assertThat(getFilteredTopicPartitions(initialState, topic2, AssignmentStatus.ASSIGNED))
+                    .hasSize(2);
+            assertThat(
+                            getFilteredTopicPartitions(
+                                    initialState, topic2, AssignmentStatus.UNASSIGNED_INITIAL))
+                    .hasSize(1);
+
+            // mock metadata change
+            metadataService.setKafkaStreams(updatedStreams);
+
+            // changes should have occurred here
+            context.runPeriodicCallable(0);
+            runAllOneTimeCallables(context);
+
+            mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, 2);
+
+            DynamicKafkaSourceEnumState migratedState = enumerator.snapshotState(-1);
+
+            assertThat(getFilteredTopicPartitions(migratedState, TOPIC, AssignmentStatus.ASSIGNED))
+                    .hasSize(3);
+            assertThat(
+                            getFilteredTopicPartitions(
+                                    migratedState, TOPIC, AssignmentStatus.UNASSIGNED_INITIAL))
+                    .isEmpty();
+            assertThat(getFilteredTopicPartitions(migratedState, topic2, AssignmentStatus.ASSIGNED))
+                    .isEmpty();
+            assertThat(
+                            getFilteredTopicPartitions(
+                                    migratedState, topic2, AssignmentStatus.UNASSIGNED_INITIAL))
+                    .isEmpty();
+        }
+    }
+
+    @Test
     public void testStartupWithCheckpointState() throws Throwable {
         // init enumerator with checkpoint state
         final DynamicKafkaSourceEnumState dynamicKafkaSourceEnumState = getCheckpointState();
@@ -863,6 +950,18 @@ public class DynamicKafkaSourceEnumeratorTest {
             }
         }
         return readerToSplits;
+    }
+
+    private List<TopicPartition> getFilteredTopicPartitions(
+            DynamicKafkaSourceEnumState state, String topic, AssignmentStatus assignmentStatus) {
+        return state.getClusterEnumeratorStates().values().stream()
+                .flatMap(s -> s.partitions().stream())
+                .filter(
+                        partition ->
+                                partition.topicPartition().topic().equals(topic)
+                                        && partition.assignmentStatus() == assignmentStatus)
+                .map(TopicPartitionAndAssignmentStatus::topicPartition)
+                .collect(Collectors.toList());
     }
 
     private static void runAllOneTimeCallables(MockSplitEnumeratorContext context)
