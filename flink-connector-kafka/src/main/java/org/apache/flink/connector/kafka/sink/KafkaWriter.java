@@ -303,7 +303,7 @@ class KafkaWriter<IN>
     }
 
     private static void overwriteClientId(Properties properties, String clientIdPrefix, int subtaskId) {
-        if(clientIdPrefix == null) {
+        if (clientIdPrefix == null) {
             return;
         }
         String updatedClientId = ClientIdFactory.buildClientId(clientIdPrefix, subtaskId);
@@ -312,7 +312,7 @@ class KafkaWriter<IN>
 
     private static void overrideProperty(Properties properties, String key, String value) {
         String userValue = properties.getProperty(key);
-        if(userValue != null) {
+        if (userValue != null) {
             LOG.warn(
                     String.format(
                             "Property %s is provided but will be overridden from %s to %s",

@@ -217,6 +217,25 @@ public class KafkaSinkBuilder<IN> {
         checkNotNull(recordSerializer, "recordSerializer");
     }
 
+    private static void overwriteConfig(Properties properties, String clientIdPrefix, int subtaskId) {
+        if (clientIdPrefix == null) {
+            return;
+        }
+        String updatedClientId = ClientIdFactory.buildClientId(clientIdPrefix, subtaskId);
+        overrideProperty(properties, ProducerConfig.CLIENT_ID_CONFIG, updatedClientId);
+    }
+
+    private static void overrideProperty(Properties properties, String key, String value) {
+        String userValue = properties.getProperty(key);
+        if (userValue != null) {
+            LOG.warn(
+                    String.format(
+                            "Property %s is provided but will be overridden from %s to %s",
+                            key, userValue, value));
+        }
+        properties.setProperty(key, value);
+    }
+
     /**
      * Constructs the {@link KafkaSink} with the configured properties.
      *

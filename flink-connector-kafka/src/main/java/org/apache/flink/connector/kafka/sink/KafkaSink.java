@@ -63,7 +63,6 @@ public class KafkaSink<IN>
     private final String transactionalIdPrefix;
     private final String clientIdPrefix;
 
-
     KafkaSink(
             DeliveryGuarantee deliveryGuarantee,
             Properties kafkaProducerConfig,
