@@ -51,40 +51,24 @@ class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
             "org.apache.kafka.clients.producer.internals.TransactionManager$State";
     private static final String PRODUCER_ID_AND_EPOCH_FIELD_NAME = "producerIdAndEpoch";
 
-    @Nullable
-    private String transactionalId;
+    @Nullable private String transactionalId;
     private volatile boolean inTransaction;
     private volatile boolean hasRecordsInTransaction;
     private volatile boolean closed;
 
-    public FlinkKafkaInternalProducer(Properties properties,
-                                      @Nullable String transactionalId,
-                                      @Nullable String clientId
-    ) {
-        super(withTransactionAndClientIds(properties, transactionalId, clientId));
+    public FlinkKafkaInternalProducer(Properties properties, @Nullable String transactionalId) {
+        super(withTransactionalId(properties, transactionalId));
         this.transactionalId = transactionalId;
     }
 
-    private static Properties withTransactionAndClientIds(
-            Properties properties,
-            @Nullable String transactionalId,
-            @Nullable String clientId
-    ) {
-        if(transactionalId == null && clientId == null) {
+    private static Properties withTransactionalId(
+            Properties properties, @Nullable String transactionalId) {
+        if (transactionalId == null) {
             return properties;
         }
-
         Properties props = new Properties();
         props.putAll(properties);
-
-        if(transactionalId != null) {
-            props.setProperty(ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
-        }
-
-        if(clientId != null) {
-            props.setProperty(ProducerConfig.CLIENT_ID_CONFIG, clientId);
-        }
-
+        props.setProperty(ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
         return props;
     }
 
@@ -239,8 +223,8 @@ class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
                 invoke(
                         transactionManager,
                         "enqueueRequest",
-                        new Class[]{txnRequestHandler.getClass().getSuperclass()},
-                        new Object[]{txnRequestHandler});
+                        new Class[] {txnRequestHandler.getClass().getSuperclass()},
+                        new Object[] {txnRequestHandler});
                 result =
                         (TransactionalRequestResult)
                                 getField(
@@ -360,10 +344,10 @@ class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
             constructor.setAccessible(true);
             return constructor.newInstance(producerId, epoch);
         } catch (InvocationTargetException
-                 | InstantiationException
-                 | IllegalAccessException
-                 | NoSuchFieldException
-                 | NoSuchMethodException e) {
+                | InstantiationException
+                | IllegalAccessException
+                | NoSuchFieldException
+                | NoSuchMethodException e) {
             throw new RuntimeException("Incompatible KafkaProducer version", e);
         }
     }

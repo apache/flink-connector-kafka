@@ -225,6 +225,6 @@ public class KafkaSinkBuilder<IN> {
     public KafkaSink<IN> build() {
         sanityCheck();
         return new KafkaSink<>(
-                deliveryGuarantee, kafkaProducerConfig, transactionalIdPrefix, transactionalIdPrefix, recordSerializer);
+                deliveryGuarantee, kafkaProducerConfig, transactionalIdPrefix, clientIdPrefix, recordSerializer);
     }
 }
