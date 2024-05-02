@@ -61,29 +61,30 @@ class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
                                       @Nullable String transactionalId,
                                       @Nullable String clientId
     ) {
-        super(withClientId(withTransactionalId(properties, transactionalId), ""));
+        super(withTransactionAndClientIds(properties, transactionalId, clientId));
         this.transactionalId = transactionalId;
     }
 
-    private static Properties withTransactionalId(
-            Properties properties, @Nullable String transactionalId) {
-        if (transactionalId == null) {
-            return properties;
-        }
-        Properties props = new Properties();
-        props.putAll(properties);
-        props.setProperty(ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
-        return props;
-    }
-
-    private static Properties withClientId(Properties properties, @Nullable String clientId) {
-        if (clientId == null) {
+    private static Properties withTransactionAndClientIds(
+            Properties properties,
+            @Nullable String transactionalId,
+            @Nullable String clientId
+    ) {
+        if(transactionalId == null && clientId == null) {
             return properties;
         }
 
         Properties props = new Properties();
         props.putAll(properties);
-        props.setProperty(ProducerConfig.CLIENT_ID_CONFIG, clientId);
+
+        if(transactionalId != null) {
+            props.setProperty(ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
+        }
+
+        if(clientId != null) {
+            props.setProperty(ProducerConfig.CLIENT_ID_CONFIG, clientId);
+        }
+
         return props;
     }
 
