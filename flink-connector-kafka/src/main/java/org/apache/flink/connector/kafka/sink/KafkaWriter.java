@@ -68,7 +68,7 @@ import static org.apache.flink.util.Preconditions.checkState;
  */
 class KafkaWriter<IN>
         implements TwoPhaseCommittingStatefulSink.PrecommittingStatefulSinkWriter<
-                IN, KafkaWriterState, KafkaCommittable> {
+        IN, KafkaWriterState, KafkaCommittable> {
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaWriter.class);
     private static final String KAFKA_PRODUCER_METRIC_NAME = "KafkaProducer";
@@ -81,6 +81,7 @@ class KafkaWriter<IN>
     private final DeliveryGuarantee deliveryGuarantee;
     private final Properties kafkaProducerConfig;
     private final String transactionalIdPrefix;
+    private final String clientIdPrefix;
     private final KafkaRecordSerializationSchema<IN> recordSerializer;
     private final Callback deliveryCallback;
     private final KafkaRecordSerializationSchema.KafkaSinkContext kafkaSinkContext;
@@ -115,22 +116,24 @@ class KafkaWriter<IN>
      * KafkaRecordSerializationSchema#open(SerializationSchema.InitializationContext,
      * KafkaRecordSerializationSchema.KafkaSinkContext)} fails.
      *
-     * @param deliveryGuarantee the Sink's delivery guarantee
-     * @param kafkaProducerConfig the properties to configure the {@link FlinkKafkaInternalProducer}
+     * @param deliveryGuarantee     the Sink's delivery guarantee
+     * @param kafkaProducerConfig   the properties to configure the {@link FlinkKafkaInternalProducer}
      * @param transactionalIdPrefix used to create the transactionalIds
-     * @param sinkInitContext context to provide information about the runtime environment
-     * @param recordSerializer serialize to transform the incoming records to {@link ProducerRecord}
-     * @param schemaContext context used to initialize the {@link KafkaRecordSerializationSchema}
-     * @param recoveredStates state from an previous execution which was covered
+     * @param sinkInitContext       context to provide information about the runtime environment
+     * @param recordSerializer      serialize to transform the incoming records to {@link ProducerRecord}
+     * @param schemaContext         context used to initialize the {@link KafkaRecordSerializationSchema}
+     * @param recoveredStates       state from an previous execution which was covered
      */
     KafkaWriter(
             DeliveryGuarantee deliveryGuarantee,
             Properties kafkaProducerConfig,
             String transactionalIdPrefix,
+            String clientIdPrefix,
             Sink.InitContext sinkInitContext,
             KafkaRecordSerializationSchema<IN> recordSerializer,
             SerializationSchema.InitializationContext schemaContext,
             Collection<KafkaWriterState> recoveredStates) {
+        this.clientIdPrefix = clientIdPrefix;
         this.deliveryGuarantee = checkNotNull(deliveryGuarantee, "deliveryGuarantee");
         this.kafkaProducerConfig = checkNotNull(kafkaProducerConfig, "kafkaProducerConfig");
         this.transactionalIdPrefix = checkNotNull(transactionalIdPrefix, "transactionalIdPrefix");
@@ -142,11 +145,11 @@ class KafkaWriter<IN>
                         sinkInitContext.<RecordMetadata>metadataConsumer().orElse(null));
         this.disabledMetrics =
                 kafkaProducerConfig.containsKey(KEY_DISABLE_METRICS)
-                                && Boolean.parseBoolean(
-                                        kafkaProducerConfig.get(KEY_DISABLE_METRICS).toString())
+                        && Boolean.parseBoolean(
+                        kafkaProducerConfig.get(KEY_DISABLE_METRICS).toString())
                         || kafkaProducerConfig.containsKey(KEY_REGISTER_METRICS)
-                                && !Boolean.parseBoolean(
-                                        kafkaProducerConfig.get(KEY_REGISTER_METRICS).toString());
+                        && !Boolean.parseBoolean(
+                        kafkaProducerConfig.get(KEY_REGISTER_METRICS).toString());
         this.timeService = sinkInitContext.getProcessingTimeService();
         this.metricGroup = sinkInitContext.metricGroup();
         this.numBytesOutCounter = metricGroup.getIOMetricGroup().getNumBytesOutCounter();
@@ -175,7 +178,9 @@ class KafkaWriter<IN>
             this.currentProducer.beginTransaction();
         } else if (deliveryGuarantee == DeliveryGuarantee.AT_LEAST_ONCE
                 || deliveryGuarantee == DeliveryGuarantee.NONE) {
-            this.currentProducer = new FlinkKafkaInternalProducer<>(this.kafkaProducerConfig, null);
+            String clientId =
+                    ClientIdFactory.buildClientId(clientIdPrefix, kafkaSinkContext.getParallelInstanceId());
+            this.currentProducer = new FlinkKafkaInternalProducer<>(this.kafkaProducerConfig, null, clientId);
             producerCloseables.add(this.currentProducer);
             initKafkaMetrics(this.currentProducer);
         } else {
@@ -290,11 +295,11 @@ class KafkaWriter<IN>
         }
 
         try (TransactionAborter transactionAborter =
-                new TransactionAborter(
-                        kafkaSinkContext.getParallelInstanceId(),
-                        kafkaSinkContext.getNumberOfParallelInstances(),
-                        this::getOrCreateTransactionalProducer,
-                        producerPool::add)) {
+                     new TransactionAborter(
+                             kafkaSinkContext.getParallelInstanceId(),
+                             kafkaSinkContext.getNumberOfParallelInstances(),
+                             this::getOrCreateTransactionalProducer,
+                             producerPool::add)) {
             transactionAborter.abortLingeringTransactions(prefixesToAbort, startCheckpointId);
         }
     }
@@ -332,7 +337,9 @@ class KafkaWriter<IN>
             String transactionalId) {
         FlinkKafkaInternalProducer<byte[], byte[]> producer = producerPool.poll();
         if (producer == null) {
-            producer = new FlinkKafkaInternalProducer<>(kafkaProducerConfig, transactionalId);
+            String clientId =
+                    ClientIdFactory.buildClientId(clientIdPrefix, kafkaSinkContext.getParallelInstanceId());
+            producer = new FlinkKafkaInternalProducer<>(kafkaProducerConfig, transactionalId, clientId);
             producerCloseables.add(producer);
             producer.initTransactions();
             initKafkaMetrics(producer);
@@ -424,7 +431,8 @@ class KafkaWriter<IN>
 
     private class WriterCallback implements Callback {
         private final MailboxExecutor mailboxExecutor;
-        @Nullable private final Consumer<RecordMetadata> metadataConsumer;
+        @Nullable
+        private final Consumer<RecordMetadata> metadataConsumer;
 
         public WriterCallback(
                 MailboxExecutor mailboxExecutor,
