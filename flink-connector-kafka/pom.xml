@@ -133,6 +133,12 @@ under the License.
             <type>test-jar</type>
         </dependency>
 
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>fink-migration-test-utils</artifactId>
+            <version>${flink.version}</version>
+            <scope>test</scope>
+        </dependency>
 
         <dependency>
             <!-- include kafka server for tests  -->

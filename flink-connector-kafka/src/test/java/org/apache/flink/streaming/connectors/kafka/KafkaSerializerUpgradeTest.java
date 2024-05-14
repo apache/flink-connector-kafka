@@ -20,12 +20,12 @@ package org.apache.flink.streaming.connectors.kafka;
 
 import org.apache.flink.FlinkVersion;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.TypeSerializerMatchers;
 import org.apache.flink.api.common.typeutils.TypeSerializerSchemaCompatibility;
 import org.apache.flink.streaming.connectors.kafka.internals.FlinkKafkaInternalProducer;
+import org.apache.flink.streaming.connectors.kafka.testutils.TypeSerializerConditions;
 import org.apache.flink.streaming.connectors.kafka.testutils.TypeSerializerUpgradeTestBase;
 
-import org.hamcrest.Matcher;
+import org.assertj.core.api.Condition;
 import org.mockito.Mockito;
 
 import java.util.ArrayList;
@@ -33,18 +33,18 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.Set;
 
-import static org.hamcrest.Matchers.is;
-
 /**
  * A {@link TypeSerializerUpgradeTestBase} for {@link FlinkKafkaProducer.TransactionStateSerializer}
  * and {@link FlinkKafkaProducer.ContextStateSerializer}.
  */
 class KafkaSerializerUpgradeTest extends TypeSerializerUpgradeTestBase<Object, Object> {
 
-    public Collection<TestSpecification<?, ?>> createTestSpecifications() throws Exception {
-
+    public Collection<TestSpecification<?, ?>> createTestSpecifications(FlinkVersion currentVersion)
+            throws Exception {
+        Set<FlinkVersion> migrationVersions =
+                FlinkVersion.rangeOf(FlinkVersion.v1_11, FlinkVersion.v1_17);
         ArrayList<TestSpecification<?, ?>> testSpecifications = new ArrayList<>();
-        for (FlinkVersion flinkVersion : MIGRATION_VERSIONS) {
+        for (FlinkVersion flinkVersion : migrationVersions) {
             testSpecifications.add(
                     new TestSpecification<>(
                             "transaction-state-serializer",
@@ -99,18 +99,20 @@ class KafkaSerializerUpgradeTest extends TypeSerializerUpgradeTestBase<Object, O
         }
 
         @Override
-        public Matcher<FlinkKafkaProducer.KafkaTransactionState> testDataMatcher() {
+        public Condition<FlinkKafkaProducer.KafkaTransactionState> testDataCondition() {
             @SuppressWarnings("unchecked")
             FlinkKafkaInternalProducer<byte[], byte[]> mock =
                     Mockito.mock(FlinkKafkaInternalProducer.class);
-            return is(
-                    new FlinkKafkaProducer.KafkaTransactionState("1234", 3456, (short) 789, mock));
+            FlinkKafkaProducer.KafkaTransactionState state =
+                    new FlinkKafkaProducer.KafkaTransactionState("1234", 3456, (short) 789, mock);
+            return new Condition<>(state::equals, "state is " + state);
         }
 
         @Override
-        public Matcher<TypeSerializerSchemaCompatibility<FlinkKafkaProducer.KafkaTransactionState>>
-                schemaCompatibilityMatcher(FlinkVersion version) {
-            return TypeSerializerMatchers.isCompatibleAsIs();
+        public Condition<
+                        TypeSerializerSchemaCompatibility<FlinkKafkaProducer.KafkaTransactionState>>
+                schemaCompatibilityCondition(FlinkVersion version) {
+            return TypeSerializerConditions.isCompatibleAsIs();
         }
     }
 
@@ -154,20 +156,22 @@ class KafkaSerializerUpgradeTest extends TypeSerializerUpgradeTestBase<Object, O
         }
 
         @Override
-        public Matcher<FlinkKafkaProducer.KafkaTransactionContext> testDataMatcher() {
+        public Condition<FlinkKafkaProducer.KafkaTransactionContext> testDataCondition() {
             Set<String> transactionIds = new HashSet<>();
             transactionIds.add("123");
             transactionIds.add("456");
             transactionIds.add("789");
-            return is(new FlinkKafkaProducer.KafkaTransactionContext(transactionIds));
+            FlinkKafkaProducer.KafkaTransactionContext context =
+                    new FlinkKafkaProducer.KafkaTransactionContext(transactionIds);
+            return new Condition<>(context::equals, "context is " + context);
         }
 
         @Override
-        public Matcher<
+        public Condition<
                         TypeSerializerSchemaCompatibility<
                                 FlinkKafkaProducer.KafkaTransactionContext>>
-                schemaCompatibilityMatcher(FlinkVersion version) {
-            return TypeSerializerMatchers.isCompatibleAsIs();
+                schemaCompatibilityCondition(FlinkVersion version) {
+            return TypeSerializerConditions.isCompatibleAsIs();
         }
     }
 }
