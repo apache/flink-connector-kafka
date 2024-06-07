@@ -16,8 +16,8 @@
 # limitations under the License.
 ################################################################################
 
-version: 3.1.0
-flink_compatibility: [1.17, 1.18]
+version: 3.2.0
+flink_compatibility: [1.18, 1.19]
 variants:
   - maven: flink-connector-kafka
     sql_url: https://repo.maven.apache.org/maven2/org/apache/flink/flink-sql-connector-kafka/$full_version/flink-sql-connector-kafka-$full_version.jar
