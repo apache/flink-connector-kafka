@@ -32,6 +32,7 @@ import org.apache.flink.streaming.connectors.kafka.internals.metrics.KafkaMetric
 import org.apache.flink.util.FlinkRuntimeException;
 
 import org.apache.kafka.clients.producer.Callback;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.Metric;
@@ -127,6 +128,7 @@ class KafkaWriter<IN>
             DeliveryGuarantee deliveryGuarantee,
             Properties kafkaProducerConfig,
             String transactionalIdPrefix,
+            String clientIdPrefix,
             Sink.InitContext sinkInitContext,
             KafkaRecordSerializationSchema<IN> recordSerializer,
             SerializationSchema.InitializationContext schemaContext,
@@ -136,6 +138,7 @@ class KafkaWriter<IN>
         this.transactionalIdPrefix = checkNotNull(transactionalIdPrefix, "transactionalIdPrefix");
         this.recordSerializer = checkNotNull(recordSerializer, "recordSerializer");
         checkNotNull(sinkInitContext, "sinkInitContext");
+        overwriteClientId(kafkaProducerConfig, clientIdPrefix, sinkInitContext.getSubtaskId());
         this.deliveryCallback =
                 new WriterCallback(
                         sinkInitContext.getMailboxExecutor(),
@@ -297,6 +300,25 @@ class KafkaWriter<IN>
                         producerPool::add)) {
             transactionAborter.abortLingeringTransactions(prefixesToAbort, startCheckpointId);
         }
+    }
+
+    private static void overwriteClientId(Properties properties, String clientIdPrefix, int subtaskId) {
+        if (clientIdPrefix == null) {
+            return;
+        }
+        String updatedClientId = ClientIdFactory.buildClientId(clientIdPrefix, subtaskId);
+        overrideProperty(properties, ProducerConfig.CLIENT_ID_CONFIG, updatedClientId);
+    }
+
+    private static void overrideProperty(Properties properties, String key, String value) {
+        String userValue = properties.getProperty(key);
+        if (userValue != null) {
+            LOG.warn(
+                    String.format(
+                            "Property %s is provided but will be overridden from %s to %s",
+                            key, userValue, value));
+        }
+        properties.setProperty(key, value);
     }
 
     /**
