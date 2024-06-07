@@ -423,6 +423,11 @@ public class KafkaPartitionSplitReader
     }
 
     private String createConsumerClientId(Properties props) {
+        String providedClientId = props.getProperty(KafkaSourceOptions.COMPLETE_CLIENT_ID.key());
+        if (providedClientId != null) {
+            return providedClientId;
+        }
+
         String prefix = props.getProperty(KafkaSourceOptions.CLIENT_ID_PREFIX.key());
         return prefix + "-" + subtaskId;
     }
