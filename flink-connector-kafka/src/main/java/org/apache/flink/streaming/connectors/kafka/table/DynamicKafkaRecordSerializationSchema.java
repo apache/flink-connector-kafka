@@ -103,16 +103,12 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
                 valueSerialized = null;
             } else {
                 // make the message to be INSERT to be compliant with the INSERT-ONLY format
-                final RowData valueRow =
-                        DynamicKafkaRecordSerializationSchema.createProjectedRow(
-                                consumedRow, kind, valueFieldGetters);
+                final RowData valueRow = createProjectedRow(consumedRow, kind, valueFieldGetters);
                 valueRow.setRowKind(RowKind.INSERT);
                 valueSerialized = valueSerialization.serialize(valueRow);
             }
         } else {
-            final RowData valueRow =
-                    DynamicKafkaRecordSerializationSchema.createProjectedRow(
-                            consumedRow, kind, valueFieldGetters);
+            final RowData valueRow = createProjectedRow(consumedRow, kind, valueFieldGetters);
             valueSerialized = valueSerialization.serialize(valueRow);
         }
 
