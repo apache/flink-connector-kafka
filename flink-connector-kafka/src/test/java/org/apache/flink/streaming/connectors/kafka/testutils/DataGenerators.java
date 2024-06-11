@@ -62,11 +62,11 @@ public class DataGenerators {
                                 // create a sequence
                                 int[] elements = new int[numElements];
                                 for (int i = 0, val = getRuntimeContext().getIndexOfThisSubtask();
-                                        i < numElements;
-                                        i++,
-                                                val +=
-                                                        getRuntimeContext()
-                                                                .getNumberOfParallelSubtasks()) {
+                                     i < numElements;
+                                     i++,
+                                             val +=
+                                                     getRuntimeContext()
+                                                             .getNumberOfParallelSubtasks()) {
 
                                     elements[i] = val;
                                 }

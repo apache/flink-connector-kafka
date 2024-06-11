@@ -133,24 +133,14 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
 
         @Override
         public TypeSerializer<PreviousElementT> createPriorSerializer() {
-            try (ThreadContextClassLoader ignored =
-                    new ThreadContextClassLoader(setupClassloader)) {
-                return delegateSetup.createPriorSerializer();
-            } catch (IOException e) {
-                throw new RuntimeException(
-                        "Error creating prior serializer via ClassLoaderSafePreUpgradeSetup.", e);
-            }
+            ThreadContextClassLoader ignored = new ThreadContextClassLoader(setupClassloader);
+            return delegateSetup.createPriorSerializer();
         }
 
         @Override
         public PreviousElementT createTestData() {
-            try (ThreadContextClassLoader ignored =
-                    new ThreadContextClassLoader(setupClassloader)) {
-                return delegateSetup.createTestData();
-            } catch (IOException e) {
-                throw new RuntimeException(
-                        "Error creating test data via ThreadContextClassLoader.", e);
-            }
+            ThreadContextClassLoader ignored = new ThreadContextClassLoader(setupClassloader);
+            return delegateSetup.createTestData();
         }
     }
 
@@ -176,38 +166,21 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
 
         @Override
         public TypeSerializer<UpgradedElementT> createUpgradedSerializer() {
-            try (ThreadContextClassLoader ignored =
-                    new ThreadContextClassLoader(verifierClassloader)) {
-                return delegateVerifier.createUpgradedSerializer();
-            } catch (IOException e) {
-                throw new RuntimeException(
-                        "Error creating upgraded serializer via ClassLoaderSafeUpgradeVerifier.",
-                        e);
-            }
+            ThreadContextClassLoader ignored = new ThreadContextClassLoader(verifierClassloader);
+            return delegateVerifier.createUpgradedSerializer();
         }
 
         @Override
         public Matcher<UpgradedElementT> testDataMatcher() {
-            try (ThreadContextClassLoader ignored =
-                    new ThreadContextClassLoader(verifierClassloader)) {
-                return delegateVerifier.testDataMatcher();
-            } catch (IOException e) {
-                throw new RuntimeException(
-                        "Error creating expected test data via ClassLoaderSafeUpgradeVerifier.", e);
-            }
+            ThreadContextClassLoader ignored = new ThreadContextClassLoader(verifierClassloader);
+            return delegateVerifier.testDataMatcher();
         }
 
         @Override
         public Matcher<TypeSerializerSchemaCompatibility<UpgradedElementT>>
                 schemaCompatibilityMatcher(FlinkVersion version) {
-            try (ThreadContextClassLoader ignored =
-                    new ThreadContextClassLoader(verifierClassloader)) {
-                return delegateVerifier.schemaCompatibilityMatcher(version);
-            } catch (IOException e) {
-                throw new RuntimeException(
-                        "Error creating schema compatibility matcher via ClassLoaderSafeUpgradeVerifier.",
-                        e);
-            }
+            ThreadContextClassLoader ignored = new ThreadContextClassLoader(verifierClassloader);
+            return delegateVerifier.schemaCompatibilityMatcher(version);
         }
     }
 

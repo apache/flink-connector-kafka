@@ -455,7 +455,8 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
 
     // --------------------------------------------------------------------------------------------
 
-    private static class KafkaHeader implements Header {
+    /** KafkaHeader helper class. */
+    protected static class KafkaHeader implements Header {
 
         private final String key;
 

@@ -24,6 +24,12 @@ import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 import org.apache.flink.util.Collector;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.header.Header;
+
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * A simple wrapper for using the DeserializationSchema with the KafkaDeserializationSchema
@@ -36,10 +42,36 @@ public class KafkaDeserializationSchemaWrapper<T> implements KafkaDeserializatio
 
     private static final long serialVersionUID = 2651665280744549932L;
 
+    private static Method deserializeWithAdditionalPropertiesMethod = null;
+
+    protected static final String IS_KEY = "IS_KEY";
+
+    protected static final String HEADERS = "HEADERS";
+
+    static {
+        Class<DeserializationSchema> deserializationSchemaClass = DeserializationSchema.class;
+        try {
+            deserializeWithAdditionalPropertiesMethod =
+                    deserializationSchemaClass.getDeclaredMethod(
+                            "deserializeWithAdditionalProperties",
+                            byte[].class,
+                            Map.class,
+                            Collector.class);
+
+        } catch (NoSuchMethodException e) {
+            // do nothing
+        }
+    }
+
     private final DeserializationSchema<T> deserializationSchema;
 
     public KafkaDeserializationSchemaWrapper(DeserializationSchema<T> deserializationSchema) {
         this.deserializationSchema = deserializationSchema;
+        if (deserializeWithAdditionalPropertiesMethod == null) {
+            Class<DeserializationSchema> deserializationSchemaClass = DeserializationSchema.class;
+            Method[] methods = deserializationSchemaClass.getDeclaredMethods();
+            throw new RuntimeException("DeSerialize Method wrapper is null " + methods);
+        }
     }
 
     @Override
@@ -55,7 +87,25 @@ public class KafkaDeserializationSchemaWrapper<T> implements KafkaDeserializatio
     @Override
     public void deserialize(ConsumerRecord<byte[], byte[]> message, Collector<T> out)
             throws Exception {
-        deserializationSchema.deserialize(message.value(), out);
+        Map<String, Object> headersMapFromKafka = new HashMap<>();
+        for (Header header : message.headers()) {
+            headersMapFromKafka.put(header.key(), header.value());
+        }
+        if (deserializeWithAdditionalPropertiesMethod == null) {
+            deserializationSchema.deserialize(message.value(), out);
+        } else {
+            Map<String, Object> additionalParameters = new HashMap<>();
+            additionalParameters.put(IS_KEY, false);
+            additionalParameters.put(HEADERS, headersMapFromKafka);
+            try {
+                deserializeWithAdditionalPropertiesMethod.invoke(
+                        message.value(), additionalParameters, out);
+            } catch (IllegalAccessException e) {
+                throw new RuntimeException(e);
+            } catch (InvocationTargetException e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 
     @Override
