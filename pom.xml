@@ -22,7 +22,7 @@ under the License.
     <parent>
         <groupId>org.apache.flink</groupId>
         <artifactId>flink-connector-parent</artifactId>
-        <version>1.0.0</version>
+        <version>1.1.0</version>
     </parent>
 
     <modelVersion>4.0.0</modelVersion>
@@ -86,6 +86,9 @@ under the License.
          of entries in the form '[-]{2}add-[opens|exports]=<module>/<package>=ALL-UNNAMED'.-->
         <flink.connector.module.config/>
         <flink.surefire.baseArgLine>-XX:+UseG1GC -Xms256m -XX:+IgnoreUnrecognizedVMOptions ${flink.connector.module.config}</flink.surefire.baseArgLine>
+        <!-- exclude nested tests to avoid executing them twice since the outer class will execute
+        them -->
+        <additionalExcludes>**/*$*</additionalExcludes>
     </properties>
 
     <dependencies>
