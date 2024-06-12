@@ -25,7 +25,20 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 
-/** A serializer used to serialize {@link KafkaWriterState}. */
+/**
+ * The {@link org.apache.flink.core.io.SimpleVersionedSerializer serializer} for {@link
+ * KafkaWriterState}.
+ *
+ * <p>The serializer has a version (returned by {@link #getVersion()}) which can be attached to the
+ * serialized data. When the serializer evolves, the version can be used to identify with which
+ * prior version the data was serialized. Currently, this serializer supported versions are:
+ *
+ * <ol>
+ *   <li>1
+ * </ol>
+ *
+ * <p>Other versions of the serialized data will fail to deserialize and throw an exception.
+ */
 class KafkaWriterStateSerializer implements SimpleVersionedSerializer<KafkaWriterState> {
 
     @Override
@@ -45,6 +58,15 @@ class KafkaWriterStateSerializer implements SimpleVersionedSerializer<KafkaWrite
 
     @Override
     public KafkaWriterState deserialize(int version, byte[] serialized) throws IOException {
+        switch (version) {
+            case 1:
+                return deserializeV1(serialized);
+            default:
+                throw new IOException("Unrecognized version or corrupt state: " + version);
+        }
+    }
+
+    private KafkaWriterState deserializeV1(byte[] serialized) throws IOException {
         try (final ByteArrayInputStream bais = new ByteArrayInputStream(serialized);
                 final DataInputStream in = new DataInputStream(bais)) {
             final String transactionalIdPrefx = in.readUTF();
