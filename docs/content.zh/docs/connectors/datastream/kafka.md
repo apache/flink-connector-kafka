@@ -110,7 +110,7 @@ Kafka Source 提供了 3 种 Topic / Partition 的订阅方式：
   {{< tabs "KafkaSource#setTopicPattern" >}}
   {{< tab "Java" >}}
   ```java
-  KafkaSource.builder().setTopicPattern("topic.*");
+  KafkaSource.builder().setTopicPattern(Pattern.compile("topic.*"));
   ```
   {{< /tab >}}
   {{< tab "Python" >}}
