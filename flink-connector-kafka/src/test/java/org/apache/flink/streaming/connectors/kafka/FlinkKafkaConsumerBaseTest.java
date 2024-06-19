@@ -33,6 +33,7 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.runtime.TupleSerializer;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.testutils.CheckedThread;
+import org.apache.flink.core.testutils.FlinkAssertions;
 import org.apache.flink.core.testutils.OneShotLatch;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
@@ -60,16 +61,16 @@ import org.apache.flink.streaming.util.AbstractStreamOperatorTestHarness;
 import org.apache.flink.streaming.util.MockDeserializationSchema;
 import org.apache.flink.streaming.util.MockStreamingRuntimeContext;
 import org.apache.flink.streaming.util.serialization.KeyedDeserializationSchema;
-import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.SerializedValue;
-import org.apache.flink.util.TestLogger;
+import org.apache.flink.util.TestLoggerExtension;
 import org.apache.flink.util.function.SupplierWithException;
 import org.apache.flink.util.function.ThrowingRunnable;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import javax.annotation.Nonnull;
 
@@ -102,26 +103,26 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 
 /** Tests for the {@link FlinkKafkaConsumerBase}. */
-public class FlinkKafkaConsumerBaseTest extends TestLogger {
+@ExtendWith(TestLoggerExtension.class)
+class FlinkKafkaConsumerBaseTest {
 
     private static final int maxParallelism = Short.MAX_VALUE / 2;
 
     /** Tests that not both types of timestamp extractors / watermark generators can be used. */
     @Test
     @SuppressWarnings("unchecked")
-    public void testEitherWatermarkExtractor() {
+    void testEitherWatermarkExtractor() {
+        final FlinkKafkaConsumerBase<String> consumer = new DummyFlinkKafkaConsumer<String>();
         assertThatThrownBy(
                         () ->
-                                new DummyFlinkKafkaConsumer<String>()
-                                        .assignTimestampsAndWatermarks(
-                                                (AssignerWithPeriodicWatermarks<String>) null))
+                                consumer.assignTimestampsAndWatermarks(
+                                        (AssignerWithPeriodicWatermarks<String>) null))
                 .isInstanceOf(NullPointerException.class);
 
         assertThatThrownBy(
                         () ->
-                                new DummyFlinkKafkaConsumer<String>()
-                                        .assignTimestampsAndWatermarks(
-                                                (AssignerWithPunctuatedWatermarks<String>) null))
+                                consumer.assignTimestampsAndWatermarks(
+                                        (AssignerWithPunctuatedWatermarks<String>) null))
                 .isInstanceOf(NullPointerException.class);
 
         final AssignerWithPeriodicWatermarks<String> periodicAssigner =
@@ -142,8 +143,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
 
     /** Tests that no checkpoints happen when the fetcher is not running. */
     @Test
-    public void ignoreCheckpointWhenNotRunning() throws Exception {
-        @SuppressWarnings("unchecked")
+    void ignoreCheckpointWhenNotRunning() throws Exception {
         final MockFetcher<String> fetcher = new MockFetcher<>();
         final FlinkKafkaConsumerBase<String> consumer =
                 new DummyFlinkKafkaConsumer<>(
@@ -162,7 +162,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
         // acknowledgement of the checkpoint should also not result in any offset commits
         consumer.notifyCheckpointComplete(1L);
         assertThat(fetcher.getAndClearLastCommittedOffsets()).isNull();
-        assertThat(fetcher.getCommitCount()).isEqualTo(0);
+        assertThat(fetcher.getCommitCount()).isZero();
     }
 
     /**
@@ -170,8 +170,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
      * correctly contains the restored state instead.
      */
     @Test
-    public void checkRestoredCheckpointWhenFetcherNotReady() throws Exception {
-        @SuppressWarnings("unchecked")
+    void checkRestoredCheckpointWhenFetcherNotReady() throws Exception {
         final FlinkKafkaConsumerBase<String> consumer = new DummyFlinkKafkaConsumer<>();
 
         final TestingListState<Tuple2<KafkaTopicPartition, Long>> restoredListState =
@@ -203,8 +202,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
     }
 
     @Test
-    public void testConfigureOnCheckpointsCommitMode() throws Exception {
-        @SuppressWarnings("unchecked")
+    void testConfigureOnCheckpointsCommitMode() throws Exception {
         // auto-commit enabled; this should be ignored in this case
         final DummyFlinkKafkaConsumer<String> consumer = new DummyFlinkKafkaConsumer<>(true);
 
@@ -216,8 +214,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
     }
 
     @Test
-    public void testConfigureAutoCommitMode() throws Exception {
-        @SuppressWarnings("unchecked")
+    void testConfigureAutoCommitMode() throws Exception {
         final DummyFlinkKafkaConsumer<String> consumer = new DummyFlinkKafkaConsumer<>(true);
 
         setupConsumer(consumer);
@@ -226,8 +223,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
     }
 
     @Test
-    public void testConfigureDisableOffsetCommitWithCheckpointing() throws Exception {
-        @SuppressWarnings("unchecked")
+    void testConfigureDisableOffsetCommitWithCheckpointing() throws Exception {
         // auto-commit enabled; this should be ignored in this case
         final DummyFlinkKafkaConsumer<String> consumer = new DummyFlinkKafkaConsumer<>(true);
         consumer.setCommitOffsetsOnCheckpoints(
@@ -241,8 +237,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
     }
 
     @Test
-    public void testConfigureDisableOffsetCommitWithoutCheckpointing() throws Exception {
-        @SuppressWarnings("unchecked")
+    void testConfigureDisableOffsetCommitWithoutCheckpointing() throws Exception {
         final DummyFlinkKafkaConsumer<String> consumer = new DummyFlinkKafkaConsumer<>(false);
 
         setupConsumer(consumer);
@@ -255,8 +250,8 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
      * (filterRestoredPartitionsWithDiscovered is active)
      */
     @Test
-    public void testSetFilterRestoredParitionsNoChange() throws Exception {
-        checkFilterRestoredPartitionsWithDisovered(
+    void testSetFilterRestoredPartitionsNoChange() throws Exception {
+        checkFilterRestoredPartitionsWithDiscovered(
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
@@ -268,8 +263,8 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
      * in restored partitions. (filterRestoredPartitionsWithDiscovered is active)
      */
     @Test
-    public void testSetFilterRestoredParitionsWithRemovedTopic() throws Exception {
-        checkFilterRestoredPartitionsWithDisovered(
+    void testSetFilterRestoredPartitionsWithRemovedTopic() throws Exception {
+        checkFilterRestoredPartitionsWithDiscovered(
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
                 Arrays.asList(new String[] {"kafka_topic_1"}),
                 Arrays.asList(new String[] {"kafka_topic_1"}),
@@ -281,8 +276,8 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
      * (filterRestoredPartitionsWithDiscovered is active)
      */
     @Test
-    public void testSetFilterRestoredParitionsWithAddedTopic() throws Exception {
-        checkFilterRestoredPartitionsWithDisovered(
+    void testSetFilterRestoredPartitionsWithAddedTopic() throws Exception {
+        checkFilterRestoredPartitionsWithDiscovered(
                 Arrays.asList(new String[] {"kafka_topic_1"}),
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
@@ -294,8 +289,8 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
      * (filterRestoredPartitionsWithDiscovered is disabled)
      */
     @Test
-    public void testDisableFilterRestoredParitionsNoChange() throws Exception {
-        checkFilterRestoredPartitionsWithDisovered(
+    void testDisableFilterRestoredPartitionsNoChange() throws Exception {
+        checkFilterRestoredPartitionsWithDiscovered(
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
@@ -307,8 +302,8 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
      * still in restored partitions. (filterRestoredPartitionsWithDiscovered is disabled)
      */
     @Test
-    public void testDisableFilterRestoredParitionsWithRemovedTopic() throws Exception {
-        checkFilterRestoredPartitionsWithDisovered(
+    void testDisableFilterRestoredPartitionsWithRemovedTopic() throws Exception {
+        checkFilterRestoredPartitionsWithDiscovered(
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
                 Arrays.asList(new String[] {"kafka_topic_1"}),
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
@@ -320,15 +315,15 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
      * (filterRestoredPartitionsWithDiscovered is disabled)
      */
     @Test
-    public void testDisableFilterRestoredParitionsWithAddedTopic() throws Exception {
-        checkFilterRestoredPartitionsWithDisovered(
+    void testDisableFilterRestoredPartitionsWithAddedTopic() throws Exception {
+        checkFilterRestoredPartitionsWithDiscovered(
                 Arrays.asList(new String[] {"kafka_topic_1"}),
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
                 true);
     }
 
-    private void checkFilterRestoredPartitionsWithDisovered(
+    private void checkFilterRestoredPartitionsWithDiscovered(
             List<String> restoredKafkaTopics,
             List<String> initKafkaTopics,
             List<String> expectedSubscribedPartitions,
@@ -374,7 +369,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
 
     @Test
     @SuppressWarnings("unchecked")
-    public void testSnapshotStateWithCommitOnCheckpointsEnabled() throws Exception {
+    void testSnapshotStateWithCommitOnCheckpointsEnabled() throws Exception {
 
         // --------------------------------------------------------------------
         //   prepare fake states
@@ -431,7 +426,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
 
         assertThat(snapshot1).isEqualTo(state1);
         assertThat(consumer.getPendingOffsetsToCommit()).hasSize(1);
-        assertThat(consumer.getPendingOffsetsToCommit().get(138L)).isEqualTo(state1);
+        assertThat(consumer.getPendingOffsetsToCommit()).containsEntry(138L, state1);
 
         // checkpoint 2
         consumer.snapshotState(new StateSnapshotContextSynchronousImpl(140, 140));
@@ -446,7 +441,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
 
         assertThat(snapshot2).isEqualTo(state2);
         assertThat(consumer.getPendingOffsetsToCommit()).hasSize(2);
-        assertThat(consumer.getPendingOffsetsToCommit().get(140L)).isEqualTo(state2);
+        assertThat(consumer.getPendingOffsetsToCommit()).containsEntry(140L, state2);
 
         // ack checkpoint 1
         consumer.notifyCheckpointComplete(138L);
@@ -468,7 +463,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
 
         assertThat(snapshot3).isEqualTo(state3);
         assertThat(consumer.getPendingOffsetsToCommit()).hasSize(2);
-        assertThat(consumer.getPendingOffsetsToCommit().get(141L)).isEqualTo(state3);
+        assertThat(consumer.getPendingOffsetsToCommit()).containsEntry(141L, state3);
 
         // ack checkpoint 3, subsumes number 2
         consumer.notifyCheckpointComplete(141L);
@@ -487,7 +482,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
 
     @Test
     @SuppressWarnings("unchecked")
-    public void testSnapshotStateWithCommitOnCheckpointsDisabled() throws Exception {
+    void testSnapshotStateWithCommitOnCheckpointsDisabled() throws Exception {
         // --------------------------------------------------------------------
         //   prepare fake states
         // --------------------------------------------------------------------
@@ -543,8 +538,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
         }
 
         assertThat(snapshot1).isEqualTo(state1);
-        assertThat(consumer.getPendingOffsetsToCommit().size())
-                .isEqualTo(0); // pending offsets to commit should not be updated
+        assertThat(consumer.getPendingOffsetsToCommit()).isEmpty(); // pending offsets to commit should not be updated
 
         // checkpoint 2
         consumer.snapshotState(new StateSnapshotContextSynchronousImpl(140, 140));
@@ -558,12 +552,11 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
         }
 
         assertThat(snapshot2).isEqualTo(state2);
-        assertThat(consumer.getPendingOffsetsToCommit().size())
-                .isEqualTo(0); // pending offsets to commit should not be updated
+        assertThat(consumer.getPendingOffsetsToCommit()).isEmpty(); // pending offsets to commit should not be updated
 
         // ack checkpoint 1
         consumer.notifyCheckpointComplete(138L);
-        assertThat(fetcher.getCommitCount()).isEqualTo(0);
+        assertThat(fetcher.getCommitCount()).isZero();
         assertThat(fetcher.getAndClearLastCommittedOffsets())
                 .isNull(); // no offsets should be committed
 
@@ -579,17 +572,16 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
         }
 
         assertThat(snapshot3).isEqualTo(state3);
-        assertThat(consumer.getPendingOffsetsToCommit().size())
-                .isEqualTo(0); // pending offsets to commit should not be updated
+        assertThat(consumer.getPendingOffsetsToCommit()).isEmpty(); // pending offsets to commit should not be updated
 
         // ack checkpoint 3, subsumes number 2
         consumer.notifyCheckpointComplete(141L);
-        assertThat(fetcher.getCommitCount()).isEqualTo(0);
+        assertThat(fetcher.getCommitCount()).isZero();
         assertThat(fetcher.getAndClearLastCommittedOffsets())
                 .isNull(); // no offsets should be committed
 
         consumer.notifyCheckpointComplete(666); // invalid checkpoint
-        assertThat(fetcher.getCommitCount()).isEqualTo(0);
+        assertThat(fetcher.getCommitCount()).isZero();
         assertThat(fetcher.getAndClearLastCommittedOffsets())
                 .isNull(); // no offsets should be committed
 
@@ -598,7 +590,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
     }
 
     @Test
-    public void testClosePartitionDiscovererWhenOpenThrowException() throws Exception {
+    void testClosePartitionDiscovererWhenOpenThrowException() throws Exception {
         final RuntimeException failureCause =
                 new RuntimeException(new FlinkException("Test partition discoverer exception"));
         final FailingPartitionDiscoverer failingPartitionDiscoverer =
@@ -614,7 +606,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
     }
 
     @Test
-    public void testClosePartitionDiscovererWhenCreateKafkaFetcherFails() throws Exception {
+    void testClosePartitionDiscovererWhenCreateKafkaFetcherFails() throws Exception {
         final FlinkException failureCause = new FlinkException("Create Kafka fetcher failure.");
 
         final DummyPartitionDiscoverer testPartitionDiscoverer = new DummyPartitionDiscoverer();
@@ -633,7 +625,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
     }
 
     @Test
-    public void testClosePartitionDiscovererWhenKafkaFetcherFails() throws Exception {
+    void testClosePartitionDiscovererWhenKafkaFetcherFails() throws Exception {
         final FlinkException failureCause = new FlinkException("Run Kafka fetcher failure.");
 
         // in this scenario, the partition discoverer will be concurrently accessed;
@@ -658,23 +650,15 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
     private void testFailingConsumerLifecycle(
             FlinkKafkaConsumerBase<String> testKafkaConsumer, @Nonnull Exception expectedException)
             throws Exception {
-        try {
+        assertThatThrownBy(() -> {
             setupConsumer(testKafkaConsumer);
             testKafkaConsumer.run(new TestSourceContext<>());
-
-            fail(
-                    "Exception should have been thrown from open / run method of FlinkKafkaConsumerBase.");
-        } catch (Exception e) {
-            assertThat(
-                            ExceptionUtils.findThrowable(
-                                    e, throwable -> throwable.equals(expectedException)))
-                    .isPresent();
-        }
+        }).satisfies(FlinkAssertions.anyCauseMatches(expectedException.getClass()));
         testKafkaConsumer.close();
     }
 
     @Test
-    public void testClosePartitionDiscovererWithCancellation() throws Exception {
+    void testClosePartitionDiscovererWithCancellation() throws Exception {
         final DummyPartitionDiscoverer testPartitionDiscoverer = new DummyPartitionDiscoverer();
 
         final TestingFlinkKafkaConsumer<String> consumer =
@@ -707,7 +691,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
      * that the two methods create compatible serializers.
      */
     @Test
-    public void testExplicitStateSerializerCompatibility() throws Exception {
+    void testExplicitStateSerializerCompatibility() throws Exception {
         ExecutionConfig executionConfig = new ExecutionConfig();
 
         Tuple2<KafkaTopicPartition, Long> tuple =
@@ -733,12 +717,12 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
     }
 
     @Test
-    public void testScaleUp() throws Exception {
+    void testScaleUp() throws Exception {
         testRescaling(5, 2, 8, 30);
     }
 
     @Test
-    public void testScaleDown() throws Exception {
+    void testScaleDown() throws Exception {
         testRescaling(5, 10, 2, 100);
     }
 
@@ -883,7 +867,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
     }
 
     @Test
-    public void testOpen() throws Exception {
+    void testOpen() throws Exception {
         MockDeserializationSchema<Object> deserializationSchema = new MockDeserializationSchema<>();
 
         AbstractStreamOperatorTestHarness<Object> testHarness =
@@ -898,7 +882,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
     }
 
     @Test
-    public void testOpenWithRestoreState() throws Exception {
+    void testOpenWithRestoreState() throws Exception {
         MockDeserializationSchema<String> deserializationSchema = new MockDeserializationSchema<>();
         final FlinkKafkaConsumerBase<String> consumer =
                 new DummyFlinkKafkaConsumer<>(
@@ -945,7 +929,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
         }
 
         @Override
-        protected void initializeConnections() throws Exception {
+        protected void initializeConnections() {
             closed = false;
         }
 
@@ -953,7 +937,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
         protected void wakeupConnections() {}
 
         @Override
-        protected void closeConnections() throws Exception {
+        protected void closeConnections() {
             closed = true;
         }
 
@@ -1087,8 +1071,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
 
         @Override
         protected void doCommitInternalOffsetsToKafka(
-                Map<KafkaTopicPartition, Long> offsets, @Nonnull KafkaCommitCallback commitCallback)
-                throws Exception {}
+                Map<KafkaTopicPartition, Long> offsets, @Nonnull KafkaCommitCallback commitCallback) {}
 
         @Override
         protected KPH createKafkaPartitionHandle(KafkaTopicPartition partition) {
@@ -1104,11 +1087,10 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
     private static class DummyFlinkKafkaConsumer<T> extends FlinkKafkaConsumerBase<T> {
         private static final long serialVersionUID = 1L;
 
-        private SupplierWithException<AbstractFetcher<T, ?>, Exception> testFetcherSupplier;
-        private AbstractPartitionDiscoverer testPartitionDiscoverer;
-        private boolean isAutoCommitEnabled;
+        private final SupplierWithException<AbstractFetcher<T, ?>, Exception> testFetcherSupplier;
+        private final AbstractPartitionDiscoverer testPartitionDiscoverer;
+        private final boolean isAutoCommitEnabled;
 
-        @SuppressWarnings("unchecked")
         DummyFlinkKafkaConsumer() {
             this(false);
         }
@@ -1149,7 +1131,6 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
                     (KeyedDeserializationSchema<T>) mock(KeyedDeserializationSchema.class));
         }
 
-        @SuppressWarnings("unchecked")
         DummyFlinkKafkaConsumer(
                 SupplierWithException<AbstractFetcher<T, ?>, Exception> abstractFetcherSupplier,
                 AbstractPartitionDiscoverer abstractPartitionDiscoverer,
@@ -1161,7 +1142,6 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
                     discoveryIntervalMillis);
         }
 
-        @SuppressWarnings("unchecked")
         DummyFlinkKafkaConsumer(
                 AbstractFetcher<T, ?> testFetcher,
                 AbstractPartitionDiscoverer testPartitionDiscoverer,
@@ -1173,7 +1153,6 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
                     PARTITION_DISCOVERY_DISABLED);
         }
 
-        @SuppressWarnings("unchecked")
         DummyFlinkKafkaConsumer(
                 AbstractFetcher<T, ?> testFetcher,
                 AbstractPartitionDiscoverer testPartitionDiscoverer,
@@ -1201,7 +1180,6 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
                     (KeyedDeserializationSchema<T>) mock(KeyedDeserializationSchema.class));
         }
 
-        @SuppressWarnings("unchecked")
         DummyFlinkKafkaConsumer(
                 SupplierWithException<AbstractFetcher<T, ?>, Exception> testFetcherSupplier,
                 AbstractPartitionDiscoverer testPartitionDiscoverer,
@@ -1321,12 +1299,12 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
         }
 
         @Override
-        public Iterable<T> get() throws Exception {
+        public Iterable<T> get() {
             return list;
         }
 
         @Override
-        public void add(T value) throws Exception {
+        public void add(T value) {
             Preconditions.checkNotNull(value, "You cannot add null to a ListState.");
             list.add(value);
         }
@@ -1340,14 +1318,13 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
         }
 
         @Override
-        public void update(List<T> values) throws Exception {
+        public void update(List<T> values) {
             clear();
-
             addAll(values);
         }
 
         @Override
-        public void addAll(List<T> values) throws Exception {
+        public void addAll(List<T> values) {
             if (values != null) {
                 values.forEach(
                         v -> Preconditions.checkNotNull(v, "You cannot add null to a ListState."));
@@ -1357,7 +1334,6 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private static <T, S> void setupConsumer(
             FlinkKafkaConsumerBase<T> consumer,
             boolean isRestored,
@@ -1406,8 +1382,7 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
 
         @Override
         protected void doCommitInternalOffsetsToKafka(
-                Map<KafkaTopicPartition, Long> offsets, @Nonnull KafkaCommitCallback commitCallback)
-                throws Exception {
+                Map<KafkaTopicPartition, Long> offsets, @Nonnull KafkaCommitCallback commitCallback) {
             this.lastCommittedOffsets = offsets;
             this.commitCount++;
             commitCallback.onSuccess();
@@ -1460,20 +1435,17 @@ public class FlinkKafkaConsumerBaseTest extends TestLogger {
 
         @Override
         @SuppressWarnings("unchecked")
-        public <S> ListState<S> getUnionListState(ListStateDescriptor<S> stateDescriptor)
-                throws Exception {
+        public <S> ListState<S> getUnionListState(ListStateDescriptor<S> stateDescriptor) {
             return (ListState<S>) mockRestoredUnionListState;
         }
 
         @Override
-        public <K, V> BroadcastState<K, V> getBroadcastState(
-                MapStateDescriptor<K, V> stateDescriptor) throws Exception {
+        public <K, V> BroadcastState<K, V> getBroadcastState(MapStateDescriptor<K, V> stateDescriptor) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public <S> ListState<S> getListState(ListStateDescriptor<S> stateDescriptor)
-                throws Exception {
+        public <S> ListState<S> getListState(ListStateDescriptor<S> stateDescriptor) {
             throw new UnsupportedOperationException();
         }
 

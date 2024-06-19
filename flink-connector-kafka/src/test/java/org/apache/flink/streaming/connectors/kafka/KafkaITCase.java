@@ -38,8 +38,9 @@ import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartiti
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import javax.annotation.Nullable;
 
@@ -47,12 +48,13 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 /** IT cases for Kafka. */
-public class KafkaITCase extends KafkaConsumerTestBase {
+class KafkaITCase extends KafkaConsumerTestBase {
 
-    @BeforeClass
-    public static void prepare() throws Exception {
+    @BeforeAll
+    protected static void prepare() throws Exception {
         KafkaProducerTestBase.prepare();
         ((KafkaTestEnvironmentImpl) kafkaServer)
                 .setProducerSemantic(FlinkKafkaProducer.Semantic.AT_LEAST_ONCE);
@@ -62,131 +64,154 @@ public class KafkaITCase extends KafkaConsumerTestBase {
     //  Suite of Tests
     // ------------------------------------------------------------------------
 
-    @Test(timeout = 120000)
-    public void testFailOnNoBroker() throws Exception {
+    @Test
+    @Timeout(value = 120L, unit = TimeUnit.SECONDS)
+    void testFailOnNoBroker() throws Exception {
         runFailOnNoBrokerTest();
     }
 
-    @Test(timeout = 60000)
-    public void testConcurrentProducerConsumerTopology() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testConcurrentProducerConsumerTopology() throws Exception {
         runSimpleConcurrentProducerConsumerTopology();
     }
 
-    @Test(timeout = 60000)
-    public void testKeyValueSupport() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testKeyValueSupport() throws Exception {
         runKeyValueTest();
     }
 
     // --- canceling / failures ---
 
-    @Test(timeout = 60000)
-    public void testCancelingEmptyTopic() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testCancelingEmptyTopic() throws Exception {
         runCancelingOnEmptyInputTest();
     }
 
-    @Test(timeout = 60000)
-    public void testCancelingFullTopic() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testCancelingFullTopic() throws Exception {
         runCancelingOnFullInputTest();
     }
 
     // --- source to partition mappings and exactly once ---
 
-    @Test(timeout = 60000)
-    public void testOneToOneSources() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testOneToOneSources() throws Exception {
         runOneToOneExactlyOnceTest();
     }
 
-    @Test(timeout = 60000)
-    public void testOneSourceMultiplePartitions() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testOneSourceMultiplePartitions() throws Exception {
         runOneSourceMultiplePartitionsExactlyOnceTest();
     }
 
-    @Test(timeout = 60000)
-    public void testMultipleSourcesOnePartition() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testMultipleSourcesOnePartition() throws Exception {
         runMultipleSourcesOnePartitionExactlyOnceTest();
     }
 
     // --- broker failure ---
 
-    @Test(timeout = 60000)
-    public void testBrokerFailure() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testBrokerFailure() throws Exception {
         runBrokerFailureTest();
     }
 
     // --- special executions ---
 
-    @Test(timeout = 60000)
-    public void testBigRecordJob() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testBigRecordJob() throws Exception {
         runBigRecordTestTopology();
     }
 
-    @Test(timeout = 60000)
-    public void testMultipleTopicsWithLegacySerializer() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testMultipleTopicsWithLegacySerializer() throws Exception {
         runProduceConsumeMultipleTopics(true);
     }
 
-    @Test(timeout = 60000)
-    public void testMultipleTopicsWithKafkaSerializer() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testMultipleTopicsWithKafkaSerializer() throws Exception {
         runProduceConsumeMultipleTopics(false);
     }
 
-    @Test(timeout = 60000)
-    public void testAllDeletes() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testAllDeletes() throws Exception {
         runAllDeletesTest();
     }
 
-    @Test(timeout = 60000)
-    public void testMetricsAndEndOfStream() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testMetricsAndEndOfStream() throws Exception {
         runEndOfStreamTest();
     }
 
     // --- startup mode ---
 
-    @Test(timeout = 60000)
-    public void testStartFromEarliestOffsets() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testStartFromEarliestOffsets() throws Exception {
         runStartFromEarliestOffsets();
     }
 
-    @Test(timeout = 60000)
-    public void testStartFromLatestOffsets() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testStartFromLatestOffsets() throws Exception {
         runStartFromLatestOffsets();
     }
 
-    @Test(timeout = 60000)
-    public void testStartFromGroupOffsets() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testStartFromGroupOffsets() throws Exception {
         runStartFromGroupOffsets();
     }
 
-    @Test(timeout = 60000)
-    public void testStartFromSpecificOffsets() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testStartFromSpecificOffsets() throws Exception {
         runStartFromSpecificOffsets();
     }
 
-    @Test(timeout = 60000)
-    public void testStartFromTimestamp() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testStartFromTimestamp() throws Exception {
         runStartFromTimestamp();
     }
 
     // --- offset committing ---
 
-    @Test(timeout = 60000)
-    public void testCommitOffsetsToKafka() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testCommitOffsetsToKafka() throws Exception {
         runCommitOffsetsToKafka();
     }
 
-    @Test(timeout = 60000)
-    public void testAutoOffsetRetrievalAndCommitToKafka() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testAutoOffsetRetrievalAndCommitToKafka() throws Exception {
         runAutoOffsetRetrievalAndCommitToKafka();
     }
 
-    @Test(timeout = 60000)
-    public void testCollectingSchema() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testCollectingSchema() throws Exception {
         runCollectingSchemaTest();
     }
 
     /** Kafka 20 specific test, ensuring Timestamps are properly written to and read from Kafka. */
-    @Test(timeout = 60000)
-    public void testTimestamps() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testTimestamps() throws Exception {
 
         final String topic = "tstopic-" + UUID.randomUUID();
         createTestTopic(topic, 3, 1);
@@ -204,7 +229,7 @@ public class KafkaITCase extends KafkaConsumerTestBase {
                             boolean running = true;
 
                             @Override
-                            public void run(SourceContext<Long> ctx) throws Exception {
+                            public void run(SourceContext<Long> ctx) {
                                 long i = 0;
                                 while (running) {
                                     ctx.collectWithTimestamp(i, i * 2);
@@ -368,8 +393,7 @@ public class KafkaITCase extends KafkaConsumerTestBase {
             cnt++;
             DataInputView in =
                     new DataInputViewStreamWrapper(new ByteArrayInputStream(record.value()));
-            Long e = ser.deserialize(in);
-            return e;
+            return ser.deserialize(in);
         }
 
         @Override

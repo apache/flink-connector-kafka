@@ -28,21 +28,18 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.util.TestStreamEnvironment;
 import org.apache.flink.test.util.SuccessException;
 import org.apache.flink.testutils.junit.RetryOnFailure;
-import org.apache.flink.testutils.junit.RetryRule;
 import org.apache.flink.util.InstantiationUtil;
-import org.apache.flink.util.TestLogger;
 
 import com.google.common.base.MoreObjects;
+import org.apache.flink.util.TestLoggerExtension;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Rule;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,7 +76,8 @@ import static org.assertj.core.api.Assertions.fail;
  */
 @SuppressWarnings("serial")
 @RetryOnFailure(times = 3)
-public abstract class KafkaTestBase extends TestLogger {
+@ExtendWith(TestLoggerExtension.class)
+public abstract class KafkaTestBase {
 
     public static final Logger LOG = LoggerFactory.getLogger(KafkaTestBase.class);
 
@@ -96,18 +94,14 @@ public abstract class KafkaTestBase extends TestLogger {
 
     public static List<KafkaClusterTestEnvMetadata> kafkaClusters = new ArrayList<>();
 
-    @ClassRule public static TemporaryFolder tempFolder = new TemporaryFolder();
-
     public static Properties secureProps = new Properties();
-
-    @Rule public final RetryRule retryRule = new RetryRule();
 
     // ------------------------------------------------------------------------
     //  Setup and teardown of the mini clusters
     // ------------------------------------------------------------------------
 
-    @BeforeClass
-    public static void prepare() throws Exception {
+    @BeforeAll
+    protected static void prepare() throws Exception {
         LOG.info("-------------------------------------------------------------------------");
         LOG.info("    Starting KafkaTestBase ");
         LOG.info("-------------------------------------------------------------------------");
@@ -115,8 +109,8 @@ public abstract class KafkaTestBase extends TestLogger {
         startClusters(false, numKafkaClusters);
     }
 
-    @AfterClass
-    public static void shutDownServices() throws Exception {
+    @AfterAll
+    protected static void shutDownServices() throws Exception {
 
         LOG.info("-------------------------------------------------------------------------");
         LOG.info("    Shut down KafkaTestBase ");

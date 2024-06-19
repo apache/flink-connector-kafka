@@ -35,9 +35,10 @@ import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -50,13 +51,14 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.StringJoiner;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for {@link KafkaSourceEnumerator}. */
-public class KafkaEnumeratorTest {
+class KafkaEnumeratorTest {
     private static final int NUM_SUBTASKS = 3;
     private static final String DYNAMIC_TOPIC_NAME = "dynamic_topic";
     private static final int NUM_PARTITIONS_DYNAMIC_TOPIC = 4;
@@ -75,26 +77,26 @@ public class KafkaEnumeratorTest {
     private static final boolean INCLUDE_DYNAMIC_TOPIC = true;
     private static final boolean EXCLUDE_DYNAMIC_TOPIC = false;
 
-    @BeforeClass
-    public static void setup() throws Throwable {
+    @BeforeAll
+    static void setup() throws Throwable {
         KafkaSourceTestEnv.setup();
         KafkaSourceTestEnv.setupTopic(TOPIC1, true, true, KafkaSourceTestEnv::getRecordsForTopic);
         KafkaSourceTestEnv.setupTopic(TOPIC2, true, true, KafkaSourceTestEnv::getRecordsForTopic);
     }
 
-    @AfterClass
-    public static void tearDown() throws Exception {
+    @AfterAll
+    static void tearDown() throws Exception {
         KafkaSourceTestEnv.tearDown();
     }
 
     @Test
-    public void testStartWithDiscoverPartitionsOnce() throws Exception {
+    void testStartWithDiscoverPartitionsOnce() throws Exception {
         try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
                 KafkaSourceEnumerator enumerator =
                         createEnumerator(context, DISABLE_PERIODIC_PARTITION_DISCOVERY)) {
 
-            // Start the enumerator and it should schedule a one time task to discover and assign
+            // Start the enumerator, and it should schedule a one time task to discover and assign
             // partitions.
             enumerator.start();
             assertThat(context.getPeriodicCallables()).isEmpty();
@@ -109,13 +111,13 @@ public class KafkaEnumeratorTest {
     }
 
     @Test
-    public void testStartWithPeriodicPartitionDiscovery() throws Exception {
+    void testStartWithPeriodicPartitionDiscovery() throws Exception {
         try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
                 KafkaSourceEnumerator enumerator =
                         createEnumerator(context, ENABLE_PERIODIC_PARTITION_DISCOVERY)) {
 
-            // Start the enumerator and it should schedule a one time task to discover and assign
+            // Start the enumerator, and it should schedule a one time task to discover and assign
             // partitions.
             enumerator.start();
             assertThat(context.getOneTimeCallables()).isEmpty();
@@ -130,13 +132,13 @@ public class KafkaEnumeratorTest {
     }
 
     @Test
-    public void testDiscoverPartitionsTriggersAssignments() throws Throwable {
+    void testDiscoverPartitionsTriggersAssignments() throws Throwable {
         try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
                 KafkaSourceEnumerator enumerator =
                         createEnumerator(context, DISABLE_PERIODIC_PARTITION_DISCOVERY)) {
 
-            // Start the enumerator and it should schedule a one time task to discover and assign
+            // Start the enumerator, and it should schedule a one time task to discover and assign
             // partitions.
             enumerator.start();
 
@@ -155,13 +157,13 @@ public class KafkaEnumeratorTest {
     }
 
     @Test
-    public void testReaderRegistrationTriggersAssignments() throws Throwable {
+    void testReaderRegistrationTriggersAssignments() throws Throwable {
         try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
                 KafkaSourceEnumerator enumerator =
                         createEnumerator(context, DISABLE_PERIODIC_PARTITION_DISCOVERY)) {
 
-            // Start the enumerator and it should schedule a one time task to discover and assign
+            // Start the enumerator, and it should schedule a one time task to discover and assign
             // partitions.
             enumerator.start();
             runOneTimePartitionDiscovery(context);
@@ -178,13 +180,13 @@ public class KafkaEnumeratorTest {
     }
 
     @Test
-    public void testRunWithDiscoverPartitionsOnceToCheckNoMoreSplit() throws Throwable {
+    void testRunWithDiscoverPartitionsOnceToCheckNoMoreSplit() throws Throwable {
         try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
                 KafkaSourceEnumerator enumerator =
                         createEnumerator(context, DISABLE_PERIODIC_PARTITION_DISCOVERY)) {
 
-            // Start the enumerator and it should schedule a one time task to discover and assign
+            // Start the enumerator, and it should schedule a one time task to discover and assign
             // partitions.
             enumerator.start();
             assertThat(context.getOneTimeCallables())
@@ -202,13 +204,13 @@ public class KafkaEnumeratorTest {
     }
 
     @Test
-    public void testRunWithPeriodicPartitionDiscoveryOnceToCheckNoMoreSplit() throws Throwable {
+    void testRunWithPeriodicPartitionDiscoveryOnceToCheckNoMoreSplit() throws Throwable {
         try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
                 KafkaSourceEnumerator enumerator =
                         createEnumerator(context, ENABLE_PERIODIC_PARTITION_DISCOVERY)) {
 
-            // Start the enumerator and it should schedule a one time task to discover and assign
+            // Start the enumerator, and it should schedule a one time task to discover and assign
             // partitions.
             enumerator.start();
             assertThat(context.getOneTimeCallables()).isEmpty();
@@ -226,7 +228,7 @@ public class KafkaEnumeratorTest {
     }
 
     @Test
-    public void testRunWithDiscoverPartitionsOnceWithZeroMsToCheckNoMoreSplit() throws Throwable {
+    void testRunWithDiscoverPartitionsOnceWithZeroMsToCheckNoMoreSplit() throws Throwable {
         try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
                 // Disable periodic partition discovery
@@ -249,8 +251,9 @@ public class KafkaEnumeratorTest {
         }
     }
 
-    @Test(timeout = 30000L)
-    public void testDiscoverPartitionsPeriodically() throws Throwable {
+    @Test
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testDiscoverPartitionsPeriodically() throws Throwable {
         try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
                 KafkaSourceEnumerator enumerator =
@@ -317,7 +320,7 @@ public class KafkaEnumeratorTest {
     }
 
     @Test
-    public void testAddSplitsBack() throws Throwable {
+    void testAddSplitsBack() throws Throwable {
         try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
                 KafkaSourceEnumerator enumerator =
@@ -342,7 +345,7 @@ public class KafkaEnumeratorTest {
     }
 
     @Test
-    public void testWorkWithPreexistingAssignments() throws Throwable {
+    void testWorkWithPreexistingAssignments() throws Throwable {
         Set<TopicPartition> preexistingAssignments;
         try (MockSplitEnumeratorContext<KafkaPartitionSplit> context1 =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
@@ -377,7 +380,7 @@ public class KafkaEnumeratorTest {
     }
 
     @Test
-    public void testKafkaClientProperties() throws Exception {
+    void testKafkaClientProperties() throws Exception {
         Properties properties = new Properties();
         String clientIdPrefix = "test-prefix";
         Integer defaultTimeoutMs = 99999;
@@ -410,7 +413,7 @@ public class KafkaEnumeratorTest {
     }
 
     @Test
-    public void testSnapshotState() throws Throwable {
+    void testSnapshotState() throws Throwable {
         try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
                 KafkaSourceEnumerator enumerator = createEnumerator(context, false)) {
@@ -463,7 +466,7 @@ public class KafkaEnumeratorTest {
     }
 
     @Test
-    public void testPartitionChangeChecking() throws Throwable {
+    void testPartitionChangeChecking() throws Throwable {
         try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
                 KafkaSourceEnumerator enumerator =
@@ -483,7 +486,7 @@ public class KafkaEnumeratorTest {
             final KafkaSourceEnumerator.PartitionChange partitionChange =
                     enumerator.getPartitionChange(fetchedPartitions);
 
-            // Since enumerator never met DYNAMIC_TOPIC_NAME-0, it should be mark as a new partition
+            // Since enumerator never met DYNAMIC_TOPIC_NAME-0, it should be marked as a new partition
             Set<TopicPartition> expectedNewPartitions = Collections.singleton(newPartition);
 
             // All existing topics are not in the fetchedPartitions, so they should be marked as
@@ -500,7 +503,7 @@ public class KafkaEnumeratorTest {
     }
 
     @Test
-    public void testEnablePartitionDiscoveryByDefault() throws Throwable {
+    void testEnablePartitionDiscoveryByDefault() throws Throwable {
         try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
                 KafkaSourceEnumerator enumerator = createEnumerator(context, new Properties())) {
@@ -514,7 +517,7 @@ public class KafkaEnumeratorTest {
     }
 
     @Test
-    public void testDisablePartitionDiscovery() throws Throwable {
+    void testDisablePartitionDiscovery() throws Throwable {
         Properties props = new Properties();
         props.setProperty(
                 KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), String.valueOf(0));
@@ -532,7 +535,7 @@ public class KafkaEnumeratorTest {
             MockSplitEnumeratorContext<KafkaPartitionSplit> context,
             KafkaSourceEnumerator enumerator)
             throws Throwable {
-        // Start the enumerator and it should schedule a one time task to discover and assign
+        // Start the enumerator, and it should schedule a one time task to discover and assign
         // partitions.
         enumerator.start();
 
@@ -677,7 +680,7 @@ public class KafkaEnumeratorTest {
                     Set<TopicPartition> expectedAssignmentsForReader =
                             expectedAssignments.get(reader);
                     assertThat(expectedAssignmentsForReader).isNotNull();
-                    assertThat(splits.size()).isEqualTo(expectedAssignmentsForReader.size());
+                    assertThat(splits).hasSameSizeAs(expectedAssignmentsForReader);
                     for (KafkaPartitionSplit split : splits) {
                         assertThat(expectedAssignmentsForReader)
                                 .contains(split.getTopicPartition());

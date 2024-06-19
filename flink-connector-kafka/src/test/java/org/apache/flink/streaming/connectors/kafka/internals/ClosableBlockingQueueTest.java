@@ -18,7 +18,7 @@
 
 package org.apache.flink.streaming.connectors.kafka.internals;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -27,17 +27,18 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static java.util.Arrays.asList;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.fail;
 
 /** Tests for the {@link ClosableBlockingQueue}. */
-public class ClosableBlockingQueueTest {
+class ClosableBlockingQueueTest {
 
     // ------------------------------------------------------------------------
     //  single-threaded unit tests
     // ------------------------------------------------------------------------
 
     @Test
-    public void testCreateQueueHashCodeEquals() {
+    void testCreateQueueHashCodeEquals() {
         try {
             ClosableBlockingQueue<String> queue1 = new ClosableBlockingQueue<>();
             ClosableBlockingQueue<String> queue2 = new ClosableBlockingQueue<>(22);
@@ -46,10 +47,10 @@ public class ClosableBlockingQueueTest {
             assertThat(queue2.isOpen()).isTrue();
             assertThat(queue1.isEmpty()).isTrue();
             assertThat(queue2.isEmpty()).isTrue();
-            assertThat(queue1.size()).isEqualTo(0);
-            assertThat(queue2.size()).isEqualTo(0);
+            assertThat(queue1.size()).isZero();
+            assertThat(queue2.size()).isZero();
 
-            assertThat(queue1.hashCode()).isEqualTo(queue2.hashCode());
+            assertThat(queue1).hasSameHashCodeAs(queue2);
             //noinspection EqualsWithItself
             assertThat(queue1.equals(queue1)).isTrue();
             //noinspection EqualsWithItself
@@ -91,7 +92,7 @@ public class ClosableBlockingQueueTest {
     }
 
     @Test
-    public void testCloseEmptyQueue() {
+    void testCloseEmptyQueue() {
         try {
             ClosableBlockingQueue<String> queue = new ClosableBlockingQueue<>();
             assertThat(queue.isOpen()).isTrue();
@@ -101,12 +102,7 @@ public class ClosableBlockingQueueTest {
             assertThat(queue.addIfOpen("element")).isFalse();
             assertThat(queue.isEmpty()).isTrue();
 
-            try {
-                queue.add("some element");
-                fail("should cause an exception");
-            } catch (IllegalStateException ignored) {
-                // expected
-            }
+            assertThatThrownBy(() -> queue.add("some element")).isInstanceOf(IllegalStateException.class);
         } catch (Exception e) {
             e.printStackTrace();
             fail(e.getMessage());
@@ -114,7 +110,7 @@ public class ClosableBlockingQueueTest {
     }
 
     @Test
-    public void testCloseNonEmptyQueue() {
+    void testCloseNonEmptyQueue() {
         try {
             ClosableBlockingQueue<Integer> queue = new ClosableBlockingQueue<>(asList(1, 2, 3));
             assertThat(queue.isOpen()).isTrue();
@@ -135,12 +131,7 @@ public class ClosableBlockingQueueTest {
             assertThat(queue.addIfOpen(42)).isFalse();
             assertThat(queue.isEmpty()).isTrue();
 
-            try {
-                queue.add(99);
-                fail("should cause an exception");
-            } catch (IllegalStateException ignored) {
-                // expected
-            }
+            assertThatThrownBy(() -> queue.add(99)).isInstanceOf(IllegalStateException.class);
         } catch (Exception e) {
             e.printStackTrace();
             fail(e.getMessage());
@@ -148,7 +139,7 @@ public class ClosableBlockingQueueTest {
     }
 
     @Test
-    public void testPeekAndPoll() {
+    void testPeekAndPoll() {
         try {
             ClosableBlockingQueue<String> queue = new ClosableBlockingQueue<>();
 
@@ -157,7 +148,7 @@ public class ClosableBlockingQueueTest {
             assertThat(queue.poll()).isNull();
             assertThat(queue.poll()).isNull();
 
-            assertThat(queue.size()).isEqualTo(0);
+            assertThat(queue.size()).isZero();
 
             queue.add("a");
             queue.add("b");
@@ -181,26 +172,15 @@ public class ClosableBlockingQueueTest {
 
             assertThat(queue.poll()).isEqualTo("c");
 
-            assertThat(queue.size()).isEqualTo(0);
+            assertThat(queue.size()).isZero();
             assertThat(queue.poll()).isNull();
             assertThat(queue.peek()).isNull();
             assertThat(queue.peek()).isNull();
 
             assertThat(queue.close()).isTrue();
 
-            try {
-                queue.peek();
-                fail("should cause an exception");
-            } catch (IllegalStateException ignored) {
-                // expected
-            }
-
-            try {
-                queue.poll();
-                fail("should cause an exception");
-            } catch (IllegalStateException ignored) {
-                // expected
-            }
+            assertThatThrownBy(() -> queue.peek()).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> queue.poll()).isInstanceOf(IllegalStateException.class);
         } catch (Exception e) {
             e.printStackTrace();
             fail(e.getMessage());
@@ -208,7 +188,7 @@ public class ClosableBlockingQueueTest {
     }
 
     @Test
-    public void testPollBatch() {
+    void testPollBatch() {
         try {
             ClosableBlockingQueue<String> queue = new ClosableBlockingQueue<>();
 
@@ -227,12 +207,7 @@ public class ClosableBlockingQueueTest {
 
             assertThat(queue.close()).isTrue();
 
-            try {
-                queue.pollBatch();
-                fail("should cause an exception");
-            } catch (IllegalStateException ignored) {
-                // expected
-            }
+            assertThatThrownBy(() -> queue.pollBatch()).isInstanceOf(IllegalStateException.class);
         } catch (Exception e) {
             e.printStackTrace();
             fail(e.getMessage());
@@ -240,7 +215,7 @@ public class ClosableBlockingQueueTest {
     }
 
     @Test
-    public void testGetElementBlocking() {
+    void testGetElementBlocking() {
         try {
             ClosableBlockingQueue<String> queue = new ClosableBlockingQueue<>();
 
@@ -248,7 +223,7 @@ public class ClosableBlockingQueueTest {
             assertThat(queue.getElementBlocking(3)).isNull();
             assertThat(queue.getElementBlocking(2)).isNull();
 
-            assertThat(queue.size()).isEqualTo(0);
+            assertThat(queue.size()).isZero();
 
             queue.add("a");
             queue.add("b");
@@ -269,7 +244,7 @@ public class ClosableBlockingQueueTest {
             assertThat(queue.getElementBlocking()).isEqualTo("e");
             assertThat(queue.getElementBlocking(1786598)).isEqualTo("f");
 
-            assertThat(queue.size()).isEqualTo(0);
+            assertThat(queue.size()).isZero();
 
             assertThat(queue.getElementBlocking(1)).isNull();
             assertThat(queue.getElementBlocking(3)).isNull();
@@ -277,19 +252,9 @@ public class ClosableBlockingQueueTest {
 
             assertThat(queue.close()).isTrue();
 
-            try {
-                queue.getElementBlocking();
-                fail("should cause an exception");
-            } catch (IllegalStateException ignored) {
-                // expected
-            }
-
-            try {
-                queue.getElementBlocking(1000000000L);
-                fail("should cause an exception");
-            } catch (IllegalStateException ignored) {
-                // expected
-            }
+            assertThatThrownBy(() -> queue.getElementBlocking()).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> queue.getElementBlocking(1000000000L))
+                    .isInstanceOf(IllegalStateException.class);
         } catch (Exception e) {
             e.printStackTrace();
             fail(e.getMessage());
@@ -297,7 +262,7 @@ public class ClosableBlockingQueueTest {
     }
 
     @Test
-    public void testGetBatchBlocking() {
+    void testGetBatchBlocking() {
         try {
             ClosableBlockingQueue<String> queue = new ClosableBlockingQueue<>();
 
@@ -333,19 +298,9 @@ public class ClosableBlockingQueueTest {
 
             assertThat(queue.close()).isTrue();
 
-            try {
-                queue.getBatchBlocking();
-                fail("should cause an exception");
-            } catch (IllegalStateException ignored) {
-                // expected
-            }
-
-            try {
-                queue.getBatchBlocking(1000000000L);
-                fail("should cause an exception");
-            } catch (IllegalStateException ignored) {
-                // expected
-            }
+            assertThatThrownBy(() -> queue.getBatchBlocking()).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> queue.getBatchBlocking(1000000000L))
+                    .isInstanceOf(IllegalStateException.class);
         } catch (Exception e) {
             e.printStackTrace();
             fail(e.getMessage());
@@ -357,7 +312,7 @@ public class ClosableBlockingQueueTest {
     // ------------------------------------------------------------------------
 
     @Test
-    public void notifyOnClose() {
+    void notifyOnClose() {
         try {
             final long oneYear = 365L * 24 * 60 * 60 * 1000;
 
@@ -412,7 +367,7 @@ public class ClosableBlockingQueueTest {
 
     @SuppressWarnings("ThrowableResultOfMethodCallIgnored")
     @Test
-    public void testMultiThreadedAddGet() {
+    void testMultiThreadedAddGet() {
         try {
             final ClosableBlockingQueue<Integer> queue = new ClosableBlockingQueue<>();
             final AtomicReference<Throwable> pushErrorRef = new AtomicReference<>();

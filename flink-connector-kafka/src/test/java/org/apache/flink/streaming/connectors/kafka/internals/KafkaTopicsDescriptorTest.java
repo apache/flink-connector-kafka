@@ -17,9 +17,11 @@
 
 package org.apache.flink.streaming.connectors.kafka.internals;
 
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension;
+import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -29,10 +31,10 @@ import java.util.regex.Pattern;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for the {@link KafkaTopicsDescriptor}. */
-@RunWith(Parameterized.class)
+@ExtendWith(ParameterizedTestExtension.class)
 public class KafkaTopicsDescriptorTest {
 
-    @Parameterized.Parameters
+    @Parameters
     public static Collection<Object[]> data() {
         return Arrays.asList(
                 new Object[][] {
@@ -57,7 +59,7 @@ public class KafkaTopicsDescriptorTest {
     }
 
     @Test
-    public void testIsMatchingTopic() {
+    void testIsMatchingTopic() {
         KafkaTopicsDescriptor topicsDescriptor =
                 new KafkaTopicsDescriptor(fixedTopics, topicPattern);
 

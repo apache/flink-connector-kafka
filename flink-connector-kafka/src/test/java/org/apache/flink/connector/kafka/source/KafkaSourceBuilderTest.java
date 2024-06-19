@@ -42,10 +42,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link KafkaSourceBuilder}. */
 @ExtendWith(TestLoggerExtension.class)
-public class KafkaSourceBuilderTest {
+class KafkaSourceBuilderTest {
 
     @Test
-    public void testBuildSourceWithGroupId() {
+    void testBuildSourceWithGroupId() {
         final KafkaSource<String> kafkaSource = getBasicBuilder().setGroupId("groupId").build();
         // Commit on checkpoint should be enabled by default
         assertThat(
@@ -65,7 +65,7 @@ public class KafkaSourceBuilderTest {
     }
 
     @Test
-    public void testBuildSourceWithoutGroupId() {
+    void testBuildSourceWithoutGroupId() {
         final KafkaSource<String> kafkaSource = getBasicBuilder().build();
         // Commit on checkpoint and auto commit should be disabled because group.id is not specified
         assertThat(
@@ -84,7 +84,7 @@ public class KafkaSourceBuilderTest {
     }
 
     @Test
-    public void testEnableCommitOnCheckpointWithoutGroupId() {
+    void testEnableCommitOnCheckpointWithoutGroupId() {
         assertThatThrownBy(
                         () ->
                                 getBasicBuilder()
@@ -99,7 +99,7 @@ public class KafkaSourceBuilderTest {
     }
 
     @Test
-    public void testEnableAutoCommitWithoutGroupId() {
+    void testEnableAutoCommitWithoutGroupId() {
         assertThatThrownBy(
                         () ->
                                 getBasicBuilder()
@@ -112,7 +112,7 @@ public class KafkaSourceBuilderTest {
     }
 
     @Test
-    public void testDisableOffsetCommitWithoutGroupId() {
+    void testDisableOffsetCommitWithoutGroupId() {
         getBasicBuilder()
                 .setProperty(KafkaSourceOptions.COMMIT_OFFSETS_ON_CHECKPOINT.key(), "false")
                 .build();
@@ -120,7 +120,7 @@ public class KafkaSourceBuilderTest {
     }
 
     @Test
-    public void testUsingCommittedOffsetsInitializerWithoutGroupId() {
+    void testUsingCommittedOffsetsInitializerWithoutGroupId() {
         // Using OffsetsInitializer#committedOffsets as starting offsets
         assertThatThrownBy(
                         () ->
@@ -158,7 +158,7 @@ public class KafkaSourceBuilderTest {
     }
 
     @Test
-    public void testSettingCustomKafkaSubscriber() {
+    void testSettingCustomKafkaSubscriber() {
         ExampleCustomSubscriber exampleCustomSubscriber = new ExampleCustomSubscriber();
         KafkaSourceBuilder<String> customKafkaSubscriberBuilder =
                 new KafkaSourceBuilder<String>()

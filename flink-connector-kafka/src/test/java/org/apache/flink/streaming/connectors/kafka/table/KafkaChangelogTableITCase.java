@@ -32,8 +32,8 @@ import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.api.config.OptimizerConfigOptions;
 
 import org.apache.kafka.clients.producer.ProducerConfig;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.ZoneId;
@@ -45,17 +45,17 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaTableTestUt
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaTableTestUtils.waitingExpectedResults;
 
 /** IT cases for Kafka with changelog format for Table API & SQL. */
-public class KafkaChangelogTableITCase extends KafkaTableTestBase {
+class KafkaChangelogTableITCase extends KafkaTableTestBase {
 
-    @Before
-    public void before() {
+    @BeforeEach
+    void before() {
         // we have to use single parallelism,
         // because we will count the messages in sink to terminate the job
         env.setParallelism(1);
     }
 
     @Test
-    public void testKafkaDebeziumChangelogSource() throws Exception {
+    void testKafkaDebeziumChangelogSource() throws Exception {
         final String topic = "changelog_topic";
         createTestTopic(topic, 1, 1);
 
@@ -182,7 +182,7 @@ public class KafkaChangelogTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testKafkaCanalChangelogSource() throws Exception {
+    void testKafkaCanalChangelogSource() throws Exception {
         final String topic = "changelog_canal";
         createTestTopic(topic, 1, 1);
 
@@ -323,7 +323,7 @@ public class KafkaChangelogTableITCase extends KafkaTableTestBase {
     }
 
     @Test
-    public void testKafkaMaxwellChangelogSource() throws Exception {
+    void testKafkaMaxwellChangelogSource() throws Exception {
         final String topic = "changelog_maxwell";
         createTestTopic(topic, 1, 1);
 

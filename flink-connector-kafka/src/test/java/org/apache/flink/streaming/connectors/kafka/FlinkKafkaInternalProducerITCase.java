@@ -27,27 +27,30 @@ import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.Properties;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for our own {@link FlinkKafkaInternalProducer}. */
 @SuppressWarnings("serial")
-public class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
+class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
     protected String transactionalId;
     protected Properties extraProperties;
     private volatile Exception exceptionInCallback;
 
-    @BeforeClass
-    public static void prepare() throws Exception {
+    @BeforeAll
+    protected static void prepare() throws Exception {
         LOG.info("-------------------------------------------------------------------------");
         LOG.info("    Starting KafkaTestBase ");
         LOG.info("-------------------------------------------------------------------------");
@@ -63,8 +66,8 @@ public class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
                         .setKafkaServerProperties(serverProperties));
     }
 
-    @Before
-    public void before() {
+    @BeforeEach
+    void before() {
         transactionalId = UUID.randomUUID().toString();
         extraProperties = new Properties();
         extraProperties.putAll(standardProps);
@@ -80,8 +83,9 @@ public class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
         extraProperties.put("isolation.level", "read_committed");
     }
 
-    @Test(timeout = 60000L)
-    public void testHappyPath() throws Exception {
+    @Test
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testHappyPath() {
         String topicName = "flink-kafka-producer-happy-path";
 
         Producer<String, String> kafkaProducer = new FlinkKafkaInternalProducer<>(extraProperties);
@@ -101,8 +105,9 @@ public class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
         deleteTestTopic(topicName);
     }
 
-    @Test(timeout = 30000L)
-    public void testResumeTransaction() throws Exception {
+    @Test
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testResumeTransaction() {
         String topicName = "flink-kafka-producer-resume-transaction";
         FlinkKafkaInternalProducer<String, String> kafkaProducer =
                 new FlinkKafkaInternalProducer<>(extraProperties);
@@ -130,7 +135,7 @@ public class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
             assertRecord(topicName, "42", "42");
 
             // this shouldn't throw - in case of network split, old producer might attempt to commit
-            // it's transaction
+            // its transaction
             kafkaProducer.commitTransaction();
 
             // this shouldn't fail also, for same reason as above
@@ -147,62 +152,77 @@ public class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
         deleteTestTopic(topicName);
     }
 
-    @Test(timeout = 30000L, expected = IllegalStateException.class)
-    public void testPartitionsForAfterClosed() {
+    @Test
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testPartitionsForAfterClosed() {
         FlinkKafkaInternalProducer<String, String> kafkaProducer =
                 new FlinkKafkaInternalProducer<>(extraProperties);
         kafkaProducer.close(Duration.ofSeconds(5));
-        kafkaProducer.partitionsFor("Topic");
+        assertThatThrownBy(() -> kafkaProducer.partitionsFor("Topic"))
+                .isInstanceOf(IllegalStateException.class);
     }
 
-    @Test(timeout = 30000L, expected = IllegalStateException.class)
-    public void testInitTransactionsAfterClosed() {
+    @Test
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testInitTransactionsAfterClosed() {
         FlinkKafkaInternalProducer<String, String> kafkaProducer =
                 new FlinkKafkaInternalProducer<>(extraProperties);
         kafkaProducer.close(Duration.ofSeconds(5));
+        assertThatThrownBy(kafkaProducer::initTransactions)
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testBeginTransactionAfterClosed() {
+        FlinkKafkaInternalProducer<String, String> kafkaProducer =
+                new FlinkKafkaInternalProducer<>(extraProperties);
         kafkaProducer.initTransactions();
-    }
-
-    @Test(timeout = 30000L, expected = IllegalStateException.class)
-    public void testBeginTransactionAfterClosed() {
-        FlinkKafkaInternalProducer<String, String> kafkaProducer =
-                new FlinkKafkaInternalProducer<>(extraProperties);
-        kafkaProducer.initTransactions();
         kafkaProducer.close(Duration.ofSeconds(5));
-        kafkaProducer.beginTransaction();
+        assertThatThrownBy(kafkaProducer::beginTransaction)
+                .isInstanceOf(IllegalStateException.class);
     }
 
-    @Test(timeout = 30000L, expected = IllegalStateException.class)
-    public void testCommitTransactionAfterClosed() {
+    @Test
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testCommitTransactionAfterClosed() {
         String topicName = "testCommitTransactionAfterClosed";
         FlinkKafkaInternalProducer<String, String> kafkaProducer = getClosedProducer(topicName);
-        kafkaProducer.commitTransaction();
+        assertThatThrownBy(kafkaProducer::commitTransaction)
+                .isInstanceOf(IllegalStateException.class);
     }
 
-    @Test(timeout = 30000L, expected = IllegalStateException.class)
-    public void testResumeTransactionAfterClosed() {
+    @Test
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testResumeTransactionAfterClosed() {
         String topicName = "testAbortTransactionAfterClosed";
         FlinkKafkaInternalProducer<String, String> kafkaProducer = getClosedProducer(topicName);
-        kafkaProducer.resumeTransaction(0L, (short) 1);
+        assertThatThrownBy(() -> kafkaProducer.resumeTransaction(0L, (short) 1))
+                .isInstanceOf(IllegalStateException.class);
     }
 
-    @Test(timeout = 30000L, expected = IllegalStateException.class)
-    public void testAbortTransactionAfterClosed() {
+    @Test
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testAbortTransactionAfterClosed() {
         String topicName = "testAbortTransactionAfterClosed";
         FlinkKafkaInternalProducer<String, String> kafkaProducer = getClosedProducer(topicName);
         kafkaProducer.abortTransaction();
-        kafkaProducer.resumeTransaction(0L, (short) 1);
+        assertThatThrownBy(() -> kafkaProducer.resumeTransaction(0L, (short) 1))
+                .isInstanceOf(IllegalStateException.class);
     }
 
-    @Test(timeout = 30000L, expected = IllegalStateException.class)
-    public void testFlushAfterClosed() {
+    @Test
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testFlushAfterClosed() {
         String topicName = "testCommitTransactionAfterClosed";
         FlinkKafkaInternalProducer<String, String> kafkaProducer = getClosedProducer(topicName);
-        kafkaProducer.flush();
+        assertThatThrownBy(kafkaProducer::flush)
+                .isInstanceOf(IllegalStateException.class);
     }
 
-    @Test(timeout = 30000L)
-    public void testProducerWhenCommitEmptyPartitionsToOutdatedTxnCoordinator() throws Exception {
+    @Test
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testProducerWhenCommitEmptyPartitionsToOutdatedTxnCoordinator() throws Exception {
         String topic = "flink-kafka-producer-txn-coordinator-changed-" + UUID.randomUUID();
         createTestTopic(topic, 1, 1);
         Producer<String, String> kafkaProducer = new FlinkKafkaInternalProducer<>(extraProperties);
