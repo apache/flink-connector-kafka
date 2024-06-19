@@ -18,9 +18,8 @@
 package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.connector.kafka.sink.KafkaTransactionLog.TransactionRecord;
-import org.apache.flink.util.TestLogger;
-
 import org.apache.flink.util.TestLoggerExtension;
+
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerConfig;

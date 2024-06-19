@@ -19,9 +19,9 @@ package org.apache.flink.streaming.connectors.kafka.internals;
 
 import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension;
 import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.junit.runners.Parameterized;
 
 import java.util.Arrays;
 import java.util.Collection;

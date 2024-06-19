@@ -29,7 +29,6 @@ import org.apache.flink.streaming.util.TestStreamEnvironment;
 import org.apache.flink.test.util.SuccessException;
 import org.apache.flink.testutils.junit.RetryOnFailure;
 import org.apache.flink.util.InstantiationUtil;
-import org.apache.flink.util.TestLogger;
 
 import com.google.common.base.MoreObjects;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -39,9 +38,6 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.io.TempDir;
-
-import java.io.File;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

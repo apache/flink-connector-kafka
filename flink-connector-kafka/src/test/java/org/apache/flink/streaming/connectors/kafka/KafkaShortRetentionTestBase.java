@@ -36,9 +36,9 @@ import org.apache.flink.util.InstantiationUtil;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
-import org.testcontainers.junit.jupiter.Container;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.testcontainers.junit.jupiter.Container;
 
 import java.io.Serializable;
 import java.util.Properties;

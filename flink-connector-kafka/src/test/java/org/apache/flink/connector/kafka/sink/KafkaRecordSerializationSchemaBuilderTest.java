@@ -21,8 +21,8 @@ import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.connector.testutils.formats.DummyInitializationContext;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
-
 import org.apache.flink.util.TestLoggerExtension;
+
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.Configurable;
 import org.apache.kafka.common.header.Header;

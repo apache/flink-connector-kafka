@@ -18,6 +18,7 @@
 package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.util.TestLoggerExtension;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
