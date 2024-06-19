@@ -52,7 +52,6 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.assertj.core.api.Assertions.fail;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.mock;
@@ -65,7 +64,7 @@ class FlinkKafkaProducerBaseTest {
 
     /** Tests that the constructor eagerly checks bootstrap servers are set in config. */
     @Test
-    public void testInstantiationFailsWhenBootstrapServersMissing() throws Exception {
+    void testInstantiationFailsWhenBootstrapServersMissing() throws Exception {
         // no bootstrap servers set in props
         Properties props = new Properties();
         // should throw IllegalArgumentException
@@ -169,17 +168,9 @@ class FlinkKafkaProducerBaseTest {
                 .get(0)
                 .onCompletion(null, new Exception("artificial async exception"));
 
-        try {
-            testHarness.processElement(new StreamRecord<>("msg-2"));
-        } catch (Exception e) {
-            // the next invoke should rethrow the async exception
-            assertThat(e.getCause().getMessage()).contains("artificial async exception");
-
-            // test succeeded
-            return;
-        }
-
-        fail("unknown failure");
+        // the next invoke should rethrow the async exception
+        assertThatThrownBy(() -> testHarness.processElement(new StreamRecord<>("msg-2")))
+                .hasStackTraceContaining("artificial async exception");
     }
 
     /**
@@ -206,17 +197,9 @@ class FlinkKafkaProducerBaseTest {
                 .get(0)
                 .onCompletion(null, new Exception("artificial async exception"));
 
-        try {
-            testHarness.snapshot(123L, 123L);
-        } catch (Exception e) {
-            // the next invoke should rethrow the async exception
-            assertThat(e.getCause().getMessage()).contains("artificial async exception");
-
-            // test succeeded
-            return;
-        }
-
-        fail("unknown failure");
+        // the next invoke should rethrow the async exception
+        assertThatThrownBy(() -> testHarness.snapshot(123L, 123L))
+                .hasStackTraceContaining("artificial async exception");
     }
 
     /**
@@ -229,7 +212,7 @@ class FlinkKafkaProducerBaseTest {
      */
     @SuppressWarnings("unchecked")
     @Test
-    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    @Timeout(value = 5L, unit = TimeUnit.SECONDS)
     void testAsyncErrorRethrownOnCheckpointAfterFlush() throws Throwable {
         final DummyFlinkKafkaProducer<String> producer =
                 new DummyFlinkKafkaProducer<>(
@@ -271,18 +254,9 @@ class FlinkKafkaProducerBaseTest {
                 .onCompletion(null, new Exception("artificial async failure for 2nd message"));
         producer.getPendingCallbacks().get(2).onCompletion(null, null);
 
-        try {
-            snapshotThread.sync();
-        } catch (Exception e) {
-            // the snapshot should have failed with the async exception
-            assertThat(e.getCause().getMessage())
-                    .contains("artificial async failure for 2nd message");
-
-            // test succeeded
-            return;
-        }
-
-        fail("unknown failure");
+        // the snapshot should have failed with the async exception
+        assertThatThrownBy(() -> snapshotThread.sync())
+                .hasStackTraceContaining("artificial async failure for 2nd message");
     }
 
     /**
@@ -291,7 +265,7 @@ class FlinkKafkaProducerBaseTest {
      */
     @SuppressWarnings("unchecked")
     @Test
-    @Timeout(value = 10, unit = TimeUnit.SECONDS)
+    @Timeout(value = 10L, unit = TimeUnit.SECONDS)
     void testAtLeastOnceProducer() throws Throwable {
         final DummyFlinkKafkaProducer<String> producer =
                 new DummyFlinkKafkaProducer<>(
@@ -365,7 +339,7 @@ class FlinkKafkaProducerBaseTest {
      */
     @SuppressWarnings("unchecked")
     @Test
-    @Timeout(value = 5, unit = TimeUnit.SECONDS)
+    @Timeout(value = 5L, unit = TimeUnit.SECONDS)
     void testDoesNotWaitForPendingRecordsIfFlushingDisabled() throws Throwable {
         final DummyFlinkKafkaProducer<String> producer =
                 new DummyFlinkKafkaProducer<>(

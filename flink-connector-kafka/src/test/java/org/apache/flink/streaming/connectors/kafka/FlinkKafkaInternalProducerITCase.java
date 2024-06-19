@@ -84,8 +84,8 @@ class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
     }
 
     @Test
-    @Timeout(value = 60, unit = TimeUnit.SECONDS)
-    public void testHappyPath() throws Exception {
+    @Timeout(value = 60L, unit = TimeUnit.SECONDS)
+    void testHappyPath() {
         String topicName = "flink-kafka-producer-happy-path";
 
         Producer<String, String> kafkaProducer = new FlinkKafkaInternalProducer<>(extraProperties);
@@ -106,8 +106,8 @@ class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
     }
 
     @Test
-    @Timeout(30L)
-    public void testResumeTransaction() throws Exception {
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testResumeTransaction() {
         String topicName = "flink-kafka-producer-resume-transaction";
         FlinkKafkaInternalProducer<String, String> kafkaProducer =
                 new FlinkKafkaInternalProducer<>(extraProperties);
@@ -135,7 +135,7 @@ class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
             assertRecord(topicName, "42", "42");
 
             // this shouldn't throw - in case of network split, old producer might attempt to commit
-            // it's transaction
+            // its transaction
             kafkaProducer.commitTransaction();
 
             // this shouldn't fail also, for same reason as above
@@ -153,8 +153,8 @@ class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
     }
 
     @Test
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
-    public void testPartitionsForAfterClosed() {
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testPartitionsForAfterClosed() {
         FlinkKafkaInternalProducer<String, String> kafkaProducer =
                 new FlinkKafkaInternalProducer<>(extraProperties);
         kafkaProducer.close(Duration.ofSeconds(5));
@@ -163,8 +163,8 @@ class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
     }
 
     @Test
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
-    public void testInitTransactionsAfterClosed() {
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testInitTransactionsAfterClosed() {
         FlinkKafkaInternalProducer<String, String> kafkaProducer =
                 new FlinkKafkaInternalProducer<>(extraProperties);
         kafkaProducer.close(Duration.ofSeconds(5));
@@ -173,8 +173,8 @@ class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
     }
 
     @Test
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
-    public void testBeginTransactionAfterClosed() {
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testBeginTransactionAfterClosed() {
         FlinkKafkaInternalProducer<String, String> kafkaProducer =
                 new FlinkKafkaInternalProducer<>(extraProperties);
         kafkaProducer.initTransactions();
@@ -184,8 +184,8 @@ class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
     }
 
     @Test
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
-    public void testCommitTransactionAfterClosed() {
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testCommitTransactionAfterClosed() {
         String topicName = "testCommitTransactionAfterClosed";
         FlinkKafkaInternalProducer<String, String> kafkaProducer = getClosedProducer(topicName);
         assertThatThrownBy(kafkaProducer::commitTransaction)
@@ -193,8 +193,8 @@ class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
     }
 
     @Test
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
-    public void testResumeTransactionAfterClosed() {
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testResumeTransactionAfterClosed() {
         String topicName = "testAbortTransactionAfterClosed";
         FlinkKafkaInternalProducer<String, String> kafkaProducer = getClosedProducer(topicName);
         assertThatThrownBy(() -> kafkaProducer.resumeTransaction(0L, (short) 1))
@@ -202,8 +202,8 @@ class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
     }
 
     @Test
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
-    public void testAbortTransactionAfterClosed() {
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testAbortTransactionAfterClosed() {
         String topicName = "testAbortTransactionAfterClosed";
         FlinkKafkaInternalProducer<String, String> kafkaProducer = getClosedProducer(topicName);
         kafkaProducer.abortTransaction();
@@ -212,8 +212,8 @@ class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
     }
 
     @Test
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
-    public void testFlushAfterClosed() {
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testFlushAfterClosed() {
         String topicName = "testCommitTransactionAfterClosed";
         FlinkKafkaInternalProducer<String, String> kafkaProducer = getClosedProducer(topicName);
         assertThatThrownBy(kafkaProducer::flush)
@@ -221,8 +221,8 @@ class FlinkKafkaInternalProducerITCase extends KafkaTestBase {
     }
 
     @Test
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
-    public void testProducerWhenCommitEmptyPartitionsToOutdatedTxnCoordinator() throws Exception {
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
+    void testProducerWhenCommitEmptyPartitionsToOutdatedTxnCoordinator() throws Exception {
         String topic = "flink-kafka-producer-txn-coordinator-changed-" + UUID.randomUUID();
         createTestTopic(topic, 1, 1);
         Producer<String, String> kafkaProducer = new FlinkKafkaInternalProducer<>(extraProperties);

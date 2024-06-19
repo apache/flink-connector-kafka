@@ -65,10 +65,12 @@ import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.SerializedValue;
+import org.apache.flink.util.TestLoggerExtension;
 import org.apache.flink.util.function.SupplierWithException;
 import org.apache.flink.util.function.ThrowingRunnable;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import javax.annotation.Nonnull;
 
@@ -101,6 +103,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 
 /** Tests for the {@link FlinkKafkaConsumerBase}. */
+@ExtendWith(TestLoggerExtension.class)
 class FlinkKafkaConsumerBaseTest {
 
     private static final int maxParallelism = Short.MAX_VALUE / 2;
@@ -141,7 +144,6 @@ class FlinkKafkaConsumerBaseTest {
     /** Tests that no checkpoints happen when the fetcher is not running. */
     @Test
     void ignoreCheckpointWhenNotRunning() throws Exception {
-        @SuppressWarnings("unchecked")
         final MockFetcher<String> fetcher = new MockFetcher<>();
         final FlinkKafkaConsumerBase<String> consumer =
                 new DummyFlinkKafkaConsumer<>(
@@ -169,7 +171,6 @@ class FlinkKafkaConsumerBaseTest {
      */
     @Test
     void checkRestoredCheckpointWhenFetcherNotReady() throws Exception {
-        @SuppressWarnings("unchecked")
         final FlinkKafkaConsumerBase<String> consumer = new DummyFlinkKafkaConsumer<>();
 
         final TestingListState<Tuple2<KafkaTopicPartition, Long>> restoredListState =
@@ -202,7 +203,6 @@ class FlinkKafkaConsumerBaseTest {
 
     @Test
     void testConfigureOnCheckpointsCommitMode() throws Exception {
-        @SuppressWarnings("unchecked")
         // auto-commit enabled; this should be ignored in this case
         final DummyFlinkKafkaConsumer<String> consumer = new DummyFlinkKafkaConsumer<>(true);
 
@@ -215,7 +215,6 @@ class FlinkKafkaConsumerBaseTest {
 
     @Test
     void testConfigureAutoCommitMode() throws Exception {
-        @SuppressWarnings("unchecked")
         final DummyFlinkKafkaConsumer<String> consumer = new DummyFlinkKafkaConsumer<>(true);
 
         setupConsumer(consumer);
@@ -225,7 +224,6 @@ class FlinkKafkaConsumerBaseTest {
 
     @Test
     void testConfigureDisableOffsetCommitWithCheckpointing() throws Exception {
-        @SuppressWarnings("unchecked")
         // auto-commit enabled; this should be ignored in this case
         final DummyFlinkKafkaConsumer<String> consumer = new DummyFlinkKafkaConsumer<>(true);
         consumer.setCommitOffsetsOnCheckpoints(
@@ -240,7 +238,6 @@ class FlinkKafkaConsumerBaseTest {
 
     @Test
     void testConfigureDisableOffsetCommitWithoutCheckpointing() throws Exception {
-        @SuppressWarnings("unchecked")
         final DummyFlinkKafkaConsumer<String> consumer = new DummyFlinkKafkaConsumer<>(false);
 
         setupConsumer(consumer);
@@ -253,8 +250,8 @@ class FlinkKafkaConsumerBaseTest {
      * (filterRestoredPartitionsWithDiscovered is active)
      */
     @Test
-    void testSetFilterRestoredParitionsNoChange() throws Exception {
-        checkFilterRestoredPartitionsWithDisovered(
+    void testSetFilterRestoredPartitionsNoChange() throws Exception {
+        checkFilterRestoredPartitionsWithDiscovered(
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
@@ -266,8 +263,8 @@ class FlinkKafkaConsumerBaseTest {
      * in restored partitions. (filterRestoredPartitionsWithDiscovered is active)
      */
     @Test
-    void testSetFilterRestoredParitionsWithRemovedTopic() throws Exception {
-        checkFilterRestoredPartitionsWithDisovered(
+    void testSetFilterRestoredPartitionsWithRemovedTopic() throws Exception {
+        checkFilterRestoredPartitionsWithDiscovered(
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
                 Arrays.asList(new String[] {"kafka_topic_1"}),
                 Arrays.asList(new String[] {"kafka_topic_1"}),
@@ -279,8 +276,8 @@ class FlinkKafkaConsumerBaseTest {
      * (filterRestoredPartitionsWithDiscovered is active)
      */
     @Test
-    void testSetFilterRestoredParitionsWithAddedTopic() throws Exception {
-        checkFilterRestoredPartitionsWithDisovered(
+    void testSetFilterRestoredPartitionsWithAddedTopic() throws Exception {
+        checkFilterRestoredPartitionsWithDiscovered(
                 Arrays.asList(new String[] {"kafka_topic_1"}),
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
@@ -292,8 +289,8 @@ class FlinkKafkaConsumerBaseTest {
      * (filterRestoredPartitionsWithDiscovered is disabled)
      */
     @Test
-    void testDisableFilterRestoredParitionsNoChange() throws Exception {
-        checkFilterRestoredPartitionsWithDisovered(
+    void testDisableFilterRestoredPartitionsNoChange() throws Exception {
+        checkFilterRestoredPartitionsWithDiscovered(
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
@@ -305,8 +302,8 @@ class FlinkKafkaConsumerBaseTest {
      * still in restored partitions. (filterRestoredPartitionsWithDiscovered is disabled)
      */
     @Test
-    void testDisableFilterRestoredParitionsWithRemovedTopic() throws Exception {
-        checkFilterRestoredPartitionsWithDisovered(
+    void testDisableFilterRestoredPartitionsWithRemovedTopic() throws Exception {
+        checkFilterRestoredPartitionsWithDiscovered(
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
                 Arrays.asList(new String[] {"kafka_topic_1"}),
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
@@ -318,15 +315,15 @@ class FlinkKafkaConsumerBaseTest {
      * (filterRestoredPartitionsWithDiscovered is disabled)
      */
     @Test
-    void testDisableFilterRestoredParitionsWithAddedTopic() throws Exception {
-        checkFilterRestoredPartitionsWithDisovered(
+    void testDisableFilterRestoredPartitionsWithAddedTopic() throws Exception {
+        checkFilterRestoredPartitionsWithDiscovered(
                 Arrays.asList(new String[] {"kafka_topic_1"}),
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
                 Arrays.asList(new String[] {"kafka_topic_1", "kafka_topic_2"}),
                 true);
     }
 
-    private void checkFilterRestoredPartitionsWithDisovered(
+    private void checkFilterRestoredPartitionsWithDiscovered(
             List<String> restoredKafkaTopics,
             List<String> initKafkaTopics,
             List<String> expectedSubscribedPartitions,
@@ -940,7 +937,7 @@ class FlinkKafkaConsumerBaseTest {
         }
 
         @Override
-        protected void initializeConnections() throws Exception {
+        protected void initializeConnections() {
             closed = false;
         }
 
@@ -948,7 +945,7 @@ class FlinkKafkaConsumerBaseTest {
         protected void wakeupConnections() {}
 
         @Override
-        protected void closeConnections() throws Exception {
+        protected void closeConnections() {
             closed = true;
         }
 
@@ -1082,8 +1079,7 @@ class FlinkKafkaConsumerBaseTest {
 
         @Override
         protected void doCommitInternalOffsetsToKafka(
-                Map<KafkaTopicPartition, Long> offsets, @Nonnull KafkaCommitCallback commitCallback)
-                throws Exception {}
+                Map<KafkaTopicPartition, Long> offsets, @Nonnull KafkaCommitCallback commitCallback) {}
 
         @Override
         protected KPH createKafkaPartitionHandle(KafkaTopicPartition partition) {
@@ -1099,11 +1095,10 @@ class FlinkKafkaConsumerBaseTest {
     private static class DummyFlinkKafkaConsumer<T> extends FlinkKafkaConsumerBase<T> {
         private static final long serialVersionUID = 1L;
 
-        private SupplierWithException<AbstractFetcher<T, ?>, Exception> testFetcherSupplier;
-        private AbstractPartitionDiscoverer testPartitionDiscoverer;
-        private boolean isAutoCommitEnabled;
+        private final SupplierWithException<AbstractFetcher<T, ?>, Exception> testFetcherSupplier;
+        private final AbstractPartitionDiscoverer testPartitionDiscoverer;
+        private final boolean isAutoCommitEnabled;
 
-        @SuppressWarnings("unchecked")
         DummyFlinkKafkaConsumer() {
             this(false);
         }
@@ -1144,7 +1139,6 @@ class FlinkKafkaConsumerBaseTest {
                     (KeyedDeserializationSchema<T>) mock(KeyedDeserializationSchema.class));
         }
 
-        @SuppressWarnings("unchecked")
         DummyFlinkKafkaConsumer(
                 SupplierWithException<AbstractFetcher<T, ?>, Exception> abstractFetcherSupplier,
                 AbstractPartitionDiscoverer abstractPartitionDiscoverer,
@@ -1156,7 +1150,6 @@ class FlinkKafkaConsumerBaseTest {
                     discoveryIntervalMillis);
         }
 
-        @SuppressWarnings("unchecked")
         DummyFlinkKafkaConsumer(
                 AbstractFetcher<T, ?> testFetcher,
                 AbstractPartitionDiscoverer testPartitionDiscoverer,
@@ -1168,7 +1161,6 @@ class FlinkKafkaConsumerBaseTest {
                     PARTITION_DISCOVERY_DISABLED);
         }
 
-        @SuppressWarnings("unchecked")
         DummyFlinkKafkaConsumer(
                 AbstractFetcher<T, ?> testFetcher,
                 AbstractPartitionDiscoverer testPartitionDiscoverer,
@@ -1196,7 +1188,6 @@ class FlinkKafkaConsumerBaseTest {
                     (KeyedDeserializationSchema<T>) mock(KeyedDeserializationSchema.class));
         }
 
-        @SuppressWarnings("unchecked")
         DummyFlinkKafkaConsumer(
                 SupplierWithException<AbstractFetcher<T, ?>, Exception> testFetcherSupplier,
                 AbstractPartitionDiscoverer testPartitionDiscoverer,
@@ -1316,12 +1307,12 @@ class FlinkKafkaConsumerBaseTest {
         }
 
         @Override
-        public Iterable<T> get() throws Exception {
+        public Iterable<T> get() {
             return list;
         }
 
         @Override
-        public void add(T value) throws Exception {
+        public void add(T value) {
             Preconditions.checkNotNull(value, "You cannot add null to a ListState.");
             list.add(value);
         }
@@ -1335,14 +1326,13 @@ class FlinkKafkaConsumerBaseTest {
         }
 
         @Override
-        public void update(List<T> values) throws Exception {
+        public void update(List<T> values) {
             clear();
-
             addAll(values);
         }
 
         @Override
-        public void addAll(List<T> values) throws Exception {
+        public void addAll(List<T> values) {
             if (values != null) {
                 values.forEach(
                         v -> Preconditions.checkNotNull(v, "You cannot add null to a ListState."));
@@ -1400,8 +1390,7 @@ class FlinkKafkaConsumerBaseTest {
 
         @Override
         protected void doCommitInternalOffsetsToKafka(
-                Map<KafkaTopicPartition, Long> offsets, @Nonnull KafkaCommitCallback commitCallback)
-                throws Exception {
+                Map<KafkaTopicPartition, Long> offsets, @Nonnull KafkaCommitCallback commitCallback) {
             this.lastCommittedOffsets = offsets;
             this.commitCount++;
             commitCallback.onSuccess();
@@ -1454,20 +1443,17 @@ class FlinkKafkaConsumerBaseTest {
 
         @Override
         @SuppressWarnings("unchecked")
-        public <S> ListState<S> getUnionListState(ListStateDescriptor<S> stateDescriptor)
-                throws Exception {
+        public <S> ListState<S> getUnionListState(ListStateDescriptor<S> stateDescriptor) {
             return (ListState<S>) mockRestoredUnionListState;
         }
 
         @Override
-        public <K, V> BroadcastState<K, V> getBroadcastState(
-                MapStateDescriptor<K, V> stateDescriptor) throws Exception {
+        public <K, V> BroadcastState<K, V> getBroadcastState(MapStateDescriptor<K, V> stateDescriptor) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public <S> ListState<S> getListState(ListStateDescriptor<S> stateDescriptor)
-                throws Exception {
+        public <S> ListState<S> getListState(ListStateDescriptor<S> stateDescriptor) {
             throw new UnsupportedOperationException();
         }
 

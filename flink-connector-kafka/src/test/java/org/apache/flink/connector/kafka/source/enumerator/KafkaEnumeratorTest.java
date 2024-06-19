@@ -51,6 +51,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.StringJoiner;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -95,7 +96,7 @@ class KafkaEnumeratorTest {
                 KafkaSourceEnumerator enumerator =
                         createEnumerator(context, DISABLE_PERIODIC_PARTITION_DISCOVERY)) {
 
-            // Start the enumerator and it should schedule a one time task to discover and assign
+            // Start the enumerator, and it should schedule a one time task to discover and assign
             // partitions.
             enumerator.start();
             assertThat(context.getPeriodicCallables()).isEmpty();
@@ -116,7 +117,7 @@ class KafkaEnumeratorTest {
                 KafkaSourceEnumerator enumerator =
                         createEnumerator(context, ENABLE_PERIODIC_PARTITION_DISCOVERY)) {
 
-            // Start the enumerator and it should schedule a one time task to discover and assign
+            // Start the enumerator, and it should schedule a one time task to discover and assign
             // partitions.
             enumerator.start();
             assertThat(context.getOneTimeCallables()).isEmpty();
@@ -137,7 +138,7 @@ class KafkaEnumeratorTest {
                 KafkaSourceEnumerator enumerator =
                         createEnumerator(context, DISABLE_PERIODIC_PARTITION_DISCOVERY)) {
 
-            // Start the enumerator and it should schedule a one time task to discover and assign
+            // Start the enumerator, and it should schedule a one time task to discover and assign
             // partitions.
             enumerator.start();
 
@@ -162,7 +163,7 @@ class KafkaEnumeratorTest {
                 KafkaSourceEnumerator enumerator =
                         createEnumerator(context, DISABLE_PERIODIC_PARTITION_DISCOVERY)) {
 
-            // Start the enumerator and it should schedule a one time task to discover and assign
+            // Start the enumerator, and it should schedule a one time task to discover and assign
             // partitions.
             enumerator.start();
             runOneTimePartitionDiscovery(context);
@@ -185,7 +186,7 @@ class KafkaEnumeratorTest {
                 KafkaSourceEnumerator enumerator =
                         createEnumerator(context, DISABLE_PERIODIC_PARTITION_DISCOVERY)) {
 
-            // Start the enumerator and it should schedule a one time task to discover and assign
+            // Start the enumerator, and it should schedule a one time task to discover and assign
             // partitions.
             enumerator.start();
             assertThat(context.getOneTimeCallables())
@@ -209,7 +210,7 @@ class KafkaEnumeratorTest {
                 KafkaSourceEnumerator enumerator =
                         createEnumerator(context, ENABLE_PERIODIC_PARTITION_DISCOVERY)) {
 
-            // Start the enumerator and it should schedule a one time task to discover and assign
+            // Start the enumerator, and it should schedule a one time task to discover and assign
             // partitions.
             enumerator.start();
             assertThat(context.getOneTimeCallables()).isEmpty();
@@ -251,7 +252,7 @@ class KafkaEnumeratorTest {
     }
 
     @Test
-    @Timeout(30L)
+    @Timeout(value = 30L, unit = TimeUnit.SECONDS)
     void testDiscoverPartitionsPeriodically() throws Throwable {
         try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
@@ -485,7 +486,7 @@ class KafkaEnumeratorTest {
             final KafkaSourceEnumerator.PartitionChange partitionChange =
                     enumerator.getPartitionChange(fetchedPartitions);
 
-            // Since enumerator never met DYNAMIC_TOPIC_NAME-0, it should be mark as a new partition
+            // Since enumerator never met DYNAMIC_TOPIC_NAME-0, it should be marked as a new partition
             Set<TopicPartition> expectedNewPartitions = Collections.singleton(newPartition);
 
             // All existing topics are not in the fetchedPartitions, so they should be marked as
@@ -534,7 +535,7 @@ class KafkaEnumeratorTest {
             MockSplitEnumeratorContext<KafkaPartitionSplit> context,
             KafkaSourceEnumerator enumerator)
             throws Throwable {
-        // Start the enumerator and it should schedule a one time task to discover and assign
+        // Start the enumerator, and it should schedule a one time task to discover and assign
         // partitions.
         enumerator.start();
 
@@ -679,7 +680,7 @@ class KafkaEnumeratorTest {
                     Set<TopicPartition> expectedAssignmentsForReader =
                             expectedAssignments.get(reader);
                     assertThat(expectedAssignmentsForReader).isNotNull();
-                    assertThat(splits.size()).isEqualTo(expectedAssignmentsForReader.size());
+                    assertThat(splits).hasSameSizeAs(expectedAssignmentsForReader);
                     for (KafkaPartitionSplit split : splits) {
                         assertThat(expectedAssignmentsForReader)
                                 .contains(split.getTopicPartition());

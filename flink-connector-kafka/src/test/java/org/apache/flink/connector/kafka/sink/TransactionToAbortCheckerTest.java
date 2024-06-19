@@ -17,7 +17,9 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.flink.util.TestLoggerExtension;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -27,6 +29,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link TransactionsToAbortChecker}. */
+@ExtendWith(TestLoggerExtension.class)
 class TransactionToAbortCheckerTest {
 
     public static final String ABORT = "abort";

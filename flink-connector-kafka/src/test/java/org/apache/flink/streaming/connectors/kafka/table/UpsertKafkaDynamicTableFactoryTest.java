@@ -67,10 +67,11 @@ import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
 
+import org.apache.flink.util.TestLoggerExtension;
 import org.apache.kafka.clients.consumer.OffsetAndTimestamp;
 import org.apache.kafka.common.TopicPartition;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -80,7 +81,7 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.function.Consumer;
 
-import static org.apache.flink.core.testutils.FlinkMatchers.containsCause;
+import static org.apache.flink.core.testutils.FlinkAssertions.anyCauseMatches;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanBoundedMode;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.AVRO_CONFLUENT;
 import static org.apache.flink.table.factories.utils.FactoryMocks.createTableSink;
@@ -89,6 +90,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link UpsertKafkaDynamicTableFactory}. */
+@ExtendWith(TestLoggerExtension.class)
 class UpsertKafkaDynamicTableFactoryTest {
 
     private static final String SOURCE_TOPIC = "sourceTopic_1";
@@ -433,9 +435,7 @@ class UpsertKafkaDynamicTableFactoryTest {
     void testBoundedSpecificOffsets() {
         testBoundedOffsets(
                 ScanBoundedMode.SPECIFIC_OFFSETS,
-                options -> {
-                    options.put("scan.bounded.specific-offsets", "partition:0,offset:2");
-                },
+                options -> options.put("scan.bounded.specific-offsets", "partition:0,offset:2"),
                 source -> {
                     assertThat(source.getBoundedness()).isEqualTo(Boundedness.BOUNDED);
                     OffsetsInitializer offsetsInitializer =
@@ -479,9 +479,7 @@ class UpsertKafkaDynamicTableFactoryTest {
     void testBoundedGroupOffsets() {
         testBoundedOffsets(
                 ScanBoundedMode.GROUP_OFFSETS,
-                options -> {
-                    options.put("properties.group.id", "dummy");
-                },
+                options -> options.put("properties.group.id", "dummy"),
                 source -> {
                     assertThat(source.getBoundedness()).isEqualTo(Boundedness.BOUNDED);
                     OffsetsInitializer offsetsInitializer =
@@ -501,9 +499,7 @@ class UpsertKafkaDynamicTableFactoryTest {
     void testBoundedTimestamp() {
         testBoundedOffsets(
                 ScanBoundedMode.TIMESTAMP,
-                options -> {
-                    options.put("scan.bounded.timestamp-millis", "1");
-                },
+                options -> options.put("scan.bounded.timestamp-millis", "1"),
                 source -> {
                     assertThat(source.getBoundedness()).isEqualTo(Boundedness.BOUNDED);
                     OffsetsInitializer offsetsInitializer =
@@ -549,110 +545,100 @@ class UpsertKafkaDynamicTableFactoryTest {
 
     @Test
     void testCreateSourceTableWithoutPK() {
-        Assertions.assertThrows(ValidationException.class,
-                () -> containsCause(
-                        new ValidationException(
-                                "'upsert-kafka' tables require to define a PRIMARY KEY constraint. "
-                                        + "The PRIMARY KEY specifies which columns should be read from or write to the Kafka message key. "
-                                        + "The PRIMARY KEY also defines records in the 'upsert-kafka' table should update or delete on which keys.")));
-
         ResolvedSchema illegalSchema =
                 ResolvedSchema.of(
                         Column.physical("window_start", DataTypes.STRING()),
                         Column.physical("region", DataTypes.STRING()),
                         Column.physical("view_count", DataTypes.BIGINT()));
-        createTableSource(illegalSchema, getFullSourceOptions());
+        assertThatThrownBy(() -> createTableSource(illegalSchema, getFullSourceOptions()))
+                .satisfies(anyCauseMatches(ValidationException.class,
+                        "'upsert-kafka' tables require to define a PRIMARY KEY constraint. "
+                                + "The PRIMARY KEY specifies which columns should be read from or write to the Kafka message key. "
+                                + "The PRIMARY KEY also defines records in the 'upsert-kafka' table should update or delete on which keys."
+                ));
     }
 
     @Test
     void testCreateSinkTableWithoutPK() {
-        Assertions.assertThrows(ValidationException.class,
-                () -> containsCause(
-                        new ValidationException(
-                                "'upsert-kafka' tables require to define a PRIMARY KEY constraint. "
-                                        + "The PRIMARY KEY specifies which columns should be read from or write to the Kafka message key. "
-                                        + "The PRIMARY KEY also defines records in the 'upsert-kafka' table should update or delete on which keys.")));
-
         ResolvedSchema illegalSchema =
                 ResolvedSchema.of(
                         Column.physical("region", DataTypes.STRING()),
                         Column.physical("view_count", DataTypes.BIGINT()));
-        createTableSink(illegalSchema, getFullSinkOptions());
+        assertThatThrownBy(() -> createTableSink(illegalSchema, getFullSinkOptions()))
+                .satisfies(anyCauseMatches(ValidationException.class,
+                                "'upsert-kafka' tables require to define a PRIMARY KEY constraint. "
+                                        + "The PRIMARY KEY specifies which columns should be read from or write to the Kafka message key. "
+                                        + "The PRIMARY KEY also defines records in the 'upsert-kafka' table should update or delete on which keys."
+                ));
     }
 
     @Test
     void testSerWithCDCFormatAsValue() {
-        Assertions.assertThrows(ValidationException.class,
-                () -> containsCause(
-                        new ValidationException(
+        assertThatThrownBy(() ->
+                createTableSink(
+                        SINK_SCHEMA,
+                        getModifiedOptions(
+                                getFullSinkOptions(),
+                                options ->
+                                        options.put(
+                                                String.format(
+                                                        "value.%s.%s",
+                                                        TestFormatFactory.IDENTIFIER,
+                                                        TestFormatFactory.CHANGELOG_MODE.key()),
+                                                "I;UA;UB;D"))))
+                .satisfies(anyCauseMatches(ValidationException.class,
                                 String.format(
                                         "'upsert-kafka' connector doesn't support '%s' as value format, "
                                                 + "because '%s' is not in insert-only mode.",
                                         TestFormatFactory.IDENTIFIER,
-                                        TestFormatFactory.IDENTIFIER))));
+                                        TestFormatFactory.IDENTIFIER))
+                );
 
-        createTableSink(
-                SINK_SCHEMA,
-                getModifiedOptions(
-                        getFullSinkOptions(),
-                        options ->
-                                options.put(
-                                        String.format(
-                                                "value.%s.%s",
-                                                TestFormatFactory.IDENTIFIER,
-                                                TestFormatFactory.CHANGELOG_MODE.key()),
-                                        "I;UA;UB;D")));
     }
 
     @Test
     void testDeserWithCDCFormatAsValue() {
-        Assertions.assertThrows(ValidationException.class,
-                () -> containsCause(
-                        new ValidationException(
+        assertThatThrownBy(() ->
+                createTableSource(
+                        SOURCE_SCHEMA,
+                        getModifiedOptions(
+                                getFullSourceOptions(),
+                                options ->
+                                        options.put(
+                                                String.format(
+                                                        "value.%s.%s",
+                                                        TestFormatFactory.IDENTIFIER,
+                                                        TestFormatFactory.CHANGELOG_MODE.key()),
+                                                "I;UA;UB;D"))))
+                .satisfies(anyCauseMatches(ValidationException.class,
                                 String.format(
                                         "'upsert-kafka' connector doesn't support '%s' as value format, "
                                                 + "because '%s' is not in insert-only mode.",
                                         TestFormatFactory.IDENTIFIER,
-                                        TestFormatFactory.IDENTIFIER))));
-
-        createTableSource(
-                SOURCE_SCHEMA,
-                getModifiedOptions(
-                        getFullSourceOptions(),
-                        options ->
-                                options.put(
-                                        String.format(
-                                                "value.%s.%s",
-                                                TestFormatFactory.IDENTIFIER,
-                                                TestFormatFactory.CHANGELOG_MODE.key()),
-                                        "I;UA;UB;D")));
+                                        TestFormatFactory.IDENTIFIER))
+                );
     }
 
     @Test
     void testInvalidSinkBufferFlush() {
-        Assertions.assertThrows(ValidationException.class,
-                () -> containsCause(
-                        new ValidationException(
+        assertThatThrownBy(() ->
+                createTableSink(
+                        SINK_SCHEMA,
+                        getModifiedOptions(
+                                getFullSinkOptions(),
+                                options -> {
+                                    options.put("sink.buffer-flush.max-rows", "0");
+                                    options.put("sink.buffer-flush.interval", "1s");
+                                })))
+                .satisfies(anyCauseMatches(ValidationException.class,
                                 "'sink.buffer-flush.max-rows' and 'sink.buffer-flush.interval' "
                                         + "must be set to be greater than zero together to enable"
-                                        + " sink buffer flushing.")));
-        createTableSink(
-                SINK_SCHEMA,
-                getModifiedOptions(
-                        getFullSinkOptions(),
-                        options -> {
-                            options.put("sink.buffer-flush.max-rows", "0");
-                            options.put("sink.buffer-flush.interval", "1s");
-                        }));
+                                        + " sink buffer flushing."
+                ));
     }
 
     @Test
     void testExactlyOnceGuaranteeWithoutTransactionalIdPrefix() {
-        Assertions.assertThrows(ValidationException.class,
-                () -> containsCause(
-                        new ValidationException(
-                                "sink.transactional-id-prefix must be specified when using DeliveryGuarantee.EXACTLY_ONCE.")));
-
         final Map<String, String> modifiedOptions =
                 getModifiedOptions(
                         getFullSinkOptions(),
@@ -662,7 +648,10 @@ class UpsertKafkaDynamicTableFactoryTest {
                                     KafkaConnectorOptions.DELIVERY_GUARANTEE.key(),
                                     DeliveryGuarantee.EXACTLY_ONCE.toString());
                         });
-        createTableSink(SINK_SCHEMA, modifiedOptions);
+        assertThatThrownBy(() -> createTableSink(SINK_SCHEMA, modifiedOptions))
+                .satisfies(anyCauseMatches(ValidationException.class,
+                                "sink.transactional-id-prefix must be specified when using DeliveryGuarantee.EXACTLY_ONCE."
+                ));
     }
 
     // --------------------------------------------------------------------------------------------
