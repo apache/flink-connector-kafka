@@ -33,6 +33,7 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.runtime.TupleSerializer;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.testutils.CheckedThread;
+import org.apache.flink.core.testutils.FlinkAssertions;
 import org.apache.flink.core.testutils.OneShotLatch;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
@@ -60,7 +61,6 @@ import org.apache.flink.streaming.util.AbstractStreamOperatorTestHarness;
 import org.apache.flink.streaming.util.MockDeserializationSchema;
 import org.apache.flink.streaming.util.MockStreamingRuntimeContext;
 import org.apache.flink.streaming.util.serialization.KeyedDeserializationSchema;
-import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.Preconditions;
@@ -650,18 +650,10 @@ class FlinkKafkaConsumerBaseTest {
     private void testFailingConsumerLifecycle(
             FlinkKafkaConsumerBase<String> testKafkaConsumer, @Nonnull Exception expectedException)
             throws Exception {
-        try {
+        assertThatThrownBy(() -> {
             setupConsumer(testKafkaConsumer);
             testKafkaConsumer.run(new TestSourceContext<>());
-
-            fail(
-                    "Exception should have been thrown from open / run method of FlinkKafkaConsumerBase.");
-        } catch (Exception e) {
-            assertThat(
-                            ExceptionUtils.findThrowable(
-                                    e, throwable -> throwable.equals(expectedException)))
-                    .isPresent();
-        }
+        }).satisfies(FlinkAssertions.anyCauseMatches(expectedException.getClass()));
         testKafkaConsumer.close();
     }
 
