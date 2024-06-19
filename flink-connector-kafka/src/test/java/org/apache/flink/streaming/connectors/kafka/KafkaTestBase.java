@@ -147,8 +147,9 @@ public abstract class KafkaTestBase {
             KafkaTestEnvironment.Config environmentConfig, int numKafkaClusters) throws Exception {
         for (int i = 0; i < numKafkaClusters; i++) {
             startClusters(environmentConfig);
-            KafkaClusterTestEnvMetadata kafkaClusterTestEnvMetadata = new KafkaClusterTestEnvMetadata(
-                    i, kafkaServer, standardProps, brokerConnectionStrings, secureProps);
+            KafkaClusterTestEnvMetadata kafkaClusterTestEnvMetadata =
+                    new KafkaClusterTestEnvMetadata(
+                            i, kafkaServer, standardProps, brokerConnectionStrings, secureProps);
             kafkaClusters.add(kafkaClusterTestEnvMetadata);
             LOG.info("Created Kafka cluster with configuration: {}", kafkaClusterTestEnvMetadata);
         }
@@ -176,8 +177,9 @@ public abstract class KafkaTestBase {
     }
 
     public static KafkaTestEnvironment constructKafkaTestEnvironment() throws Exception {
-        Class<?> clazz = Class.forName(
-                "org.apache.flink.streaming.connectors.kafka.KafkaTestEnvironmentImpl");
+        Class<?> clazz =
+                Class.forName(
+                        "org.apache.flink.streaming.connectors.kafka.KafkaTestEnvironmentImpl");
         return (KafkaTestEnvironment) InstantiationUtil.instantiate(clazz);
     }
 
@@ -233,7 +235,8 @@ public abstract class KafkaTestBase {
     public static <K, V> void produceToKafka(
             Collection<ProducerRecord<K, V>> records,
             Class<? extends org.apache.kafka.common.serialization.Serializer<K>> keySerializerClass,
-            Class<? extends org.apache.kafka.common.serialization.Serializer<V>> valueSerializerClass)
+            Class<? extends org.apache.kafka.common.serialization.Serializer<V>>
+                    valueSerializerClass)
             throws Throwable {
         Properties props = new Properties();
         props.putAll(standardProps);
@@ -243,13 +246,14 @@ public abstract class KafkaTestBase {
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, valueSerializerClass.getName());
 
         AtomicReference<Throwable> sendingError = new AtomicReference<>();
-        Callback callback = (metadata, exception) -> {
-            if (exception != null) {
-                if (!sendingError.compareAndSet(null, exception)) {
-                    sendingError.get().addSuppressed(exception);
-                }
-            }
-        };
+        Callback callback =
+                (metadata, exception) -> {
+                    if (exception != null) {
+                        if (!sendingError.compareAndSet(null, exception)) {
+                            sendingError.get().addSuppressed(exception);
+                        }
+                    }
+                };
         try (KafkaProducer<K, V> producer = new KafkaProducer<>(props)) {
             for (ProducerRecord<K, V> record : records) {
                 producer.send(record, callback);
@@ -291,8 +295,8 @@ public abstract class KafkaTestBase {
             properties.put("heartbeat.interval.ms", "500");
 
             // query kafka for new records ...
-            Collection<ConsumerRecord<Integer, Integer>> records = kafkaServer.getAllRecordsFromTopic(properties,
-                    topic);
+            Collection<ConsumerRecord<Integer, Integer>> records =
+                    kafkaServer.getAllRecordsFromTopic(properties, topic);
 
             for (ConsumerRecord<Integer, Integer> record : records) {
                 actualElements.add(record.value());
@@ -324,8 +328,8 @@ public abstract class KafkaTestBase {
         consumerProperties.put("isolation.level", "read_committed");
 
         // query kafka for new records ...
-        Collection<ConsumerRecord<byte[], byte[]>> records = kafkaServer.getAllRecordsFromTopic(consumerProperties,
-                topic);
+        Collection<ConsumerRecord<byte[], byte[]>> records =
+                kafkaServer.getAllRecordsFromTopic(consumerProperties, topic);
 
         for (ConsumerRecord<byte[], byte[]> record : records) {
             actualElements.add(ByteBuffer.wrap(record.value()).getInt());

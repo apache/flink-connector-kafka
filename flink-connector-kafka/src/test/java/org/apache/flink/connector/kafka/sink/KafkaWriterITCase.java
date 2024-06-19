@@ -27,9 +27,11 @@ import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.OperatorIOMetricGroup;
+import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
 import org.apache.flink.metrics.testutils.MetricListener;
 import org.apache.flink.runtime.metrics.groups.InternalSinkWriterMetricGroup;
+import org.apache.flink.runtime.metrics.groups.ProxyMetricGroup;
 import org.apache.flink.runtime.metrics.groups.UnregisteredMetricGroups;
 import org.apache.flink.util.TestLoggerExtension;
 import org.apache.flink.util.UserCodeClassLoader;
@@ -58,7 +60,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -69,9 +70,9 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
+import static org.apache.flink.connector.kafka.testutils.DockerImageVersions.KAFKA;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.drainAllRecordsFromTopic;
-import static org.apache.flink.util.DockerImageVersions.KAFKA;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
 
@@ -84,7 +85,7 @@ class KafkaWriterITCase {
     private static final Network NETWORK = Network.newNetwork();
     private static final String KAFKA_METRIC_WITH_GROUP_NAME = "KafkaProducer.incoming-byte-total";
     private static final SinkWriter.Context SINK_WRITER_CONTEXT = new DummySinkWriterContext();
-    private String topic;
+    private static String topic;
 
     private MetricListener metricListener;
     private TriggerTimeService timeService;
@@ -114,7 +115,7 @@ class KafkaWriterITCase {
 
     @ParameterizedTest
     @EnumSource(DeliveryGuarantee.class)
-    void testRegisterMetrics(DeliveryGuarantee guarantee) throws Exception {
+    public void testRegisterMetrics(DeliveryGuarantee guarantee) throws Exception {
         try (final KafkaWriter<Integer> ignored =
                 createWriterWithConfiguration(getKafkaClientConfiguration(), guarantee)) {
             assertThat(metricListener.getGauge(KAFKA_METRIC_WITH_GROUP_NAME)).isPresent();
@@ -130,11 +131,8 @@ class KafkaWriterITCase {
 
     @Test
     void testIncreasingRecordBasedCounters() throws Exception {
-        final OperatorIOMetricGroup operatorIOMetricGroup =
-                UnregisteredMetricGroups.createUnregisteredOperatorMetricGroup().getIOMetricGroup();
-        final InternalSinkWriterMetricGroup metricGroup =
-                InternalSinkWriterMetricGroup.mock(
-                        metricListener.getMetricGroup(), operatorIOMetricGroup);
+        final SinkWriterMetricGroup metricGroup = createSinkWriterMetricGroup();
+
         try (final KafkaWriter<Integer> writer =
                 createWriterWithConfiguration(
                         getKafkaClientConfiguration(), DeliveryGuarantee.NONE, metricGroup)) {
@@ -166,14 +164,10 @@ class KafkaWriterITCase {
     }
 
     @Test
-    void testCurrentSendTimeMetric() throws Exception {
-        final InternalSinkWriterMetricGroup metricGroup =
-                InternalSinkWriterMetricGroup.mock(metricListener.getMetricGroup());
+    public void testCurrentSendTimeMetric() throws Exception {
         try (final KafkaWriter<Integer> writer =
                 createWriterWithConfiguration(
-                        getKafkaClientConfiguration(),
-                        DeliveryGuarantee.AT_LEAST_ONCE,
-                        metricGroup)) {
+                        getKafkaClientConfiguration(), DeliveryGuarantee.AT_LEAST_ONCE)) {
             final Optional<Gauge<Long>> currentSendTime =
                     metricListener.getGauge("currentSendTime");
             assertThat(currentSendTime).isPresent();
@@ -199,16 +193,12 @@ class KafkaWriterITCase {
     void testFlushAsyncErrorPropagationAndErrorCounter() throws Exception {
         Properties properties = getKafkaClientConfiguration();
 
-        SinkInitContext sinkInitContext =
-                new SinkInitContext(
-                        InternalSinkWriterMetricGroup.mock(metricListener.getMetricGroup()),
-                        timeService,
-                        null);
+        final SinkWriterMetricGroup metricGroup = createSinkWriterMetricGroup();
+
         final KafkaWriter<Integer> writer =
                 createWriterWithConfiguration(
-                        properties, DeliveryGuarantee.EXACTLY_ONCE, sinkInitContext);
-        final Counter numRecordsOutErrors =
-                sinkInitContext.metricGroup.getNumRecordsOutErrorsCounter();
+                        properties, DeliveryGuarantee.EXACTLY_ONCE, metricGroup);
+        final Counter numRecordsOutErrors = metricGroup.getNumRecordsOutErrorsCounter();
         assertThat(numRecordsOutErrors.getCount()).isZero();
 
         triggerProducerException(writer, properties);
@@ -228,16 +218,12 @@ class KafkaWriterITCase {
     void testWriteAsyncErrorPropagationAndErrorCounter() throws Exception {
         Properties properties = getKafkaClientConfiguration();
 
-        SinkInitContext sinkInitContext =
-                new SinkInitContext(
-                        InternalSinkWriterMetricGroup.mock(metricListener.getMetricGroup()),
-                        timeService,
-                        null);
+        final SinkWriterMetricGroup metricGroup = createSinkWriterMetricGroup();
+
         final KafkaWriter<Integer> writer =
                 createWriterWithConfiguration(
-                        properties, DeliveryGuarantee.EXACTLY_ONCE, sinkInitContext);
-        final Counter numRecordsOutErrors =
-                sinkInitContext.metricGroup.getNumRecordsOutErrorsCounter();
+                        properties, DeliveryGuarantee.EXACTLY_ONCE, metricGroup);
+        final Counter numRecordsOutErrors = metricGroup.getNumRecordsOutErrorsCounter();
         assertThat(numRecordsOutErrors.getCount()).isZero();
 
         triggerProducerException(writer, properties);
@@ -259,10 +245,8 @@ class KafkaWriterITCase {
         Properties properties = getKafkaClientConfiguration();
 
         SinkInitContext sinkInitContext =
-                new SinkInitContext(
-                        InternalSinkWriterMetricGroup.mock(metricListener.getMetricGroup()),
-                        timeService,
-                        null);
+                new SinkInitContext(createSinkWriterMetricGroup(), timeService, null);
+
         final KafkaWriter<Integer> writer =
                 createWriterWithConfiguration(
                         properties, DeliveryGuarantee.EXACTLY_ONCE, sinkInitContext);
@@ -289,16 +273,12 @@ class KafkaWriterITCase {
     void testCloseAsyncErrorPropagationAndErrorCounter() throws Exception {
         Properties properties = getKafkaClientConfiguration();
 
-        SinkInitContext sinkInitContext =
-                new SinkInitContext(
-                        InternalSinkWriterMetricGroup.mock(metricListener.getMetricGroup()),
-                        timeService,
-                        null);
+        final SinkWriterMetricGroup metricGroup = createSinkWriterMetricGroup();
+
         final KafkaWriter<Integer> writer =
                 createWriterWithConfiguration(
-                        properties, DeliveryGuarantee.EXACTLY_ONCE, sinkInitContext);
-        final Counter numRecordsOutErrors =
-                sinkInitContext.metricGroup.getNumRecordsOutErrorsCounter();
+                        properties, DeliveryGuarantee.EXACTLY_ONCE, metricGroup);
+        final Counter numRecordsOutErrors = metricGroup.getNumRecordsOutErrorsCounter();
         assertThat(numRecordsOutErrors.getCount()).isZero();
 
         triggerProducerException(writer, properties);
@@ -334,7 +314,7 @@ class KafkaWriterITCase {
                 createWriterWithConfiguration(
                         getKafkaClientConfiguration(),
                         DeliveryGuarantee.AT_LEAST_ONCE,
-                        InternalSinkWriterMetricGroup.mock(metricListener.getMetricGroup()),
+                        createSinkWriterMetricGroup(),
                         meta -> metadataList.add(meta.toString()))) {
             List<String> expected = new ArrayList<>();
             for (int i = 0; i < 100; i++) {
@@ -413,7 +393,7 @@ class KafkaWriterITCase {
         try (final KafkaWriter<Integer> writer =
                 createWriterWithConfiguration(
                         getKafkaClientConfiguration(), DeliveryGuarantee.EXACTLY_ONCE)) {
-            assertThat(writer.getProducerPool()).isEmpty();
+            assertThat(writer.getProducerPool()).hasSize(0);
 
             writer.write(1, SINK_WRITER_CONTEXT);
             writer.flush(false);
@@ -425,7 +405,7 @@ class KafkaWriterITCase {
 
             FlinkKafkaInternalProducer<?, ?> firstProducer =
                     committable.getProducer().get().getObject();
-            assertThat(firstProducer)
+            assertThat(firstProducer != writer.getCurrentProducer())
                     .as("Expected different producer")
                     .isNotSameAs(writer.getCurrentProducer());
 
@@ -518,17 +498,15 @@ class KafkaWriterITCase {
     }
 
     private KafkaWriter<Integer> createWriterWithConfiguration(
-            Properties config, DeliveryGuarantee guarantee) {
-        return createWriterWithConfiguration(
-                config,
-                guarantee,
-                InternalSinkWriterMetricGroup.mock(metricListener.getMetricGroup()));
+            Properties config, DeliveryGuarantee guarantee) throws IOException {
+        return createWriterWithConfiguration(config, guarantee, createSinkWriterMetricGroup());
     }
 
     private KafkaWriter<Integer> createWriterWithConfiguration(
             Properties config,
             DeliveryGuarantee guarantee,
-            SinkWriterMetricGroup sinkWriterMetricGroup) {
+            SinkWriterMetricGroup sinkWriterMetricGroup)
+            throws IOException {
         return createWriterWithConfiguration(config, guarantee, sinkWriterMetricGroup, null);
     }
 
@@ -536,27 +514,37 @@ class KafkaWriterITCase {
             Properties config,
             DeliveryGuarantee guarantee,
             SinkWriterMetricGroup sinkWriterMetricGroup,
-            @Nullable Consumer<RecordMetadata> metadataConsumer) {
-        return new KafkaWriter<>(
-                guarantee,
-                config,
-                "test-prefix",
-                new SinkInitContext(sinkWriterMetricGroup, timeService, metadataConsumer),
-                new DummyRecordSerializer(),
-                new DummySchemaContext(),
-                Collections.emptyList());
+            @Nullable Consumer<RecordMetadata> metadataConsumer)
+            throws IOException {
+        KafkaSink<Integer> kafkaSink =
+                KafkaSink.<Integer>builder()
+                        .setKafkaProducerConfig(config)
+                        .setDeliveryGuarantee(guarantee)
+                        .setTransactionalIdPrefix("test-prefix")
+                        .setRecordSerializer(new DummyRecordSerializer())
+                        .build();
+        return (KafkaWriter<Integer>)
+                kafkaSink.createWriter(
+                        new SinkInitContext(sinkWriterMetricGroup, timeService, metadataConsumer));
     }
 
     private KafkaWriter<Integer> createWriterWithConfiguration(
-            Properties config, DeliveryGuarantee guarantee, SinkInitContext sinkInitContext) {
-        return new KafkaWriter<>(
-                guarantee,
-                config,
-                "test-prefix",
-                sinkInitContext,
-                new DummyRecordSerializer(),
-                new DummySchemaContext(),
-                Collections.emptyList());
+            Properties config, DeliveryGuarantee guarantee, SinkInitContext sinkInitContext)
+            throws IOException {
+        KafkaSink<Integer> kafkaSink =
+                KafkaSink.<Integer>builder()
+                        .setKafkaProducerConfig(config)
+                        .setDeliveryGuarantee(guarantee)
+                        .setTransactionalIdPrefix("test-prefix")
+                        .setRecordSerializer(new DummyRecordSerializer())
+                        .build();
+        return (KafkaWriter<Integer>) kafkaSink.createWriter(sinkInitContext);
+    }
+
+    private SinkWriterMetricGroup createSinkWriterMetricGroup() {
+        DummyOperatorMetricGroup operatorMetricGroup =
+                new DummyOperatorMetricGroup(metricListener.getMetricGroup());
+        return InternalSinkWriterMetricGroup.wrap(operatorMetricGroup);
     }
 
     private static Properties getKafkaClientConfiguration() {
@@ -632,7 +620,7 @@ class KafkaWriterITCase {
         }
     }
 
-    private class DummyRecordSerializer implements KafkaRecordSerializationSchema<Integer> {
+    private static class DummyRecordSerializer implements KafkaRecordSerializationSchema<Integer> {
         @Override
         public ProducerRecord<byte[], byte[]> serialize(
                 Integer element, KafkaSinkContext context, Long timestamp) {
@@ -641,19 +629,6 @@ class KafkaWriterITCase {
                 return null;
             }
             return new ProducerRecord<>(topic, ByteBuffer.allocate(4).putInt(element).array());
-        }
-    }
-
-    private static class DummySchemaContext implements SerializationSchema.InitializationContext {
-
-        @Override
-        public MetricGroup getMetricGroup() {
-            throw new UnsupportedOperationException("Not implemented.");
-        }
-
-        @Override
-        public UserCodeClassLoader getUserCodeClassLoader() {
-            throw new UnsupportedOperationException("Not implemented.");
         }
     }
 
@@ -666,6 +641,24 @@ class KafkaWriterITCase {
         @Override
         public Long timestamp() {
             return null;
+        }
+    }
+
+    private static class DummyOperatorMetricGroup extends ProxyMetricGroup<MetricGroup>
+            implements OperatorMetricGroup {
+
+        private final OperatorIOMetricGroup operatorIOMetricGroup;
+
+        public DummyOperatorMetricGroup(MetricGroup parentMetricGroup) {
+            super(parentMetricGroup);
+            this.operatorIOMetricGroup =
+                    UnregisteredMetricGroups.createUnregisteredOperatorMetricGroup()
+                            .getIOMetricGroup();
+        }
+
+        @Override
+        public OperatorIOMetricGroup getIOMetricGroup() {
+            return operatorIOMetricGroup;
         }
     }
 
