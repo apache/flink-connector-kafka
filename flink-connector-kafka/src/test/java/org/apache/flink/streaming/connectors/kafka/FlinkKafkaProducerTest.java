@@ -26,7 +26,7 @@ import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartiti
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nullable;
 
@@ -34,11 +34,12 @@ import java.util.Optional;
 import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FlinkKafkaProducer}. */
-public class FlinkKafkaProducerTest {
+class FlinkKafkaProducerTest {
     @Test
-    public void testOpenSerializationSchemaProducer() throws Exception {
+    void testOpenSerializationSchemaProducer() throws Exception {
         OpenTestingSerializationSchema schema = new OpenTestingSerializationSchema();
         FlinkKafkaProducer<Integer> kafkaProducer =
                 new FlinkKafkaProducer<>("localhost:9092", "test-topic", schema);
@@ -58,7 +59,7 @@ public class FlinkKafkaProducerTest {
     }
 
     @Test
-    public void testOpenKafkaSerializationSchemaProducer() throws Exception {
+    void testOpenKafkaSerializationSchemaProducer() throws Exception {
         OpenTestingKafkaSerializationSchema schema = new OpenTestingKafkaSerializationSchema();
         Properties properties = new Properties();
         properties.put("bootstrap.servers", "localhost:9092");
@@ -84,7 +85,7 @@ public class FlinkKafkaProducerTest {
     }
 
     @Test
-    public void testOpenKafkaCustomPartitioner() throws Exception {
+    void testOpenKafkaCustomPartitioner() throws Exception {
         CustomPartitioner<Integer> partitioner = new CustomPartitioner<>();
         Properties properties = new Properties();
         properties.put("bootstrap.servers", "localhost:9092");
@@ -109,12 +110,13 @@ public class FlinkKafkaProducerTest {
         assertThat(partitioner.openCalled).isTrue();
     }
 
-    @Test(expected = NullPointerException.class)
+    @Test
     public void testProvidedNullTransactionalIdPrefix() {
         FlinkKafkaProducer<Integer> kafkaProducer =
                 new FlinkKafkaProducer<>(
                         "localhost:9092", "test-topic", new OpenTestingSerializationSchema());
-        kafkaProducer.setTransactionalIdPrefix(null);
+        assertThatThrownBy(() -> kafkaProducer.setTransactionalIdPrefix(null))
+                .isInstanceOf(NullPointerException.class);
     }
 
     private static class CustomPartitioner<T> extends FlinkKafkaPartitioner<T> {

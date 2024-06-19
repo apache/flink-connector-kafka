@@ -34,14 +34,15 @@ import org.apache.flink.test.util.MiniClusterWithClientResource;
 import org.apache.flink.util.InstantiationUtil;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.io.TempDir;
+import org.testcontainers.junit.jupiter.Container;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Serializable;
+import java.nio.file.Path;
 import java.util.Properties;
 import java.util.UUID;
 
@@ -65,7 +66,7 @@ public class KafkaShortRetentionTestBase implements Serializable {
     private static KafkaTestEnvironment kafkaServer;
     private static Properties standardProps;
 
-    @ClassRule
+    @Container
     public static MiniClusterWithClientResource flink =
             new MiniClusterWithClientResource(
                     new MiniClusterResourceConfiguration.Builder()
@@ -74,7 +75,7 @@ public class KafkaShortRetentionTestBase implements Serializable {
                             .setNumberSlotsPerTaskManager(TM_SLOTS)
                             .build());
 
-    @ClassRule public static TemporaryFolder tempFolder = new TemporaryFolder();
+    @TempDir public Path tempFolder;
 
     protected static Properties secureProps = new Properties();
 
@@ -84,8 +85,8 @@ public class KafkaShortRetentionTestBase implements Serializable {
         return flinkConfig;
     }
 
-    @BeforeClass
-    public static void prepare() throws Exception {
+    @BeforeAll
+    static void prepare() throws Exception {
         LOG.info("-------------------------------------------------------------------------");
         LOG.info("    Starting KafkaShortRetentionTestBase ");
         LOG.info("-------------------------------------------------------------------------");
@@ -113,8 +114,8 @@ public class KafkaShortRetentionTestBase implements Serializable {
         standardProps = kafkaServer.getStandardProperties();
     }
 
-    @AfterClass
-    public static void shutDownServices() throws Exception {
+    @AfterAll
+    static void shutDownServices() throws Exception {
         kafkaServer.shutdown();
 
         secureProps.clear();

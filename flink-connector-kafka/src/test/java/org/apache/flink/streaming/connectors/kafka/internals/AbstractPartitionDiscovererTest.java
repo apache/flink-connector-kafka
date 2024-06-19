@@ -20,7 +20,10 @@ package org.apache.flink.streaming.connectors.kafka.internals;
 
 import org.apache.flink.streaming.connectors.kafka.testutils.TestPartitionDiscoverer;
 
-import org.junit.Test;
+import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension;
+import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
@@ -40,7 +43,7 @@ import static org.assertj.core.api.Assertions.fail;
  * Tests that the partition assignment in the partition discoverer is deterministic and stable, with
  * both fixed and growing partitions.
  */
-@RunWith(Parameterized.class)
+@ExtendWith(ParameterizedTestExtension.class)
 public class AbstractPartitionDiscovererTest {
 
     private static final String TEST_TOPIC = "test-topic";
@@ -52,7 +55,7 @@ public class AbstractPartitionDiscovererTest {
         this.topicsDescriptor = topicsDescriptor;
     }
 
-    @Parameterized.Parameters(name = "KafkaTopicsDescriptor = {0}")
+    @Parameters(name = "KafkaTopicsDescriptor = {0}")
     @SuppressWarnings("unchecked")
     public static Collection<KafkaTopicsDescriptor[]> timeCharacteristic() {
         return Arrays.asList(
@@ -65,7 +68,7 @@ public class AbstractPartitionDiscovererTest {
     }
 
     @Test
-    public void testPartitionsEqualConsumersFixedPartitions() throws Exception {
+    void testPartitionsEqualConsumersFixedPartitions() throws Exception {
         List<KafkaTopicPartition> mockGetAllPartitionsForTopicsReturn =
                 Arrays.asList(
                         new KafkaTopicPartition(TEST_TOPIC, 0),
@@ -117,7 +120,7 @@ public class AbstractPartitionDiscovererTest {
     }
 
     @Test
-    public void testMultiplePartitionsPerConsumersFixedPartitions() {
+    void testMultiplePartitionsPerConsumersFixedPartitions() {
         try {
             final int[] partitionIDs = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 
@@ -186,7 +189,7 @@ public class AbstractPartitionDiscovererTest {
     }
 
     @Test
-    public void testPartitionsFewerThanConsumersFixedPartitions() {
+    void testPartitionsFewerThanConsumersFixedPartitions() {
         try {
             List<KafkaTopicPartition> mockGetAllPartitionsForTopicsReturn =
                     Arrays.asList(
@@ -248,7 +251,7 @@ public class AbstractPartitionDiscovererTest {
     }
 
     @Test
-    public void testGrowingPartitions() {
+    void testGrowingPartitions() {
         try {
             final int[] newPartitionIDs = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
             List<KafkaTopicPartition> allPartitions = new ArrayList<>(11);
@@ -417,7 +420,7 @@ public class AbstractPartitionDiscovererTest {
     }
 
     @Test
-    public void testDeterministicAssignmentWithDifferentFetchedPartitionOrdering()
+    void testDeterministicAssignmentWithDifferentFetchedPartitionOrdering()
             throws Exception {
         int numSubtasks = 4;
 
@@ -478,7 +481,7 @@ public class AbstractPartitionDiscovererTest {
     }
 
     @Test
-    public void testNonContiguousPartitionIdDiscovery() throws Exception {
+    void testNonContiguousPartitionIdDiscovery() throws Exception {
         List<KafkaTopicPartition> mockGetAllPartitionsForTopicsReturn1 =
                 Arrays.asList(
                         new KafkaTopicPartition("test-topic", 1),

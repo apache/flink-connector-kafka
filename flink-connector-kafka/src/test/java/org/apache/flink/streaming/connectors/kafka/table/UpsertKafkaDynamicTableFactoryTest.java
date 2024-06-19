@@ -66,13 +66,11 @@ import org.apache.flink.table.types.AtomicDataType;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
-import org.apache.flink.util.TestLogger;
 
 import org.apache.kafka.clients.consumer.OffsetAndTimestamp;
 import org.apache.kafka.common.TopicPartition;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.ExpectedException;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -91,7 +89,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link UpsertKafkaDynamicTableFactory}. */
-public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
+class UpsertKafkaDynamicTableFactoryTest {
 
     private static final String SOURCE_TOPIC = "sourceTopic_1";
 
@@ -148,10 +146,8 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
             new TestFormatFactory.DecodingFormatMock(
                     ",", true, ChangelogMode.insertOnly(), Collections.emptyMap());
 
-    @Rule public ExpectedException thrown = ExpectedException.none();
-
     @Test
-    public void testTableSource() {
+    void testTableSource() {
         final DataType producedDataType = SOURCE_SCHEMA.toPhysicalRowDataType();
         // Construct table source using options and table source factory
         final DynamicTableSource actualSource =
@@ -176,7 +172,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
     }
 
     @Test
-    public void testTableSink() {
+    void testTableSink() {
         // Construct table sink using options and table sink factory.
         final Map<String, String> modifiedOptions =
                 getModifiedOptions(
@@ -217,7 +213,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
 
     @SuppressWarnings("rawtypes")
     @Test
-    public void testBufferedTableSink() {
+    void testBufferedTableSink() {
         // Construct table sink using options and table sink factory.
         final DynamicTableSink actualSink =
                 createTableSink(
@@ -274,7 +270,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
     }
 
     @Test
-    public void testTableSinkWithParallelism() {
+    void testTableSinkWithParallelism() {
         final Map<String, String> modifiedOptions =
                 getModifiedOptions(
                         getFullSinkOptions(),
@@ -310,7 +306,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
     }
 
     @Test
-    public void testTableSinkAutoCompleteSchemaRegistrySubject() {
+    void testTableSinkAutoCompleteSchemaRegistrySubject() {
         // value.format + key.format
         verifyEncoderSubject(
                 options -> {
@@ -420,7 +416,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
     // --------------------------------------------------------------------------------------------
 
     @Test
-    public void testBoundedSpecificOffsetsValidate() {
+    void testBoundedSpecificOffsetsValidate() {
         final Map<String, String> options = getFullSourceOptions();
         options.put(
                 KafkaConnectorOptions.SCAN_BOUNDED_MODE.key(),
@@ -434,7 +430,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
     }
 
     @Test
-    public void testBoundedSpecificOffsets() {
+    void testBoundedSpecificOffsets() {
         testBoundedOffsets(
                 ScanBoundedMode.SPECIFIC_OFFSETS,
                 options -> {
@@ -456,7 +452,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
     }
 
     @Test
-    public void testBoundedLatestOffset() {
+    void testBoundedLatestOffset() {
         testBoundedOffsets(
                 ScanBoundedMode.LATEST_OFFSET,
                 options -> {},
@@ -480,7 +476,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
     }
 
     @Test
-    public void testBoundedGroupOffsets() {
+    void testBoundedGroupOffsets() {
         testBoundedOffsets(
                 ScanBoundedMode.GROUP_OFFSETS,
                 options -> {
@@ -502,7 +498,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
     }
 
     @Test
-    public void testBoundedTimestamp() {
+    void testBoundedTimestamp() {
         testBoundedOffsets(
                 ScanBoundedMode.TIMESTAMP,
                 options -> {
@@ -552,10 +548,9 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
     // --------------------------------------------------------------------------------------------
 
     @Test
-    public void testCreateSourceTableWithoutPK() {
-        thrown.expect(ValidationException.class);
-        thrown.expect(
-                containsCause(
+    void testCreateSourceTableWithoutPK() {
+        Assertions.assertThrows(ValidationException.class,
+                () -> containsCause(
                         new ValidationException(
                                 "'upsert-kafka' tables require to define a PRIMARY KEY constraint. "
                                         + "The PRIMARY KEY specifies which columns should be read from or write to the Kafka message key. "
@@ -570,10 +565,9 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
     }
 
     @Test
-    public void testCreateSinkTableWithoutPK() {
-        thrown.expect(ValidationException.class);
-        thrown.expect(
-                containsCause(
+    void testCreateSinkTableWithoutPK() {
+        Assertions.assertThrows(ValidationException.class,
+                () -> containsCause(
                         new ValidationException(
                                 "'upsert-kafka' tables require to define a PRIMARY KEY constraint. "
                                         + "The PRIMARY KEY specifies which columns should be read from or write to the Kafka message key. "
@@ -587,10 +581,9 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
     }
 
     @Test
-    public void testSerWithCDCFormatAsValue() {
-        thrown.expect(ValidationException.class);
-        thrown.expect(
-                containsCause(
+    void testSerWithCDCFormatAsValue() {
+        Assertions.assertThrows(ValidationException.class,
+                () -> containsCause(
                         new ValidationException(
                                 String.format(
                                         "'upsert-kafka' connector doesn't support '%s' as value format, "
@@ -612,10 +605,9 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
     }
 
     @Test
-    public void testDeserWithCDCFormatAsValue() {
-        thrown.expect(ValidationException.class);
-        thrown.expect(
-                containsCause(
+    void testDeserWithCDCFormatAsValue() {
+        Assertions.assertThrows(ValidationException.class,
+                () -> containsCause(
                         new ValidationException(
                                 String.format(
                                         "'upsert-kafka' connector doesn't support '%s' as value format, "
@@ -637,10 +629,9 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
     }
 
     @Test
-    public void testInvalidSinkBufferFlush() {
-        thrown.expect(ValidationException.class);
-        thrown.expect(
-                containsCause(
+    void testInvalidSinkBufferFlush() {
+        Assertions.assertThrows(ValidationException.class,
+                () -> containsCause(
                         new ValidationException(
                                 "'sink.buffer-flush.max-rows' and 'sink.buffer-flush.interval' "
                                         + "must be set to be greater than zero together to enable"
@@ -656,10 +647,9 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
     }
 
     @Test
-    public void testExactlyOnceGuaranteeWithoutTransactionalIdPrefix() {
-        thrown.expect(ValidationException.class);
-        thrown.expect(
-                containsCause(
+    void testExactlyOnceGuaranteeWithoutTransactionalIdPrefix() {
+        Assertions.assertThrows(ValidationException.class,
+                () -> containsCause(
                         new ValidationException(
                                 "sink.transactional-id-prefix must be specified when using DeliveryGuarantee.EXACTLY_ONCE.")));
 

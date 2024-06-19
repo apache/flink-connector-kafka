@@ -33,7 +33,10 @@ import org.apache.flink.table.runtime.connector.sink.SinkRuntimeProviderContext;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 
-import org.junit.Test;
+import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension;
+import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
@@ -55,9 +58,9 @@ import static org.apache.flink.types.RowKind.UPDATE_AFTER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ReducingUpsertWriter}. */
-@RunWith(Parameterized.class)
+@ExtendWith(ParameterizedTestExtension.class)
 public class ReducingUpsertWriterTest {
-    @Parameterized.Parameters(name = "object reuse = {0}")
+    @Parameters(name = "object reuse = {0}")
     public static Object[] enableObjectReuse() {
         return new Boolean[] {true, false};
     }
@@ -150,7 +153,7 @@ public class ReducingUpsertWriterTest {
     }
 
     @Test
-    public void testWriteData() throws Exception {
+    void testWriteData() throws Exception {
         final MockedSinkWriter writer = new MockedSinkWriter();
         final ReducingUpsertWriter<?, ?> bufferedWriter = createBufferedWriter(writer);
 
@@ -217,7 +220,7 @@ public class ReducingUpsertWriterTest {
     }
 
     @Test
-    public void testFlushDataWhenCheckpointing() throws Exception {
+    void testFlushDataWhenCheckpointing() throws Exception {
         final MockedSinkWriter writer = new MockedSinkWriter();
         final ReducingUpsertWriter<?, ?> bufferedWriter = createBufferedWriter(writer);
         // write all data, there should be 3 records are still buffered
@@ -265,7 +268,7 @@ public class ReducingUpsertWriterTest {
     }
 
     @Test
-    public void testWriteDataWithNullTimestamp() throws Exception {
+    void testWriteDataWithNullTimestamp() throws Exception {
         final MockedSinkWriter writer = new MockedSinkWriter();
         final ReducingUpsertWriter<?, ?> bufferedWriter = createBufferedWriter(writer);
 

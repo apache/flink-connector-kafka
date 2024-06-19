@@ -20,7 +20,7 @@ package org.apache.flink.streaming.connectors.kafka;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.test.util.MiniClusterWithClientResource;
 
-import org.junit.ClassRule;
+import org.testcontainers.junit.jupiter.Container;
 
 /** The base for the Kafka tests with Flink's MiniCluster. */
 @SuppressWarnings("serial")
@@ -30,7 +30,7 @@ public abstract class KafkaTestBaseWithFlink extends KafkaTestBase {
 
     protected static final int TM_SLOTS = 8;
 
-    @ClassRule
+    @Container
     public static MiniClusterWithClientResource flink =
             new MiniClusterWithClientResource(
                     new MiniClusterResourceConfiguration.Builder()

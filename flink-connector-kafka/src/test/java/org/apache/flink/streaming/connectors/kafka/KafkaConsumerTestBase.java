@@ -88,7 +88,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.NotLeaderForPartitionException;
 import org.apache.kafka.common.errors.TimeoutException;
-import org.junit.Before;
+import org.junit.jupiter.api.BeforeEach;
 
 import javax.annotation.Nullable;
 import javax.management.MBeanServer;
@@ -143,8 +143,8 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
      * Makes sure that no job is on the JobManager any more from any previous tests that use the
      * same mini cluster. Otherwise, missing slots may happen.
      */
-    @Before
-    public void setClientAndEnsureNoJobIsLingering() throws Exception {
+    @BeforeEach
+    void setClientAndEnsureNoJobIsLingering() throws Exception {
         client = flink.getClusterClient();
         waitUntilNoJobIsRunning(client);
     }

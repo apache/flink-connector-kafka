@@ -19,15 +19,18 @@ package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.util.TestLogger;
 
-import org.junit.Test;
+import org.apache.flink.util.TestLoggerExtension;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link TransactionalIdFactory}. */
-public class TransactionIdFactoryTest extends TestLogger {
+@ExtendWith(TestLoggerExtension.class)
+class TransactionIdFactoryTest {
 
     @Test
-    public void testBuildTransactionalId() {
+    void testBuildTransactionalId() {
         final String expected = "prefix-0-2";
         assertThat(TransactionalIdFactory.buildTransactionalId("prefix", 0, 2L))
                 .isEqualTo(expected);

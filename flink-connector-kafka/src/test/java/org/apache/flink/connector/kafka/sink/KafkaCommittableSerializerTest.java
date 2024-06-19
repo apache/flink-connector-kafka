@@ -17,9 +17,9 @@
 
 package org.apache.flink.connector.kafka.sink;
 
-import org.apache.flink.util.TestLogger;
-
-import org.junit.Test;
+import org.apache.flink.util.TestLoggerExtension;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.io.IOException;
 
@@ -29,12 +29,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Tests for serializing and deserialzing {@link KafkaCommittable} with {@link
  * KafkaCommittableSerializer}.
  */
-public class KafkaCommittableSerializerTest extends TestLogger {
+@ExtendWith({TestLoggerExtension.class})
+class KafkaCommittableSerializerTest {
 
     private static final KafkaCommittableSerializer SERIALIZER = new KafkaCommittableSerializer();
 
     @Test
-    public void testCommittableSerDe() throws IOException {
+    void testCommittableSerDe() throws IOException {
         final String transactionalId = "test-id";
         final short epoch = 5;
         final KafkaCommittable committable = new KafkaCommittable(1L, epoch, transactionalId, null);

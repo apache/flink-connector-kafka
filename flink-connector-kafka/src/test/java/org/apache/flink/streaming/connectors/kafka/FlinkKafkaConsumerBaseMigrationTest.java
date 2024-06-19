@@ -36,12 +36,13 @@ import org.apache.flink.streaming.connectors.kafka.internals.KafkaTopicPartition
 import org.apache.flink.streaming.connectors.kafka.internals.KafkaTopicsDescriptor;
 import org.apache.flink.streaming.util.AbstractStreamOperatorTestHarness;
 import org.apache.flink.streaming.util.OperatorSnapshotUtil;
+import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension;
+import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
 import org.apache.flink.util.SerializedValue;
 
-import org.junit.Ignore;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
@@ -66,7 +67,7 @@ import static org.powermock.api.mockito.PowerMockito.when;
  * <p>For regenerating the binary snapshot files run {@link #writeSnapshot()} on the corresponding
  * Flink release-* branch.
  */
-@RunWith(Parameterized.class)
+@ExtendWith(ParameterizedTestExtension.class)
 public class FlinkKafkaConsumerBaseMigrationTest {
 
     /**
@@ -90,7 +91,7 @@ public class FlinkKafkaConsumerBaseMigrationTest {
 
     private final FlinkVersion testMigrateVersion;
 
-    @Parameterized.Parameters(name = "Migration Savepoint: {0}")
+    @Parameters(name = "Migration Savepoint: {0}")
     public static Collection<FlinkVersion> parameters() {
         return FlinkVersion.rangeOf(FlinkVersion.v1_8, FlinkVersion.v1_16);
     }
@@ -100,9 +101,9 @@ public class FlinkKafkaConsumerBaseMigrationTest {
     }
 
     /** Manually run this to write binary snapshot data. */
-    @Ignore
+    @Disabled
     @Test
-    public void writeSnapshot() throws Exception {
+    void writeSnapshot() throws Exception {
         writeSnapshot(
                 "src/test/resources/kafka-consumer-migration-test-flink"
                         + flinkGenerateSavepointVersion
@@ -194,7 +195,7 @@ public class FlinkKafkaConsumerBaseMigrationTest {
 
     /** Test restoring from an legacy empty state, when no partitions could be found for topics. */
     @Test
-    public void testRestoreFromEmptyStateNoPartitions() throws Exception {
+    void testRestoreFromEmptyStateNoPartitions() throws Exception {
         final DummyFlinkKafkaConsumer<String> consumerFunction =
                 new DummyFlinkKafkaConsumer<>(
                         Collections.singletonList("dummy-topic"),
@@ -235,7 +236,7 @@ public class FlinkKafkaConsumerBaseMigrationTest {
      * could be found for topics.
      */
     @Test
-    public void testRestoreFromEmptyStateWithPartitions() throws Exception {
+    void testRestoreFromEmptyStateWithPartitions() throws Exception {
         final List<KafkaTopicPartition> partitions = new ArrayList<>(PARTITION_STATE.keySet());
 
         final DummyFlinkKafkaConsumer<String> consumerFunction =
@@ -295,7 +296,7 @@ public class FlinkKafkaConsumerBaseMigrationTest {
      * partitions could be found for topics.
      */
     @Test
-    public void testRestore() throws Exception {
+    void testRestore() throws Exception {
         final List<KafkaTopicPartition> partitions = new ArrayList<>(PARTITION_STATE.keySet());
 
         final DummyFlinkKafkaConsumer<String> consumerFunction =

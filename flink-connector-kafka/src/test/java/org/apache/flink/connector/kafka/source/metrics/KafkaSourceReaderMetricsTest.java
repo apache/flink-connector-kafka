@@ -24,7 +24,7 @@ import org.apache.flink.metrics.testutils.MetricListener;
 import org.apache.flink.runtime.metrics.groups.InternalSourceReaderMetricGroup;
 
 import org.apache.kafka.common.TopicPartition;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
 
@@ -42,7 +42,7 @@ public class KafkaSourceReaderMetricsTest {
     private static final TopicPartition BAR_1 = new TopicPartition("bar", 1);
 
     @Test
-    public void testCurrentOffsetTracking() {
+    void testCurrentOffsetTracking() {
         MetricListener metricListener = new MetricListener();
 
         final KafkaSourceReaderMetrics kafkaSourceReaderMetrics =
@@ -66,7 +66,7 @@ public class KafkaSourceReaderMetricsTest {
     }
 
     @Test
-    public void testCommitOffsetTracking() {
+    void testCommitOffsetTracking() {
         MetricListener metricListener = new MetricListener();
 
         final KafkaSourceReaderMetrics kafkaSourceReaderMetrics =
@@ -101,7 +101,7 @@ public class KafkaSourceReaderMetricsTest {
     }
 
     @Test
-    public void testNonTrackingTopicPartition() {
+    void testNonTrackingTopicPartition() {
         MetricListener metricListener = new MetricListener();
         final KafkaSourceReaderMetrics kafkaSourceReaderMetrics =
                 new KafkaSourceReaderMetrics(
@@ -113,7 +113,7 @@ public class KafkaSourceReaderMetricsTest {
     }
 
     @Test
-    public void testFailedCommit() {
+    void testFailedCommit() {
         MetricListener metricListener = new MetricListener();
         final KafkaSourceReaderMetrics kafkaSourceReaderMetrics =
                 new KafkaSourceReaderMetrics(

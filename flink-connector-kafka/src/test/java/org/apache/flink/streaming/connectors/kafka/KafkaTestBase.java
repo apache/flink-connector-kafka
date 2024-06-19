@@ -28,7 +28,6 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.util.TestStreamEnvironment;
 import org.apache.flink.test.util.SuccessException;
 import org.apache.flink.testutils.junit.RetryOnFailure;
-import org.apache.flink.testutils.junit.RetryRule;
 import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.TestLogger;
 
@@ -38,11 +37,11 @@ import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Rule;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.File;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,7 +78,7 @@ import static org.assertj.core.api.Assertions.fail;
  */
 @SuppressWarnings("serial")
 @RetryOnFailure(times = 3)
-public abstract class KafkaTestBase extends TestLogger {
+public abstract class KafkaTestBase {
 
     public static final Logger LOG = LoggerFactory.getLogger(KafkaTestBase.class);
 
@@ -96,18 +95,17 @@ public abstract class KafkaTestBase extends TestLogger {
 
     public static List<KafkaClusterTestEnvMetadata> kafkaClusters = new ArrayList<>();
 
-    @ClassRule public static TemporaryFolder tempFolder = new TemporaryFolder();
+    @TempDir
+    public static File temporaryFolder;
 
     public static Properties secureProps = new Properties();
-
-    @Rule public final RetryRule retryRule = new RetryRule();
 
     // ------------------------------------------------------------------------
     //  Setup and teardown of the mini clusters
     // ------------------------------------------------------------------------
 
-    @BeforeClass
-    public static void prepare() throws Exception {
+    @BeforeAll
+    protected static void prepare() throws Exception {
         LOG.info("-------------------------------------------------------------------------");
         LOG.info("    Starting KafkaTestBase ");
         LOG.info("-------------------------------------------------------------------------");
@@ -115,8 +113,8 @@ public abstract class KafkaTestBase extends TestLogger {
         startClusters(false, numKafkaClusters);
     }
 
-    @AfterClass
-    public static void shutDownServices() throws Exception {
+    @AfterAll
+    protected static void shutDownServices() throws Exception {
 
         LOG.info("-------------------------------------------------------------------------");
         LOG.info("    Shut down KafkaTestBase ");
@@ -153,9 +151,8 @@ public abstract class KafkaTestBase extends TestLogger {
             KafkaTestEnvironment.Config environmentConfig, int numKafkaClusters) throws Exception {
         for (int i = 0; i < numKafkaClusters; i++) {
             startClusters(environmentConfig);
-            KafkaClusterTestEnvMetadata kafkaClusterTestEnvMetadata =
-                    new KafkaClusterTestEnvMetadata(
-                            i, kafkaServer, standardProps, brokerConnectionStrings, secureProps);
+            KafkaClusterTestEnvMetadata kafkaClusterTestEnvMetadata = new KafkaClusterTestEnvMetadata(
+                    i, kafkaServer, standardProps, brokerConnectionStrings, secureProps);
             kafkaClusters.add(kafkaClusterTestEnvMetadata);
             LOG.info("Created Kafka cluster with configuration: {}", kafkaClusterTestEnvMetadata);
         }
@@ -183,9 +180,8 @@ public abstract class KafkaTestBase extends TestLogger {
     }
 
     public static KafkaTestEnvironment constructKafkaTestEnvironment() throws Exception {
-        Class<?> clazz =
-                Class.forName(
-                        "org.apache.flink.streaming.connectors.kafka.KafkaTestEnvironmentImpl");
+        Class<?> clazz = Class.forName(
+                "org.apache.flink.streaming.connectors.kafka.KafkaTestEnvironmentImpl");
         return (KafkaTestEnvironment) InstantiationUtil.instantiate(clazz);
     }
 
@@ -241,8 +237,7 @@ public abstract class KafkaTestBase extends TestLogger {
     public static <K, V> void produceToKafka(
             Collection<ProducerRecord<K, V>> records,
             Class<? extends org.apache.kafka.common.serialization.Serializer<K>> keySerializerClass,
-            Class<? extends org.apache.kafka.common.serialization.Serializer<V>>
-                    valueSerializerClass)
+            Class<? extends org.apache.kafka.common.serialization.Serializer<V>> valueSerializerClass)
             throws Throwable {
         Properties props = new Properties();
         props.putAll(standardProps);
@@ -252,14 +247,13 @@ public abstract class KafkaTestBase extends TestLogger {
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, valueSerializerClass.getName());
 
         AtomicReference<Throwable> sendingError = new AtomicReference<>();
-        Callback callback =
-                (metadata, exception) -> {
-                    if (exception != null) {
-                        if (!sendingError.compareAndSet(null, exception)) {
-                            sendingError.get().addSuppressed(exception);
-                        }
-                    }
-                };
+        Callback callback = (metadata, exception) -> {
+            if (exception != null) {
+                if (!sendingError.compareAndSet(null, exception)) {
+                    sendingError.get().addSuppressed(exception);
+                }
+            }
+        };
         try (KafkaProducer<K, V> producer = new KafkaProducer<>(props)) {
             for (ProducerRecord<K, V> record : records) {
                 producer.send(record, callback);
@@ -301,8 +295,8 @@ public abstract class KafkaTestBase extends TestLogger {
             properties.put("heartbeat.interval.ms", "500");
 
             // query kafka for new records ...
-            Collection<ConsumerRecord<Integer, Integer>> records =
-                    kafkaServer.getAllRecordsFromTopic(properties, topic);
+            Collection<ConsumerRecord<Integer, Integer>> records = kafkaServer.getAllRecordsFromTopic(properties,
+                    topic);
 
             for (ConsumerRecord<Integer, Integer> record : records) {
                 actualElements.add(record.value());
@@ -334,8 +328,8 @@ public abstract class KafkaTestBase extends TestLogger {
         consumerProperties.put("isolation.level", "read_committed");
 
         // query kafka for new records ...
-        Collection<ConsumerRecord<byte[], byte[]>> records =
-                kafkaServer.getAllRecordsFromTopic(consumerProperties, topic);
+        Collection<ConsumerRecord<byte[], byte[]>> records = kafkaServer.getAllRecordsFromTopic(consumerProperties,
+                topic);
 
         for (ConsumerRecord<byte[], byte[]> record : records) {
             actualElements.add(ByteBuffer.wrap(record.value()).getInt());

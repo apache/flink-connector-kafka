@@ -35,9 +35,9 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.ClassRule;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.testcontainers.junit.jupiter.Container;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.KafkaContainer;
@@ -63,7 +63,7 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
     private static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
     private static final int zkTimeoutMills = 30000;
 
-    @ClassRule
+    @Container
     public static final KafkaContainer KAFKA_CONTAINER =
             new KafkaContainer(DockerImageName.parse(DockerImageVersions.KAFKA)) {
                 @Override
@@ -87,8 +87,8 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
     // Timer for scheduling logging task if the test hangs
     private final Timer loggingTimer = new Timer("Debug Logging Timer");
 
-    @Before
-    public void setup() {
+    @BeforeEach
+    void setup() {
         env = StreamExecutionEnvironment.getExecutionEnvironment();
         tEnv = StreamTableEnvironment.create(env);
         env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
@@ -107,8 +107,8 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
                 });
     }
 
-    @After
-    public void after() {
+    @AfterEach
+    void after() {
         // Cancel timer for debug logging
         cancelTimeoutLogger();
     }
