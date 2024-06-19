@@ -109,18 +109,17 @@ class FlinkKafkaConsumerBaseTest {
     @Test
     @SuppressWarnings("unchecked")
     void testEitherWatermarkExtractor() {
+        final FlinkKafkaConsumerBase<String> consumer = new DummyFlinkKafkaConsumer<String>();
         assertThatThrownBy(
                         () ->
-                                new DummyFlinkKafkaConsumer<String>()
-                                        .assignTimestampsAndWatermarks(
-                                                (AssignerWithPeriodicWatermarks<String>) null))
+                                consumer.assignTimestampsAndWatermarks(
+                                        (AssignerWithPeriodicWatermarks<String>) null))
                 .isInstanceOf(NullPointerException.class);
 
         assertThatThrownBy(
                         () ->
-                                new DummyFlinkKafkaConsumer<String>()
-                                        .assignTimestampsAndWatermarks(
-                                                (AssignerWithPunctuatedWatermarks<String>) null))
+                                consumer.assignTimestampsAndWatermarks(
+                                        (AssignerWithPunctuatedWatermarks<String>) null))
                 .isInstanceOf(NullPointerException.class);
 
         final AssignerWithPeriodicWatermarks<String> periodicAssigner =
@@ -161,7 +160,7 @@ class FlinkKafkaConsumerBaseTest {
         // acknowledgement of the checkpoint should also not result in any offset commits
         consumer.notifyCheckpointComplete(1L);
         assertThat(fetcher.getAndClearLastCommittedOffsets()).isNull();
-        assertThat(fetcher.getCommitCount()).isEqualTo(0);
+        assertThat(fetcher.getCommitCount()).isZero();
     }
 
     /**
@@ -373,7 +372,7 @@ class FlinkKafkaConsumerBaseTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    public void testSnapshotStateWithCommitOnCheckpointsEnabled() throws Exception {
+    void testSnapshotStateWithCommitOnCheckpointsEnabled() throws Exception {
 
         // --------------------------------------------------------------------
         //   prepare fake states
@@ -430,7 +429,7 @@ class FlinkKafkaConsumerBaseTest {
 
         assertThat(snapshot1).isEqualTo(state1);
         assertThat(consumer.getPendingOffsetsToCommit()).hasSize(1);
-        assertThat(consumer.getPendingOffsetsToCommit().get(138L)).isEqualTo(state1);
+        assertThat(consumer.getPendingOffsetsToCommit()).containsEntry(138L, state1);
 
         // checkpoint 2
         consumer.snapshotState(new StateSnapshotContextSynchronousImpl(140, 140));
@@ -445,7 +444,7 @@ class FlinkKafkaConsumerBaseTest {
 
         assertThat(snapshot2).isEqualTo(state2);
         assertThat(consumer.getPendingOffsetsToCommit()).hasSize(2);
-        assertThat(consumer.getPendingOffsetsToCommit().get(140L)).isEqualTo(state2);
+        assertThat(consumer.getPendingOffsetsToCommit()).containsEntry(140L, state2);
 
         // ack checkpoint 1
         consumer.notifyCheckpointComplete(138L);
@@ -467,7 +466,7 @@ class FlinkKafkaConsumerBaseTest {
 
         assertThat(snapshot3).isEqualTo(state3);
         assertThat(consumer.getPendingOffsetsToCommit()).hasSize(2);
-        assertThat(consumer.getPendingOffsetsToCommit().get(141L)).isEqualTo(state3);
+        assertThat(consumer.getPendingOffsetsToCommit()).containsEntry(141L, state3);
 
         // ack checkpoint 3, subsumes number 2
         consumer.notifyCheckpointComplete(141L);
@@ -486,7 +485,7 @@ class FlinkKafkaConsumerBaseTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    public void testSnapshotStateWithCommitOnCheckpointsDisabled() throws Exception {
+    void testSnapshotStateWithCommitOnCheckpointsDisabled() throws Exception {
         // --------------------------------------------------------------------
         //   prepare fake states
         // --------------------------------------------------------------------
@@ -542,8 +541,7 @@ class FlinkKafkaConsumerBaseTest {
         }
 
         assertThat(snapshot1).isEqualTo(state1);
-        assertThat(consumer.getPendingOffsetsToCommit().size())
-                .isEqualTo(0); // pending offsets to commit should not be updated
+        assertThat(consumer.getPendingOffsetsToCommit()).isEmpty(); // pending offsets to commit should not be updated
 
         // checkpoint 2
         consumer.snapshotState(new StateSnapshotContextSynchronousImpl(140, 140));
@@ -557,12 +555,11 @@ class FlinkKafkaConsumerBaseTest {
         }
 
         assertThat(snapshot2).isEqualTo(state2);
-        assertThat(consumer.getPendingOffsetsToCommit().size())
-                .isEqualTo(0); // pending offsets to commit should not be updated
+        assertThat(consumer.getPendingOffsetsToCommit()).isEmpty(); // pending offsets to commit should not be updated
 
         // ack checkpoint 1
         consumer.notifyCheckpointComplete(138L);
-        assertThat(fetcher.getCommitCount()).isEqualTo(0);
+        assertThat(fetcher.getCommitCount()).isZero();
         assertThat(fetcher.getAndClearLastCommittedOffsets())
                 .isNull(); // no offsets should be committed
 
@@ -578,17 +575,16 @@ class FlinkKafkaConsumerBaseTest {
         }
 
         assertThat(snapshot3).isEqualTo(state3);
-        assertThat(consumer.getPendingOffsetsToCommit().size())
-                .isEqualTo(0); // pending offsets to commit should not be updated
+        assertThat(consumer.getPendingOffsetsToCommit()).isEmpty(); // pending offsets to commit should not be updated
 
         // ack checkpoint 3, subsumes number 2
         consumer.notifyCheckpointComplete(141L);
-        assertThat(fetcher.getCommitCount()).isEqualTo(0);
+        assertThat(fetcher.getCommitCount()).isZero();
         assertThat(fetcher.getAndClearLastCommittedOffsets())
                 .isNull(); // no offsets should be committed
 
         consumer.notifyCheckpointComplete(666); // invalid checkpoint
-        assertThat(fetcher.getCommitCount()).isEqualTo(0);
+        assertThat(fetcher.getCommitCount()).isZero();
         assertThat(fetcher.getAndClearLastCommittedOffsets())
                 .isNull(); // no offsets should be committed
 
@@ -1356,7 +1352,6 @@ class FlinkKafkaConsumerBaseTest {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private static <T, S> void setupConsumer(
             FlinkKafkaConsumerBase<T> consumer,
             boolean isRestored,
