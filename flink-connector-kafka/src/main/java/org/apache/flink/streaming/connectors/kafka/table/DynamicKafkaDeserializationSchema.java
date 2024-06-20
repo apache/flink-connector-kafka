@@ -20,6 +20,7 @@ package org.apache.flink.streaming.connectors.kafka.table;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.connector.kafka.source.util.ExtractPayloadSourceRecordUtil;
 import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 import org.apache.flink.streaming.connectors.kafka.KafkaSerializationSchema;
 import org.apache.flink.table.data.GenericRowData;
@@ -56,6 +57,9 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
 
     private final boolean upsertMode;
 
+    private final boolean keyIncludeKafkaConnectJsonSchema;
+    private final boolean valueIncludeKafkaConnectJsonSchema;
+
     DynamicKafkaDeserializationSchema(
             int physicalArity,
             @Nullable DeserializationSchema<RowData> keyDeserialization,
@@ -65,7 +69,9 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
             boolean hasMetadata,
             MetadataConverter[] metadataConverters,
             TypeInformation<RowData> producedTypeInfo,
-            boolean upsertMode) {
+            boolean upsertMode,
+            boolean keyIncludeKafkaConnectJsonSchema,
+            boolean valueIncludeKafkaConnectJsonSchema) {
         if (upsertMode) {
             Preconditions.checkArgument(
                     keyDeserialization != null && keyProjection.length > 0,
@@ -84,6 +90,8 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
                         upsertMode);
         this.producedTypeInfo = producedTypeInfo;
         this.upsertMode = upsertMode;
+        this.keyIncludeKafkaConnectJsonSchema = keyIncludeKafkaConnectJsonSchema;
+        this.valueIncludeKafkaConnectJsonSchema = valueIncludeKafkaConnectJsonSchema;
     }
 
     @Override
@@ -110,13 +118,19 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
         // shortcut in case no output projection is required,
         // also not for a cartesian product with the keys
         if (keyDeserialization == null && !hasMetadata) {
-            valueDeserialization.deserialize(record.value(), collector);
+            byte[] extractRecordValue =
+                    ExtractPayloadSourceRecordUtil.extractPayloadIfIncludeConnectSchema(
+                            record.value(), valueIncludeKafkaConnectJsonSchema);
+            valueDeserialization.deserialize(extractRecordValue, collector);
             return;
         }
 
         // buffer key(s)
         if (keyDeserialization != null) {
-            keyDeserialization.deserialize(record.key(), keyCollector);
+            byte[] extractRecordKey =
+                    ExtractPayloadSourceRecordUtil.extractPayloadIfIncludeConnectSchema(
+                            record.key(), keyIncludeKafkaConnectJsonSchema);
+            keyDeserialization.deserialize(extractRecordKey, keyCollector);
         }
 
         // project output while emitting values
@@ -127,7 +141,10 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
             // collect tombstone messages in upsert mode by hand
             outputCollector.collect(null);
         } else {
-            valueDeserialization.deserialize(record.value(), outputCollector);
+            byte[] extractRecordValue =
+                    ExtractPayloadSourceRecordUtil.extractPayloadIfIncludeConnectSchema(
+                            record.value(), valueIncludeKafkaConnectJsonSchema);
+            valueDeserialization.deserialize(extractRecordValue, outputCollector);
         }
         keyCollector.buffer.clear();
     }

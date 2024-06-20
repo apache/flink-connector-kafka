@@ -350,6 +350,15 @@ public class KafkaSourceBuilder<OUT> {
         return this;
     }
 
+    public KafkaSourceBuilder<OUT> setValueOnlyDeserializer(
+            DeserializationSchema<OUT> deserializationSchema,
+            boolean valueIncludeKafkaConnectJsonSchema) {
+        this.deserializationSchema =
+                KafkaRecordDeserializationSchema.valueOnly(
+                        deserializationSchema, valueIncludeKafkaConnectJsonSchema);
+        return this;
+    }
+
     /**
      * Sets the client id prefix of this KafkaSource.
      *
