@@ -26,6 +26,7 @@ import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SourceReader;
 import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.connector.base.source.reader.RecordEvaluator;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.synchronization.FutureCompletingBlockingQueue;
 import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
@@ -53,6 +54,8 @@ import com.google.common.collect.ArrayListMultimap;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -95,11 +98,13 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     private boolean isActivelyConsumingSplits;
     private boolean isNoMoreSplits;
     private AtomicBoolean restartingReaders;
+    @Nullable private final RecordEvaluator<T> eofRecordEvaluator;
 
     public DynamicKafkaSourceReader(
             SourceReaderContext readerContext,
             KafkaRecordDeserializationSchema<T> deserializationSchema,
-            Properties properties) {
+            Properties properties,
+            @Nullable RecordEvaluator<T> eofRecordEvaluator) {
         this.readerContext = readerContext;
         this.clusterReaderMap = new TreeMap<>();
         this.deserializationSchema = deserializationSchema;
@@ -116,6 +121,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         this.isActivelyConsumingSplits = false;
         this.restartingReaders = new AtomicBoolean();
         this.clustersProperties = new HashMap<>();
+        this.eofRecordEvaluator = eofRecordEvaluator;
     }
 
     /**
@@ -448,7 +454,8 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                     }
                 });
 
-        KafkaRecordEmitter<T> recordEmitter = new KafkaRecordEmitter<>(deserializationSchema);
+        KafkaRecordEmitter<T> recordEmitter =
+                new KafkaRecordEmitter<>(deserializationSchema, eofRecordEvaluator);
         return new KafkaSourceReader<>(
                 elementsQueue,
                 new KafkaSourceFetcherManager(
@@ -463,7 +470,8 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                 recordEmitter,
                 toConfiguration(readerSpecificProperties),
                 readerContext,
-                kafkaSourceReaderMetrics);
+                kafkaSourceReaderMetrics,
+                eofRecordEvaluator);
     }
 
     /**

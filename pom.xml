@@ -50,7 +50,8 @@ under the License.
     </modules>
 
     <properties>
-        <flink.version>1.17.0</flink.version>
+        <flink.version>1.18-SNAPSHOT</flink.version>
+        <flink.shaded.version>16.1</flink.shaded.version>
         <kafka.version>3.4.0</kafka.version>
         <zookeeper.version>3.7.2</zookeeper.version>
         <confluent.version>7.4.4</confluent.version>
