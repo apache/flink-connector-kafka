@@ -284,7 +284,7 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
         public String apply(IN in) {
             final String topic = cache.getOrDefault(in, topicSelector.apply(in));
             cache.put(in, topic);
-            if (cache.size() == CACHE_RESET_SIZE) {
+            if (cache.size() >= CACHE_RESET_SIZE) {
                 cache.clear();
             }
             return topic;
