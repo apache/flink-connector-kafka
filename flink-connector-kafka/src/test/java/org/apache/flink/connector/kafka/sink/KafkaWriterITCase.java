@@ -260,9 +260,14 @@ public class KafkaWriterITCase {
         // to ensure that the exceptional send request has completed
         writer.getCurrentProducer().flush();
 
-        while (sinkInitContext.getMailboxExecutor().tryYield()) {
-            // execute all mails
-        }
+        assertThatCode(
+                        () -> {
+                            while (sinkInitContext.getMailboxExecutor().tryYield()) {
+                                // execute all mails
+                            }
+                        })
+                .hasRootCauseExactlyInstanceOf(ProducerFencedException.class);
+
         assertThat(numRecordsOutErrors.getCount()).isEqualTo(1L);
 
         assertThatCode(() -> writer.write(1, SINK_WRITER_CONTEXT))
