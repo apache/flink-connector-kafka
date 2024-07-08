@@ -17,30 +17,15 @@
 
 package org.apache.flink.connector.kafka.sink;
 
-import org.apache.flink.api.common.operators.ProcessingTimeService;
-import org.apache.flink.api.common.serialization.SerializationSchema;
-import org.apache.flink.api.connector.sink2.SinkWriter;
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.connector.base.DeliveryGuarantee;
-import org.apache.flink.connector.base.sink.writer.TestSinkInitContext;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
-import org.apache.flink.metrics.MetricGroup;
-import org.apache.flink.metrics.groups.OperatorIOMetricGroup;
-import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
-import org.apache.flink.metrics.testutils.MetricListener;
-import org.apache.flink.runtime.metrics.groups.InternalSinkWriterMetricGroup;
-import org.apache.flink.runtime.metrics.groups.ProxyMetricGroup;
-import org.apache.flink.runtime.metrics.groups.UnregisteredMetricGroups;
 import org.apache.flink.util.TestLoggerExtension;
-import org.apache.flink.util.UserCodeClassLoader;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.errors.ProducerFencedException;
-import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,52 +34,22 @@ import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.testcontainers.containers.KafkaContainer;
-import org.testcontainers.containers.Network;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalLong;
-import java.util.PriorityQueue;
 import java.util.Properties;
-import java.util.concurrent.ScheduledFuture;
-import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
-import static org.apache.flink.connector.kafka.testutils.DockerImageVersions.KAFKA;
-import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.drainAllRecordsFromTopic;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
 
 /** Tests for the standalone KafkaWriter. */
 @ExtendWith(TestLoggerExtension.class)
-public class KafkaWriterITCase {
-
-    private static final Logger LOG = LoggerFactory.getLogger(KafkaWriterITCase.class);
-    private static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
-    private static final Network NETWORK = Network.newNetwork();
-    private static final String KAFKA_METRIC_WITH_GROUP_NAME = "KafkaProducer.incoming-byte-total";
-    private static final SinkWriter.Context SINK_WRITER_CONTEXT = new DummySinkWriterContext();
-    private static String topic;
-
-    private MetricListener metricListener;
-    private TriggerTimeService timeService;
-
-    private static final KafkaContainer KAFKA_CONTAINER =
-            createKafkaContainer(KAFKA, LOG)
-                    .withEmbeddedZookeeper()
-                    .withNetwork(NETWORK)
-                    .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS);
+public class KafkaWriterITCase extends KafkaWriterTestBase {
 
     @BeforeAll
     public static void beforeAll() {
@@ -108,9 +63,7 @@ public class KafkaWriterITCase {
 
     @BeforeEach
     public void setUp(TestInfo testInfo) {
-        metricListener = new MetricListener();
-        timeService = new TriggerTimeService();
-        topic = testInfo.getDisplayName().replaceAll("\\W", "");
+        super.setUp(testInfo);
     }
 
     @ParameterizedTest
@@ -499,198 +452,6 @@ public class KafkaWriterITCase {
         try (final KafkaWriter<Integer> ignored =
                 createWriterWithConfiguration(config, guarantee)) {
             assertThat(metricListener.getGauge(KAFKA_METRIC_WITH_GROUP_NAME)).isNotPresent();
-        }
-    }
-
-    private KafkaWriter<Integer> createWriterWithConfiguration(
-            Properties config, DeliveryGuarantee guarantee) throws IOException {
-        return createWriterWithConfiguration(config, guarantee, createSinkWriterMetricGroup());
-    }
-
-    private KafkaWriter<Integer> createWriterWithConfiguration(
-            Properties config,
-            DeliveryGuarantee guarantee,
-            SinkWriterMetricGroup sinkWriterMetricGroup)
-            throws IOException {
-        return createWriterWithConfiguration(config, guarantee, sinkWriterMetricGroup, null);
-    }
-
-    private KafkaWriter<Integer> createWriterWithConfiguration(
-            Properties config,
-            DeliveryGuarantee guarantee,
-            SinkWriterMetricGroup sinkWriterMetricGroup,
-            @Nullable Consumer<RecordMetadata> metadataConsumer)
-            throws IOException {
-        KafkaSink<Integer> kafkaSink =
-                KafkaSink.<Integer>builder()
-                        .setKafkaProducerConfig(config)
-                        .setDeliveryGuarantee(guarantee)
-                        .setTransactionalIdPrefix("test-prefix")
-                        .setRecordSerializer(new DummyRecordSerializer())
-                        .build();
-        return (KafkaWriter<Integer>)
-                kafkaSink.createWriter(
-                        new SinkInitContext(sinkWriterMetricGroup, timeService, metadataConsumer));
-    }
-
-    private KafkaWriter<Integer> createWriterWithConfiguration(
-            Properties config, DeliveryGuarantee guarantee, SinkInitContext sinkInitContext)
-            throws IOException {
-        KafkaSink<Integer> kafkaSink =
-                KafkaSink.<Integer>builder()
-                        .setKafkaProducerConfig(config)
-                        .setDeliveryGuarantee(guarantee)
-                        .setTransactionalIdPrefix("test-prefix")
-                        .setRecordSerializer(new DummyRecordSerializer())
-                        .build();
-        return (KafkaWriter<Integer>) kafkaSink.createWriter(sinkInitContext);
-    }
-
-    private SinkWriterMetricGroup createSinkWriterMetricGroup() {
-        DummyOperatorMetricGroup operatorMetricGroup =
-                new DummyOperatorMetricGroup(metricListener.getMetricGroup());
-        return InternalSinkWriterMetricGroup.wrap(operatorMetricGroup);
-    }
-
-    private static Properties getKafkaClientConfiguration() {
-        final Properties standardProps = new Properties();
-        standardProps.put("bootstrap.servers", KAFKA_CONTAINER.getBootstrapServers());
-        standardProps.put("group.id", "kafkaWriter-tests");
-        standardProps.put("enable.auto.commit", false);
-        standardProps.put("key.serializer", ByteArraySerializer.class.getName());
-        standardProps.put("value.serializer", ByteArraySerializer.class.getName());
-        standardProps.put("auto.offset.reset", "earliest");
-        return standardProps;
-    }
-
-    private static class SinkInitContext extends TestSinkInitContext {
-
-        private final SinkWriterMetricGroup metricGroup;
-        private final ProcessingTimeService timeService;
-        @Nullable private final Consumer<RecordMetadata> metadataConsumer;
-
-        SinkInitContext(
-                SinkWriterMetricGroup metricGroup,
-                ProcessingTimeService timeService,
-                @Nullable Consumer<RecordMetadata> metadataConsumer) {
-            this.metricGroup = metricGroup;
-            this.timeService = timeService;
-            this.metadataConsumer = metadataConsumer;
-        }
-
-        @Override
-        public UserCodeClassLoader getUserCodeClassLoader() {
-            throw new UnsupportedOperationException("Not implemented.");
-        }
-
-        @Override
-        public ProcessingTimeService getProcessingTimeService() {
-            return timeService;
-        }
-
-        @Override
-        public int getSubtaskId() {
-            return 0;
-        }
-
-        @Override
-        public int getNumberOfParallelSubtasks() {
-            return 1;
-        }
-
-        @Override
-        public int getAttemptNumber() {
-            return 0;
-        }
-
-        @Override
-        public SinkWriterMetricGroup metricGroup() {
-            return metricGroup;
-        }
-
-        @Override
-        public OptionalLong getRestoredCheckpointId() {
-            return OptionalLong.empty();
-        }
-
-        @Override
-        public SerializationSchema.InitializationContext
-                asSerializationSchemaInitializationContext() {
-            return null;
-        }
-
-        @Override
-        public <MetaT> Optional<Consumer<MetaT>> metadataConsumer() {
-            return Optional.ofNullable((Consumer<MetaT>) metadataConsumer);
-        }
-    }
-
-    private static class DummyRecordSerializer implements KafkaRecordSerializationSchema<Integer> {
-        @Override
-        public ProducerRecord<byte[], byte[]> serialize(
-                Integer element, KafkaSinkContext context, Long timestamp) {
-            if (element == null) {
-                // in general, serializers should be allowed to skip invalid elements
-                return null;
-            }
-            return new ProducerRecord<>(topic, ByteBuffer.allocate(4).putInt(element).array());
-        }
-    }
-
-    private static class DummySinkWriterContext implements SinkWriter.Context {
-        @Override
-        public long currentWatermark() {
-            return 0;
-        }
-
-        @Override
-        public Long timestamp() {
-            return null;
-        }
-    }
-
-    private static class DummyOperatorMetricGroup extends ProxyMetricGroup<MetricGroup>
-            implements OperatorMetricGroup {
-
-        private final OperatorIOMetricGroup operatorIOMetricGroup;
-
-        public DummyOperatorMetricGroup(MetricGroup parentMetricGroup) {
-            super(parentMetricGroup);
-            this.operatorIOMetricGroup =
-                    UnregisteredMetricGroups.createUnregisteredOperatorMetricGroup()
-                            .getIOMetricGroup();
-        }
-
-        @Override
-        public OperatorIOMetricGroup getIOMetricGroup() {
-            return operatorIOMetricGroup;
-        }
-    }
-
-    private static class TriggerTimeService implements ProcessingTimeService {
-
-        private final PriorityQueue<Tuple2<Long, ProcessingTimeCallback>> registeredCallbacks =
-                new PriorityQueue<>(Comparator.comparingLong(o -> o.f0));
-
-        @Override
-        public long getCurrentProcessingTime() {
-            return 0;
-        }
-
-        @Override
-        public ScheduledFuture<?> registerTimer(
-                long time, ProcessingTimeCallback processingTimerCallback) {
-            registeredCallbacks.add(new Tuple2<>(time, processingTimerCallback));
-            return null;
-        }
-
-        public void trigger() throws Exception {
-            final Tuple2<Long, ProcessingTimeCallback> registered = registeredCallbacks.poll();
-            if (registered == null) {
-                LOG.warn("Triggered time service but no callback was registered.");
-                return;
-            }
-            registered.f1.onProcessingTime(registered.f0);
         }
     }
 }
