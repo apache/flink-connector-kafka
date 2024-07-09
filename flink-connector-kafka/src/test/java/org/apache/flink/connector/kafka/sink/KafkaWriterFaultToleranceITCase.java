@@ -36,7 +36,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
 /** Tests for the standalone KafkaWriter in case of fault tolerance. */
 @ExtendWith(TestLoggerExtension.class)
 public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
-    private static final String INIT_KAFKA_RETRIES = "1";
+    private static final String INIT_KAFKA_RETRIES = "0";
     private static final String INIT_KAFKA_REQUEST_TIMEOUT_MS = "2000";
     private static final String INIT_KAFKA_MAX_BLOCK_MS = "3000";
     private static final String INIT_KAFKA_DELIVERY_TIMEOUT_MS = "4000";
