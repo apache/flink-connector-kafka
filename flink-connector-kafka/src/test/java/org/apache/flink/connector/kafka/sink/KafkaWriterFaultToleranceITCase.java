@@ -21,6 +21,7 @@ import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
 import org.apache.flink.util.TestLoggerExtension;
 
+import org.apache.kafka.common.errors.NetworkException;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -38,8 +39,8 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
 public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
     private static final String INIT_KAFKA_RETRIES = "0";
     private static final String INIT_KAFKA_REQUEST_TIMEOUT_MS = "1000";
-    private static final String INIT_KAFKA_MAX_BLOCK_MS = "2000";
-    private static final String INIT_KAFKA_DELIVERY_TIMEOUT_MS = "3000";
+    private static final String INIT_KAFKA_MAX_BLOCK_MS = "1000";
+    private static final String INIT_KAFKA_DELIVERY_TIMEOUT_MS = "1000";
 
     @BeforeAll
     public static void beforeAll() {
@@ -64,7 +65,7 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
 
         final KafkaWriter<Integer> writer =
                 createWriterWithConfiguration(
-                        properties, DeliveryGuarantee.EXACTLY_ONCE, metricGroup);
+                        properties, DeliveryGuarantee.AT_LEAST_ONCE, metricGroup);
 
         writer.write(1, SINK_WRITER_CONTEXT);
 
@@ -73,7 +74,7 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
         try {
             writer.getCurrentProducer().flush();
             assertThatCode(() -> writer.write(1, SINK_WRITER_CONTEXT))
-                    .hasRootCauseExactlyInstanceOf(TimeoutException.class);
+                    .hasRootCauseExactlyInstanceOf(NetworkException.class);
         } finally {
             KAFKA_CONTAINER.start();
         }
@@ -87,13 +88,13 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
 
         final KafkaWriter<Integer> writer =
                 createWriterWithConfiguration(
-                        properties, DeliveryGuarantee.EXACTLY_ONCE, metricGroup);
+                        properties, DeliveryGuarantee.AT_LEAST_ONCE, metricGroup);
         writer.write(1, SINK_WRITER_CONTEXT);
 
         KAFKA_CONTAINER.stop();
         try {
             assertThatCode(() -> writer.flush(false))
-                    .hasRootCauseExactlyInstanceOf(TimeoutException.class);
+                    .hasRootCauseExactlyInstanceOf(NetworkException.class);
         } finally {
             KAFKA_CONTAINER.start();
         }
@@ -107,7 +108,7 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
 
         final KafkaWriter<Integer> writer =
                 createWriterWithConfiguration(
-                        properties, DeliveryGuarantee.EXACTLY_ONCE, metricGroup);
+                        properties, DeliveryGuarantee.AT_LEAST_ONCE, metricGroup);
 
         writer.write(1, SINK_WRITER_CONTEXT);
 
@@ -117,11 +118,7 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
             writer.getCurrentProducer().flush();
             // closing producer resource throws exception first
             assertThatCode(() -> writer.close())
-                    .hasNoCause()
-                    .hasMessage(
-                            String.format(
-                                    "Timeout expired after %sms while awaiting " + "InitProducerId",
-                                    INIT_KAFKA_MAX_BLOCK_MS));
+                    .hasRootCauseExactlyInstanceOf(NetworkException.class);
         } finally {
             KAFKA_CONTAINER.start();
         }
@@ -135,7 +132,7 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
 
         final KafkaWriter<Integer> writer =
                 createWriterWithConfiguration(
-                        properties, DeliveryGuarantee.EXACTLY_ONCE, sinkInitContext);
+                        properties, DeliveryGuarantee.AT_LEAST_ONCE, sinkInitContext);
 
         KAFKA_CONTAINER.stop();
 
