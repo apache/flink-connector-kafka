@@ -461,7 +461,7 @@ public class KafkaSourceBuilder<OUT> {
         maybeOverride(
                 ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
                 ByteArrayDeserializer.class.getName(),
-                true);
+                false);
         if (!props.containsKey(ConsumerConfig.GROUP_ID_CONFIG)) {
             LOG.warn(
                     "Offset commit on checkpoint is disabled because {} is not specified",
