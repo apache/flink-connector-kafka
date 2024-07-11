@@ -557,13 +557,10 @@ public class KafkaSourceBuilder<OUT> {
                 if (iface instanceof ParameterizedType) {
                     ParameterizedType parameterizedType = (ParameterizedType) iface;
                     Type rawType = parameterizedType.getRawType();
-                    System.out.println(iface);
-                    System.out.println(rawType);
 
                     // Check if it's Deserializer<byte[]>
                     if (rawType == Deserializer.class) {
                         Type[] typeArguments = parameterizedType.getActualTypeArguments();
-                        System.out.print(Arrays.toString(typeArguments));
                         if (typeArguments.length != 1 || typeArguments[0] != byte[].class) {
                             throw new IllegalArgumentException(
                                     String.format(
