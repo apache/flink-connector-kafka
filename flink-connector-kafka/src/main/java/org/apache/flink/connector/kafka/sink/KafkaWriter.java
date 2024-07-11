@@ -449,7 +449,9 @@ class KafkaWriter<IN>
                 }
 
                 // Checking for exceptions from previous writes
-                mailboxExecutor.submit(
+                // Notice: throwing exception in mailboxExecutor thread is not safe enough for
+                // triggering global fail over, which has been fixed in [FLINK-31305].
+                mailboxExecutor.execute(
                         () -> {
                             // Checking for exceptions from previous writes
                             checkAsyncException();
