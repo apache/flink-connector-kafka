@@ -31,9 +31,12 @@ import org.apache.flink.util.function.SerializableSupplier;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
+import org.apache.kafka.common.serialization.Deserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
@@ -530,6 +533,50 @@ public class KafkaSourceBuilder<OUT> {
         if (stoppingOffsetsInitializer instanceof OffsetsInitializerValidator) {
             ((OffsetsInitializerValidator) stoppingOffsetsInitializer).validate(props);
         }
+        if (props.containsKey(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG)) {
+            checkDeserializer(props.getProperty(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG));
+        }
+        if (props.containsKey(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG)) {
+            checkDeserializer(props.getProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG));
+        }
+    }
+
+    private void checkDeserializer(String deserializer) {
+        try {
+            Class<?> deserClass = Class.forName(deserializer);
+            if (!Deserializer.class.isAssignableFrom(deserClass)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Deserializer class %s is not a subclass of %s",
+                                deserializer, Deserializer.class.getName()));
+            }
+
+            // Get the generic type information
+            Type[] interfaces = deserClass.getGenericInterfaces();
+            for (Type iface : interfaces) {
+                if (iface instanceof ParameterizedType) {
+                    ParameterizedType parameterizedType = (ParameterizedType) iface;
+                    Type rawType = parameterizedType.getRawType();
+                    System.out.println(iface);
+                    System.out.println(rawType);
+
+                    // Check if it's Deserializer<byte[]>
+                    if (rawType == Deserializer.class) {
+                        Type[] typeArguments = parameterizedType.getActualTypeArguments();
+                        System.out.print(Arrays.toString(typeArguments));
+                        if (typeArguments.length != 1 || typeArguments[0] != byte[].class) {
+                            throw new IllegalArgumentException(
+                                    String.format(
+                                            "Deserializer class %s does not deserialize byte[]",
+                                            deserializer));
+                        }
+                    }
+                }
+            }
+        } catch (ClassNotFoundException e) {
+            throw new IllegalArgumentException(
+                    String.format("Deserializer class %s not found", deserializer), e);
+        }
     }
 
     private boolean offsetCommitEnabledManually() {
@@ -544,4 +591,5 @@ public class KafkaSourceBuilder<OUT> {
                                         KafkaSourceOptions.COMMIT_OFFSETS_ON_CHECKPOINT.key()));
         return autoCommit || commitOnCheckpoint;
     }
+
 }

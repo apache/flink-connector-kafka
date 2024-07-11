@@ -27,6 +27,8 @@ import org.apache.flink.util.TestLoggerExtension;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.serialization.ByteArrayDeserializer;
+import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -193,7 +195,7 @@ public class KafkaSourceBuilderTest {
 
     @Test
     public void testSettingCustomKeyDeserializer() {
-        final String keyDeserializer = "FakeKeyDeserializer";
+        final String keyDeserializer = TestByteArrayDeserializer.class.getName();
         final KafkaSource<String> kafkaSource = getBasicBuilder().setProperty("key.deserializer", keyDeserializer).build();
         // key.deserializer should be overridden
         assertThat(
@@ -208,7 +210,7 @@ public class KafkaSourceBuilderTest {
 
     @Test
     public void testSettingCustomValueDeserializer() {
-        final String valueDeserializer = "FakeValueDeserializer";
+        final String valueDeserializer = TestByteArrayDeserializer.class.getName();
         final KafkaSource<String> kafkaSource = getBasicBuilder().setProperty("value.deserializer", valueDeserializer).build();
         // value.deserializer should be overridden
         assertThat(
@@ -219,6 +221,42 @@ public class KafkaSourceBuilderTest {
                                         .stringType()
                                         .noDefaultValue()))
                 .isEqualTo(valueDeserializer);
+    }
+
+    @Test
+    public void testSettingCustomNonByteArrayKeyDeserializer() {
+        final String keyDeserializer = StringDeserializer.class.getName();
+        assertThatThrownBy(() -> getBasicBuilder().setProperty("key.deserializer", keyDeserializer).build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        String.format("Deserializer class %s does not deserialize byte[]", keyDeserializer));
+    }
+
+    @Test
+    public void testSettingCustomNonByteArrayValueDeserializer() {
+        final String valueDeserializer = StringDeserializer.class.getName();
+        assertThatThrownBy(() -> getBasicBuilder().setProperty("value.deserializer", valueDeserializer).build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        String.format("Deserializer class %s does not deserialize byte[]", valueDeserializer));
+    }
+
+    @Test
+    public void testSettingCustomNonDeserializer() {
+        final String valueDeserializer = String.class.getName();
+        assertThatThrownBy(() -> getBasicBuilder().setProperty("value.deserializer", valueDeserializer).build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        String.format("Deserializer class %s is not a subclass of %s", String.class.getName(), Deserializer.class.getName()));
+    }
+
+    @Test
+    public void testSettingCustomUnknownClassDeserializer() {
+        final String valueDeserializer = "NonExistentClass";
+        assertThatThrownBy(() -> getBasicBuilder().setProperty("value.deserializer", valueDeserializer).build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        String.format("Deserializer class %s not found", valueDeserializer));
     }
 
     private KafkaSourceBuilder<String> getBasicBuilder() {
@@ -236,4 +274,6 @@ public class KafkaSourceBuilderTest {
             return Collections.singleton(new TopicPartition("topic", 0));
         }
     }
+
+    private class TestByteArrayDeserializer extends ByteArrayDeserializer { }
 }
