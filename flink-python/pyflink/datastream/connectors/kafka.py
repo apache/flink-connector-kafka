@@ -629,8 +629,6 @@ class KafkaSourceBuilder(object):
         Note that the following keys will be overridden by the builder when the KafkaSource is
         created.
 
-        * ``key.deserializer`` is always set to ByteArrayDeserializer.
-        * ``value.deserializer`` is always set to ByteArrayDeserializer.
         * ``auto.offset.reset.strategy`` is overridden by AutoOffsetResetStrategy returned by
           :class:`KafkaOffsetsInitializer` for the starting offsets, which is by default
           :meth:`KafkaOffsetsInitializer.earliest`.
@@ -652,8 +650,6 @@ class KafkaSourceBuilder(object):
         Note that the following keys will be overridden by the builder when the KafkaSource is
         created.
 
-        * ``key.deserializer`` is always set to ByteArrayDeserializer.
-        * ``value.deserializer`` is always set to ByteArrayDeserializer.
         * ``auto.offset.reset.strategy`` is overridden by AutoOffsetResetStrategy returned by
           :class:`KafkaOffsetsInitializer` for the starting offsets, which is by default
           :meth:`KafkaOffsetsInitializer.earliest`.

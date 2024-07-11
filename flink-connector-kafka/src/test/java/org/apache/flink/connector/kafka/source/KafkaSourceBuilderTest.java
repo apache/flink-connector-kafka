@@ -191,6 +191,36 @@ public class KafkaSourceBuilderTest {
                         "Cannot use partitions for consumption because a ExampleCustomSubscriber is already set for consumption.");
     }
 
+    @Test
+    public void testSettingCustomKeyDeserializer() {
+        final String keyDeserializer = "FakeKeyDeserializer";
+        final KafkaSource<String> kafkaSource = getBasicBuilder().setProperty("key.deserializer", keyDeserializer).build();
+        // key.deserializer should be overridden
+        assertThat(
+                kafkaSource
+                        .getConfiguration()
+                        .get(
+                                ConfigOptions.key(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG)
+                                        .stringType()
+                                        .noDefaultValue()))
+                .isEqualTo(keyDeserializer);
+    }
+
+    @Test
+    public void testSettingCustomValueDeserializer() {
+        final String valueDeserializer = "FakeValueDeserializer";
+        final KafkaSource<String> kafkaSource = getBasicBuilder().setProperty("value.deserializer", valueDeserializer).build();
+        // value.deserializer should be overridden
+        assertThat(
+                kafkaSource
+                        .getConfiguration()
+                        .get(
+                                ConfigOptions.key(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG)
+                                        .stringType()
+                                        .noDefaultValue()))
+                .isEqualTo(valueDeserializer);
+    }
+
     private KafkaSourceBuilder<String> getBasicBuilder() {
         return new KafkaSourceBuilder<String>()
                 .setBootstrapServers("testServer")

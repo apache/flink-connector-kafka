@@ -235,8 +235,6 @@ for more details.
 
 Please note that the following keys will be overridden by the builder even if
 it is configured:
-- ```key.deserializer``` is always set to ```ByteArrayDeserializer```
-- ```value.deserializer``` is always set to ```ByteArrayDeserializer```
 - ```auto.offset.reset.strategy``` is overridden by ```OffsetsInitializer#getAutoOffsetResetStrategy()```
   for the starting offsets
 - ```partition.discovery.interval.ms``` is overridden to -1 when

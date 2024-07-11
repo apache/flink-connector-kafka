@@ -379,8 +379,6 @@ public class KafkaSourceBuilder<OUT> {
      * created.
      *
      * <ul>
-     *   <li><code>key.deserializer</code> is always set to {@link ByteArrayDeserializer}.
-     *   <li><code>value.deserializer</code> is always set to {@link ByteArrayDeserializer}.
      *   <li><code>auto.offset.reset.strategy</code> is overridden by {@link
      *       OffsetsInitializer#getAutoOffsetResetStrategy()} for the starting offsets, which is by
      *       default {@link OffsetsInitializer#earliest()}.
@@ -405,8 +403,6 @@ public class KafkaSourceBuilder<OUT> {
      * created.
      *
      * <ul>
-     *   <li><code>key.deserializer</code> is always set to {@link ByteArrayDeserializer}.
-     *   <li><code>value.deserializer</code> is always set to {@link ByteArrayDeserializer}.
      *   <li><code>auto.offset.reset.strategy</code> is overridden by {@link
      *       OffsetsInitializer#getAutoOffsetResetStrategy()} for the starting offsets, which is by
      *       default {@link OffsetsInitializer#earliest()}.
@@ -457,7 +453,7 @@ public class KafkaSourceBuilder<OUT> {
         maybeOverride(
                 ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
                 ByteArrayDeserializer.class.getName(),
-                true);
+                false);
         maybeOverride(
                 ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
                 ByteArrayDeserializer.class.getName(),
