@@ -588,5 +588,4 @@ public class KafkaSourceBuilder<OUT> {
                                         KafkaSourceOptions.COMMIT_OFFSETS_ON_CHECKPOINT.key()));
         return autoCommit || commitOnCheckpoint;
     }
-
 }
