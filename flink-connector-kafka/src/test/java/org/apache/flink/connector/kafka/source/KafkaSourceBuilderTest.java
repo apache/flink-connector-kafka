@@ -28,16 +28,19 @@ import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
-import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -223,40 +226,12 @@ public class KafkaSourceBuilderTest {
                 .isEqualTo(valueDeserializer);
     }
 
-    @Test
-    public void testSettingCustomNonByteArrayKeyDeserializer() {
-        final String keyDeserializer = StringDeserializer.class.getName();
-        assertThatThrownBy(() -> getBasicBuilder().setProperty("key.deserializer", keyDeserializer).build())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        String.format("Deserializer class %s does not deserialize byte[]", keyDeserializer));
-    }
-
-    @Test
-    public void testSettingCustomNonByteArrayValueDeserializer() {
-        final String valueDeserializer = StringDeserializer.class.getName();
+    @ParameterizedTest
+    @MethodSource("provideInvalidCustomDeserializersTestParameters")
+    public void testSettingInvalidCustomDeserializers(String valueDeserializer, String expectedError) {
         assertThatThrownBy(() -> getBasicBuilder().setProperty("value.deserializer", valueDeserializer).build())
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        String.format("Deserializer class %s does not deserialize byte[]", valueDeserializer));
-    }
-
-    @Test
-    public void testSettingCustomNonDeserializer() {
-        final String valueDeserializer = String.class.getName();
-        assertThatThrownBy(() -> getBasicBuilder().setProperty("value.deserializer", valueDeserializer).build())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        String.format("Deserializer class %s is not a subclass of %s", String.class.getName(), Deserializer.class.getName()));
-    }
-
-    @Test
-    public void testSettingCustomUnknownClassDeserializer() {
-        final String valueDeserializer = "NonExistentClass";
-        assertThatThrownBy(() -> getBasicBuilder().setProperty("value.deserializer", valueDeserializer).build())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        String.format("Deserializer class %s not found", valueDeserializer));
+                .hasMessageContaining(expectedError);
     }
 
     private KafkaSourceBuilder<String> getBasicBuilder() {
@@ -273,6 +248,17 @@ public class KafkaSourceBuilderTest {
         public Set<TopicPartition> getSubscribedTopicPartitions(AdminClient adminClient) {
             return Collections.singleton(new TopicPartition("topic", 0));
         }
+    }
+
+    private static Stream<Arguments> provideInvalidCustomDeserializersTestParameters() {
+        String deserOne = String.class.getName();
+        String deserTwo = "NoneExistentClass";
+        String deserThree = StringDeserializer.class.getName();
+        return Stream.of(
+                Arguments.of(deserOne,  String.format("Deserializer class %s is not a subclass of org.apache.kafka.common.serialization.Deserializer", deserOne)),
+                Arguments.of(deserTwo,  String.format("Deserializer class %s not found", deserTwo)),
+                Arguments.of(deserThree,   String.format("Deserializer class %s does not deserialize byte[]", deserThree))
+        );
     }
 
     private class TestByteArrayDeserializer extends ByteArrayDeserializer { }
