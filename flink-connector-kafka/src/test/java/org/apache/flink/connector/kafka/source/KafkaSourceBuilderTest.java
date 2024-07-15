@@ -226,9 +226,18 @@ public class KafkaSourceBuilderTest {
                 .isEqualTo(valueDeserializer);
     }
 
+    @Test
+    public void testSettingCustomNonByteArrayKeyDeserializer() {
+        final String keyDeserializer = StringDeserializer.class.getName();
+        assertThatThrownBy(() -> getBasicBuilder().setProperty("key.deserializer", keyDeserializer).build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        String.format("Deserializer class %s does not deserialize byte[]", keyDeserializer));
+    }
+
     @ParameterizedTest
-    @MethodSource("provideInvalidCustomDeserializersTestParameters")
-    public void testSettingInvalidCustomDeserializers(String valueDeserializer, String expectedError) {
+    @MethodSource("provideInvalidCustomValueDeserializersTestParameters")
+    public void testSettingInvalidCustomValueDeserializers(String valueDeserializer, String expectedError) {
         assertThatThrownBy(() -> getBasicBuilder().setProperty("value.deserializer", valueDeserializer).build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(expectedError);
@@ -250,7 +259,7 @@ public class KafkaSourceBuilderTest {
         }
     }
 
-    private static Stream<Arguments> provideInvalidCustomDeserializersTestParameters() {
+    private static Stream<Arguments> provideInvalidCustomValueDeserializersTestParameters() {
         String deserOne = String.class.getName();
         String deserTwo = "NoneExistentClass";
         String deserThree = StringDeserializer.class.getName();
