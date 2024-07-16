@@ -196,49 +196,24 @@ public class KafkaSourceBuilderTest {
                         "Cannot use partitions for consumption because a ExampleCustomSubscriber is already set for consumption.");
     }
 
-    @Test
-    public void testSettingCustomKeyDeserializer() {
-        final String keyDeserializer = TestByteArrayDeserializer.class.getName();
-        final KafkaSource<String> kafkaSource = getBasicBuilder().setProperty("key.deserializer", keyDeserializer).build();
-        // key.deserializer should be overridden
+    @ParameterizedTest
+    @MethodSource("provideSettingCustomDeserializerTestParameters")
+    public void testSettingCustomDeserializer(String propertyKey, String propertyValue) {
+        final KafkaSource<String> kafkaSource = getBasicBuilder().setProperty(propertyKey, propertyValue).build();
         assertThat(
                 kafkaSource
                         .getConfiguration()
                         .get(
-                                ConfigOptions.key(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG)
+                                ConfigOptions.key(propertyKey)
                                         .stringType()
                                         .noDefaultValue()))
-                .isEqualTo(keyDeserializer);
-    }
-
-    @Test
-    public void testSettingCustomValueDeserializer() {
-        final String valueDeserializer = TestByteArrayDeserializer.class.getName();
-        final KafkaSource<String> kafkaSource = getBasicBuilder().setProperty("value.deserializer", valueDeserializer).build();
-        // value.deserializer should be overridden
-        assertThat(
-                kafkaSource
-                        .getConfiguration()
-                        .get(
-                                ConfigOptions.key(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG)
-                                        .stringType()
-                                        .noDefaultValue()))
-                .isEqualTo(valueDeserializer);
-    }
-
-    @Test
-    public void testSettingCustomNonByteArrayKeyDeserializer() {
-        final String keyDeserializer = StringDeserializer.class.getName();
-        assertThatThrownBy(() -> getBasicBuilder().setProperty("key.deserializer", keyDeserializer).build())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        String.format("Deserializer class %s does not deserialize byte[]", keyDeserializer));
+                .isEqualTo(propertyValue);
     }
 
     @ParameterizedTest
-    @MethodSource("provideInvalidCustomValueDeserializersTestParameters")
-    public void testSettingInvalidCustomValueDeserializers(String valueDeserializer, String expectedError) {
-        assertThatThrownBy(() -> getBasicBuilder().setProperty("value.deserializer", valueDeserializer).build())
+    @MethodSource("provideInvalidCustomDeserializersTestParameters")
+    public void testSettingInvalidCustomDeserializers(String propertyKey, String propertyValue, String expectedError) {
+        assertThatThrownBy(() -> getBasicBuilder().setProperty(propertyKey, propertyValue).build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(expectedError);
     }
@@ -259,14 +234,22 @@ public class KafkaSourceBuilderTest {
         }
     }
 
-    private static Stream<Arguments> provideInvalidCustomValueDeserializersTestParameters() {
+    private static Stream<Arguments> provideSettingCustomDeserializerTestParameters() {
+        return Stream.of(
+                Arguments.of(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, TestByteArrayDeserializer.class.getName()),
+                Arguments.of(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, TestByteArrayDeserializer.class.getName())
+        );
+    }
+
+    private static Stream<Arguments> provideInvalidCustomDeserializersTestParameters() {
         String deserOne = String.class.getName();
         String deserTwo = "NoneExistentClass";
         String deserThree = StringDeserializer.class.getName();
         return Stream.of(
-                Arguments.of(deserOne,  String.format("Deserializer class %s is not a subclass of org.apache.kafka.common.serialization.Deserializer", deserOne)),
-                Arguments.of(deserTwo,  String.format("Deserializer class %s not found", deserTwo)),
-                Arguments.of(deserThree,   String.format("Deserializer class %s does not deserialize byte[]", deserThree))
+                Arguments.of(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, deserOne,  String.format("Deserializer class %s is not a subclass of org.apache.kafka.common.serialization.Deserializer", deserOne)),
+                Arguments.of(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, deserTwo,  String.format("Deserializer class %s not found", deserTwo)),
+                Arguments.of(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, deserThree,   String.format("Deserializer class %s does not deserialize byte[]", deserThree)),
+                Arguments.of(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, deserThree,  String.format("Deserializer class %s does not deserialize byte[]", deserThree))
         );
     }
 
