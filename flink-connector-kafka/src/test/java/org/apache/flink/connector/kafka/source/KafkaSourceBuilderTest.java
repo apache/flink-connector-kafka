@@ -199,20 +199,19 @@ public class KafkaSourceBuilderTest {
     @ParameterizedTest
     @MethodSource("provideSettingCustomDeserializerTestParameters")
     public void testSettingCustomDeserializer(String propertyKey, String propertyValue) {
-        final KafkaSource<String> kafkaSource = getBasicBuilder().setProperty(propertyKey, propertyValue).build();
+        final KafkaSource<String> kafkaSource =
+                getBasicBuilder().setProperty(propertyKey, propertyValue).build();
         assertThat(
-                kafkaSource
-                        .getConfiguration()
-                        .get(
-                                ConfigOptions.key(propertyKey)
-                                        .stringType()
-                                        .noDefaultValue()))
+                    kafkaSource
+                            .getConfiguration()
+                            .get(ConfigOptions.key(propertyKey).stringType().noDefaultValue()))
                 .isEqualTo(propertyValue);
     }
 
     @ParameterizedTest
     @MethodSource("provideInvalidCustomDeserializersTestParameters")
-    public void testSettingInvalidCustomDeserializers(String propertyKey, String propertyValue, String expectedError) {
+    public void testSettingInvalidCustomDeserializers(
+            String propertyKey, String propertyValue, String expectedError) {
         assertThatThrownBy(() -> getBasicBuilder().setProperty(propertyKey, propertyValue).build())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(expectedError);
@@ -236,8 +235,12 @@ public class KafkaSourceBuilderTest {
 
     private static Stream<Arguments> provideSettingCustomDeserializerTestParameters() {
         return Stream.of(
-                Arguments.of(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, TestByteArrayDeserializer.class.getName()),
-                Arguments.of(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, TestByteArrayDeserializer.class.getName())
+                Arguments.of(
+                        ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
+                        TestByteArrayDeserializer.class.getName()),
+                Arguments.of(
+                        ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
+                        TestByteArrayDeserializer.class.getName())
         );
     }
 
@@ -246,10 +249,22 @@ public class KafkaSourceBuilderTest {
         String deserTwo = "NoneExistentClass";
         String deserThree = StringDeserializer.class.getName();
         return Stream.of(
-                Arguments.of(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, deserOne,  String.format("Deserializer class %s is not a subclass of org.apache.kafka.common.serialization.Deserializer", deserOne)),
-                Arguments.of(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, deserTwo,  String.format("Deserializer class %s not found", deserTwo)),
-                Arguments.of(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, deserThree,   String.format("Deserializer class %s does not deserialize byte[]", deserThree)),
-                Arguments.of(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, deserThree,  String.format("Deserializer class %s does not deserialize byte[]", deserThree))
+                Arguments.of(
+                        ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
+                        deserOne,
+                        String.format("Deserializer class %s is not a subclass of org.apache.kafka.common.serialization.Deserializer", deserOne)),
+                Arguments.of(
+                        ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
+                        deserTwo,
+                        String.format("Deserializer class %s not found", deserTwo)),
+                Arguments.of(
+                        ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
+                        deserThree,
+                        String.format("Deserializer class %s does not deserialize byte[]", deserThree)),
+                Arguments.of(
+                        ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
+                        deserThree,
+                        String.format("Deserializer class %s does not deserialize byte[]", deserThree))
         );
     }
 
