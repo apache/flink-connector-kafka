@@ -17,13 +17,15 @@
 
 package org.apache.flink.connector.kafka.source;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.util.TestLoggerExtension;
-
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.TopicPartition;
@@ -41,9 +43,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link KafkaSourceBuilder}. */
 @ExtendWith(TestLoggerExtension.class)
@@ -202,9 +201,9 @@ public class KafkaSourceBuilderTest {
         final KafkaSource<String> kafkaSource =
                 getBasicBuilder().setProperty(propertyKey, propertyValue).build();
         assertThat(
-                    kafkaSource
-                            .getConfiguration()
-                            .get(ConfigOptions.key(propertyKey).stringType().noDefaultValue()))
+                        kafkaSource
+                                .getConfiguration()
+                                .get(ConfigOptions.key(propertyKey).stringType().noDefaultValue()))
                 .isEqualTo(propertyValue);
     }
 
@@ -240,8 +239,7 @@ public class KafkaSourceBuilderTest {
                         TestByteArrayDeserializer.class.getName()),
                 Arguments.of(
                         ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
-                        TestByteArrayDeserializer.class.getName())
-        );
+                        TestByteArrayDeserializer.class.getName()));
     }
 
     private static Stream<Arguments> provideInvalidCustomDeserializersTestParameters() {
@@ -252,7 +250,9 @@ public class KafkaSourceBuilderTest {
                 Arguments.of(
                         ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
                         deserOne,
-                        String.format("Deserializer class %s is not a subclass of org.apache.kafka.common.serialization.Deserializer", deserOne)),
+                        String.format(
+                                "Deserializer class %s is not a subclass of org.apache.kafka.common.serialization.Deserializer",
+                                deserOne)),
                 Arguments.of(
                         ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
                         deserTwo,
@@ -260,13 +260,14 @@ public class KafkaSourceBuilderTest {
                 Arguments.of(
                         ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
                         deserThree,
-                        String.format("Deserializer class %s does not deserialize byte[]", deserThree)),
+                        String.format(
+                                "Deserializer class %s does not deserialize byte[]", deserThree)),
                 Arguments.of(
                         ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
                         deserThree,
-                        String.format("Deserializer class %s does not deserialize byte[]", deserThree))
-        );
+                        String.format(
+                                "Deserializer class %s does not deserialize byte[]", deserThree)));
     }
 
-    private class TestByteArrayDeserializer extends ByteArrayDeserializer { }
+    private class TestByteArrayDeserializer extends ByteArrayDeserializer {}
 }
