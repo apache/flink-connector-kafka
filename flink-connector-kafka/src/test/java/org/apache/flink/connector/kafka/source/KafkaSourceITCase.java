@@ -61,6 +61,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestInstance.Lifecycle;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.containers.KafkaContainer;
@@ -368,6 +369,38 @@ public class KafkaSourceITCase {
                             source,
                             WatermarkStrategy.noWatermarks(),
                             "testConsumingTopicWithEmptyPartitions"));
+        }
+
+        @Test
+        @Timeout(value = 10)
+        public void testConsumingTransactionalMessage() throws Throwable {
+            String transactionalTopic = "transactionalTopic-" + UUID.randomUUID();
+            KafkaSourceTestEnv.createTestTopic(
+                    transactionalTopic, KafkaSourceTestEnv.NUM_PARTITIONS, 1);
+            List<ProducerRecord<String, Integer>> records =
+                    KafkaSourceTestEnv.getRecordsForTopic(transactionalTopic);
+            // Prepare records for executeAndVerify method
+            records.removeIf(record -> record.partition() > record.value());
+
+            KafkaSourceTestEnv.produceTransactionalMessageToKafka(records);
+
+            KafkaSource<PartitionAndValue> source =
+                    KafkaSource.<PartitionAndValue>builder()
+                            .setBootstrapServers(KafkaSourceTestEnv.brokerConnectionStrings)
+                            .setTopics(transactionalTopic)
+                            .setGroupId("topic-with-transactional-message-test")
+                            .setDeserializer(new TestingKafkaRecordDeserializationSchema(false))
+                            .setStartingOffsets(OffsetsInitializer.earliest())
+                            .setBounded(OffsetsInitializer.latest())
+                            .build();
+            StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+            env.setParallelism(1);
+            executeAndVerify(
+                    env,
+                    env.fromSource(
+                            source,
+                            WatermarkStrategy.noWatermarks(),
+                            "testConsumingTransactionalMessage"));
         }
     }
 
