@@ -22,7 +22,6 @@ import org.apache.flink.FlinkVersion;
 import org.apache.flink.api.common.typeutils.ClassRelocator;
 import org.apache.flink.api.common.typeutils.ThreadContextClassLoader;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.TypeSerializerMatchers;
 import org.apache.flink.api.common.typeutils.TypeSerializerSchemaCompatibility;
 import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
 import org.apache.flink.api.common.typeutils.TypeSerializerSnapshotSerializationUtil;
@@ -30,11 +29,9 @@ import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputSerializer;
 import org.apache.flink.core.memory.DataOutputView;
+import org.apache.flink.test.util.MigrationTest;
 
-import org.assertj.core.api.AssertionsForClassTypes;
-import org.assertj.core.api.HamcrestCondition;
-import org.hamcrest.Matcher;
-import org.junit.jupiter.api.Disabled;
+import org.assertj.core.api.Condition;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -43,28 +40,19 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Set;
+import java.util.List;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.apache.flink.util.Preconditions.checkState;
-import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assumptions.assumeThat;
-import static org.hamcrest.CoreMatchers.not;
 
-/**
- * A test base for testing {@link TypeSerializer} upgrades.
- *
- * <p>You can run {@link #generateTestSetupFiles(TestSpecification)} on a Flink branch to
- * (re-)generate the test data files.
- */
+/** A test base for testing {@link TypeSerializer} upgrades. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedElementT> {
-
-    public static final FlinkVersion CURRENT_VERSION = FlinkVersion.v1_17;
-
-    public static final Set<FlinkVersion> MIGRATION_VERSIONS =
-            FlinkVersion.rangeOf(FlinkVersion.v1_11, CURRENT_VERSION);
+public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedElementT>
+        implements MigrationTest {
 
     // ------------------------------------------------------------------------------
     //  APIs
@@ -74,7 +62,22 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
      * Creates a collection of {@link TestSpecification} which will be used as input for
      * parametrized tests.
      */
-    public abstract Collection<TestSpecification<?, ?>> createTestSpecifications() throws Exception;
+    public abstract Collection<TestSpecification<?, ?>> createTestSpecifications(
+            FlinkVersion currentVersion) throws Exception;
+
+    public Collection<FlinkVersion> getMigrationVersions() {
+        return FlinkVersion.rangeOf(
+                FlinkVersion.v1_11, MigrationTest.getMostRecentlyPublishedVersion());
+    }
+
+    public final Collection<TestSpecification<?, ?>> createTestSpecificationsForAllVersions()
+            throws Exception {
+        List<TestSpecification<?, ?>> specificationList = new ArrayList<>();
+        for (FlinkVersion version : getMigrationVersions()) {
+            specificationList.addAll(createTestSpecifications(version));
+        }
+        return specificationList;
+    }
 
     /**
      * Setup code for a {@link TestSpecification}. This creates the serializer before upgrade and
@@ -99,15 +102,15 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
         /** Creates a post-upgrade {@link TypeSerializer}. */
         TypeSerializer<UpgradedElementT> createUpgradedSerializer();
 
-        /** Returns a {@link Matcher} for asserting the deserialized test data. */
-        Matcher<UpgradedElementT> testDataMatcher();
+        /** Returns a {@link Condition} for asserting the deserialized test data. */
+        Condition<UpgradedElementT> testDataCondition();
 
         /**
-         * Returns a {@link Matcher} for comparing the {@link TypeSerializerSchemaCompatibility}
+         * Returns a {@link Condition} for comparing the {@link TypeSerializerSchemaCompatibility}
          * that the serializer upgrade produced with an expected {@link
          * TypeSerializerSchemaCompatibility}.
          */
-        Matcher<TypeSerializerSchemaCompatibility<UpgradedElementT>> schemaCompatibilityMatcher(
+        Condition<TypeSerializerSchemaCompatibility<UpgradedElementT>> schemaCompatibilityCondition(
                 FlinkVersion version);
     }
 
@@ -136,7 +139,7 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
             try (ThreadContextClassLoader ignored =
                     new ThreadContextClassLoader(setupClassloader)) {
                 return delegateSetup.createPriorSerializer();
-            } catch (IOException e) {
+            } catch (Exception e) {
                 throw new RuntimeException(
                         "Error creating prior serializer via ClassLoaderSafePreUpgradeSetup.", e);
             }
@@ -147,7 +150,7 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
             try (ThreadContextClassLoader ignored =
                     new ThreadContextClassLoader(setupClassloader)) {
                 return delegateSetup.createTestData();
-            } catch (IOException e) {
+            } catch (Exception e) {
                 throw new RuntimeException(
                         "Error creating test data via ThreadContextClassLoader.", e);
             }
@@ -179,7 +182,7 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
             try (ThreadContextClassLoader ignored =
                     new ThreadContextClassLoader(verifierClassloader)) {
                 return delegateVerifier.createUpgradedSerializer();
-            } catch (IOException e) {
+            } catch (Exception e) {
                 throw new RuntimeException(
                         "Error creating upgraded serializer via ClassLoaderSafeUpgradeVerifier.",
                         e);
@@ -187,23 +190,23 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
         }
 
         @Override
-        public Matcher<UpgradedElementT> testDataMatcher() {
+        public Condition<UpgradedElementT> testDataCondition() {
             try (ThreadContextClassLoader ignored =
                     new ThreadContextClassLoader(verifierClassloader)) {
-                return delegateVerifier.testDataMatcher();
-            } catch (IOException e) {
+                return delegateVerifier.testDataCondition();
+            } catch (Exception e) {
                 throw new RuntimeException(
                         "Error creating expected test data via ClassLoaderSafeUpgradeVerifier.", e);
             }
         }
 
         @Override
-        public Matcher<TypeSerializerSchemaCompatibility<UpgradedElementT>>
-                schemaCompatibilityMatcher(FlinkVersion version) {
+        public Condition<TypeSerializerSchemaCompatibility<UpgradedElementT>>
+                schemaCompatibilityCondition(FlinkVersion version) {
             try (ThreadContextClassLoader ignored =
                     new ThreadContextClassLoader(verifierClassloader)) {
-                return delegateVerifier.schemaCompatibilityMatcher(version);
-            } catch (IOException e) {
+                return delegateVerifier.schemaCompatibilityCondition(version);
+            } catch (Exception e) {
                 throw new RuntimeException(
                         "Error creating schema compatibility matcher via ClassLoaderSafeUpgradeVerifier.",
                         e);
@@ -250,10 +253,8 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
      * generating the test files, e.g. to generate test files for {@link FlinkVersion#v1_8}, you
      * should be under the release-1.8 branch.
      */
-    @Disabled
-    @ParameterizedTest(name = "Test Specification = {0}")
-    @MethodSource("createTestSpecifications")
-    void generateTestSetupFiles(
+    @ParameterizedSnapshotsGenerator("createTestSpecifications")
+    public void generateTestSetupFiles(
             TestSpecification<PreviousElementT, UpgradedElementT> testSpecification)
             throws Exception {
         Files.createDirectories(getSerializerSnapshotFilePath(testSpecification).getParent());
@@ -276,7 +277,8 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
             // ... then write the serializer snapshot
             DataOutputSerializer serializerSnapshotOut =
                     new DataOutputSerializer(INITIAL_OUTPUT_BUFFER_SIZE);
-            writeSerializerSnapshot(serializerSnapshotOut, priorSerializer, CURRENT_VERSION);
+            writeSerializerSnapshot(
+                    serializerSnapshotOut, priorSerializer, testSpecification.flinkVersion);
             writeContentsTo(
                     getGenerateSerializerSnapshotFilePath(testSpecification),
                     serializerSnapshotOut.getCopyOfBuffer());
@@ -288,20 +290,20 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
     // ------------------------------------------------------------------------------
 
     @ParameterizedTest(name = "Test Specification = {0}")
-    @MethodSource("createTestSpecifications")
+    @MethodSource("createTestSpecificationsForAllVersions")
     void restoreSerializerIsValid(
             TestSpecification<PreviousElementT, UpgradedElementT> testSpecification)
             throws Exception {
         try (ThreadContextClassLoader ignored =
                 new ThreadContextClassLoader(testSpecification.verifier.verifierClassloader)) {
-            assumeThat(TypeSerializerSchemaCompatibility.incompatible())
+            assumeThat(
+                            testSpecification
+                                    .verifier
+                                    .schemaCompatibilityCondition(testSpecification.flinkVersion)
+                                    .matches(TypeSerializerSchemaCompatibility.incompatible()))
                     .as(
                             "This test only applies for test specifications that verify an upgraded serializer that is not incompatible.")
-                    .is(
-                            HamcrestCondition.matching(
-                                    not(
-                                            testSpecification.verifier.schemaCompatibilityMatcher(
-                                                    testSpecification.flinkVersion))));
+                    .isFalse();
 
             TypeSerializerSnapshot<UpgradedElementT> restoredSerializerSnapshot =
                     snapshotUnderTest(testSpecification);
@@ -311,12 +313,12 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
             assertSerializerIsValid(
                     restoredSerializer,
                     dataUnderTest(testSpecification),
-                    testSpecification.verifier.testDataMatcher());
+                    testSpecification.verifier.testDataCondition());
         }
     }
 
     @ParameterizedTest(name = "Test Specification = {0}")
-    @MethodSource("createTestSpecifications")
+    @MethodSource("createTestSpecificationsForAllVersions")
     void upgradedSerializerHasExpectedSchemaCompatibility(
             TestSpecification<PreviousElementT, UpgradedElementT> testSpecification)
             throws Exception {
@@ -328,18 +330,19 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
                     testSpecification.verifier.createUpgradedSerializer();
 
             TypeSerializerSchemaCompatibility<UpgradedElementT> upgradeCompatibility =
-                    restoredSerializerSnapshot.resolveSchemaCompatibility(upgradedSerializer);
+                    upgradedSerializer
+                            .snapshotConfiguration()
+                            .resolveSchemaCompatibility(restoredSerializerSnapshot);
 
-            AssertionsForClassTypes.assertThat(upgradeCompatibility)
+            assertThat(upgradeCompatibility)
                     .is(
-                            HamcrestCondition.matching(
-                                    testSpecification.verifier.schemaCompatibilityMatcher(
-                                            testSpecification.flinkVersion)));
+                            (testSpecification.verifier.schemaCompatibilityCondition(
+                                    testSpecification.flinkVersion)));
         }
     }
 
     @ParameterizedTest(name = "Test Specification = {0}")
-    @MethodSource("createTestSpecifications")
+    @MethodSource("createTestSpecificationsForAllVersions")
     void upgradedSerializerIsValidAfterMigration(
             TestSpecification<PreviousElementT, UpgradedElementT> testSpecification)
             throws Exception {
@@ -352,13 +355,13 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
                     testSpecification.verifier.createUpgradedSerializer();
 
             TypeSerializerSchemaCompatibility<UpgradedElementT> upgradeCompatibility =
-                    restoredSerializerSnapshot.resolveSchemaCompatibility(upgradedSerializer);
+                    upgradedSerializer
+                            .snapshotConfiguration()
+                            .resolveSchemaCompatibility(restoredSerializerSnapshot);
             assumeThat(upgradeCompatibility)
                     .as(
                             "This test only applies for test specifications that verify an upgraded serializer that requires migration to be compatible.")
-                    .is(
-                            HamcrestCondition.matching(
-                                    TypeSerializerMatchers.isCompatibleAfterMigration()));
+                    .is(TypeSerializerConditions.isCompatibleAfterMigration());
 
             // migrate the previous data schema,
             TypeSerializer<UpgradedElementT> restoreSerializer =
@@ -368,16 +371,18 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
                             dataUnderTest(testSpecification),
                             restoreSerializer,
                             upgradedSerializer,
-                            testSpecification.verifier.testDataMatcher());
+                            testSpecification.verifier.testDataCondition());
 
             // .. and then assert that the upgraded serializer is valid with the migrated data
             assertSerializerIsValid(
-                    upgradedSerializer, migratedData, testSpecification.verifier.testDataMatcher());
+                    upgradedSerializer,
+                    migratedData,
+                    testSpecification.verifier.testDataCondition());
         }
     }
 
     @ParameterizedTest(name = "Test Specification = {0}")
-    @MethodSource("createTestSpecifications")
+    @MethodSource("createTestSpecificationsForAllVersions")
     void upgradedSerializerIsValidAfterReconfiguration(
             TestSpecification<PreviousElementT, UpgradedElementT> testSpecification)
             throws Exception {
@@ -389,26 +394,25 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
                     testSpecification.verifier.createUpgradedSerializer();
 
             TypeSerializerSchemaCompatibility<UpgradedElementT> upgradeCompatibility =
-                    restoredSerializerSnapshot.resolveSchemaCompatibility(upgradedSerializer);
+                    upgradedSerializer
+                            .snapshotConfiguration()
+                            .resolveSchemaCompatibility(restoredSerializerSnapshot);
             assumeThat(upgradeCompatibility)
                     .as(
                             "This test only applies for test specifications that verify an upgraded serializer that requires reconfiguration to be compatible.")
-                    .is(
-                            HamcrestCondition.matching(
-                                    TypeSerializerMatchers
-                                            .isCompatibleWithReconfiguredSerializer()));
+                    .is(TypeSerializerConditions.isCompatibleWithReconfiguredSerializer());
 
             TypeSerializer<UpgradedElementT> reconfiguredUpgradedSerializer =
                     upgradeCompatibility.getReconfiguredSerializer();
             assertSerializerIsValid(
                     reconfiguredUpgradedSerializer,
                     dataUnderTest(testSpecification),
-                    testSpecification.verifier.testDataMatcher());
+                    testSpecification.verifier.testDataCondition());
         }
     }
 
     @ParameterizedTest(name = "Test Specification = {0}")
-    @MethodSource("createTestSpecifications")
+    @MethodSource("createTestSpecificationsForAllVersions")
     void upgradedSerializerIsValidWhenCompatibleAsIs(
             TestSpecification<PreviousElementT, UpgradedElementT> testSpecification)
             throws Exception {
@@ -420,16 +424,18 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
                     testSpecification.verifier.createUpgradedSerializer();
 
             TypeSerializerSchemaCompatibility<UpgradedElementT> upgradeCompatibility =
-                    restoredSerializerSnapshot.resolveSchemaCompatibility(upgradedSerializer);
+                    upgradedSerializer
+                            .snapshotConfiguration()
+                            .resolveSchemaCompatibility(restoredSerializerSnapshot);
             assumeThat(upgradeCompatibility)
                     .as(
                             "This test only applies for test specifications that verify an upgraded serializer that is compatible as is.")
-                    .is(HamcrestCondition.matching(TypeSerializerMatchers.isCompatibleAsIs()));
+                    .is((TypeSerializerConditions.isCompatibleAsIs()));
 
             assertSerializerIsValid(
                     upgradedSerializer,
                     dataUnderTest(testSpecification),
-                    testSpecification.verifier.testDataMatcher());
+                    testSpecification.verifier.testDataCondition());
         }
     }
 
@@ -450,7 +456,7 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
      * </ul>
      */
     private static <T> void assertSerializerIsValid(
-            TypeSerializer<T> serializer, DataInputView dataInput, Matcher<T> testDataMatcher)
+            TypeSerializer<T> serializer, DataInputView dataInput, Condition<T> testDataMatcher)
             throws Exception {
 
         DataInputView serializedData =
@@ -489,7 +495,7 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
                 + "/src/test/resources/"
                 + testSpecification.name
                 + "-"
-                + CURRENT_VERSION;
+                + testSpecification.flinkVersion;
     }
 
     private Path getSerializerSnapshotFilePath(
@@ -579,11 +585,11 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
             DataInputView originalDataInput,
             TypeSerializer<T> readSerializer,
             TypeSerializer<T> writeSerializer,
-            Matcher<T> testDataMatcher)
+            Condition<T> testDataCondition)
             throws IOException {
 
         T data = readSerializer.deserialize(originalDataInput);
-        assertThat(data).is(HamcrestCondition.matching(testDataMatcher));
+        assertThat(data).is(testDataCondition);
 
         DataOutputSerializer out = new DataOutputSerializer(INITIAL_OUTPUT_BUFFER_SIZE);
         writeSerializer.serialize(data, out);
