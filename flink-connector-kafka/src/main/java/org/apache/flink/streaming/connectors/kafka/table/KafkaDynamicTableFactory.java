@@ -94,8 +94,8 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getFlinkKafkaPartitioner;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getKafkaProperties;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getSourceTopicPattern;
-import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getSourceTopics;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getStartupOptions;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getTopics;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.validateTableSinkOptions;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.validateTableSourceOptions;
 
@@ -222,7 +222,7 @@ public class KafkaDynamicTableFactory
                 keyProjection,
                 valueProjection,
                 keyPrefix,
-                getSourceTopics(tableOptions),
+                getTopics(tableOptions),
                 getSourceTopicPattern(tableOptions),
                 properties,
                 startupOptions.startupMode,
@@ -278,7 +278,7 @@ public class KafkaDynamicTableFactory
                 keyProjection,
                 valueProjection,
                 keyPrefix,
-                tableOptions.get(TOPIC).get(0),
+                getTopics(tableOptions),
                 getKafkaProperties(context.getCatalogTable().getOptions()),
                 getFlinkKafkaPartitioner(tableOptions, context.getClassLoader()).orElse(null),
                 deliveryGuarantee,
@@ -423,7 +423,7 @@ public class KafkaDynamicTableFactory
             int[] keyProjection,
             int[] valueProjection,
             @Nullable String keyPrefix,
-            String topic,
+            @Nullable List<String> topics,
             Properties properties,
             FlinkKafkaPartitioner<RowData> partitioner,
             DeliveryGuarantee deliveryGuarantee,
@@ -437,7 +437,7 @@ public class KafkaDynamicTableFactory
                 keyProjection,
                 valueProjection,
                 keyPrefix,
-                topic,
+                topics,
                 properties,
                 partitioner,
                 deliveryGuarantee,

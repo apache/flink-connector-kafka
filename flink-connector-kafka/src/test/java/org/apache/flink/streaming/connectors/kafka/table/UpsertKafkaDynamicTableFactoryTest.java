@@ -77,6 +77,7 @@ import org.junit.rules.ExpectedException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
@@ -195,7 +196,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         SINK_KEY_FIELDS,
                         SINK_VALUE_FIELDS,
                         null,
-                        SINK_TOPIC,
+                        Collections.singletonList(SINK_TOPIC),
                         UPSERT_KAFKA_SINK_PROPERTIES,
                         DeliveryGuarantee.EXACTLY_ONCE,
                         SinkBufferFlushMode.DISABLED,
@@ -239,7 +240,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         SINK_KEY_FIELDS,
                         SINK_VALUE_FIELDS,
                         null,
-                        SINK_TOPIC,
+                        Collections.singletonList(SINK_TOPIC),
                         UPSERT_KAFKA_SINK_PROPERTIES,
                         DeliveryGuarantee.EXACTLY_ONCE,
                         new SinkBufferFlushMode(100, 1000L),
@@ -293,7 +294,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         SINK_KEY_FIELDS,
                         SINK_VALUE_FIELDS,
                         null,
-                        SINK_TOPIC,
+                        Collections.singletonList(SINK_TOPIC),
                         UPSERT_KAFKA_SINK_PROPERTIES,
                         DeliveryGuarantee.EXACTLY_ONCE,
                         SinkBufferFlushMode.DISABLED,
@@ -801,7 +802,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
             int[] keyProjection,
             int[] valueProjection,
             String keyPrefix,
-            String topic,
+            List<String> topics,
             Properties properties,
             DeliveryGuarantee deliveryGuarantee,
             SinkBufferFlushMode flushMode,
@@ -815,7 +816,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                 keyProjection,
                 valueProjection,
                 keyPrefix,
-                topic,
+                topics,
                 properties,
                 null,
                 deliveryGuarantee,

@@ -81,7 +81,7 @@ CREATE TABLE KafkaTable (
       <td><code>topic</code></td>
       <td><code>STRING NOT NULL</code></td>
       <td>Kafka 记录的 Topic 名。</td>
-      <td><code>R</code></td>
+      <td><code>R/W</code></td>
     </tr>
     <tr>
       <td><code>partition</code></td>
@@ -191,10 +191,10 @@ CREATE TABLE KafkaTable (
     </tr>
     <tr>
       <td><h5>topic</h5></td>
-      <td>required for sink</td>
+      <td>可选</td>
       <td style="word-wrap: break-word;">（无）</td>
       <td>String</td>
-      <td>当表用作 source 时读取数据的 topic 名。亦支持用分号间隔的 topic 列表，如 <code>'topic-1;topic-2'</code>。注意，对 source 表而言，'topic' 和 'topic-pattern' 两个选项只能使用其中一个。当表被用作 sink 时，该配置表示写入的 topic 名。注意 sink 表不支持 topic 列表。</td>
+      <td>当表用作 source 时读取数据的 topic 名。亦支持用分号间隔的 topic 列表，如 <code>'topic-1;topic-2'</code>。注意，对 source 表而言，'topic' 和 'topic-pattern' 两个选项只能使用其中一个。当表被用作 sink 时，该配置表示写入的 topic 名。对于接收器，提供的主题或主题列表是可以写入 `topic` 元数据列的唯一有效值（白名单），用于确定要生成的主题。如果只提供一个主题，这是默认生成的主题。如果未提供，则允许 `topic` 元数据的任何值。</td>
     </tr>
     <tr>
       <td><h5>topic-pattern</h5></td>

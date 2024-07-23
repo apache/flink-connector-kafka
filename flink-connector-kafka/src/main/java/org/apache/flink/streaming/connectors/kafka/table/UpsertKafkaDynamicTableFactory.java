@@ -76,7 +76,7 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getBoundedOptions;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getKafkaProperties;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getSourceTopicPattern;
-import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getSourceTopics;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getTopics;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.validateScanBoundedMode;
 
 /** Upsert-Kafka factory. */
@@ -155,7 +155,7 @@ public class UpsertKafkaDynamicTableFactory
                 keyValueProjections.f0,
                 keyValueProjections.f1,
                 keyPrefix,
-                getSourceTopics(tableOptions),
+                getTopics(tableOptions),
                 getSourceTopicPattern(tableOptions),
                 properties,
                 earliest,
@@ -212,7 +212,7 @@ public class UpsertKafkaDynamicTableFactory
                 keyValueProjections.f0,
                 keyValueProjections.f1,
                 keyPrefix,
-                tableOptions.get(TOPIC).get(0),
+                getTopics(tableOptions),
                 properties,
                 null,
                 tableOptions.get(DELIVERY_GUARANTEE),

@@ -115,7 +115,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
     @Nullable private final String transactionalIdPrefix;
 
     /** The Kafka topic to write to. */
-    protected final String topic;
+    protected final List<String> topics;
 
     /** Properties for the Kafka producer. */
     protected final Properties properties;
@@ -143,7 +143,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
             int[] keyProjection,
             int[] valueProjection,
             @Nullable String keyPrefix,
-            String topic,
+            @Nullable List<String> topics,
             Properties properties,
             @Nullable FlinkKafkaPartitioner<RowData> partitioner,
             DeliveryGuarantee deliveryGuarantee,
@@ -166,7 +166,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
         // Mutable attributes
         this.metadataKeys = Collections.emptyList();
         // Kafka-specific attributes
-        this.topic = checkNotNull(topic, "Topic must not be null.");
+        this.topics = topics;
         this.properties = checkNotNull(properties, "Properties must not be null.");
         this.partitioner = partitioner;
         this.deliveryGuarantee =
@@ -206,7 +206,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
                         .setKafkaProducerConfig(properties)
                         .setRecordSerializer(
                                 new DynamicKafkaRecordSerializationSchema(
-                                        topic,
+                                        topics,
                                         partitioner,
                                         keySerialization,
                                         valueSerialization,
@@ -272,7 +272,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
                         keyProjection,
                         valueProjection,
                         keyPrefix,
-                        topic,
+                        topics,
                         properties,
                         partitioner,
                         deliveryGuarantee,
@@ -306,7 +306,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
                 && Arrays.equals(keyProjection, that.keyProjection)
                 && Arrays.equals(valueProjection, that.valueProjection)
                 && Objects.equals(keyPrefix, that.keyPrefix)
-                && Objects.equals(topic, that.topic)
+                && Objects.equals(topics, that.topics)
                 && Objects.equals(properties, that.properties)
                 && Objects.equals(partitioner, that.partitioner)
                 && Objects.equals(deliveryGuarantee, that.deliveryGuarantee)
@@ -327,7 +327,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
                 keyProjection,
                 valueProjection,
                 keyPrefix,
-                topic,
+                topics,
                 properties,
                 partitioner,
                 deliveryGuarantee,
@@ -393,6 +393,20 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
     // --------------------------------------------------------------------------------------------
 
     enum WritableMetadata {
+        TOPIC(
+                "topic",
+                DataTypes.STRING().nullable(),
+                new MetadataConverter() {
+                    private static final long serialVersionUID = 1L;
+
+                    @Override
+                    public Object read(RowData row, int pos) {
+                        if (row.isNullAt(pos)) {
+                            return null;
+                        }
+                        return row.getString(pos).toString();
+                    }
+                }),
         HEADERS(
                 "headers",
                 // key and value of the map are nullable to make handling easier in queries

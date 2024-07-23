@@ -30,12 +30,14 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
+
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /** SerializationSchema used by {@link KafkaDynamicSink} to configure a {@link KafkaSink}. */
 class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationSchema<RowData> {
 
-    private final String topic;
+    private final List<String> topics;
     private final FlinkKafkaPartitioner<RowData> partitioner;
     @Nullable private final SerializationSchema<RowData> keySerialization;
     private final SerializationSchema<RowData> valueSerialization;
@@ -46,7 +48,7 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
     private final boolean upsertMode;
 
     DynamicKafkaRecordSerializationSchema(
-            String topic,
+            @Nullable List<String> topics,
             @Nullable FlinkKafkaPartitioner<RowData> partitioner,
             @Nullable SerializationSchema<RowData> keySerialization,
             SerializationSchema<RowData> valueSerialization,
@@ -60,7 +62,7 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
                     keySerialization != null && keyFieldGetters.length > 0,
                     "Key must be set in upsert mode for serialization schema.");
         }
-        this.topic = checkNotNull(topic);
+        this.topics = topics;
         this.partitioner = partitioner;
         this.keySerialization = keySerialization;
         this.valueSerialization = checkNotNull(valueSerialization);
@@ -77,13 +79,14 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
         // shortcut in case no input projection is required
         if (keySerialization == null && !hasMetadata) {
             final byte[] valueSerialized = valueSerialization.serialize(consumedRow);
+            final String targetTopic = getTargetTopic(consumedRow);
             return new ProducerRecord<>(
-                    topic,
+                    targetTopic,
                     extractPartition(
                             consumedRow,
                             null,
                             valueSerialized,
-                            context.getPartitionsForTopic(topic)),
+                            context.getPartitionsForTopic(targetTopic)),
                     null,
                     valueSerialized);
         }
@@ -115,14 +118,14 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
                             consumedRow, kind, valueFieldGetters);
             valueSerialized = valueSerialization.serialize(valueRow);
         }
-
+        final String targetTopic = getTargetTopic(consumedRow);
         return new ProducerRecord<>(
-                topic,
+                targetTopic,
                 extractPartition(
                         consumedRow,
                         keySerialized,
                         valueSerialized,
-                        context.getPartitionsForTopic(topic)),
+                        context.getPartitionsForTopic(targetTopic)),
                 readMetadata(consumedRow, KafkaDynamicSink.WritableMetadata.TIMESTAMP),
                 keySerialized,
                 valueSerialized,
@@ -144,6 +147,22 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
         valueSerialization.open(context);
     }
 
+    private String getTargetTopic(RowData element) {
+        final String topic = readMetadata(element, KafkaDynamicSink.WritableMetadata.TOPIC);
+        if (topic == null && topics == null) {
+            throw new IllegalArgumentException(
+                    "The topic of the sink record is not valid. Expected a single topic but no topic is set.");
+        } else if (topic == null && topics.size() == 1) {
+            return topics.get(0);
+        } else if (topics != null && topics.size() > 0 && !topics.contains(topic)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "The topic of the sink record is not valid. Expected topic to be in: %s but was: %s",
+                            topics, topic));
+        }
+        return topic;
+    }
+
     private Integer extractPartition(
             RowData consumedRow,
             @Nullable byte[] keySerialized,
@@ -151,7 +170,11 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
             int[] partitions) {
         if (partitioner != null) {
             return partitioner.partition(
-                    consumedRow, keySerialized, valueSerialized, topic, partitions);
+                    consumedRow,
+                    keySerialized,
+                    valueSerialized,
+                    getTargetTopic(consumedRow),
+                    partitions);
         }
         return null;
     }

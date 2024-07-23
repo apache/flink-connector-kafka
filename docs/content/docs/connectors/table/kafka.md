@@ -83,7 +83,7 @@ Read-only columns must be declared `VIRTUAL` to exclude them during an `INSERT I
       <td><code>topic</code></td>
       <td><code>STRING NOT NULL</code></td>
       <td>Topic name of the Kafka record.</td>
-      <td><code>R</code></td>
+      <td><code>R/W</code></td>
     </tr>
     <tr>
       <td><code>partition</code></td>
@@ -196,11 +196,11 @@ Connector Options
     </tr>
     <tr>
       <td><h5>topic</h5></td>
-      <td>required for sink</td>
+      <td>optional</td>
       <td>yes</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>
-      <td>Topic name(s) to read data from when the table is used as source. It also supports topic list for source by separating topic by semicolon like <code>'topic-1;topic-2'</code>. Note, only one of "topic-pattern" and "topic" can be specified for sources. When the table is used as sink, the topic name is the topic to write data to. Note topic list is not supported for sinks.</td>
+      <td>Topic name(s) to read data from when the table is used as source, or allowed topics for writing when the table is used as sink. It also supports topic list for source by separating topic by semicolon like <code>'topic-1;topic-2'</code>. Note, only one of "topic-pattern" and "topic" can be specified for sources. For sinks, the topic or list of topics provided are they only valid values (whitelist) that can be written to the `topic` metadata column for determining what topic to produce to. If only a single topic is provided, this is the default topic to produce to. If not provided, any value of `topic` metadata is permitted.</td>
     </tr>
     <tr>
       <td><h5>topic-pattern</h5></td>
