@@ -194,7 +194,7 @@ CREATE TABLE KafkaTable (
       <td>可选</td>
       <td style="word-wrap: break-word;">（无）</td>
       <td>String</td>
-      <td>当表用作 source 时读取数据的 topic 名。亦支持用分号间隔的 topic 列表，如 <code>'topic-1;topic-2'</code>。注意，对 source 表而言，'topic' 和 'topic-pattern' 两个选项只能使用其中一个。当表被用作 sink 时，该配置表示写入的 topic 名。对于接收器，提供的主题或主题列表是可以写入 `topic` 元数据列的唯一有效值（允许列表），用于确定要生成的主题。如果只提供一个主题，这是默认生成的主题。如果未提供，则允许 `topic` 元数据的任何值。</td>
+      <td>当表用作 source 时读取数据的 topic 名。亦支持用分号间隔的 topic 列表，如 <code>'topic-1;topic-2'</code>。注意，对 source 表而言，'topic' 和 'topic-pattern' 两个选项只能使用其中一个。当表被用作 sink 时，该配置表示写入的 topic 名。对于sink来说，主题名称就是写入数据的主题。它还支持接收器的主题列表。提供的主题列表被视为“主题”元数据列的有效值的允许列表，如果未提供，则任何值都有效。如果未指定“topic”选项，或者提供了列表，则对于接收器表，“topic”元数据列是可写的并且必须指定。 </td>
     </tr>
     <tr>
       <td><h5>topic-pattern</h5></td>
