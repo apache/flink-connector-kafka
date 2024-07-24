@@ -616,6 +616,9 @@ public class KafkaDynamicTableFactoryTest {
         final SinkV2Provider sinkProvider = (SinkV2Provider) provider;
         final Sink<RowData> sinkFunction = sinkProvider.createSink();
         assertThat(sinkFunction).isInstanceOf(KafkaSink.class);
+        assertThat(actualKafkaSink.listWritableMetadata()).containsOnlyKeys(
+                KafkaDynamicSink.WritableMetadata.HEADERS.key,
+                KafkaDynamicSink.WritableMetadata.TIMESTAMP.key);
     }
 
     @Test
@@ -829,6 +832,11 @@ public class KafkaDynamicTableFactoryTest {
                         null,
                         "kafka-sink");
         assertThat(actualSink).isEqualTo(expectedSink);
+        final KafkaDynamicSink actualKafkaSink = (KafkaDynamicSink) actualSink;
+        assertThat(actualKafkaSink.listWritableMetadata()).containsOnlyKeys(
+                KafkaDynamicSink.WritableMetadata.TOPIC.key,
+                KafkaDynamicSink.WritableMetadata.HEADERS.key,
+                KafkaDynamicSink.WritableMetadata.TIMESTAMP.key);
     }
 
     @Test
@@ -855,6 +863,11 @@ public class KafkaDynamicTableFactoryTest {
                         null,
                         "kafka-sink");
         assertThat(actualSink).isEqualTo(expectedSink);
+        final KafkaDynamicSink actualKafkaSink = (KafkaDynamicSink) actualSink;
+        assertThat(actualKafkaSink.listWritableMetadata()).containsOnlyKeys(
+                KafkaDynamicSink.WritableMetadata.TOPIC.key,
+                KafkaDynamicSink.WritableMetadata.HEADERS.key,
+                KafkaDynamicSink.WritableMetadata.TIMESTAMP.key);
     }
 
     private void verifyEncoderSubject(

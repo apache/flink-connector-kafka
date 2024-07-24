@@ -57,6 +57,7 @@ public class DynamicKafkaRecordSerializationSchemaTest extends TestLogger {
         String topic1 = "topic1";
         return Stream.of(
                 Arguments.of(Collections.singletonList(TOPIC), TOPIC, TOPIC),
+                Arguments.of(Collections.singletonList(TOPIC), topic1, TOPIC),
                 Arguments.of(Collections.singletonList(TOPIC), null, TOPIC),
                 Arguments.of(null, TOPIC, TOPIC),
                 Arguments.of(TOPICS, topic1, topic1));
@@ -65,12 +66,6 @@ public class DynamicKafkaRecordSerializationSchemaTest extends TestLogger {
     private static Stream<Arguments> provideInvalidTopicMetadataTestParameters() {
         String other = "other";
         return Stream.of(
-                Arguments.of(
-                        Collections.singletonList(TOPIC),
-                        other,
-                        String.format(
-                                "The topic of the sink record is not valid. Expected topic to be in: [%s] but was: %s",
-                                TOPIC, other)),
                 Arguments.of(
                         null,
                         null,
