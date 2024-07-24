@@ -251,6 +251,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
     public Map<String, DataType> listWritableMetadata() {
         final Map<String, DataType> metadataMap = new LinkedHashMap<>();
         Stream.of(WritableMetadata.values())
+                // When `topic` is a singleton list, TOPIC metadata is not writable
                 .filter(m -> topics == null || topics.size() > 1 || !WritableMetadata.TOPIC.key.equals(m.key))
                 .forEachOrdered(m -> metadataMap.put(m.key, m.dataType));
         return metadataMap;
