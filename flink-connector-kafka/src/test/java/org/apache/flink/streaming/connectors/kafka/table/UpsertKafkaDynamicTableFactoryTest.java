@@ -216,6 +216,47 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
         assertThat(sink).isInstanceOf(KafkaSink.class);
     }
 
+    @Test
+    public void testTableSinkWithTopicList() {
+        // Construct table sink using options and table sink factory.
+        final Map<String, String> modifiedOptions =
+                getModifiedOptions(
+                        getFullSinkOptions(),
+                        options -> {
+                            options.put("sink.delivery-guarantee", "exactly-once");
+                            options.put("sink.transactional-id-prefix", "kafka-sink");
+                            options.put("topic", String.format("%s;%s", SINK_TOPIC, SINK_TOPIC));
+                        });
+        final DynamicTableSink actualSink = createTableSink(SINK_SCHEMA, modifiedOptions);
+
+        final DynamicTableSink expectedSink =
+                createExpectedSink(
+                        SINK_SCHEMA.toPhysicalRowDataType(),
+                        keyEncodingFormat,
+                        valueEncodingFormat,
+                        SINK_KEY_FIELDS,
+                        SINK_VALUE_FIELDS,
+                        null,
+                        Arrays.asList(SINK_TOPIC, SINK_TOPIC),
+                        UPSERT_KAFKA_SINK_PROPERTIES,
+                        DeliveryGuarantee.EXACTLY_ONCE,
+                        SinkBufferFlushMode.DISABLED,
+                        null,
+                        "kafka-sink");
+
+        // Test sink format.
+        final KafkaDynamicSink actualUpsertKafkaSink = (KafkaDynamicSink) actualSink;
+        assertThat(actualSink).isEqualTo(expectedSink);
+
+        // Test kafka producer.
+        DynamicTableSink.SinkRuntimeProvider provider =
+                actualUpsertKafkaSink.getSinkRuntimeProvider(new SinkRuntimeProviderContext(false));
+        assertThat(provider).isInstanceOf(SinkV2Provider.class);
+        final SinkV2Provider sinkFunctionProvider = (SinkV2Provider) provider;
+        final Sink<RowData> sink = sinkFunctionProvider.createSink();
+        assertThat(sink).isInstanceOf(KafkaSink.class);
+    }
+
     @SuppressWarnings("rawtypes")
     @Test
     public void testBufferedTableSink() {

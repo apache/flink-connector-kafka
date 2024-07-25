@@ -258,7 +258,6 @@ public class UpsertKafkaDynamicTableFactory
             Format keyFormat,
             Format valueFormat,
             int[] primaryKeyIndexes) {
-        validateTopic(tableOptions);
         validateFormat(keyFormat, valueFormat, tableOptions);
         validatePKConstraints(primaryKeyIndexes);
         validateSinkBufferFlush(tableOptions);
