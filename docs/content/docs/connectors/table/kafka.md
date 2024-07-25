@@ -666,7 +666,7 @@ CREATE TABLE KafkaTable (
   /* Set SASL mechanism as SCRAM-SHA-256 */
   'properties.sasl.mechanism' = 'SCRAM-SHA-256',
   /* Set JAAS configurations */
-  'properties.sasl.jaas.config' = 'org.apache.kafka.common.security.scram.ScramLoginModule required username=\"username\" password=\"password\";'
+  'properties.sasl.jaas.config' = 'org.apache.kafka.common.security.scram.ScramLoginModule required username="username" password="password";'
 )
 ```
 
