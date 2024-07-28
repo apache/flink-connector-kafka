@@ -37,6 +37,7 @@ import java.lang.reflect.Method;
 import java.time.Duration;
 import java.util.Properties;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.apache.flink.util.Preconditions.checkState;
 
@@ -55,6 +56,7 @@ class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
     private volatile boolean inTransaction;
     private volatile boolean hasRecordsInTransaction;
     private volatile boolean closed;
+    private final AtomicLong pendingRecords = new AtomicLong(0);
 
     public FlinkKafkaInternalProducer(Properties properties, @Nullable String transactionalId) {
         super(withTransactionalId(properties, transactionalId));
@@ -72,12 +74,17 @@ class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         return props;
     }
 
+    public long getPendingRecordsCount() {
+        return pendingRecords.get();
+    }
+
     @Override
     public Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback) {
         if (inTransaction) {
             hasRecordsInTransaction = true;
         }
-        return super.send(record, callback);
+        pendingRecords.incrementAndGet();
+        return super.send(record, new TrackingCallback(callback));
     }
 
     @Override
@@ -85,6 +92,11 @@ class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         super.flush();
         if (inTransaction) {
             flushNewPartitions();
+        }
+        final long pendingRecordsCount = pendingRecords.get();
+        if (pendingRecordsCount != 0) {
+            throw new IllegalStateException(
+                    "Pending record count must be zero at this point: " + pendingRecordsCount);
         }
     }
 
@@ -396,8 +408,27 @@ class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
                 + transactionalId
                 + "', inTransaction="
                 + inTransaction
+                + ", pendingRecords="
+                + pendingRecords.get()
                 + ", closed="
                 + closed
                 + '}';
+    }
+
+    public class TrackingCallback implements Callback {
+
+        private final Callback actualCallback;
+
+        public TrackingCallback(final Callback actualCallback) {
+            this.actualCallback = actualCallback;
+        }
+
+        @Override
+        public void onCompletion(final RecordMetadata recordMetadata, final Exception e) {
+            pendingRecords.decrementAndGet();
+            if (actualCallback != null) {
+                actualCallback.onCompletion(recordMetadata, e);
+            }
+        }
     }
 }
