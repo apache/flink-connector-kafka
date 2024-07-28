@@ -61,7 +61,7 @@ import static org.apache.flink.util.Preconditions.checkState;
 public class KafkaSinkBuilder<IN> {
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaSinkBuilder.class);
-    private static final Duration DEFAULT_KAFKA_TRANSACTION_TIMEOUT = Duration.ofHours(1);
+    private static final Duration DEFAULT_KAFKA_TRANSACTION_TIMEOUT = Duration.ofMinutes(15);
     private static final String[] warnKeys =
             new String[] {
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
