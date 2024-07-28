@@ -23,6 +23,7 @@ import org.apache.flink.util.TestLogger;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Properties;
 import java.util.function.Consumer;
@@ -85,6 +86,27 @@ public class KafkaSinkBuilderTest extends TestLogger {
         validateProducerConfig(
                 getNoServerBuilder().setKafkaProducerConfig(testConf1),
                 p -> assertThat(p).containsKeys(DEFAULT_KEYS));
+    }
+
+    @Test
+    public void testTransactionTimeoutSetting() {
+        validateProducerConfig(
+                getBasicBuilder(),
+                p -> {
+                    assertThat(p.get(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG))
+                            .isEqualTo((int) Duration.ofMinutes(15).toMillis());
+                });
+
+        Properties testConf = new Properties();
+        testConf.put(
+                ProducerConfig.TRANSACTION_TIMEOUT_CONFIG, (int) Duration.ofHours(1).toMillis());
+
+        validateProducerConfig(
+                getBasicBuilder().setKafkaProducerConfig(testConf),
+                p -> {
+                    assertThat(p.get(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG))
+                            .isEqualTo((int) Duration.ofHours(1).toMillis());
+                });
     }
 
     private void validateProducerConfig(
