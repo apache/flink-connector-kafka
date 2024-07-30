@@ -39,7 +39,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationSchema<RowData> {
 
     private final List<String> topics;
-    private final transient Pattern topicPattern;
+    private final Pattern topicPattern;
     private final FlinkKafkaPartitioner<RowData> partitioner;
     @Nullable private final SerializationSchema<RowData> keySerialization;
     private final SerializationSchema<RowData> valueSerialization;
