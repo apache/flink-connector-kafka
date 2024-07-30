@@ -44,7 +44,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.utils.DataTypeUtils;
-import org.apache.flink.util.Preconditions;
 
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.header.Header;
@@ -260,7 +259,11 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
         final Map<String, DataType> metadataMap = new LinkedHashMap<>();
         Stream.of(WritableMetadata.values())
                 // When `topic` is a singleton list, TOPIC metadata is not writable
-                .filter(m -> topics == null || topics.size() > 1 || !WritableMetadata.TOPIC.key.equals(m.key))
+                .filter(
+                        m ->
+                                topics == null
+                                        || topics.size() > 1
+                                        || !WritableMetadata.TOPIC.key.equals(m.key))
                 .forEachOrdered(m -> metadataMap.put(m.key, m.dataType));
         return metadataMap;
     }

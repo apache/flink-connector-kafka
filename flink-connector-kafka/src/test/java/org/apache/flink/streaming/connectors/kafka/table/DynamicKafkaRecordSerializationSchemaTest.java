@@ -29,7 +29,8 @@ public class DynamicKafkaRecordSerializationSchemaTest extends TestLogger {
 
     @ParameterizedTest
     @MethodSource("provideTopicMetadataTestParameters")
-    public void testTopicMetadata(List<String> topics, Pattern topicPattern, String rowTopic, String expectedTopic) {
+    public void testTopicMetadata(
+            List<String> topics, Pattern topicPattern, String rowTopic, String expectedTopic) {
         GenericRowData rowData = createRowData(rowTopic);
         DynamicKafkaRecordSerializationSchema schema = createSchema(topics, topicPattern);
         KafkaRecordSerializationSchema.KafkaSinkContext context = createContext();
@@ -84,7 +85,8 @@ public class DynamicKafkaRecordSerializationSchemaTest extends TestLogger {
                                 "topic*", other)));
     }
 
-    private DynamicKafkaRecordSerializationSchema createSchema(List<String> topics, Pattern topicPattern) {
+    private DynamicKafkaRecordSerializationSchema createSchema(
+            List<String> topics, Pattern topicPattern) {
         // Create a SerializationSchema for RowData
         SerializationSchema<RowData> serializationSchema =
                 new SerializationSchema<RowData>() {

@@ -165,15 +165,15 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
             throw new IllegalArgumentException(
                     "The topic of the sink record is not valid. Expected a single topic but no topic is set.");
         } else if (topics != null && !topics.contains(topic)) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "The topic of the sink record is not valid. Expected topic to be in: %s but was: %s",
-                                topics, topic));
+            throw new IllegalArgumentException(
+                    String.format(
+                            "The topic of the sink record is not valid. Expected topic to be in: %s but was: %s",
+                            topics, topic));
         } else if (topicPattern != null && !topicPattern.matcher(topic).matches()) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "The topic of the sink record is not valid. Expected topic to match: %s but was: %s",
-                                topicPattern, topic));
+            throw new IllegalArgumentException(
+                    String.format(
+                            "The topic of the sink record is not valid. Expected topic to match: %s but was: %s",
+                            topicPattern, topic));
         }
         return topic;
     }

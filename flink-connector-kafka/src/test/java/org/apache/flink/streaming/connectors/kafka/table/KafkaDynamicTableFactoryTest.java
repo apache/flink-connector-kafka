@@ -617,9 +617,10 @@ public class KafkaDynamicTableFactoryTest {
         final SinkV2Provider sinkProvider = (SinkV2Provider) provider;
         final Sink<RowData> sinkFunction = sinkProvider.createSink();
         assertThat(sinkFunction).isInstanceOf(KafkaSink.class);
-        assertThat(actualKafkaSink.listWritableMetadata()).containsOnlyKeys(
-                KafkaDynamicSink.WritableMetadata.HEADERS.key,
-                KafkaDynamicSink.WritableMetadata.TIMESTAMP.key);
+        assertThat(actualKafkaSink.listWritableMetadata())
+                .containsOnlyKeys(
+                        KafkaDynamicSink.WritableMetadata.HEADERS.key,
+                        KafkaDynamicSink.WritableMetadata.TIMESTAMP.key);
     }
 
     @Test
@@ -838,19 +839,22 @@ public class KafkaDynamicTableFactoryTest {
                         "kafka-sink");
         assertThat(actualSink).isEqualTo(expectedSink);
         final KafkaDynamicSink actualKafkaSink = (KafkaDynamicSink) actualSink;
-        assertThat(actualKafkaSink.listWritableMetadata()).containsOnlyKeys(
-                KafkaDynamicSink.WritableMetadata.TOPIC.key,
-                KafkaDynamicSink.WritableMetadata.HEADERS.key,
-                KafkaDynamicSink.WritableMetadata.TIMESTAMP.key);
+        assertThat(actualKafkaSink.listWritableMetadata())
+                .containsOnlyKeys(
+                        KafkaDynamicSink.WritableMetadata.TOPIC.key,
+                        KafkaDynamicSink.WritableMetadata.HEADERS.key,
+                        KafkaDynamicSink.WritableMetadata.TIMESTAMP.key);
     }
 
     @Test
     public void testTableSinkWithTopicPattern() {
         final Map<String, String> modifiedOptions =
-                getModifiedOptions(getBasicSinkOptions(), options -> {
-                    options.remove("topic");
-                    options.put("topic-pattern", TOPIC_REGEX);
-                });
+                getModifiedOptions(
+                        getBasicSinkOptions(),
+                        options -> {
+                            options.remove("topic");
+                            options.put("topic-pattern", TOPIC_REGEX);
+                        });
         KafkaDynamicSink actualSink = (KafkaDynamicSink) createTableSink(SCHEMA, modifiedOptions);
 
         final EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat =
@@ -873,10 +877,11 @@ public class KafkaDynamicTableFactoryTest {
                         "kafka-sink");
         assertThat(actualSink).isEqualTo(expectedSink);
         final KafkaDynamicSink actualKafkaSink = (KafkaDynamicSink) actualSink;
-        assertThat(actualKafkaSink.listWritableMetadata()).containsOnlyKeys(
-                KafkaDynamicSink.WritableMetadata.TOPIC.key,
-                KafkaDynamicSink.WritableMetadata.HEADERS.key,
-                KafkaDynamicSink.WritableMetadata.TIMESTAMP.key);
+        assertThat(actualKafkaSink.listWritableMetadata())
+                .containsOnlyKeys(
+                        KafkaDynamicSink.WritableMetadata.TOPIC.key,
+                        KafkaDynamicSink.WritableMetadata.HEADERS.key,
+                        KafkaDynamicSink.WritableMetadata.TIMESTAMP.key);
     }
 
     private void verifyEncoderSubject(
@@ -1091,8 +1096,7 @@ public class KafkaDynamicTableFactoryTest {
         try {
             createTableSink(SCHEMA, modifiedOptions);
         } catch (Throwable t) {
-            assertThat(t.getCause().getMessage())
-                    .isEqualTo(errorMessageTemp);
+            assertThat(t.getCause().getMessage()).isEqualTo(errorMessageTemp);
         }
     }
 
