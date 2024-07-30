@@ -845,9 +845,12 @@ public class KafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testTableSinkWithNoTopic() {
+    public void testTableSinkWithTopicPattern() {
         final Map<String, String> modifiedOptions =
-                getModifiedOptions(getBasicSinkOptions(), options -> options.remove("topic"));
+                getModifiedOptions(getBasicSinkOptions(), options -> {
+                    options.remove("topic");
+                    options.put("topic-pattern", TOPIC_REGEX);
+                });
         KafkaDynamicSink actualSink = (KafkaDynamicSink) createTableSink(SCHEMA, modifiedOptions);
 
         final EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat =
@@ -862,7 +865,7 @@ public class KafkaDynamicTableFactoryTest {
                         new int[] {0, 1, 2},
                         null,
                         null,
-                        null,
+                        Pattern.compile(TOPIC_REGEX),
                         KAFKA_SINK_PROPERTIES,
                         new FlinkFixedPartitioner<>(),
                         DeliveryGuarantee.EXACTLY_ONCE,
@@ -1084,12 +1087,12 @@ public class KafkaDynamicTableFactoryTest {
                             options.put("topic-pattern", TOPIC_REGEX);
                         });
         final String errorMessageTemp =
-                "Flink Kafka sink currently only supports topic, but got %s: %s.";
+                "Option 'topic' and 'topic-pattern' shouldn't be set together.";
         try {
             createTableSink(SCHEMA, modifiedOptions);
         } catch (Throwable t) {
             assertThat(t.getCause().getMessage())
-                    .isEqualTo(String.format(errorMessageTemp, "'topic-pattern'", TOPIC_REGEX));
+                    .isEqualTo(errorMessageTemp);
         }
     }
 

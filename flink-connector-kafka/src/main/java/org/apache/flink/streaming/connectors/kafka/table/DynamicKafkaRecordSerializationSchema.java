@@ -39,7 +39,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationSchema<RowData> {
 
     private final List<String> topics;
-    private final Pattern topicPattern;
+    private final transient Pattern topicPattern;
     private final FlinkKafkaPartitioner<RowData> partitioner;
     @Nullable private final SerializationSchema<RowData> keySerialization;
     private final SerializationSchema<RowData> valueSerialization;
@@ -68,7 +68,7 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
         Preconditions.checkArgument(
                 (topics != null && topicPattern == null && topics.size() > 0)
                         || (topics == null && topicPattern != null),
-                "Either Topic or Topic Pattern must be set for source.");
+                "Either Topic or Topic Pattern must be set.");
         this.topics = topics;
         this.topicPattern = topicPattern;
         this.partitioner = partitioner;

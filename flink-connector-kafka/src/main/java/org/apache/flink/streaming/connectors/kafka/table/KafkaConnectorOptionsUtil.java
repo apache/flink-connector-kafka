@@ -103,17 +103,17 @@ class KafkaConnectorOptionsUtil {
     // --------------------------------------------------------------------------------------------
 
     public static void validateTableSourceOptions(ReadableConfig tableOptions) {
-        validateSourceTopic(tableOptions);
+        validateTopic(tableOptions);
         validateScanStartupMode(tableOptions);
         validateScanBoundedMode(tableOptions);
     }
 
     public static void validateTableSinkOptions(ReadableConfig tableOptions) {
-        validateSinkTopic(tableOptions);
+        validateTopic(tableOptions);
         validateSinkPartitioner(tableOptions);
     }
 
-    public static void validateSourceTopic(ReadableConfig tableOptions) {
+    public static void validateTopic(ReadableConfig tableOptions) {
         Optional<List<String>> topic = tableOptions.getOptional(TOPIC);
         Optional<String> pattern = tableOptions.getOptional(TOPIC_PATTERN);
 
@@ -124,18 +124,6 @@ class KafkaConnectorOptionsUtil {
 
         if (!topic.isPresent() && !pattern.isPresent()) {
             throw new ValidationException("Either 'topic' or 'topic-pattern' must be set.");
-        }
-    }
-
-    public static void validateSinkTopic(ReadableConfig tableOptions) {
-        if (tableOptions.getOptional(TOPIC).isPresent()) {
-            if (tableOptions.getOptional(TOPIC_PATTERN).isPresent()) {
-                String errorMessage =
-                        String.format(
-                                "Flink Kafka sink currently only supports topic, but got %s: %s.",
-                                "'topic-pattern'", tableOptions.get(TOPIC_PATTERN));
-                throw new ValidationException(errorMessage);
-            }
         }
     }
 
@@ -632,7 +620,7 @@ class KafkaConnectorOptionsUtil {
         Configuration configuration = Configuration.fromMap(options);
         // the subject autoComplete should only be used in sink with a single topic, check the topic
         // option first
-        validateSinkTopic(configuration);
+        validateTopic(configuration);
         if (configuration.contains(TOPIC) && isSingleTopic(configuration)) {
             final Optional<String> valueFormat = configuration.getOptional(VALUE_FORMAT);
             final Optional<String> keyFormat = configuration.getOptional(KEY_FORMAT);

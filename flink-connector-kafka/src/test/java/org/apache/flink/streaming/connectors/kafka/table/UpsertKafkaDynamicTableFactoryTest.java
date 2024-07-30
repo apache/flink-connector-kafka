@@ -86,7 +86,7 @@ import java.util.regex.Pattern;
 
 import static org.apache.flink.core.testutils.FlinkMatchers.containsCause;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanBoundedMode;
-import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC_PATTERN;import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.AVRO_CONFLUENT;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.AVRO_CONFLUENT;
 import static org.apache.flink.table.factories.utils.FactoryMocks.createTableSink;
 import static org.apache.flink.table.factories.utils.FactoryMocks.createTableSource;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -271,6 +271,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                             options.put("sink.delivery-guarantee", "exactly-once");
                             options.put("sink.transactional-id-prefix", "kafka-sink");
                             options.put("topic-pattern", SINK_TOPIC_PATTERN);
+                            options.remove("topic");
                         });
         final DynamicTableSink actualSink = createTableSink(SINK_SCHEMA, modifiedOptions);
 
