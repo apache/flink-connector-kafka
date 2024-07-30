@@ -93,8 +93,8 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getBoundedOptions;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getFlinkKafkaPartitioner;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getKafkaProperties;
-import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getSourceTopicPattern;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getStartupOptions;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getTopicPattern;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getTopics;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.validateTableSinkOptions;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.validateTableSourceOptions;
@@ -223,7 +223,7 @@ public class KafkaDynamicTableFactory
                 valueProjection,
                 keyPrefix,
                 getTopics(tableOptions),
-                getSourceTopicPattern(tableOptions),
+                getTopicPattern(tableOptions),
                 properties,
                 startupOptions.startupMode,
                 startupOptions.specificOffsets,
@@ -279,6 +279,7 @@ public class KafkaDynamicTableFactory
                 valueProjection,
                 keyPrefix,
                 getTopics(tableOptions),
+                getTopicPattern(tableOptions),
                 getKafkaProperties(context.getCatalogTable().getOptions()),
                 getFlinkKafkaPartitioner(tableOptions, context.getClassLoader()).orElse(null),
                 deliveryGuarantee,
@@ -424,6 +425,7 @@ public class KafkaDynamicTableFactory
             int[] valueProjection,
             @Nullable String keyPrefix,
             @Nullable List<String> topics,
+            @Nullable Pattern topicPattern,
             Properties properties,
             FlinkKafkaPartitioner<RowData> partitioner,
             DeliveryGuarantee deliveryGuarantee,
@@ -438,6 +440,7 @@ public class KafkaDynamicTableFactory
                 valueProjection,
                 keyPrefix,
                 topics,
+                topicPattern,
                 properties,
                 partitioner,
                 deliveryGuarantee,

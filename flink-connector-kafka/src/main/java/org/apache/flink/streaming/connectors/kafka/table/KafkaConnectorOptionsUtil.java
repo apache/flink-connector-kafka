@@ -252,7 +252,7 @@ class KafkaConnectorOptionsUtil {
         return tableOptions.getOptional(TOPIC).orElse(null);
     }
 
-    public static Pattern getSourceTopicPattern(ReadableConfig tableOptions) {
+    public static Pattern getTopicPattern(ReadableConfig tableOptions) {
         return tableOptions.getOptional(TOPIC_PATTERN).map(Pattern::compile).orElse(null);
     }
 

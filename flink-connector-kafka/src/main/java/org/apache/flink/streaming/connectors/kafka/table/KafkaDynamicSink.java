@@ -44,6 +44,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.utils.DataTypeUtils;
+import org.apache.flink.util.Preconditions;
 
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.header.Header;
@@ -59,6 +60,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
@@ -114,8 +116,11 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
      */
     @Nullable private final String transactionalIdPrefix;
 
-    /** The Kafka topic to write to. */
+    /** The Kafka topics to allow for producing. */
     protected final List<String> topics;
+
+    /** The Kafka topic pattern of topics allowed to produce to. */
+    protected final Pattern topicPattern;
 
     /** Properties for the Kafka producer. */
     protected final Properties properties;
@@ -144,6 +149,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
             int[] valueProjection,
             @Nullable String keyPrefix,
             @Nullable List<String> topics,
+            @Nullable Pattern topicPattern,
             Properties properties,
             @Nullable FlinkKafkaPartitioner<RowData> partitioner,
             DeliveryGuarantee deliveryGuarantee,
@@ -166,7 +172,12 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
         // Mutable attributes
         this.metadataKeys = Collections.emptyList();
         // Kafka-specific attributes
+        Preconditions.checkArgument(
+                (topics != null && topicPattern == null)
+                        || (topics == null && topicPattern != null),
+                "Either Topic or Topic Pattern must be set for source.");
         this.topics = topics;
+        this.topicPattern = topicPattern;
         this.properties = checkNotNull(properties, "Properties must not be null.");
         this.partitioner = partitioner;
         this.deliveryGuarantee =
@@ -207,6 +218,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
                         .setRecordSerializer(
                                 new DynamicKafkaRecordSerializationSchema(
                                         topics,
+                                        topicPattern,
                                         partitioner,
                                         keySerialization,
                                         valueSerialization,
@@ -275,6 +287,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
                         valueProjection,
                         keyPrefix,
                         topics,
+                        topicPattern,
                         properties,
                         partitioner,
                         deliveryGuarantee,
@@ -309,6 +322,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
                 && Arrays.equals(valueProjection, that.valueProjection)
                 && Objects.equals(keyPrefix, that.keyPrefix)
                 && Objects.equals(topics, that.topics)
+                && Objects.equals(String.valueOf(topicPattern), String.valueOf(that.topicPattern))
                 && Objects.equals(properties, that.properties)
                 && Objects.equals(partitioner, that.partitioner)
                 && Objects.equals(deliveryGuarantee, that.deliveryGuarantee)
@@ -330,6 +344,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
                 valueProjection,
                 keyPrefix,
                 topics,
+                topicPattern,
                 properties,
                 partitioner,
                 deliveryGuarantee,

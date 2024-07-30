@@ -207,10 +207,6 @@ public class KafkaDynamicSource
         this.metadataKeys = Collections.emptyList();
         this.watermarkStrategy = null;
         // Kafka-specific attributes
-        Preconditions.checkArgument(
-                (topics != null && topicPattern == null)
-                        || (topics == null && topicPattern != null),
-                "Either Topic or Topic Pattern must be set for source.");
         this.topics = topics;
         this.topicPattern = topicPattern;
         this.properties = Preconditions.checkNotNull(properties, "Properties must not be null.");

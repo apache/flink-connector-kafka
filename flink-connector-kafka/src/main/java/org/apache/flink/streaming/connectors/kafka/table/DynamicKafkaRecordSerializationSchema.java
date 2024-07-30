@@ -31,6 +31,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -38,6 +39,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationSchema<RowData> {
 
     private final List<String> topics;
+    private final Pattern topicPattern;
     private final FlinkKafkaPartitioner<RowData> partitioner;
     @Nullable private final SerializationSchema<RowData> keySerialization;
     private final SerializationSchema<RowData> valueSerialization;
@@ -49,6 +51,7 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
 
     DynamicKafkaRecordSerializationSchema(
             @Nullable List<String> topics,
+            @Nullable Pattern topicPattern,
             @Nullable FlinkKafkaPartitioner<RowData> partitioner,
             @Nullable SerializationSchema<RowData> keySerialization,
             SerializationSchema<RowData> valueSerialization,
@@ -62,7 +65,12 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
                     keySerialization != null && keyFieldGetters.length > 0,
                     "Key must be set in upsert mode for serialization schema.");
         }
+        Preconditions.checkArgument(
+                (topics != null && topicPattern == null && topics.size() > 0)
+                        || (topics == null && topicPattern != null),
+                "Either Topic or Topic Pattern must be set for source.");
         this.topics = topics;
+        this.topicPattern = topicPattern;
         this.partitioner = partitioner;
         this.keySerialization = keySerialization;
         this.valueSerialization = checkNotNull(valueSerialization);
@@ -153,14 +161,19 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
             return topics.get(0);
         }
         final String topic = readMetadata(element, KafkaDynamicSink.WritableMetadata.TOPIC);
-        if (topic == null && topics == null) {
+        if (topic == null) {
             throw new IllegalArgumentException(
                     "The topic of the sink record is not valid. Expected a single topic but no topic is set.");
-        } else if (topics != null && topics.size() > 1 && !topics.contains(topic)) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "The topic of the sink record is not valid. Expected topic to be in: %s but was: %s",
-                            topics, topic));
+        } else if (topics != null && !topics.contains(topic)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "The topic of the sink record is not valid. Expected topic to be in: %s but was: %s",
+                                topics, topic));
+        } else if (topicPattern != null && !topicPattern.matcher(topic).matches()) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "The topic of the sink record is not valid. Expected topic to match: %s but was: %s",
+                                topicPattern, topic));
         }
         return topic;
     }
