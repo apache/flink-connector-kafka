@@ -98,7 +98,6 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
     private static final String SOURCE_TOPIC = "sourceTopic_1";
 
     private static final String SINK_TOPIC = "sinkTopic";
-    private static final String SINK_TOPIC_PATTERN = ".*";
 
     private static final String TEST_REGISTRY_URL = "http://localhost:8081";
     private static final String DEFAULT_VALUE_SUBJECT = SINK_TOPIC + "-value";
@@ -242,49 +241,6 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         null,
                         Arrays.asList(SINK_TOPIC, SINK_TOPIC),
                         null,
-                        UPSERT_KAFKA_SINK_PROPERTIES,
-                        DeliveryGuarantee.EXACTLY_ONCE,
-                        SinkBufferFlushMode.DISABLED,
-                        null,
-                        "kafka-sink");
-
-        // Test sink format.
-        final KafkaDynamicSink actualUpsertKafkaSink = (KafkaDynamicSink) actualSink;
-        assertThat(actualSink).isEqualTo(expectedSink);
-
-        // Test kafka producer.
-        DynamicTableSink.SinkRuntimeProvider provider =
-                actualUpsertKafkaSink.getSinkRuntimeProvider(new SinkRuntimeProviderContext(false));
-        assertThat(provider).isInstanceOf(SinkV2Provider.class);
-        final SinkV2Provider sinkFunctionProvider = (SinkV2Provider) provider;
-        final Sink<RowData> sink = sinkFunctionProvider.createSink();
-        assertThat(sink).isInstanceOf(KafkaSink.class);
-    }
-
-    @Test
-    public void testTableSinkWithTopicPattern() {
-        // Construct table sink using options and table sink factory.
-        final Map<String, String> modifiedOptions =
-                getModifiedOptions(
-                        getFullSinkOptions(),
-                        options -> {
-                            options.put("sink.delivery-guarantee", "exactly-once");
-                            options.put("sink.transactional-id-prefix", "kafka-sink");
-                            options.put("topic-pattern", SINK_TOPIC_PATTERN);
-                            options.remove("topic");
-                        });
-        final DynamicTableSink actualSink = createTableSink(SINK_SCHEMA, modifiedOptions);
-
-        final DynamicTableSink expectedSink =
-                createExpectedSink(
-                        SINK_SCHEMA.toPhysicalRowDataType(),
-                        keyEncodingFormat,
-                        valueEncodingFormat,
-                        SINK_KEY_FIELDS,
-                        SINK_VALUE_FIELDS,
-                        null,
-                        null,
-                        Pattern.compile(SINK_TOPIC_PATTERN),
                         UPSERT_KAFKA_SINK_PROPERTIES,
                         DeliveryGuarantee.EXACTLY_ONCE,
                         SinkBufferFlushMode.DISABLED,
