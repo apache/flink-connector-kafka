@@ -172,10 +172,6 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
         // Mutable attributes
         this.metadataKeys = Collections.emptyList();
         // Kafka-specific attributes
-        Preconditions.checkArgument(
-                (topics != null && topicPattern == null)
-                        || (topics == null && topicPattern != null),
-                "Either Topic or Topic Pattern must be set for source.");
         this.topics = topics;
         this.topicPattern = topicPattern;
         this.properties = checkNotNull(properties, "Properties must not be null.");
