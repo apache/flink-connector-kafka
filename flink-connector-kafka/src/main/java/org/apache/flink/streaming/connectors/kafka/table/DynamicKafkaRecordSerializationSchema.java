@@ -160,22 +160,22 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
             // If topics is a singleton list, we only return the provided topic.
             return topics.get(0);
         }
-        final String topic = readMetadata(element, KafkaDynamicSink.WritableMetadata.TOPIC);
-        if (topic == null) {
+        final String targetTopic = readMetadata(element, KafkaDynamicSink.WritableMetadata.TOPIC);
+        if (targetTopic == null) {
             throw new IllegalArgumentException(
                     "The topic of the sink record is not valid. Expected a single topic but no topic is set.");
-        } else if (topics != null && !topics.contains(topic)) {
+        } else if (topics != null && !topics.contains(targetTopic)) {
             throw new IllegalArgumentException(
                     String.format(
                             "The topic of the sink record is not valid. Expected topic to be in: %s but was: %s",
-                            topics, topic));
-        } else if (topicPattern != null && !topicPattern.matcher(topic).matches()) {
+                            topics, targetTopic));
+        } else if (topicPattern != null && !topicPattern.matcher(targetTopic).matches()) {
             throw new IllegalArgumentException(
                     String.format(
                             "The topic of the sink record is not valid. Expected topic to match: %s but was: %s",
-                            topicPattern, topic));
+                            topicPattern, targetTopic));
         }
-        return topic;
+        return targetTopic;
     }
 
     private Integer extractPartition(
