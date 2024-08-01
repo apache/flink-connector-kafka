@@ -189,6 +189,116 @@ public class KafkaTableITCase extends KafkaTableTestBase {
     }
 
     @Test
+    public void testKafkaSourceSinkWithTopicList() throws Exception {
+        // we always use a different topic name for each parameterized topic,
+        // in order to make sure the topic can be created.
+        final String topic1 = "topics1_" + format + "_" + UUID.randomUUID();
+        final String topic2 = "topics2_" + format + "_" + UUID.randomUUID();
+        createTestTopic(topic2, 1, 1);
+        createTestTopic(topic1, 1, 1);
+
+        // ---------- Produce an event time stream into Kafka -------------------
+        String groupId = getStandardProps().getProperty("group.id");
+        String bootstraps = getBootstrapServers();
+        final String createTable =
+                String.format(
+                        "CREATE TABLE kafka (\n"
+                                + "  `topic` STRING METADATA,\n"
+                                + "  `user_id` INT,\n"
+                                + "  `item_id` INT,\n"
+                                + "  `behavior` STRING\n"
+                                + ") WITH (\n"
+                                + "  'connector' = '%s',\n"
+                                + "  'topic' = '%s;%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'properties.group.id' = '%s',\n"
+                                + "  'scan.startup.mode' = 'earliest-offset',\n"
+                                + "  %s\n"
+                                + ")\n",
+                        KafkaDynamicTableFactory.IDENTIFIER,
+                        topic1,
+                        topic2,
+                        bootstraps,
+                        groupId,
+                        formatOptions());
+
+        tEnv.executeSql(createTable);
+
+        List<Row> values =
+                Arrays.asList(
+                        Row.of(topic1, 1, 1102, "behavior 1"),
+                        Row.of(topic2, 2, 1103, "behavior 2"));
+        tEnv.fromValues(values).insertInto("kafka").execute().await();
+
+        // ---------- Consume stream from Kafka -------------------
+
+        List<Row> results = collectAllRows(tEnv.sqlQuery("SELECT * from kafka"));
+
+        assertThat(results)
+                .containsExactly(Row.of(topic1, 1, 1102, "behavior 1"), Row.of(topic2, 2, 1103, "behavior 2"));
+
+        // ------------- cleanup -------------------
+
+        deleteTestTopic(topic1);
+        deleteTestTopic(topic2);
+    }
+
+    @Test
+    public void testKafkaSourceSinkWithTopicPattern() throws Exception {
+        // we always use a different topic name for each parameterized topic,
+        // in order to make sure the topic can be created.
+        final String topic1 = "topics1_" + format + "_" + UUID.randomUUID();
+        final String topic2 = "topics2_" + format + "_" + UUID.randomUUID();
+        final String topicPattern = "topics.*";
+        createTestTopic(topic2, 1, 1);
+        createTestTopic(topic1, 1, 1);
+
+        // ---------- Produce an event time stream into Kafka -------------------
+        String groupId = getStandardProps().getProperty("group.id");
+        String bootstraps = getBootstrapServers();
+        final String createTable =
+                String.format(
+                        "CREATE TABLE kafka (\n"
+                                + "  `topic` STRING METADATA,\n"
+                                + "  `user_id` INT,\n"
+                                + "  `item_id` INT,\n"
+                                + "  `behavior` STRING\n"
+                                + ") WITH (\n"
+                                + "  'connector' = '%s',\n"
+                                + "  'topic-pattern' = '%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'properties.group.id' = '%s',\n"
+                                + "  'scan.startup.mode' = 'earliest-offset',\n"
+                                + "  %s\n"
+                                + ")\n",
+                        KafkaDynamicTableFactory.IDENTIFIER,
+                        topicPattern,
+                        bootstraps,
+                        groupId,
+                        formatOptions());
+
+        tEnv.executeSql(createTable);
+
+        List<Row> values =
+                Arrays.asList(
+                        Row.of(topic1, 1, 1102, "behavior 1"),
+                        Row.of(topic2, 2, 1103, "behavior 2"));
+        tEnv.fromValues(values).insertInto("kafka").execute().await();
+
+        // ---------- Consume stream from Kafka -------------------
+
+        List<Row> results = collectAllRows(tEnv.sqlQuery("SELECT * from kafka"));
+
+        assertThat(results)
+                .containsExactly(Row.of(topic1, 1, 1102, "behavior 1"), Row.of(topic2, 2, 1103, "behavior 2"));
+
+        // ------------- cleanup -------------------
+
+        deleteTestTopic(topic1);
+        deleteTestTopic(topic2);
+    }
+
+    @Test
     public void testKafkaSourceSinkWithBoundedSpecificOffsets() throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.

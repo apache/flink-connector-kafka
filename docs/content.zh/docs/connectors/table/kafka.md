@@ -81,7 +81,7 @@ CREATE TABLE KafkaTable (
       <td><code>topic</code></td>
       <td><code>STRING NOT NULL</code></td>
       <td>Kafka 记录的 Topic 名。</td>
-      <td><code>R</code></td>
+      <td><code>R/W</code></td>
     </tr>
     <tr>
       <td><code>partition</code></td>
@@ -191,17 +191,17 @@ CREATE TABLE KafkaTable (
     </tr>
     <tr>
       <td><h5>topic</h5></td>
-      <td>required for sink</td>
+      <td>可选</td>
       <td style="word-wrap: break-word;">（无）</td>
       <td>String</td>
-      <td>当表用作 source 时读取数据的 topic 名。亦支持用分号间隔的 topic 列表，如 <code>'topic-1;topic-2'</code>。注意，对 source 表而言，'topic' 和 'topic-pattern' 两个选项只能使用其中一个。当表被用作 sink 时，该配置表示写入的 topic 名。注意 sink 表不支持 topic 列表。</td>
+      <td>当表用作 source 时读取数据的 topic 名，或当表用作 sink 时写入的 topic 名。它还支持通过分号分隔的 topic 列表，如 <code>'topic-1;topic-2'</code> 来作为 source 的 topic 列表。注意，“topic-pattern”和“topic”只能指定其中一个。对于 sink 来说，topic 名是写入数据的 topic。它还支持 sink 的 topic 列表。提供的 topic 列表被视为 `topic` 元数据列的有效值的允许列表。如果提供了列表，对于 sink 表，“topic”元数据列是可写的并且必须指定。</td>
     </tr>
     <tr>
       <td><h5>topic-pattern</h5></td>
       <td>可选</td>
       <td style="word-wrap: break-word;">（无）</td>
       <td>String</td>
-      <td>匹配读取 topic 名称的正则表达式。在作业开始运行时，所有匹配该正则表达式的 topic 都将被 Kafka consumer 订阅。注意，对 source 表而言，'topic' 和 'topic-pattern' 两个选项只能使用其中一个。</td>
+      <td>用于读取或写入的 topic 名称模式的正则表达式。所有匹配指定正则表达式的 topic 名称将在作业开始运行时被消费者订阅。对于 sink 来说，`topic` 元数据列是可写的，必须提供并且与 `topic-pattern` 正则表达式匹配。注意，“topic-pattern”和“topic”只能指定其中一个。</td>
     </tr>
     <tr>
       <td><h5>properties.bootstrap.servers</h5></td>

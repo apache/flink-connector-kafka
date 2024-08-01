@@ -600,7 +600,8 @@ public class KafkaDynamicTableFactoryTest {
                         new int[0],
                         new int[] {0, 1, 2},
                         null,
-                        TOPIC,
+                        Collections.singletonList(TOPIC),
+                        null,
                         KAFKA_SINK_PROPERTIES,
                         new FlinkFixedPartitioner<>(),
                         DeliveryGuarantee.EXACTLY_ONCE,
@@ -616,6 +617,10 @@ public class KafkaDynamicTableFactoryTest {
         final SinkV2Provider sinkProvider = (SinkV2Provider) provider;
         final Sink<RowData> sinkFunction = sinkProvider.createSink();
         assertThat(sinkFunction).isInstanceOf(KafkaSink.class);
+        assertThat(actualKafkaSink.listWritableMetadata())
+                .containsOnlyKeys(
+                        KafkaDynamicSink.WritableMetadata.HEADERS.key,
+                        KafkaDynamicSink.WritableMetadata.TIMESTAMP.key);
     }
 
     @Test
@@ -640,7 +645,8 @@ public class KafkaDynamicTableFactoryTest {
                             new int[0],
                             new int[] {0, 1, 2},
                             null,
-                            TOPIC,
+                            Collections.singletonList(TOPIC),
+                            null,
                             KAFKA_SINK_PROPERTIES,
                             new FlinkFixedPartitioner<>(),
                             DeliveryGuarantee.valueOf(semantic.toUpperCase().replace("-", "_")),
@@ -683,7 +689,8 @@ public class KafkaDynamicTableFactoryTest {
                         new int[] {0},
                         new int[] {1, 2},
                         null,
-                        TOPIC,
+                        Collections.singletonList(TOPIC),
+                        null,
                         KAFKA_FINAL_SINK_PROPERTIES,
                         new FlinkFixedPartitioner<>(),
                         DeliveryGuarantee.EXACTLY_ONCE,
@@ -711,7 +718,8 @@ public class KafkaDynamicTableFactoryTest {
                         new int[0],
                         new int[] {0, 1, 2},
                         null,
-                        TOPIC,
+                        Collections.singletonList(TOPIC),
+                        null,
                         KAFKA_SINK_PROPERTIES,
                         new FlinkFixedPartitioner<>(),
                         DeliveryGuarantee.EXACTLY_ONCE,
@@ -803,6 +811,77 @@ public class KafkaDynamicTableFactoryTest {
                 },
                 DEFAULT_VALUE_SUBJECT,
                 "sub2");
+    }
+
+    @Test
+    public void testTableSinkWithTopicList() {
+        final Map<String, String> modifiedOptions =
+                getModifiedOptions(getBasicSinkOptions(), options -> options.put("topic", TOPICS));
+        KafkaDynamicSink actualSink = (KafkaDynamicSink) createTableSink(SCHEMA, modifiedOptions);
+
+        final EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat =
+                new EncodingFormatMock(",");
+
+        final DynamicTableSink expectedSink =
+                createExpectedSink(
+                        SCHEMA_DATA_TYPE,
+                        null,
+                        valueEncodingFormat,
+                        new int[0],
+                        new int[] {0, 1, 2},
+                        null,
+                        Arrays.asList(TOPICS.split(";")),
+                        null,
+                        KAFKA_SINK_PROPERTIES,
+                        new FlinkFixedPartitioner<>(),
+                        DeliveryGuarantee.EXACTLY_ONCE,
+                        null,
+                        "kafka-sink");
+        assertThat(actualSink).isEqualTo(expectedSink);
+        final KafkaDynamicSink actualKafkaSink = (KafkaDynamicSink) actualSink;
+        assertThat(actualKafkaSink.listWritableMetadata())
+                .containsOnlyKeys(
+                        KafkaDynamicSink.WritableMetadata.TOPIC.key,
+                        KafkaDynamicSink.WritableMetadata.HEADERS.key,
+                        KafkaDynamicSink.WritableMetadata.TIMESTAMP.key);
+    }
+
+    @Test
+    public void testTableSinkWithTopicPattern() {
+        final Map<String, String> modifiedOptions =
+                getModifiedOptions(
+                        getBasicSinkOptions(),
+                        options -> {
+                            options.remove("topic");
+                            options.put("topic-pattern", TOPIC_REGEX);
+                        });
+        KafkaDynamicSink actualSink = (KafkaDynamicSink) createTableSink(SCHEMA, modifiedOptions);
+
+        final EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat =
+                new EncodingFormatMock(",");
+
+        final DynamicTableSink expectedSink =
+                createExpectedSink(
+                        SCHEMA_DATA_TYPE,
+                        null,
+                        valueEncodingFormat,
+                        new int[0],
+                        new int[] {0, 1, 2},
+                        null,
+                        null,
+                        Pattern.compile(TOPIC_REGEX),
+                        KAFKA_SINK_PROPERTIES,
+                        new FlinkFixedPartitioner<>(),
+                        DeliveryGuarantee.EXACTLY_ONCE,
+                        null,
+                        "kafka-sink");
+        assertThat(actualSink).isEqualTo(expectedSink);
+        final KafkaDynamicSink actualKafkaSink = (KafkaDynamicSink) actualSink;
+        assertThat(actualKafkaSink.listWritableMetadata())
+                .containsOnlyKeys(
+                        KafkaDynamicSink.WritableMetadata.TOPIC.key,
+                        KafkaDynamicSink.WritableMetadata.HEADERS.key,
+                        KafkaDynamicSink.WritableMetadata.TIMESTAMP.key);
     }
 
     private void verifyEncoderSubject(
@@ -1002,7 +1081,7 @@ public class KafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testSinkWithTopicListOrTopicPattern() {
+    public void testSinkWithTopicListAndTopicPattern() {
         Map<String, String> modifiedOptions =
                 getModifiedOptions(
                         getBasicSinkOptions(),
@@ -1010,32 +1089,13 @@ public class KafkaDynamicTableFactoryTest {
                             options.put("topic", TOPICS);
                             options.put("scan.startup.mode", "earliest-offset");
                             options.remove("specific-offsets");
+                            options.put("topic-pattern", TOPIC_REGEX);
                         });
         final String errorMessageTemp =
-                "Flink Kafka sink currently only supports single topic, but got %s: %s.";
-
-        try {
-            createTableSink(SCHEMA, modifiedOptions);
-        } catch (Throwable t) {
-            assertThat(t.getCause().getMessage())
-                    .isEqualTo(
-                            String.format(
-                                    errorMessageTemp,
-                                    "'topic'",
-                                    String.format("[%s]", String.join(", ", TOPIC_LIST))));
-        }
-
-        modifiedOptions =
-                getModifiedOptions(
-                        getBasicSinkOptions(),
-                        options -> options.put("topic-pattern", TOPIC_REGEX));
-
-        try {
-            createTableSink(SCHEMA, modifiedOptions);
-        } catch (Throwable t) {
-            assertThat(t.getCause().getMessage())
-                    .isEqualTo(String.format(errorMessageTemp, "'topic-pattern'", TOPIC_REGEX));
-        }
+                "Option 'topic' and 'topic-pattern' shouldn't be set together.";
+        assertThatThrownBy(() -> createTableSink(SCHEMA, modifiedOptions))
+                .isInstanceOf(ValidationException.class)
+                .satisfies(anyCauseMatches(ValidationException.class, errorMessageTemp));
     }
 
     @Test
@@ -1217,7 +1277,8 @@ public class KafkaDynamicTableFactoryTest {
             int[] keyProjection,
             int[] valueProjection,
             @Nullable String keyPrefix,
-            String topic,
+            @Nullable List<String> topics,
+            @Nullable Pattern topicPattern,
             Properties properties,
             @Nullable FlinkKafkaPartitioner<RowData> partitioner,
             DeliveryGuarantee deliveryGuarantee,
@@ -1231,7 +1292,8 @@ public class KafkaDynamicTableFactoryTest {
                 keyProjection,
                 valueProjection,
                 keyPrefix,
-                topic,
+                topics,
+                topicPattern,
                 properties,
                 partitioner,
                 deliveryGuarantee,
