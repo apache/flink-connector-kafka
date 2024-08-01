@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Tests for {@link DynamicKafkaRecordSerializationSchema}. */
 public class DynamicKafkaRecordSerializationSchemaTest extends TestLogger {
-    private static final List<String> TOPICS = Arrays.asList("topic1;topic2".split(";"));
+    private static final List<String> MULTIPLE_TOPICS = Arrays.asList("topic1", "topic2");
     private static final String TOPIC = "topic";
     private static final Pattern TOPIC_PATTERN = Pattern.compile("topic*");
 
