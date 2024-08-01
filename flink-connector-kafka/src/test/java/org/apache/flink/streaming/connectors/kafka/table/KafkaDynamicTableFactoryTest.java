@@ -1093,11 +1093,9 @@ public class KafkaDynamicTableFactoryTest {
                         });
         final String errorMessageTemp =
                 "Option 'topic' and 'topic-pattern' shouldn't be set together.";
-        try {
-            createTableSink(SCHEMA, modifiedOptions);
-        } catch (Throwable t) {
-            assertThat(t.getCause().getMessage()).isEqualTo(errorMessageTemp);
-        }
+        assertThatThrownBy(() -> createTableSink(SCHEMA, modifiedOptions))
+                .isInstanceOf(ValidationException.class)
+                .satisfies(anyCauseMatches(ValidationException.class, errorMessageTemp));
     }
 
     @Test

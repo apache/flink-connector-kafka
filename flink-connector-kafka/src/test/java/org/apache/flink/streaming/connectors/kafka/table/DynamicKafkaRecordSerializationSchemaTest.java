@@ -18,13 +18,13 @@ import java.util.List;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Tests for {@link DynamicKafkaRecordSerializationSchema}. */
 public class DynamicKafkaRecordSerializationSchemaTest extends TestLogger {
-    private static final List<String> TOPICS = Arrays.asList("topic1;topic2".split(";"));
-    private static final String TOPIC = "topic";
+    private static final List<String> MULTIPLE_TOPICS = Arrays.asList("topic1;topic2".split(";"));
+    private static final String SINGLE_TOPIC = "topic";
     private static final Pattern TOPIC_PATTERN = Pattern.compile("topic*");
 
     @ParameterizedTest
@@ -39,7 +39,7 @@ public class DynamicKafkaRecordSerializationSchemaTest extends TestLogger {
         ProducerRecord<byte[], byte[]> record = schema.serialize(rowData, context, null);
 
         // Assert the returned ProducerRecord is routed to the correct topic
-        assertEquals(record.topic(), expectedTopic);
+        assertThat(record.topic()).isEqualTo(expectedTopic);
     }
 
     @ParameterizedTest
@@ -59,23 +59,23 @@ public class DynamicKafkaRecordSerializationSchemaTest extends TestLogger {
     private static Stream<Arguments> provideTopicMetadataTestParameters() {
         String topic1 = "topic1";
         return Stream.of(
-                Arguments.of(Collections.singletonList(TOPIC), null, TOPIC, TOPIC),
-                Arguments.of(Collections.singletonList(TOPIC), null, topic1, TOPIC),
-                Arguments.of(Collections.singletonList(TOPIC), null, null, TOPIC),
-                Arguments.of(TOPICS, null, topic1, topic1),
-                Arguments.of(null, TOPIC_PATTERN, TOPIC, TOPIC));
+                Arguments.of(Collections.singletonList(SINGLE_TOPIC), null, SINGLE_TOPIC, SINGLE_TOPIC),
+                Arguments.of(Collections.singletonList(SINGLE_TOPIC), null, topic1, SINGLE_TOPIC),
+                Arguments.of(Collections.singletonList(SINGLE_TOPIC), null, null, SINGLE_TOPIC),
+                Arguments.of(MULTIPLE_TOPICS, null, topic1, topic1),
+                Arguments.of(null, TOPIC_PATTERN, SINGLE_TOPIC, SINGLE_TOPIC));
     }
 
     private static Stream<Arguments> provideInvalidTopicMetadataTestParameters() {
         String other = "other";
         return Stream.of(
                 Arguments.of(
-                        TOPICS,
+                        MULTIPLE_TOPICS,
                         null,
                         other,
                         String.format(
                                 "The topic of the sink record is not valid. Expected topic to be in: %s but was: %s",
-                                TOPICS, other)),
+                                MULTIPLE_TOPICS, other)),
                 Arguments.of(
                         null,
                         TOPIC_PATTERN,

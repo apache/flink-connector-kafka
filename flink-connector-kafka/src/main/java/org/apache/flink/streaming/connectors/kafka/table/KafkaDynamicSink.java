@@ -257,14 +257,13 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
     @Override
     public Map<String, DataType> listWritableMetadata() {
         final Map<String, DataType> metadataMap = new LinkedHashMap<>();
-        Stream.of(WritableMetadata.values())
+        for (WritableMetadata m : WritableMetadata.values()) {
+            if (topics != null && topics.size() == 1 && WritableMetadata.TOPIC.key.equals(m.key)) {
                 // When `topic` is a singleton list, TOPIC metadata is not writable
-                .filter(
-                        m ->
-                                topics == null
-                                        || topics.size() > 1
-                                        || !WritableMetadata.TOPIC.key.equals(m.key))
-                .forEachOrdered(m -> metadataMap.put(m.key, m.dataType));
+                continue;
+            }
+            metadataMap.put(m.key, m.dataType);
+        }
         return metadataMap;
     }
 
@@ -411,7 +410,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
     enum WritableMetadata {
         TOPIC(
                 "topic",
-                DataTypes.STRING().nullable(),
+                DataTypes.STRING().notNull(),
                 new MetadataConverter() {
                     private static final long serialVersionUID = 1L;
 

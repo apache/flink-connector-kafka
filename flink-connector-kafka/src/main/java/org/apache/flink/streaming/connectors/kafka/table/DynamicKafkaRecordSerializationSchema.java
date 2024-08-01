@@ -30,7 +30,11 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 
 import javax.annotation.Nullable;
 
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
@@ -38,7 +42,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 /** SerializationSchema used by {@link KafkaDynamicSink} to configure a {@link KafkaSink}. */
 class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationSchema<RowData> {
 
-    private final List<String> topics;
+    private final Set<String> topics;
     private final Pattern topicPattern;
     private final FlinkKafkaPartitioner<RowData> partitioner;
     @Nullable private final SerializationSchema<RowData> keySerialization;
@@ -48,6 +52,7 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
     private final boolean hasMetadata;
     private final int[] metadataPositions;
     private final boolean upsertMode;
+    private final Map<String, Boolean> topicPatternMatches;
 
     DynamicKafkaRecordSerializationSchema(
             @Nullable List<String> topics,
@@ -69,7 +74,11 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
                 (topics != null && topicPattern == null && topics.size() > 0)
                         || (topics == null && topicPattern != null),
                 "Either Topic or Topic Pattern must be set.");
-        this.topics = topics;
+        if (topics != null) {
+            this.topics = new HashSet<>(topics);
+        } else {
+            this.topics = null;
+        }
         this.topicPattern = topicPattern;
         this.partitioner = partitioner;
         this.keySerialization = keySerialization;
@@ -79,6 +88,8 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
         this.hasMetadata = hasMetadata;
         this.metadataPositions = metadataPositions;
         this.upsertMode = upsertMode;
+        // Cache results of topic pattern matches to avoid re-evaluating the pattern for each record
+        this.topicPatternMatches = new HashMap<>();
     }
 
     @Override
@@ -158,7 +169,7 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
     private String getTargetTopic(RowData element) {
         if (topics != null && topics.size() == 1) {
             // If topics is a singleton list, we only return the provided topic.
-            return topics.get(0);
+            return topics.stream().findFirst().get();
         }
         final String targetTopic = readMetadata(element, KafkaDynamicSink.WritableMetadata.TOPIC);
         if (targetTopic == null) {
@@ -169,13 +180,19 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
                     String.format(
                             "The topic of the sink record is not valid. Expected topic to be in: %s but was: %s",
                             topics, targetTopic));
-        } else if (topicPattern != null && !topicPattern.matcher(targetTopic).matches()) {
+        } else if (topicPattern != null && !cachedTopicPatternMatch(targetTopic)) {
             throw new IllegalArgumentException(
                     String.format(
                             "The topic of the sink record is not valid. Expected topic to match: %s but was: %s",
                             topicPattern, targetTopic));
         }
         return targetTopic;
+    }
+
+    private boolean cachedTopicPatternMatch(String topic) {
+        return topicPatternMatches.computeIfAbsent(
+                topic,
+                t -> topicPattern.matcher(t).matches());
     }
 
     private Integer extractPartition(
