@@ -103,6 +103,7 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
                     targetTopic,
                     extractPartition(
                             consumedRow,
+                            targetTopic,
                             null,
                             valueSerialized,
                             context.getPartitionsForTopic(targetTopic)),
@@ -142,6 +143,7 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
                 targetTopic,
                 extractPartition(
                         consumedRow,
+                        targetTopic,
                         keySerialized,
                         valueSerialized,
                         context.getPartitionsForTopic(targetTopic)),
@@ -197,6 +199,7 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
 
     private Integer extractPartition(
             RowData consumedRow,
+            String targetTopic,
             @Nullable byte[] keySerialized,
             byte[] valueSerialized,
             int[] partitions) {
@@ -205,7 +208,7 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
                     consumedRow,
                     keySerialized,
                     valueSerialized,
-                    getTargetTopic(consumedRow),
+                    targetTopic,
                     partitions);
         }
         return null;
