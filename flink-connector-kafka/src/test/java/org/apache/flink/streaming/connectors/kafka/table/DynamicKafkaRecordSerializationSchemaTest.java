@@ -23,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link DynamicKafkaRecordSerializationSchema}. */
 public class DynamicKafkaRecordSerializationSchemaTest extends TestLogger {
-    private static final List<String> MULTIPLE_TOPICS = Arrays.asList("topic1;topic2".split(";"));
+    private static final List<String> MULTIPLE_TOPICS = Arrays.asList("topic1", "topic2");
     private static final String SINGLE_TOPIC = "topic";
     private static final Pattern TOPIC_PATTERN = Pattern.compile("topic*");
 
