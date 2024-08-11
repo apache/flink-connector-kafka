@@ -38,6 +38,7 @@ tools/releasing/release
 tools/japicmp-output
 
 # Generated file, do not store in git
+flink-connector-kafka/.idea
 flink-python/pyflink/datastream/connectors/kafka_connector_version.py
 flink-python/apache_flink_connectors_kafka.egg-info/
 flink-python/.tox/
