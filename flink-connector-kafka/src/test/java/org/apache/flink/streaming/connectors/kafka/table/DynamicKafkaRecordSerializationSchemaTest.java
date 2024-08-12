@@ -59,7 +59,8 @@ public class DynamicKafkaRecordSerializationSchemaTest extends TestLogger {
     private static Stream<Arguments> provideTopicMetadataTestParameters() {
         String topic1 = "topic1";
         return Stream.of(
-                Arguments.of(Collections.singletonList(SINGLE_TOPIC), null, SINGLE_TOPIC, SINGLE_TOPIC),
+                Arguments.of(
+                        Collections.singletonList(SINGLE_TOPIC), null, SINGLE_TOPIC, SINGLE_TOPIC),
                 Arguments.of(Collections.singletonList(SINGLE_TOPIC), null, topic1, SINGLE_TOPIC),
                 Arguments.of(Collections.singletonList(SINGLE_TOPIC), null, null, SINGLE_TOPIC),
                 Arguments.of(MULTIPLE_TOPICS, null, topic1, topic1),

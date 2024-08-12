@@ -235,7 +235,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         List<Row> results = collectAllRows(tEnv.sqlQuery("SELECT * from kafka"));
 
         assertThat(results)
-                .containsExactly(Row.of(topic1, 1, 1102, "behavior 1"), Row.of(topic2, 2, 1103, "behavior 2"));
+                .containsExactly(
+                        Row.of(topic1, 1, 1102, "behavior 1"),
+                        Row.of(topic2, 2, 1103, "behavior 2"));
 
         // ------------- cleanup -------------------
 
@@ -290,7 +292,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         List<Row> results = collectAllRows(tEnv.sqlQuery("SELECT * from kafka"));
 
         assertThat(results)
-                .containsExactly(Row.of(topic1, 1, 1102, "behavior 1"), Row.of(topic2, 2, 1103, "behavior 2"));
+                .containsExactly(
+                        Row.of(topic1, 1, 1102, "behavior 1"),
+                        Row.of(topic2, 2, 1103, "behavior 2"));
 
         // ------------- cleanup -------------------
 

@@ -192,9 +192,7 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
     }
 
     private boolean cachedTopicPatternMatch(String topic) {
-        return topicPatternMatches.computeIfAbsent(
-                topic,
-                t -> topicPattern.matcher(t).matches());
+        return topicPatternMatches.computeIfAbsent(topic, t -> topicPattern.matcher(t).matches());
     }
 
     private Integer extractPartition(
@@ -205,11 +203,7 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
             int[] partitions) {
         if (partitioner != null) {
             return partitioner.partition(
-                    consumedRow,
-                    keySerialized,
-                    valueSerialized,
-                    targetTopic,
-                    partitions);
+                    consumedRow, keySerialized, valueSerialized, targetTopic, partitions);
         }
         return null;
     }
