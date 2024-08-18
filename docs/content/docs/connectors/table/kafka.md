@@ -337,6 +337,7 @@ Connector Options
     <tr>
       <td><h5>scan.bounded.mode</h5></td>
       <td>optional</td>
+      <td>no</td>
       <td style="word-wrap: break-word;">unbounded</td>
       <td>Enum</td>
       <td>Bounded mode for Kafka consumer, valid values are <code>'latest-offset'</code>, <code>'group-offsets'</code>, <code>'timestamp'</code> and <code>'specific-offsets'</code>.
