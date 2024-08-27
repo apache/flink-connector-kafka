@@ -216,8 +216,8 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                         + ")\n";
         final String createTopicListTable =
                 String.format(
-                        "kafka",
                         createTableTemplate,
+                        "kafka",
                         KafkaDynamicTableFactory.IDENTIFIER,
                         String.join(";", Arrays.asList(topic1, topic2)),
                         bootstraps,
@@ -225,8 +225,8 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                         formatOptions());
         final String createTopic1Table =
                 String.format(
-                        "topic1",
                         createTableTemplate,
+                        "topic1",
                         KafkaDynamicTableFactory.IDENTIFIER,
                         topic1,
                         bootstraps,
@@ -234,8 +234,8 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                         formatOptions());
         final String createTopic2Table =
                 String.format(
-                        "topic2",
                         createTableTemplate,
+                        "topic2",
                         KafkaDynamicTableFactory.IDENTIFIER,
                         topic2,
                         bootstraps,
