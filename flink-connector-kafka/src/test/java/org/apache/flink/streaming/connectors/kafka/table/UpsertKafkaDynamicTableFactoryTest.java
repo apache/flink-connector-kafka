@@ -188,8 +188,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         });
         final DataType producedDataType = SOURCE_SCHEMA.toPhysicalRowDataType();
         // Construct table source using options and table source factory
-        final DynamicTableSource actualSource =
-                createTableSource(SOURCE_SCHEMA, modifiedOptions);
+        final DynamicTableSource actualSource = createTableSource(SOURCE_SCHEMA, modifiedOptions);
 
         final KafkaDynamicSource expectedSource =
                 createExpectedScanSource(
