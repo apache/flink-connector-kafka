@@ -253,7 +253,6 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         tEnv.fromValues(values).insertInto("kafka").execute().await();
 
         // ---------- Consume stream from Kafka -------------------
-
         List<Row> results = collectAllRows(tEnv.sqlQuery("SELECT * from kafka"));
         List<Row> topic1Results = collectAllRows(tEnv.sqlQuery("SELECT * from topic1"));
         List<Row> topic2Results = collectAllRows(tEnv.sqlQuery("SELECT * from topic2"));
@@ -261,12 +260,8 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                 .containsExactlyInAnyOrder(
                         Row.of(topic1, 1, 1102, "behavior 1"),
                         Row.of(topic2, 2, 1103, "behavior 2"));
-        assertThat(topic1Results)
-                .containsExactly(
-                        Row.of(topic1, 1, 1102, "behavior 1"));
-        assertThat(topic2Results)
-                .containsExactly(
-                        Row.of(topic2, 2, 1103, "behavior 2"));
+        assertThat(topic1Results).containsExactly(Row.of(topic1, 1, 1102, "behavior 1"));
+        assertThat(topic2Results).containsExactly(Row.of(topic2, 2, 1103, "behavior 2"));
 
         // ------------- cleanup -------------------
         deleteTestTopic(topic1);
@@ -286,28 +281,51 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         // ---------- Produce an event time stream into Kafka -------------------
         String groupId = getStandardProps().getProperty("group.id");
         String bootstraps = getBootstrapServers();
-        final String createTable =
+        final String createTableTemplate =
+                "CREATE TABLE %s (\n"
+                        + "  `topic` STRING METADATA,\n"
+                        + "  `user_id` INT,\n"
+                        + "  `item_id` INT,\n"
+                        + "  `behavior` STRING\n"
+                        + ") WITH (\n"
+                        + "  'connector' = '%s',\n"
+                        + "  'topic-pattern' = '%s',\n"
+                        + "  'properties.bootstrap.servers' = '%s',\n"
+                        + "  'properties.group.id' = '%s',\n"
+                        + "  'scan.startup.mode' = 'earliest-offset',\n"
+                        + "  %s\n"
+                        + ")\n";
+        final String createTopicPatternTable =
                 String.format(
-                        "CREATE TABLE kafka (\n"
-                                + "  `topic` STRING METADATA,\n"
-                                + "  `user_id` INT,\n"
-                                + "  `item_id` INT,\n"
-                                + "  `behavior` STRING\n"
-                                + ") WITH (\n"
-                                + "  'connector' = '%s',\n"
-                                + "  'topic-pattern' = '%s',\n"
-                                + "  'properties.bootstrap.servers' = '%s',\n"
-                                + "  'properties.group.id' = '%s',\n"
-                                + "  'scan.startup.mode' = 'earliest-offset',\n"
-                                + "  %s\n"
-                                + ")\n",
+                        createTableTemplate,
+                        "kafka",
                         KafkaDynamicTableFactory.IDENTIFIER,
                         topicPattern,
                         bootstraps,
                         groupId,
                         formatOptions());
+        final String createTopic1Table =
+                String.format(
+                        createTableTemplate,
+                        "topic1",
+                        KafkaDynamicTableFactory.IDENTIFIER,
+                        topic1,
+                        bootstraps,
+                        groupId,
+                        formatOptions());
+        final String createTopic2Table =
+                String.format(
+                        createTableTemplate,
+                        "topic2",
+                        KafkaDynamicTableFactory.IDENTIFIER,
+                        topic2,
+                        bootstraps,
+                        groupId,
+                        formatOptions());
 
-        tEnv.executeSql(createTable);
+        tEnv.executeSql(createTopicPatternTable);
+        tEnv.executeSql(createTopic1Table);
+        tEnv.executeSql(createTopic2Table);
 
         List<Row> values =
                 Arrays.asList(
@@ -316,13 +334,15 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         tEnv.fromValues(values).insertInto("kafka").execute().await();
 
         // ---------- Consume stream from Kafka -------------------
-
         List<Row> results = collectAllRows(tEnv.sqlQuery("SELECT * from kafka"));
-
+        List<Row> topic1Results = collectAllRows(tEnv.sqlQuery("SELECT * from topic1"));
+        List<Row> topic2Results = collectAllRows(tEnv.sqlQuery("SELECT * from topic2"));
         assertThat(results)
-                .containsExactly(
+                .containsExactlyInAnyOrder(
                         Row.of(topic1, 1, 1102, "behavior 1"),
                         Row.of(topic2, 2, 1103, "behavior 2"));
+        assertThat(topic1Results).containsExactly(Row.of(topic1, 1, 1102, "behavior 1"));
+        assertThat(topic2Results).containsExactly(Row.of(topic2, 2, 1103, "behavior 2"));
 
         // ------------- cleanup -------------------
 
