@@ -167,7 +167,39 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         SOURCE_KEY_FIELDS,
                         SOURCE_VALUE_FIELDS,
                         null,
-                        SOURCE_TOPIC,
+                        Collections.singletonList(SOURCE_TOPIC),
+                        UPSERT_KAFKA_SOURCE_PROPERTIES);
+        assertThat(actualSource).isEqualTo(expectedSource);
+
+        final KafkaDynamicSource actualUpsertKafkaSource = (KafkaDynamicSource) actualSource;
+        ScanTableSource.ScanRuntimeProvider provider =
+                actualUpsertKafkaSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
+        assertKafkaSource(provider);
+    }
+
+    @Test
+    public void testTableSourceWithTopicList() {
+        final Map<String, String> modifiedOptions =
+                getModifiedOptions(
+                        getFullSourceOptions(),
+                        options -> {
+                            options.put(
+                                    "topic", String.format("%s;%s", SOURCE_TOPIC, SOURCE_TOPIC));
+                        });
+        final DataType producedDataType = SOURCE_SCHEMA.toPhysicalRowDataType();
+        // Construct table source using options and table source factory
+        final DynamicTableSource actualSource =
+                createTableSource(SOURCE_SCHEMA, modifiedOptions);
+
+        final KafkaDynamicSource expectedSource =
+                createExpectedScanSource(
+                        producedDataType,
+                        keyDecodingFormat,
+                        valueDecodingFormat,
+                        SOURCE_KEY_FIELDS,
+                        SOURCE_VALUE_FIELDS,
+                        null,
+                        Arrays.asList(SOURCE_TOPIC, SOURCE_TOPIC),
                         UPSERT_KAFKA_SOURCE_PROPERTIES);
         assertThat(actualSource).isEqualTo(expectedSource);
 
@@ -819,7 +851,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
             int[] keyFields,
             int[] valueFields,
             String keyPrefix,
-            String topic,
+            List<String> topic,
             Properties properties) {
         return new KafkaDynamicSource(
                 producedDataType,
@@ -828,7 +860,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                 keyFields,
                 valueFields,
                 keyPrefix,
-                Collections.singletonList(topic),
+                topic,
                 null,
                 properties,
                 StartupMode.EARLIEST,

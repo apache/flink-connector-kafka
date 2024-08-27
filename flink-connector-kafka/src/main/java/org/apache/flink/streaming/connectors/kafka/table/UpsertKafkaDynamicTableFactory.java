@@ -250,7 +250,6 @@ public class UpsertKafkaDynamicTableFactory
             Format keyFormat,
             Format valueFormat,
             int[] primaryKeyIndexes) {
-        validateTopic(tableOptions);
         validateScanBoundedMode(tableOptions);
         validateFormat(keyFormat, valueFormat, tableOptions);
         validatePKConstraints(primaryKeyIndexes);
@@ -264,15 +263,6 @@ public class UpsertKafkaDynamicTableFactory
         validateFormat(keyFormat, valueFormat, tableOptions);
         validatePKConstraints(primaryKeyIndexes);
         validateSinkBufferFlush(tableOptions);
-    }
-
-    private static void validateTopic(ReadableConfig tableOptions) {
-        List<String> topic = tableOptions.get(TOPIC);
-        if (topic.size() > 1) {
-            throw new ValidationException(
-                    "The 'upsert-kafka' connector doesn't support topic list now. "
-                            + "Please use single topic as the value of the parameter 'topic'.");
-        }
     }
 
     private static void validateFormat(

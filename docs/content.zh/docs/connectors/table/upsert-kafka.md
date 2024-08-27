@@ -119,7 +119,7 @@ of all available metadata fields.
       <td>必选</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>
-      <td>用于读取和写入的 Kafka topic 名称。</td>
+      <td>当表用作 source 时读取数据的 topic 名，或当表用作 sink 时写入的 topic 名。它还支持通过分号分隔的 topic 列表，如 <code>'topic-1;topic-2'</code> 来作为 source 的 topic 列表。注意，“topic-pattern”和“topic”只能指定其中一个。对于 sink 来说，topic 名是写入数据的 topic。它还支持 sink 的 topic 列表。提供的 topic 列表被视为 `topic` 元数据列的有效值的允许列表。如果提供了列表，对于 sink 表，“topic”元数据列是可写的并且必须指定。</td>
     </tr>
     <tr>
       <td><h5>properties.bootstrap.servers</h5></td>
