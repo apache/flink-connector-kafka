@@ -69,6 +69,7 @@ import org.apache.flink.streaming.connectors.kafka.internals.KafkaDeserializatio
 import org.apache.flink.streaming.connectors.kafka.internals.KafkaTopicPartition;
 import org.apache.flink.streaming.connectors.kafka.testutils.DataGenerators;
 import org.apache.flink.streaming.connectors.kafka.testutils.FailingIdentityMapper;
+import org.apache.flink.streaming.connectors.kafka.testutils.KafkaUtils;
 import org.apache.flink.streaming.connectors.kafka.testutils.PartitionValidatingMapper;
 import org.apache.flink.streaming.connectors.kafka.testutils.ThrottledMapper;
 import org.apache.flink.streaming.connectors.kafka.testutils.Tuple2FlinkPartitioner;
@@ -869,7 +870,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
                             }
                         });
         Properties producerProperties =
-                FlinkKafkaProducerBase.getPropertiesFromBrokerList(brokerConnectionStrings);
+                KafkaUtils.getPropertiesFromBrokerList(brokerConnectionStrings);
         producerProperties.setProperty("retries", "3");
         producerProperties.putAll(secureProps);
         kafkaServer.produceIntoKafka(stream, topic, sinkSchema, producerProperties, null);
@@ -1550,7 +1551,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
                 new TypeInformationKeyValueSerializationSchema<>(
                         Long.class, PojoValue.class, env.getConfig());
         Properties producerProperties =
-                FlinkKafkaProducerBase.getPropertiesFromBrokerList(brokerConnectionStrings);
+                KafkaUtils.getPropertiesFromBrokerList(brokerConnectionStrings);
         producerProperties.setProperty("retries", "3");
         kafkaServer.produceIntoKafka(kvStream, topic, schema, producerProperties, null);
         env.execute("Write KV to Kafka");
@@ -1646,7 +1647,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
                         byte[].class, PojoValue.class, env.getConfig());
 
         Properties producerProperties =
-                FlinkKafkaProducerBase.getPropertiesFromBrokerList(brokerConnectionStrings);
+                KafkaUtils.getPropertiesFromBrokerList(brokerConnectionStrings);
         producerProperties.setProperty("retries", "3");
         producerProperties.putAll(secureProps);
         kafkaServer.produceIntoKafka(kvStream, topic, schema, producerProperties, null);
@@ -2288,7 +2289,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 
             // the producer must not produce duplicates
             Properties producerProperties =
-                    FlinkKafkaProducerBase.getPropertiesFromBrokerList(brokerConnectionStrings);
+                    KafkaUtils.getPropertiesFromBrokerList(brokerConnectionStrings);
             producerProperties.setProperty("retries", "0");
             producerProperties.putAll(secureProps);
 
@@ -2392,7 +2393,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 
         // the producer must not produce duplicates
         Properties producerProperties =
-                FlinkKafkaProducerBase.getPropertiesFromBrokerList(brokerConnectionStrings);
+                KafkaUtils.getPropertiesFromBrokerList(brokerConnectionStrings);
         producerProperties.setProperty("retries", "0");
         producerProperties.putAll(secureProps);
 
