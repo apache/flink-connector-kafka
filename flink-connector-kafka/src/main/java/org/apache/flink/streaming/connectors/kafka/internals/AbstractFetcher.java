@@ -435,6 +435,14 @@ public abstract class AbstractFetcher<T, KPH> {
                                         kafkaHandle,
                                         deserializedWatermarkStrategy.createTimestampAssigner(
                                                 () -> consumerMetricGroup),
+                                        // When upgrading to Flink 2.0, context has to provide also
+                                        // the input activity clock. This is not trivial for the old
+                                        // sources. Ideally we should drop this old source before
+                                        // this connector is upgraded to Flink 2.0. Otherwise, we
+                                        // can avoid the compilation error without fixing the bug
+                                        // addressed by the FLIP-471, by returning SystemClock,
+                                        // which would reproduce the pre-FLIP-471 behavior (without
+                                        // fixing the underlying bug).
                                         deserializedWatermarkStrategy.createWatermarkGenerator(
                                                 () -> consumerMetricGroup),
                                         immediateOutput,
