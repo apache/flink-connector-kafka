@@ -36,6 +36,7 @@ import org.apache.flink.streaming.connectors.kafka.internals.KeyedSerializationS
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
 import org.apache.flink.streaming.connectors.kafka.testutils.FailingIdentityMapper;
 import org.apache.flink.streaming.connectors.kafka.testutils.IntegerSource;
+import org.apache.flink.streaming.connectors.kafka.testutils.KafkaUtils;
 import org.apache.flink.test.util.SuccessException;
 import org.apache.flink.test.util.TestUtils;
 import org.apache.flink.util.Preconditions;
@@ -148,8 +149,7 @@ public abstract class KafkaProducerTestBase extends KafkaTestBaseWithFlink {
                             .setParallelism(1);
 
             Properties props = new Properties();
-            props.putAll(
-                    FlinkKafkaProducerBase.getPropertiesFromBrokerList(brokerConnectionStrings));
+            props.putAll(KafkaUtils.getPropertiesFromBrokerList(brokerConnectionStrings));
             props.putAll(secureProps);
 
             // sink partitions into

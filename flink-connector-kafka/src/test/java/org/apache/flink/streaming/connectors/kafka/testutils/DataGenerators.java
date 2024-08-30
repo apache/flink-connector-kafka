@@ -26,7 +26,6 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.source.RichParallelSourceFunction;
 import org.apache.flink.streaming.api.operators.StreamSink;
-import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducerBase;
 import org.apache.flink.streaming.connectors.kafka.KafkaTestEnvironment;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkFixedPartitioner;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
@@ -98,8 +97,7 @@ public class DataGenerators {
 
         Properties props = new Properties();
         props.putAll(
-                FlinkKafkaProducerBase.getPropertiesFromBrokerList(
-                        testServer.getBrokerConnectionString()));
+                KafkaUtils.getPropertiesFromBrokerList(testServer.getBrokerConnectionString()));
         Properties secureProps = testServer.getSecureProperties();
         if (secureProps != null) {
             props.putAll(testServer.getSecureProperties());
@@ -156,8 +154,7 @@ public class DataGenerators {
             OneInputStreamOperatorTestHarness<String, Object> testHarness = null;
             try {
                 Properties producerProperties =
-                        FlinkKafkaProducerBase.getPropertiesFromBrokerList(
-                                server.getBrokerConnectionString());
+                        KafkaUtils.getPropertiesFromBrokerList(server.getBrokerConnectionString());
                 producerProperties.setProperty("retries", "3");
 
                 StreamSink<String> sink =
