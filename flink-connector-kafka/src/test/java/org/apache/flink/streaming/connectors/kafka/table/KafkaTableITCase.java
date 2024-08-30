@@ -212,6 +212,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                         + "  'properties.bootstrap.servers' = '%s',\n"
                         + "  'properties.group.id' = '%s',\n"
                         + "  'scan.startup.mode' = 'earliest-offset',\n"
+                        + "  'scan.bounded.mode' = 'latest-offset',\n"
                         + "  %s\n"
                         + ")\n";
         final String createTopicListTable =
@@ -293,6 +294,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                         + "  'properties.bootstrap.servers' = '%s',\n"
                         + "  'properties.group.id' = '%s',\n"
                         + "  'scan.startup.mode' = 'earliest-offset',\n"
+                        + "  'scan.bounded.mode' = 'latest-offset',\n"
                         + "  %s\n"
                         + ")\n";
         final String createTopicPatternTable =
