@@ -35,6 +35,7 @@ import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceS
 import org.apache.flink.connector.kafka.source.KafkaPropertiesUtil;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumerator;
+import org.apache.flink.connector.kafka.source.enumerator.TopicPartitionAndAssignmentStatus;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
@@ -298,24 +299,18 @@ public class DynamicKafkaSourceEnumerator
                 final Set<String> activeTopics = activeClusterTopics.getValue();
 
                 // filter out removed topics
-                Set<TopicPartition> activeAssignedPartitions =
-                        kafkaSourceEnumState.assignedPartitions().stream()
-                                .filter(tp -> activeTopics.contains(tp.topic()))
-                                .collect(Collectors.toSet());
-                Set<TopicPartition> activeUnassignedInitialPartitions =
-                        kafkaSourceEnumState.unassignedInitialPartitions().stream()
-                                .filter(tp -> activeTopics.contains(tp.topic()))
-                                .collect(Collectors.toSet());
+                Set<TopicPartitionAndAssignmentStatus> partitions = kafkaSourceEnumState.partitions().stream()
+                        .filter(tp -> activeTopics.contains(tp.topicPartition().topic()))
+                        .collect(Collectors.toSet());
 
                 newKafkaSourceEnumState =
                         new KafkaSourceEnumState(
-                                activeAssignedPartitions,
-                                activeUnassignedInitialPartitions,
+                                partitions,
                                 kafkaSourceEnumState.initialDiscoveryFinished());
             } else {
                 newKafkaSourceEnumState =
                         new KafkaSourceEnumState(
-                                Collections.emptySet(), Collections.emptySet(), false);
+                                Collections.emptySet(),false);
             }
 
             // restarts enumerator from state using only the active topic partitions, to avoid
