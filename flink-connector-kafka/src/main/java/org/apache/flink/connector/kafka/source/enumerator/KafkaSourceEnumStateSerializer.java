@@ -118,7 +118,6 @@ public class KafkaSourceEnumStateSerializer
                 DataInputStream in = new DataInputStream(bais)) {
 
             final int numPartitions = in.readInt();
-            Set<TopicPartition> topicPartitions = new HashSet<>(numPartitions);
             Set<TopicPartitionAndAssignmentStatus> partitions = new HashSet<>(numPartitions);
             for (int i = 0; i < numPartitions; i++) {
                 final String topic = in.readUTF();
