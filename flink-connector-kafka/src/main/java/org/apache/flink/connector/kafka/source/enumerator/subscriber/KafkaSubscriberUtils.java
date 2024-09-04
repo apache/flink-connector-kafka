@@ -44,7 +44,7 @@ class KafkaSubscriberUtils {
         try {
             Set<String> allTopicNames = adminClient.listTopics().names().get();
             Set<String> patternTopicNames = allTopicNames.stream()
-                    .filter(topicName -> topicPattern.matcher(topicName).matches())
+                    .filter(name -> topicPattern.matcher(name).matches())
                     .collect(Collectors.toSet());
             return getTopicMetadata(adminClient, patternTopicNames);
         } catch (Exception e) {
