@@ -43,10 +43,10 @@ class KafkaSubscriberUtils {
     static Map<String, TopicDescription> getTopicMetadata(AdminClient adminClient, Pattern topicPattern) {
         try {
             Set<String> allTopicNames = adminClient.listTopics().names().get();
-            Set<String> patternTopicNames = allTopicNames.stream()
+            Set<String> matchedTopicNames = allTopicNames.stream()
                     .filter(name -> topicPattern.matcher(name).matches())
                     .collect(Collectors.toSet());
-            return getTopicMetadata(adminClient, patternTopicNames);
+            return getTopicMetadata(adminClient, matchedTopicNames);
         } catch (Exception e) {
             throw new RuntimeException(
                     String.format("Failed to get metadata for %s topics.", topicPattern.pattern()), e);
