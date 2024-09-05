@@ -19,15 +19,28 @@ package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.serialization.SerializationSchema;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
+import org.apache.flink.connector.kafka.lineage.LineageFacetProvider;
+import org.apache.flink.connector.kafka.lineage.facets.KafkaTopicListFacet;
+import org.apache.flink.connector.kafka.lineage.facets.TypeInformationFacet;
+import org.apache.flink.streaming.api.lineage.LineageDatasetFacet;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
 
+import com.google.common.reflect.Invokable;
+import com.google.common.reflect.TypeToken;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.Serializer;
 
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
 import java.util.function.Function;
@@ -122,7 +135,8 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
     public KafkaRecordSerializationSchemaBuilder<IN> setTopic(String topic) {
         checkState(this.topicSelector == null, "Topic selector already set.");
         checkNotNull(topic);
-        this.topicSelector = new CachingTopicSelector<>((e) -> topic);
+
+        this.topicSelector = new ConstantTopicSelector<>(topic);
         return this;
     }
 
@@ -283,6 +297,27 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
         checkState(keySerializationSchema == null, "Key serializer already set.");
     }
 
+    private static class ConstantTopicSelector<IN>
+            implements Function<IN, String>, Serializable, LineageFacetProvider {
+
+        private String topic;
+
+        ConstantTopicSelector(String topic) {
+            this.topic = topic;
+        }
+
+        @Override
+        public String apply(IN in) {
+            return topic;
+        }
+
+        @Override
+        public Collection<LineageDatasetFacet> getDatasetFacets() {
+            return Collections.singletonList(
+                    new KafkaTopicListFacet(Collections.singletonList(topic)));
+        }
+    }
+
     private static class CachingTopicSelector<IN> implements Function<IN, String>, Serializable {
 
         private static final int CACHE_RESET_SIZE = 5;
@@ -306,7 +341,7 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
     }
 
     private static class KafkaRecordSerializationSchemaWrapper<IN>
-            implements KafkaRecordSerializationSchema<IN> {
+            implements LineageFacetProvider, KafkaRecordSerializationSchema<IN> {
         private final SerializationSchema<? super IN> valueSerializationSchema;
         private final Function<? super IN, String> topicSelector;
         private final KafkaPartitioner<? super IN> partitioner;
@@ -368,6 +403,35 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
                     key,
                     value,
                     headerProvider != null ? headerProvider.getHeaders(element) : null);
+        }
+
+        @Override
+        public List<LineageDatasetFacet> getDatasetFacets() {
+            List<LineageDatasetFacet> facets = new ArrayList<>();
+            if (topicSelector instanceof LineageFacetProvider) {
+                facets.addAll(((LineageFacetProvider) topicSelector).getDatasetFacets());
+            }
+
+            if (this.valueSerializationSchema instanceof ResultTypeQueryable) {
+                facets.add(
+                        new TypeInformationFacet(
+                                ((ResultTypeQueryable<?>) this.valueSerializationSchema)
+                                        .getProducedType()));
+            } else {
+                // gets type information from serialize method signature
+                Arrays.stream(this.valueSerializationSchema.getClass().getMethods())
+                        .map(m -> Invokable.from(m))
+                        .filter(m -> "serialize".equalsIgnoreCase(m.getName()))
+                        .map(m -> m.getParameters().get(0))
+                        .filter(p -> !p.getType().equals(TypeToken.of(Object.class)))
+                        .findFirst()
+                        .map(p -> p.getType())
+                        .map(t -> TypeInformation.of(t.getRawType()))
+                        .map(g -> new TypeInformationFacet(g))
+                        .ifPresent(f -> facets.add(f));
+            }
+
+            return facets;
         }
     }
 }

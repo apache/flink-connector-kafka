@@ -18,6 +18,10 @@
 
 package org.apache.flink.connector.kafka.source.reader.deserializer;
 
+import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.connector.kafka.lineage.LineageFacetProvider;
+import org.apache.flink.connector.kafka.lineage.facets.TypeInformationFacet;
 import org.apache.flink.connector.kafka.util.JacksonMapperFactory;
 import org.apache.flink.connector.testutils.formats.DummyInitializationContext;
 import org.apache.flink.connector.testutils.source.deserialization.TestingDeserializationContext;
@@ -76,6 +80,8 @@ public class KafkaRecordDeserializationSchemaTest {
         assertThat(deserializedValue.get("metadata").get("topic").asText()).isEqualTo("topic#1");
         assertThat(deserializedValue.get("metadata").get("offset").asInt()).isEqualTo(4);
         assertThat(deserializedValue.get("metadata").get("partition").asInt()).isEqualTo(3);
+        assertThat(((LineageFacetProvider) schema).getDatasetFacets())
+                .containsExactly(new TypeInformationFacet(TypeInformation.of(ObjectNode.class)));
     }
 
     @Test
@@ -102,6 +108,12 @@ public class KafkaRecordDeserializationSchemaTest {
         assertThat(deserializedValue.get("word").asText()).isEqualTo("world");
         assertThat(deserializedValue.get("key")).isNull();
         assertThat(deserializedValue.get("metadata")).isNull();
+        assertThat(((LineageFacetProvider) schema).getDatasetFacets())
+                .containsExactly(
+                        new TypeInformationFacet(
+                                TypeInformation.of(
+                                        org.apache.flink.shaded.jackson2.com.fasterxml.jackson
+                                                .databind.node.ObjectNode.class)));
     }
 
     @Test
@@ -119,6 +131,8 @@ public class KafkaRecordDeserializationSchemaTest {
 
         assertThat(collector.list).hasSize(1);
         assertThat(collector.list.get(0)).isEqualTo("world");
+        assertThat(((LineageFacetProvider) schema).getDatasetFacets())
+                .containsExactly(new TypeInformationFacet(BasicTypeInfo.STRING_TYPE_INFO));
     }
 
     @Test

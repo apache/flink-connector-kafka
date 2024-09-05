@@ -22,11 +22,18 @@ import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.sink2.Committer;
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.kafka.lineage.LineageUtil;
+import org.apache.flink.connector.kafka.lineage.facets.KafkaPropertiesFacet;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
+import org.apache.flink.streaming.api.lineage.LineageDatasetFacet;
+import org.apache.flink.streaming.api.lineage.LineageVertex;
+import org.apache.flink.streaming.api.lineage.LineageVertexProvider;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Properties;
 
 /**
@@ -54,7 +61,8 @@ import java.util.Properties;
  */
 @PublicEvolving
 public class KafkaSink<IN>
-        implements TwoPhaseCommittingStatefulSink<IN, KafkaWriterState, KafkaCommittable> {
+        implements LineageVertexProvider,
+                TwoPhaseCommittingStatefulSink<IN, KafkaWriterState, KafkaCommittable> {
 
     private final DeliveryGuarantee deliveryGuarantee;
 
@@ -131,5 +139,17 @@ public class KafkaSink<IN>
     @VisibleForTesting
     protected Properties getKafkaProducerConfig() {
         return kafkaProducerConfig;
+    }
+
+    @Override
+    public LineageVertex getLineageVertex() {
+        List<LineageDatasetFacet> facets = new ArrayList<>();
+
+        // add all the facets from deserialization schema and subscriber
+        facets.addAll(LineageUtil.facetsFrom(recordSerializer));
+        facets.add(new KafkaPropertiesFacet(this.kafkaProducerConfig));
+
+        String namespace = LineageUtil.datasetNamespaceOf(this.kafkaProducerConfig);
+        return LineageUtil.lineageVertexOf(LineageUtil.datasetsFrom(namespace, facets));
     }
 }

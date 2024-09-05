@@ -33,6 +33,9 @@ import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.synchronization.FutureCompletingBlockingQueue;
+import org.apache.flink.connector.kafka.lineage.LineageUtil;
+import org.apache.flink.connector.kafka.lineage.facets.KafkaPropertiesFacet;
+import org.apache.flink.connector.kafka.lineage.facets.TypeInformationFacet;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumStateSerializer;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumerator;
@@ -48,6 +51,9 @@ import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplitSerializer;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.metrics.MetricGroup;
+import org.apache.flink.streaming.api.lineage.LineageDatasetFacet;
+import org.apache.flink.streaming.api.lineage.LineageVertexProvider;
+import org.apache.flink.streaming.api.lineage.SourceLineageVertex;
 import org.apache.flink.util.UserCodeClassLoader;
 import org.apache.flink.util.function.SerializableSupplier;
 
@@ -56,11 +62,15 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+
+import static org.apache.flink.connector.kafka.lineage.LineageUtil.sourceLineageVertexOf;
 
 /**
  * The Source implementation of Kafka. Please use a {@link KafkaSourceBuilder} to construct a {@link
@@ -87,7 +97,8 @@ import java.util.function.Supplier;
  */
 @PublicEvolving
 public class KafkaSource<OUT>
-        implements Source<OUT, KafkaPartitionSplit, KafkaSourceEnumState>,
+        implements LineageVertexProvider,
+                Source<OUT, KafkaPartitionSplit, KafkaSourceEnumState>,
                 ResultTypeQueryable<OUT> {
     private static final long serialVersionUID = -8755372893283732098L;
     // Users can choose only one of the following ways to specify the topics to consume from.
@@ -250,5 +261,20 @@ public class KafkaSource<OUT>
     @VisibleForTesting
     OffsetsInitializer getStoppingOffsetsInitializer() {
         return stoppingOffsetsInitializer;
+    }
+
+    @Override
+    public SourceLineageVertex getLineageVertex() {
+        List<LineageDatasetFacet> facets = new ArrayList<>();
+
+        // add all the facets from deserialization schema and subscriber
+        facets.addAll(LineageUtil.facetsFrom(deserializationSchema));
+        facets.addAll(LineageUtil.facetsFrom(subscriber));
+
+        facets.add(new TypeInformationFacet(getProducedType()));
+        facets.add(new KafkaPropertiesFacet(props));
+
+        String namespace = LineageUtil.datasetNamespaceOf(props);
+        return sourceLineageVertexOf(LineageUtil.datasetsFrom(namespace, facets));
     }
 }

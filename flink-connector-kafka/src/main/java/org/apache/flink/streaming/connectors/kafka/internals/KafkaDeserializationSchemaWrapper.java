@@ -20,10 +20,16 @@ package org.apache.flink.streaming.connectors.kafka.internals;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.connector.kafka.lineage.LineageFacetProvider;
+import org.apache.flink.connector.kafka.lineage.facets.TypeInformationFacet;
+import org.apache.flink.streaming.api.lineage.LineageDatasetFacet;
 import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 import org.apache.flink.util.Collector;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+
+import java.util.Collections;
+import java.util.List;
 
 /**
  * A simple wrapper for using the DeserializationSchema with the KafkaDeserializationSchema
@@ -33,7 +39,8 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
  */
 @Internal
 @Deprecated
-public class KafkaDeserializationSchemaWrapper<T> implements KafkaDeserializationSchema<T> {
+public class KafkaDeserializationSchemaWrapper<T>
+        implements KafkaDeserializationSchema<T>, LineageFacetProvider {
 
     private static final long serialVersionUID = 2651665280744549932L;
 
@@ -67,5 +74,10 @@ public class KafkaDeserializationSchemaWrapper<T> implements KafkaDeserializatio
     @Override
     public TypeInformation<T> getProducedType() {
         return deserializationSchema.getProducedType();
+    }
+
+    @Override
+    public List<LineageDatasetFacet> getDatasetFacets() {
+        return Collections.singletonList(new TypeInformationFacet(this.getProducedType()));
     }
 }

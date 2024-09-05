@@ -18,6 +18,9 @@
 
 package org.apache.flink.connector.kafka.source.enumerator.subscriber;
 
+import org.apache.flink.connector.kafka.lineage.LineageFacetProvider;
+import org.apache.flink.connector.kafka.lineage.facets.KafkaTopicListFacet;
+import org.apache.flink.connector.kafka.lineage.facets.KafkaTopicPatternFacet;
 import org.apache.flink.connector.kafka.testutils.KafkaSourceTestEnv;
 
 import org.apache.kafka.clients.admin.AdminClient;
@@ -71,6 +74,8 @@ public class KafkaSubscriberTest {
                 new HashSet<>(KafkaSourceTestEnv.getPartitionsForTopics(topics));
 
         assertThat(subscribedPartitions).isEqualTo(expectedSubscribedPartitions);
+        assertThat(((LineageFacetProvider) subscriber).getDatasetFacets())
+                .containsExactly(new KafkaTopicListFacet(topics));
     }
 
     @Test
@@ -96,6 +101,8 @@ public class KafkaSubscriberTest {
                         KafkaSourceTestEnv.getPartitionsForTopics(Collections.singleton(TOPIC2)));
 
         assertThat(subscribedPartitions).isEqualTo(expectedSubscribedPartitions);
+        assertThat(((LineageFacetProvider) subscriber).getDatasetFacets())
+                .containsExactly(new KafkaTopicPatternFacet(Pattern.compile("pattern.*")));
     }
 
     @Test
@@ -111,6 +118,8 @@ public class KafkaSubscriberTest {
                 subscriber.getSubscribedTopicPartitions(adminClient);
 
         assertThat(subscribedPartitions).isEqualTo(partitions);
+        assertThat(((LineageFacetProvider) subscriber).getDatasetFacets())
+                .containsExactly(new KafkaTopicListFacet(topics));
     }
 
     @Test
