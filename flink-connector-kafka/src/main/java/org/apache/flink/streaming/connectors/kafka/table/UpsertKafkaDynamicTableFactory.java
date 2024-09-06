@@ -66,6 +66,7 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SINK_BUFFER_FLUSH_MAX_ROWS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SINK_PARALLELISM;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC_PATTERN;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TRANSACTIONAL_ID_PREFIX;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FIELDS_INCLUDE;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
@@ -75,8 +76,8 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.createValueFormatProjection;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getBoundedOptions;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getKafkaProperties;
-import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getSourceTopicPattern;
-import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getSourceTopics;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getTopicPattern;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getTopics;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.validateScanBoundedMode;
 
 /** Upsert-Kafka factory. */
@@ -94,7 +95,6 @@ public class UpsertKafkaDynamicTableFactory
     public Set<ConfigOption<?>> requiredOptions() {
         final Set<ConfigOption<?>> options = new HashSet<>();
         options.add(PROPS_BOOTSTRAP_SERVERS);
-        options.add(TOPIC);
         options.add(KEY_FORMAT);
         options.add(VALUE_FORMAT);
         return options;
@@ -103,6 +103,8 @@ public class UpsertKafkaDynamicTableFactory
     @Override
     public Set<ConfigOption<?>> optionalOptions() {
         final Set<ConfigOption<?>> options = new HashSet<>();
+        options.add(TOPIC);
+        options.add(TOPIC_PATTERN);
         options.add(KEY_FIELDS_PREFIX);
         options.add(VALUE_FIELDS_INCLUDE);
         options.add(SINK_PARALLELISM);
@@ -155,8 +157,8 @@ public class UpsertKafkaDynamicTableFactory
                 keyValueProjections.f0,
                 keyValueProjections.f1,
                 keyPrefix,
-                getSourceTopics(tableOptions),
-                getSourceTopicPattern(tableOptions),
+                getTopics(tableOptions),
+                getTopicPattern(tableOptions),
                 properties,
                 earliest,
                 Collections.emptyMap(),
@@ -212,7 +214,8 @@ public class UpsertKafkaDynamicTableFactory
                 keyValueProjections.f0,
                 keyValueProjections.f1,
                 keyPrefix,
-                tableOptions.get(TOPIC).get(0),
+                getTopics(tableOptions),
+                getTopicPattern(tableOptions),
                 properties,
                 null,
                 tableOptions.get(DELIVERY_GUARANTEE),
@@ -247,7 +250,6 @@ public class UpsertKafkaDynamicTableFactory
             Format keyFormat,
             Format valueFormat,
             int[] primaryKeyIndexes) {
-        validateTopic(tableOptions);
         validateScanBoundedMode(tableOptions);
         validateFormat(keyFormat, valueFormat, tableOptions);
         validatePKConstraints(primaryKeyIndexes);
@@ -258,19 +260,9 @@ public class UpsertKafkaDynamicTableFactory
             Format keyFormat,
             Format valueFormat,
             int[] primaryKeyIndexes) {
-        validateTopic(tableOptions);
         validateFormat(keyFormat, valueFormat, tableOptions);
         validatePKConstraints(primaryKeyIndexes);
         validateSinkBufferFlush(tableOptions);
-    }
-
-    private static void validateTopic(ReadableConfig tableOptions) {
-        List<String> topic = tableOptions.get(TOPIC);
-        if (topic.size() > 1) {
-            throw new ValidationException(
-                    "The 'upsert-kafka' connector doesn't support topic list now. "
-                            + "Please use single topic as the value of the parameter 'topic'.");
-        }
     }
 
     private static void validateFormat(

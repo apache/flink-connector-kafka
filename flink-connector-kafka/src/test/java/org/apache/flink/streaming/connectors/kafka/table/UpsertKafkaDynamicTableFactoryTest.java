@@ -77,10 +77,12 @@ import org.junit.rules.ExpectedException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 
 import static org.apache.flink.core.testutils.FlinkMatchers.containsCause;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanBoundedMode;
@@ -165,7 +167,38 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         SOURCE_KEY_FIELDS,
                         SOURCE_VALUE_FIELDS,
                         null,
-                        SOURCE_TOPIC,
+                        Collections.singletonList(SOURCE_TOPIC),
+                        UPSERT_KAFKA_SOURCE_PROPERTIES);
+        assertThat(actualSource).isEqualTo(expectedSource);
+
+        final KafkaDynamicSource actualUpsertKafkaSource = (KafkaDynamicSource) actualSource;
+        ScanTableSource.ScanRuntimeProvider provider =
+                actualUpsertKafkaSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
+        assertKafkaSource(provider);
+    }
+
+    @Test
+    public void testTableSourceWithTopicList() {
+        final Map<String, String> modifiedOptions =
+                getModifiedOptions(
+                        getFullSourceOptions(),
+                        options -> {
+                            options.put(
+                                    "topic", String.format("%s;%s", SOURCE_TOPIC, SOURCE_TOPIC));
+                        });
+        final DataType producedDataType = SOURCE_SCHEMA.toPhysicalRowDataType();
+        // Construct table source using options and table source factory
+        final DynamicTableSource actualSource = createTableSource(SOURCE_SCHEMA, modifiedOptions);
+
+        final KafkaDynamicSource expectedSource =
+                createExpectedScanSource(
+                        producedDataType,
+                        keyDecodingFormat,
+                        valueDecodingFormat,
+                        SOURCE_KEY_FIELDS,
+                        SOURCE_VALUE_FIELDS,
+                        null,
+                        Arrays.asList(SOURCE_TOPIC, SOURCE_TOPIC),
                         UPSERT_KAFKA_SOURCE_PROPERTIES);
         assertThat(actualSource).isEqualTo(expectedSource);
 
@@ -195,7 +228,50 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         SINK_KEY_FIELDS,
                         SINK_VALUE_FIELDS,
                         null,
-                        SINK_TOPIC,
+                        Collections.singletonList(SINK_TOPIC),
+                        null,
+                        UPSERT_KAFKA_SINK_PROPERTIES,
+                        DeliveryGuarantee.EXACTLY_ONCE,
+                        SinkBufferFlushMode.DISABLED,
+                        null,
+                        "kafka-sink");
+
+        // Test sink format.
+        final KafkaDynamicSink actualUpsertKafkaSink = (KafkaDynamicSink) actualSink;
+        assertThat(actualSink).isEqualTo(expectedSink);
+
+        // Test kafka producer.
+        DynamicTableSink.SinkRuntimeProvider provider =
+                actualUpsertKafkaSink.getSinkRuntimeProvider(new SinkRuntimeProviderContext(false));
+        assertThat(provider).isInstanceOf(SinkV2Provider.class);
+        final SinkV2Provider sinkFunctionProvider = (SinkV2Provider) provider;
+        final Sink<RowData> sink = sinkFunctionProvider.createSink();
+        assertThat(sink).isInstanceOf(KafkaSink.class);
+    }
+
+    @Test
+    public void testTableSinkWithTopicList() {
+        // Construct table sink using options and table sink factory.
+        final Map<String, String> modifiedOptions =
+                getModifiedOptions(
+                        getFullSinkOptions(),
+                        options -> {
+                            options.put("sink.delivery-guarantee", "exactly-once");
+                            options.put("sink.transactional-id-prefix", "kafka-sink");
+                            options.put("topic", String.format("%s;%s", SINK_TOPIC, SINK_TOPIC));
+                        });
+        final DynamicTableSink actualSink = createTableSink(SINK_SCHEMA, modifiedOptions);
+
+        final DynamicTableSink expectedSink =
+                createExpectedSink(
+                        SINK_SCHEMA.toPhysicalRowDataType(),
+                        keyEncodingFormat,
+                        valueEncodingFormat,
+                        SINK_KEY_FIELDS,
+                        SINK_VALUE_FIELDS,
+                        null,
+                        Arrays.asList(SINK_TOPIC, SINK_TOPIC),
+                        null,
                         UPSERT_KAFKA_SINK_PROPERTIES,
                         DeliveryGuarantee.EXACTLY_ONCE,
                         SinkBufferFlushMode.DISABLED,
@@ -239,7 +315,8 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         SINK_KEY_FIELDS,
                         SINK_VALUE_FIELDS,
                         null,
-                        SINK_TOPIC,
+                        Collections.singletonList(SINK_TOPIC),
+                        null,
                         UPSERT_KAFKA_SINK_PROPERTIES,
                         DeliveryGuarantee.EXACTLY_ONCE,
                         new SinkBufferFlushMode(100, 1000L),
@@ -293,7 +370,8 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         SINK_KEY_FIELDS,
                         SINK_VALUE_FIELDS,
                         null,
-                        SINK_TOPIC,
+                        Collections.singletonList(SINK_TOPIC),
+                        null,
                         UPSERT_KAFKA_SINK_PROPERTIES,
                         DeliveryGuarantee.EXACTLY_ONCE,
                         SinkBufferFlushMode.DISABLED,
@@ -772,7 +850,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
             int[] keyFields,
             int[] valueFields,
             String keyPrefix,
-            String topic,
+            List<String> topic,
             Properties properties) {
         return new KafkaDynamicSource(
                 producedDataType,
@@ -781,7 +859,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                 keyFields,
                 valueFields,
                 keyPrefix,
-                Collections.singletonList(topic),
+                topic,
                 null,
                 properties,
                 StartupMode.EARLIEST,
@@ -801,7 +879,8 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
             int[] keyProjection,
             int[] valueProjection,
             String keyPrefix,
-            String topic,
+            List<String> topics,
+            Pattern topicPattern,
             Properties properties,
             DeliveryGuarantee deliveryGuarantee,
             SinkBufferFlushMode flushMode,
@@ -815,7 +894,8 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                 keyProjection,
                 valueProjection,
                 keyPrefix,
-                topic,
+                topics,
+                topicPattern,
                 properties,
                 null,
                 deliveryGuarantee,
