@@ -38,13 +38,13 @@ import java.time.Duration;
 import java.util.Properties;
 import java.util.concurrent.Future;
 
+import static org.apache.flink.connector.kafka.sink.KafkaSink.withClientId;
 import static org.apache.flink.util.Preconditions.checkState;
 
 /**
  * A {@link KafkaProducer} that exposes private fields to allow resume producing from a given state.
  */
 class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
-
     private static final Logger LOG = LoggerFactory.getLogger(FlinkKafkaInternalProducer.class);
     private static final String TRANSACTION_MANAGER_FIELD_NAME = "transactionManager";
     private static final String TRANSACTION_MANAGER_STATE_ENUM =
@@ -55,9 +55,10 @@ class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
     private volatile boolean inTransaction;
     private volatile boolean hasRecordsInTransaction;
     private volatile boolean closed;
+    private static final String clientIdSuffix = "";
 
     public FlinkKafkaInternalProducer(Properties properties, @Nullable String transactionalId) {
-        super(withTransactionalId(properties, transactionalId));
+        super(withClientId(withTransactionalId(properties, transactionalId), clientIdSuffix));
         this.transactionalId = transactionalId;
     }
 
