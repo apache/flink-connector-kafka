@@ -45,7 +45,8 @@ class TopicPatternSubscriber implements KafkaSubscriber {
     @Override
     public Set<TopicPartition> getSubscribedTopicPartitions(AdminClient adminClient) {
         LOG.debug("Fetching descriptions for {} topics on Kafka cluster", topicPattern.pattern());
-        final Map<String, TopicDescription> matchedTopicMetadata = getTopicMetadata(adminClient, topicPattern);
+        final Map<String, TopicDescription> matchedTopicMetadata =
+                getTopicMetadata(adminClient, topicPattern);
 
         Set<TopicPartition> subscribedTopicPartitions = new HashSet<>();
 
@@ -53,10 +54,8 @@ class TopicPatternSubscriber implements KafkaSubscriber {
                 (topicName, topicDescription) -> {
                     for (TopicPartitionInfo partition : topicDescription.partitions()) {
                         subscribedTopicPartitions.add(
-                                new TopicPartition(
-                                        topicDescription.name(), partition.partition()));
+                                new TopicPartition(topicDescription.name(), partition.partition()));
                     }
-
                 });
 
         return subscribedTopicPartitions;
