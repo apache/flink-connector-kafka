@@ -54,7 +54,10 @@ class TopicListSubscriber implements KafkaSubscriber {
         Set<TopicPartition> subscribedPartitions = new HashSet<>();
         for (TopicDescription topic : topicMetadata.values()) {
             for (TopicPartitionInfo partition : topic.partitions()) {
-                subscribedPartitions.add(new TopicPartition(topic.name(), partition.partition()));
+                if (partition.leader() != null) {
+                    subscribedPartitions.add(
+                            new TopicPartition(topic.name(), partition.partition()));
+                }
             }
         }
 
