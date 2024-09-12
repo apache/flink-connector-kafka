@@ -30,7 +30,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-import static org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriberUtils.getAllTopicMetadata;
+import static org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriberUtils.getTopicMetadata;
 
 /** A subscriber to a topic pattern. */
 class TopicPatternSubscriber implements KafkaSubscriber {
@@ -44,19 +44,17 @@ class TopicPatternSubscriber implements KafkaSubscriber {
 
     @Override
     public Set<TopicPartition> getSubscribedTopicPartitions(AdminClient adminClient) {
-        LOG.debug("Fetching descriptions for all topics on Kafka cluster");
-        final Map<String, TopicDescription> allTopicMetadata = getAllTopicMetadata(adminClient);
+        LOG.debug("Fetching descriptions for {} topics on Kafka cluster", topicPattern.pattern());
+        final Map<String, TopicDescription> matchedTopicMetadata =
+                getTopicMetadata(adminClient, topicPattern);
 
         Set<TopicPartition> subscribedTopicPartitions = new HashSet<>();
 
-        allTopicMetadata.forEach(
+        matchedTopicMetadata.forEach(
                 (topicName, topicDescription) -> {
-                    if (topicPattern.matcher(topicName).matches()) {
-                        for (TopicPartitionInfo partition : topicDescription.partitions()) {
-                            subscribedTopicPartitions.add(
-                                    new TopicPartition(
-                                            topicDescription.name(), partition.partition()));
-                        }
+                    for (TopicPartitionInfo partition : topicDescription.partitions()) {
+                        subscribedTopicPartitions.add(
+                                new TopicPartition(topicDescription.name(), partition.partition()));
                     }
                 });
 
