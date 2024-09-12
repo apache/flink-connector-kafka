@@ -89,7 +89,7 @@ public class KafkaSourceEnumStateSerializer
             case CURRENT_VERSION:
                 return deserializeTopicPartitionAndAssignmentStatus(serialized);
             case VERSION_1:
-                return deserializeTopicPartitions(serialized, AssignmentStatus.ASSIGNED);
+                return deserializeAssignedTopicPartitions(serialized);
             case VERSION_0:
                 Map<Integer, Set<KafkaPartitionSplit>> currentPartitionAssignment =
                         SerdeUtils.deserializeSplitAssignments(
@@ -111,8 +111,8 @@ public class KafkaSourceEnumStateSerializer
         }
     }
 
-    private static KafkaSourceEnumState deserializeTopicPartitions(
-            byte[] serializedTopicPartitions, AssignmentStatus status) throws IOException {
+    private static KafkaSourceEnumState deserializeAssignedTopicPartitions(
+            byte[] serializedTopicPartitions) throws IOException {
         try (ByteArrayInputStream bais = new ByteArrayInputStream(serializedTopicPartitions);
                 DataInputStream in = new DataInputStream(bais)) {
 
@@ -123,7 +123,7 @@ public class KafkaSourceEnumStateSerializer
                 final int partition = in.readInt();
                 partitions.add(
                         new TopicPartitionAndAssignmentStatus(
-                                new TopicPartition(topic, partition), status));
+                                new TopicPartition(topic, partition), AssignmentStatus.ASSIGNED));
             }
             if (in.available() > 0) {
                 throw new IOException("Unexpected trailing bytes in serialized topic partitions");
