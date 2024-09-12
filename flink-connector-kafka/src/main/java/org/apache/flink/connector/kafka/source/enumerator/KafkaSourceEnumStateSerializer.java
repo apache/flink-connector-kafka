@@ -111,9 +111,8 @@ public class KafkaSourceEnumStateSerializer
         }
     }
 
-    private static KafkaSourceEnumState deserializeTopicPartitions(byte[] serializedTopicPartitions,
-                                                                   AssignmentStatus status)
-            throws IOException {
+    private static KafkaSourceEnumState deserializeTopicPartitions(
+            byte[] serializedTopicPartitions, AssignmentStatus status) throws IOException {
         try (ByteArrayInputStream bais = new ByteArrayInputStream(serializedTopicPartitions);
                 DataInputStream in = new DataInputStream(bais)) {
 
@@ -124,8 +123,7 @@ public class KafkaSourceEnumStateSerializer
                 final int partition = in.readInt();
                 partitions.add(
                         new TopicPartitionAndAssignmentStatus(
-                                new TopicPartition(topic, partition),
-                                status));
+                                new TopicPartition(topic, partition), status));
             }
             if (in.available() > 0) {
                 throw new IOException("Unexpected trailing bytes in serialized topic partitions");

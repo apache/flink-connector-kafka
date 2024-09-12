@@ -299,18 +299,16 @@ public class DynamicKafkaSourceEnumerator
                 final Set<String> activeTopics = activeClusterTopics.getValue();
 
                 // filter out removed topics
-                Set<TopicPartitionAndAssignmentStatus> partitions = kafkaSourceEnumState.partitions().stream()
-                        .filter(tp -> activeTopics.contains(tp.topicPartition().topic()))
-                        .collect(Collectors.toSet());
+                Set<TopicPartitionAndAssignmentStatus> partitions =
+                        kafkaSourceEnumState.partitions().stream()
+                                .filter(tp -> activeTopics.contains(tp.topicPartition().topic()))
+                                .collect(Collectors.toSet());
 
                 newKafkaSourceEnumState =
                         new KafkaSourceEnumState(
-                                partitions,
-                                kafkaSourceEnumState.initialDiscoveryFinished());
+                                partitions, kafkaSourceEnumState.initialDiscoveryFinished());
             } else {
-                newKafkaSourceEnumState =
-                        new KafkaSourceEnumState(
-                                Collections.emptySet(),false);
+                newKafkaSourceEnumState = new KafkaSourceEnumState(Collections.emptySet(), false);
             }
 
             // restarts enumerator from state using only the active topic partitions, to avoid
