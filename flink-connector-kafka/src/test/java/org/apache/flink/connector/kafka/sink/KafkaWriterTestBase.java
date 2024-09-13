@@ -55,7 +55,6 @@ import java.util.Properties;
 import java.util.concurrent.ScheduledFuture;
 import java.util.function.Consumer;
 
-import static org.apache.flink.connector.kafka.testutils.DockerImageVersions.KAFKA;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 
 /** Test base for KafkaWriter. */
@@ -73,7 +72,7 @@ public abstract class KafkaWriterTestBase {
     protected TriggerTimeService timeService;
 
     protected static final KafkaContainer KAFKA_CONTAINER =
-            createKafkaContainer(KAFKA, LOG)
+            createKafkaContainer(KafkaWriterTestBase.class)
                     .withEmbeddedZookeeper()
                     .withNetwork(NETWORK)
                     .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS);

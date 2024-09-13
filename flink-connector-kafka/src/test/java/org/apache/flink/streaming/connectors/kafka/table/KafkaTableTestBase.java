@@ -19,7 +19,7 @@
 package org.apache.flink.streaming.connectors.kafka.table;
 
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
-import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
+import org.apache.flink.connector.kafka.testutils.KafkaUtil;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.test.util.AbstractTestBase;
@@ -41,8 +41,6 @@ import org.junit.ClassRule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.KafkaContainer;
-import org.testcontainers.containers.output.Slf4jLogConsumer;
-import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -65,15 +63,8 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
 
     @ClassRule
     public static final KafkaContainer KAFKA_CONTAINER =
-            new KafkaContainer(DockerImageName.parse(DockerImageVersions.KAFKA)) {
-                @Override
-                protected void doStart() {
-                    super.doStart();
-                    if (LOG.isInfoEnabled()) {
-                        this.followOutput(new Slf4jLogConsumer(LOG));
-                    }
-                }
-            }.withEmbeddedZookeeper()
+            KafkaUtil.createKafkaContainer(KafkaTableTestBase.class)
+                    .withEmbeddedZookeeper()
                     .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS)
                     .withEnv(
                             "KAFKA_TRANSACTION_MAX_TIMEOUT_MS",

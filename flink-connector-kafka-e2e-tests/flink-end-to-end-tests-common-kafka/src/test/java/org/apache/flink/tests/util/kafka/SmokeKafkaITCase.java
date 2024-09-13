@@ -45,8 +45,6 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.junit.jupiter.Container;
@@ -62,7 +60,6 @@ import java.util.Properties;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.connector.kafka.testutils.DockerImageVersions.KAFKA;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -71,20 +68,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 class SmokeKafkaITCase {
 
-    private static final Logger LOG = LoggerFactory.getLogger(SmokeKafkaITCase.class);
     private static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
     private static final Network NETWORK = Network.newNetwork();
     private static final String EXAMPLE_JAR_MATCHER = "flink-streaming-kafka-test.*";
 
     @Container
     public static final KafkaContainer KAFKA_CONTAINER =
-            createKafkaContainer(KAFKA, LOG)
+            createKafkaContainer(SmokeKafkaITCase.class)
                     .withEmbeddedZookeeper()
                     .withNetwork(NETWORK)
                     .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS);
 
     public static final TestcontainersSettings TESTCONTAINERS_SETTINGS =
-            TestcontainersSettings.builder().logger(LOG).dependsOn(KAFKA_CONTAINER).build();
+            TestcontainersSettings.builder()
+                    .logger(KafkaUtil.getLogger("flink", SmokeKafkaITCase.class))
+                    .dependsOn(KAFKA_CONTAINER)
+                    .build();
 
     @RegisterExtension
     public static final FlinkContainers FLINK =

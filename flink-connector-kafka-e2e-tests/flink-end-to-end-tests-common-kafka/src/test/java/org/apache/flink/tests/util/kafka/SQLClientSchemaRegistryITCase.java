@@ -20,6 +20,7 @@ package org.apache.flink.tests.util.kafka;
 
 import org.apache.flink.api.common.time.Deadline;
 import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
+import org.apache.flink.connector.kafka.testutils.KafkaUtil;
 import org.apache.flink.connector.testframe.container.FlinkContainers;
 import org.apache.flink.connector.testframe.container.TestcontainersSettings;
 import org.apache.flink.test.resources.ResourceTestUtils;
@@ -40,11 +41,8 @@ import org.junit.Before;
 import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.rules.Timeout;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.Network;
-import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.utility.DockerImageName;
 
 import java.nio.file.Path;
@@ -60,9 +58,6 @@ import static org.junit.Assert.assertThat;
 
 /** End-to-end test for SQL client using Avro Confluent Registry format. */
 public class SQLClientSchemaRegistryITCase {
-    private static final Logger LOG = LoggerFactory.getLogger(SQLClientSchemaRegistryITCase.class);
-    private static final Slf4jLogConsumer LOG_CONSUMER = new Slf4jLogConsumer(LOG);
-
     public static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
     public static final String INTER_CONTAINER_REGISTRY_ALIAS = "registry";
     private static final Path sqlAvroJar = ResourceTestUtils.getResource(".*avro.jar");
@@ -78,10 +73,9 @@ public class SQLClientSchemaRegistryITCase {
 
     @ClassRule
     public static final KafkaContainer KAFKA =
-            new KafkaContainer(DockerImageName.parse(DockerImageVersions.KAFKA))
+            KafkaUtil.createKafkaContainer(SQLClientSchemaRegistryITCase.class)
                     .withNetwork(NETWORK)
-                    .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS)
-                    .withLogConsumer(LOG_CONSUMER);
+                    .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS);
 
     @ClassRule
     public static final SchemaRegistryContainer REGISTRY =
@@ -92,7 +86,11 @@ public class SQLClientSchemaRegistryITCase {
                     .dependsOn(KAFKA);
 
     public final TestcontainersSettings testcontainersSettings =
-            TestcontainersSettings.builder().network(NETWORK).logger(LOG).dependsOn(KAFKA).build();
+            TestcontainersSettings.builder()
+                    .network(NETWORK)
+                    .logger(KafkaUtil.getLogger("flink", SQLClientSchemaRegistryITCase.class))
+                    .dependsOn(KAFKA)
+                    .build();
 
     public final FlinkContainers flink =
             FlinkContainers.builder().withTestcontainersSettings(testcontainersSettings).build();

@@ -34,8 +34,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -47,7 +45,6 @@ import java.util.Properties;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.connector.kafka.testutils.DockerImageVersions.KAFKA;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -56,12 +53,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @ExtendWith(TestLoggerExtension.class)
 class FlinkKafkaInternalProducerITCase {
 
-    private static final Logger LOG =
-            LoggerFactory.getLogger(FlinkKafkaInternalProducerITCase.class);
-
     @Container
     private static final KafkaContainer KAFKA_CONTAINER =
-            createKafkaContainer(KAFKA, LOG).withEmbeddedZookeeper();
+            createKafkaContainer(FlinkKafkaInternalProducerITCase.class).withEmbeddedZookeeper();
 
     @Test
     void testInitTransactionId() {
