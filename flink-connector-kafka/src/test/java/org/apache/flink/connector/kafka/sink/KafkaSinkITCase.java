@@ -101,7 +101,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
-import static org.apache.flink.connector.kafka.testutils.DockerImageVersions.KAFKA;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
@@ -124,7 +123,7 @@ public class KafkaSinkITCase extends TestLogger {
 
     @ClassRule
     public static final KafkaContainer KAFKA_CONTAINER =
-            createKafkaContainer(KAFKA, LOG)
+            createKafkaContainer(KafkaSinkITCase.class)
                     .withEmbeddedZookeeper()
                     .withNetwork(NETWORK)
                     .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS);

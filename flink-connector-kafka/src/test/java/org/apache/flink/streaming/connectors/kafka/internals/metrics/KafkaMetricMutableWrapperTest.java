@@ -28,8 +28,6 @@ import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.junit.jupiter.Container;
@@ -42,20 +40,18 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
-import static org.apache.flink.connector.kafka.testutils.DockerImageVersions.KAFKA;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 
 @Testcontainers
 @ExtendWith(TestLoggerExtension.class)
 class KafkaMetricMutableWrapperTest {
 
-    private static final Logger LOG = LoggerFactory.getLogger(KafkaMetricMutableWrapperTest.class);
     private static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
     private static final Network NETWORK = Network.newNetwork();
 
     @Container
     public static final KafkaContainer KAFKA_CONTAINER =
-            createKafkaContainer(KAFKA, LOG)
+            createKafkaContainer(KafkaMetricMutableWrapperTest.class)
                     .withEmbeddedZookeeper()
                     .withNetwork(NETWORK)
                     .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS);

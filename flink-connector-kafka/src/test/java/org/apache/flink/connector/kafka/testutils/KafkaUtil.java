@@ -18,8 +18,6 @@
 
 package org.apache.flink.connector.kafka.testutils;
 
-import org.apache.flink.util.StringUtils;
-
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -49,24 +47,34 @@ public class KafkaUtil {
 
     private KafkaUtil() {}
 
-    /**
-     * This method helps to set commonly used Kafka configurations and aligns the internal Kafka log
-     * levels with the ones used by the capturing logger.
-     *
-     * @param dockerImageVersion describing the Kafka image
-     * @param logger to derive the log level from
-     * @return configured Kafka container
-     */
-    public static KafkaContainer createKafkaContainer(String dockerImageVersion, Logger logger) {
-        return createKafkaContainer(dockerImageVersion, logger, null);
+    /** This method helps to set commonly used Kafka configurations and sets up the logger. */
+    public static KafkaContainer createKafkaContainer(Class<?> testCase) {
+        return createKafkaContainer(getContainerName("kafka", testCase));
     }
 
-    /**
-     * This method helps to set commonly used Kafka configurations and aligns the internal Kafka log
-     * levels with the ones used by the capturing logger, and set the prefix of logger.
-     */
-    public static KafkaContainer createKafkaContainer(
-            String dockerImageVersion, Logger logger, String loggerPrefix) {
+    /** This method helps to set commonly used Kafka configurations and sets up the logger. */
+    public static KafkaContainer createKafkaContainer(String containerName) {
+        Logger logger = getLogger(containerName);
+
+        String logLevel = inferLogLevel(logger);
+
+        Slf4jLogConsumer logConsumer = new Slf4jLogConsumer(logger, true);
+        return new KafkaContainer(DockerImageName.parse(DockerImageVersions.KAFKA))
+                .withEnv("KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR", "1")
+                .withEnv("KAFKA_TRANSACTION_STATE_LOG_MIN_ISR", "1")
+                .withEnv("KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR", "1")
+                .withEnv("KAFKA_CONFLUENT_SUPPORT_METRICS_ENABLE", "false")
+                .withEnv("KAFKA_LOG4J_ROOT_LOGLEVEL", logLevel)
+                .withEnv("KAFKA_LOG4J_LOGGERS", "state.change.logger=" + logLevel)
+                .withEnv("KAFKA_CONFLUENT_SUPPORT_METRICS_ENABLE", "false")
+                .withEnv(
+                        "KAFKA_TRANSACTION_MAX_TIMEOUT_MS",
+                        String.valueOf(Duration.ofHours(2).toMillis()))
+                .withEnv("KAFKA_LOG4J_TOOLS_ROOT_LOGLEVEL", logLevel)
+                .withLogConsumer(logConsumer);
+    }
+
+    private static String inferLogLevel(Logger logger) {
         String logLevel;
         if (logger.isTraceEnabled()) {
             logLevel = "TRACE";
@@ -81,24 +89,19 @@ public class KafkaUtil {
         } else {
             logLevel = "OFF";
         }
+        return logLevel;
+    }
 
-        Slf4jLogConsumer logConsumer = new Slf4jLogConsumer(logger);
-        if (!StringUtils.isNullOrWhitespaceOnly(loggerPrefix)) {
-            logConsumer.withPrefix(loggerPrefix);
-        }
-        return new KafkaContainer(DockerImageName.parse(dockerImageVersion))
-                .withEnv("KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR", "1")
-                .withEnv("KAFKA_TRANSACTION_STATE_LOG_MIN_ISR", "1")
-                .withEnv("KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR", "1")
-                .withEnv("KAFKA_CONFLUENT_SUPPORT_METRICS_ENABLE", "false")
-                .withEnv("KAFKA_LOG4J_ROOT_LOGLEVEL", logLevel)
-                .withEnv("KAFKA_LOG4J_LOGGERS", "state.change.logger=" + logLevel)
-                .withEnv("KAFKA_CONFLUENT_SUPPORT_METRICS_ENABLE", "false")
-                .withEnv(
-                        "KAFKA_TRANSACTION_MAX_TIMEOUT_MS",
-                        String.valueOf(Duration.ofHours(2).toMillis()))
-                .withEnv("KAFKA_LOG4J_TOOLS_ROOT_LOGLEVEL", logLevel)
-                .withLogConsumer(logConsumer);
+    public static Logger getLogger(String containerName) {
+        return LoggerFactory.getLogger("container." + containerName);
+    }
+
+    public static Logger getLogger(String type, Class<?> testClass) {
+        return getLogger(getContainerName(type, testClass));
+    }
+
+    private static String getContainerName(String type, Class<?> testClass) {
+        return type + "." + testClass.getSimpleName();
     }
 
     /**

@@ -54,7 +54,6 @@ public class FlinkKafkaProducerMigrationTest extends KafkaMigrationTestBase {
         Properties properties = new Properties();
         properties.putAll(standardProps);
         properties.putAll(secureProps);
-        properties.put(ProducerConfig.CLIENT_ID_CONFIG, "producer-client-id");
         properties.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "producer-transaction-id");
         properties.put(FlinkKafkaProducer.KEY_DISABLE_METRICS, "true");
         return properties;

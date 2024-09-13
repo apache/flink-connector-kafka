@@ -434,7 +434,7 @@ public class KafkaTestEnvironmentImpl extends KafkaTestEnvironment {
             int brokerID, @Nullable GenericContainer<?> zookeeper) {
         String brokerName = String.format("Kafka-%d", brokerID);
         KafkaContainer broker =
-                KafkaUtil.createKafkaContainer(DockerImageVersions.KAFKA, LOG, brokerName)
+                KafkaUtil.createKafkaContainer(brokerName)
                         .withNetworkAliases(brokerName)
                         .withEnv("KAFKA_BROKER_ID", String.valueOf(brokerID))
                         .withEnv("KAFKA_MESSAGE_MAX_BYTES", String.valueOf(50 * 1024 * 1024))
