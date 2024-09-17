@@ -54,6 +54,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -350,6 +351,62 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         deleteTestTopic(topic1);
         deleteTestTopic(topic2);
+    }
+
+    @Test
+    public void testKafkaSourceEmptyResultOnDeletedOffsets() throws Exception {
+        // we always use a different topic name for each parameterized topic,
+        // in order to make sure the topic can be created.
+        final String topic = "bounded_" + format + "_" + UUID.randomUUID();
+        createTestTopic(topic, 1, 1);
+        // ---------- Produce an event time stream into Kafka -------------------
+        String groupId = getStandardProps().getProperty("group.id");
+        String bootstraps = getBootstrapServers();
+
+        final String createTable =
+                String.format(
+                        "CREATE TABLE kafka (\n"
+                                + "  `user_id` INT,\n"
+                                + "  `item_id` INT,\n"
+                                + "  `behavior` STRING\n"
+                                + ") WITH (\n"
+                                + "  'connector' = '%s',\n"
+                                + "  'topic' = '%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'properties.group.id' = '%s',\n"
+                                + "  'scan.startup.mode' = 'specific-offsets',\n"
+                                + "  'scan.bounded.mode' = 'specific-offsets',\n"
+                                + "  'scan.startup.specific-offsets' = 'partition:0,offset:1',\n"
+                                + "  'scan.bounded.specific-offsets' = 'partition:0,offset:3',\n"
+                                + "  %s\n"
+                                + ")\n",
+                        KafkaDynamicTableFactory.IDENTIFIER,
+                        topic,
+                        bootstraps,
+                        groupId,
+                        formatOptions());
+        tEnv.executeSql(createTable);
+        List<Row> values =
+                Arrays.asList(
+                        Row.of(1, 1102, "behavior 1"),
+                        Row.of(2, 1103, "behavior 2"),
+                        Row.of(3, 1104, "behavior 3"));
+        tEnv.fromValues(values).insertInto("kafka").execute().await();
+        // ---------- Delete events from Kafka -------------------
+        Map<Integer, Long> partitionOffsetsToDelete = new HashMap<>();
+        partitionOffsetsToDelete.put(0, 3L);
+        deleteRecords(topic, partitionOffsetsToDelete);
+        // ---------- Consume stream from Kafka -------------------
+        List<Row> results = new ArrayList<>();
+        env = StreamExecutionEnvironment.getExecutionEnvironment();
+        tEnv = StreamTableEnvironment.create(env);
+        tEnv.executeSql(createTable);
+        results.addAll(collectAllRows(tEnv.sqlQuery("SELECT * FROM kafka")));
+        assertThat(results).isEmpty();
+
+        // ------------- cleanup -------------------
+
+        deleteTestTopic(topic);
     }
 
     @Test

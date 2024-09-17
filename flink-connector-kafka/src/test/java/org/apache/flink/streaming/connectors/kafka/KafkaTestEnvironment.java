@@ -34,6 +34,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.UUID;
 
 /** Abstract class providing a Kafka test environment. */
 public abstract class KafkaTestEnvironment {
@@ -112,6 +113,12 @@ public abstract class KafkaTestEnvironment {
         props.put("enable.idempotence", "true");
         props.put("acks", "all");
         props.put("retries", "3");
+        return props;
+    }
+
+    public Properties getTransactionalProducerConfig() {
+        Properties props = new Properties();
+        props.put("transactional.id", UUID.randomUUID().toString());
         return props;
     }
 
