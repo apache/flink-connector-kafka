@@ -2097,7 +2097,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 
                                 count++;
 
-                                LOG.info("Received message {}, total {} messages", value, count);
+                                LOG.debug("Received message {}, total {} messages", value, count);
 
                                 // verify if we've seen everything
                                 if (count == finalCount) {

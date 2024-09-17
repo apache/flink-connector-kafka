@@ -138,7 +138,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         }
 
         if (restartingReaders.get()) {
-            logger.info("Poll next invoked while restarting readers");
+            logger.debug("Poll next invoked while restarting readers");
             return logAndReturnInputStatus(InputStatus.NOTHING_AVAILABLE);
         }
 

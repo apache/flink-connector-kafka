@@ -240,7 +240,7 @@ public class DynamicKafkaSourceExternalContext implements DataStreamSourceExtern
                         }
                     }
 
-                    logger.info("Writing producer records: {}", producerRecords);
+                    logger.debug("Writing producer records: {}", producerRecords);
 
                     DynamicKafkaSourceTestHelper.produceToKafka(
                             clusterPropertiesMap.get(cluster),

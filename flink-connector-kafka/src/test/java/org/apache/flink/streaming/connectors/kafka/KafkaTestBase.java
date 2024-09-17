@@ -167,7 +167,7 @@ public abstract class KafkaTestBase extends TestLogger {
             throws Exception {
         kafkaServer = constructKafkaTestEnvironment();
 
-        LOG.info("Starting KafkaTestBase.prepare() for Kafka " + kafkaServer.getVersion());
+        LOG.info("Starting KafkaTestBase.prepare() for Kafka {}", kafkaServer.getVersion());
 
         kafkaServer.prepare(environmentConfig);
 
