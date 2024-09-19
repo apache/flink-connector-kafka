@@ -53,10 +53,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-
-import scala.concurrent.duration.FiniteDuration;
 
 import static org.assertj.core.api.Assertions.fail;
 
@@ -89,8 +86,6 @@ public abstract class KafkaTestBase extends TestLogger {
     public static String brokerConnectionStrings;
 
     public static Properties standardProps;
-
-    public static FiniteDuration timeout = new FiniteDuration(10, TimeUnit.SECONDS);
 
     public static KafkaTestEnvironment kafkaServer;
 
