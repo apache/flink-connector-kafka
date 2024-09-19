@@ -32,7 +32,8 @@ public class KafkaSourceEnumState {
     /** Partitions with status: ASSIGNED or UNASSIGNED_INITIAL. */
     private final Set<TopicPartitionAndAssignmentStatus> partitions;
     /**
-     * this flag will be marked as true if inital partitions are discovered after enumerator starts.
+     * this flag will be marked as true if initial partitions are discovered after enumerator
+     * starts.
      */
     private final boolean initialDiscoveryFinished;
 

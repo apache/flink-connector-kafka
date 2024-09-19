@@ -112,7 +112,7 @@ public class KafkaSourceEnumerator
                 properties,
                 context,
                 boundedness,
-                new KafkaSourceEnumState(Collections.emptySet(), Collections.emptySet(), false));
+                new KafkaSourceEnumState(Collections.emptySet(), false));
     }
 
     public KafkaSourceEnumerator(

@@ -89,9 +89,7 @@ public class KafkaSourceEnumStateSerializer
             case CURRENT_VERSION:
                 return deserializeTopicPartitionAndAssignmentStatus(serialized);
             case VERSION_1:
-                final Set<TopicPartition> assignedPartitions =
-                        deserializeTopicPartitions(serialized);
-                return new KafkaSourceEnumState(assignedPartitions, new HashSet<>(), true);
+                return deserializeAssignedTopicPartitions(serialized);
             case VERSION_0:
                 Map<Integer, Set<KafkaPartitionSplit>> currentPartitionAssignment =
                         SerdeUtils.deserializeSplitAssignments(
@@ -113,23 +111,24 @@ public class KafkaSourceEnumStateSerializer
         }
     }
 
-    private static Set<TopicPartition> deserializeTopicPartitions(byte[] serializedTopicPartitions)
-            throws IOException {
+    private static KafkaSourceEnumState deserializeAssignedTopicPartitions(
+            byte[] serializedTopicPartitions) throws IOException {
         try (ByteArrayInputStream bais = new ByteArrayInputStream(serializedTopicPartitions);
                 DataInputStream in = new DataInputStream(bais)) {
 
             final int numPartitions = in.readInt();
-            Set<TopicPartition> topicPartitions = new HashSet<>(numPartitions);
+            Set<TopicPartitionAndAssignmentStatus> partitions = new HashSet<>(numPartitions);
             for (int i = 0; i < numPartitions; i++) {
                 final String topic = in.readUTF();
                 final int partition = in.readInt();
-                topicPartitions.add(new TopicPartition(topic, partition));
+                partitions.add(
+                        new TopicPartitionAndAssignmentStatus(
+                                new TopicPartition(topic, partition), AssignmentStatus.ASSIGNED));
             }
             if (in.available() > 0) {
                 throw new IOException("Unexpected trailing bytes in serialized topic partitions");
             }
-
-            return topicPartitions;
+            return new KafkaSourceEnumState(partitions, true);
         }
     }
 
