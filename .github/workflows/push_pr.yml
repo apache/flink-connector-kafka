@@ -28,13 +28,8 @@ jobs:
   compile_and_test:
     strategy:
       matrix:
-        flink: [ 1.17.2 ]
-        jdk: [ '8, 11' ]
-        include:
-          - flink: 1.18.1
-            jdk: '8, 11, 17'
-          - flink: 1.19.0
-            jdk: '8, 11, 17, 21'
+        flink: [ 1.19.0, 1.20-SNAPSHOT ]
+        jdk: [ '8, 11, 17, 21' ]
     uses: apache/flink-connector-shared-utils/.github/workflows/ci.yml@ci_utils
     with:
       flink_version: ${{ matrix.flink }}
@@ -42,7 +37,7 @@ jobs:
   python_test:
     strategy:
       matrix:
-        flink: [ 1.17.2, 1.18.1, 1.19.0 ]
+        flink: [ 1.19.0 ]
     uses: apache/flink-connector-shared-utils/.github/workflows/python_ci.yml@ci_utils
     with:
       flink_version: ${{ matrix.flink }}
