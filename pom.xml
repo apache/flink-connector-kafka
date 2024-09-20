@@ -51,7 +51,7 @@ under the License.
 
     <properties>
         <flink.version>1.17.0</flink.version>
-        <kafka.version>3.4.0</kafka.version>
+        <kafka.version>3.5.2</kafka.version>
         <zookeeper.version>3.7.2</zookeeper.version>
         <confluent.version>7.4.4</confluent.version>
 
