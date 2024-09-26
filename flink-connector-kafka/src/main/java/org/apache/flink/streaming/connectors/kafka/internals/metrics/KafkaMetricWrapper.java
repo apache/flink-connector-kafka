@@ -23,6 +23,7 @@ import org.apache.flink.metrics.Gauge;
 
 /** Gauge for getting the current value of a Kafka metric. */
 @Internal
+@Deprecated
 public class KafkaMetricWrapper implements Gauge<Double> {
     private final org.apache.kafka.common.Metric kafkaMetric;
 

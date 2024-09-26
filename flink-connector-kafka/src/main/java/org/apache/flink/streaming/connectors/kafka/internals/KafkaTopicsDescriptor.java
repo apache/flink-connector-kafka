@@ -33,6 +33,7 @@ import static org.apache.flink.util.Preconditions.checkArgument;
  * list of topics, or a topic pattern.
  */
 @Internal
+@Deprecated
 public class KafkaTopicsDescriptor implements Serializable {
 
     private static final long serialVersionUID = -3807227764764900975L;

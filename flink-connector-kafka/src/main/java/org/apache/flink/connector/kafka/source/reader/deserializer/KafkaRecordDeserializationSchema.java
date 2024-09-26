@@ -71,7 +71,9 @@ public interface KafkaRecordDeserializationSchema<T> extends Serializable, Resul
      * @param <V> the return type of the deserialized record.
      * @return A {@link KafkaRecordDeserializationSchema} that uses the given {@link
      *     KafkaDeserializationSchema} to deserialize the {@link ConsumerRecord ConsumerRecords}.
+     * @deprecated Will be removed with {@link KafkaDeserializationSchema}.
      */
+    @Deprecated
     static <V> KafkaRecordDeserializationSchema<V> of(
             KafkaDeserializationSchema<V> kafkaDeserializationSchema) {
         return new KafkaDeserializationSchemaWrapper<>(kafkaDeserializationSchema);

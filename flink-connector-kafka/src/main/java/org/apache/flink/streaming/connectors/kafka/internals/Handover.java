@@ -47,6 +47,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  */
 @ThreadSafe
 @Internal
+@Deprecated
 public final class Handover implements Closeable {
 
     private final Object lock = new Object();

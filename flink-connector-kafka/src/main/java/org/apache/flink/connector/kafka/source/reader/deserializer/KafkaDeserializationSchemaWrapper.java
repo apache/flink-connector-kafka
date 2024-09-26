@@ -33,7 +33,9 @@ import java.io.IOException;
  * ConsumerRecord ConsumerRecords}.
  *
  * @param <T> the type of the deserialized records.
+ * @deprecated Remove with @{@link KafkaDeserializationSchema}
  */
+@Deprecated
 class KafkaDeserializationSchemaWrapper<T> implements KafkaRecordDeserializationSchema<T> {
     private static final long serialVersionUID = 1L;
     private final KafkaDeserializationSchema<T> kafkaDeserializationSchema;

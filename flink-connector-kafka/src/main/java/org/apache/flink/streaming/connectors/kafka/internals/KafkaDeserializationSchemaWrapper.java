@@ -32,6 +32,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
  * @param <T> The type created by the deserialization schema.
  */
 @Internal
+@Deprecated
 public class KafkaDeserializationSchemaWrapper<T> implements KafkaDeserializationSchema<T> {
 
     private static final long serialVersionUID = 2651665280744549932L;

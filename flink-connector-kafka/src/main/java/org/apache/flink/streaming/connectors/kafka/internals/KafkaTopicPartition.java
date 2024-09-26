@@ -32,8 +32,13 @@ import static java.util.Objects.requireNonNull;
  *
  * <p>Note: This class must not change in its structure, because it would change the serialization
  * format and make previous savepoints unreadable.
+ *
+ * @deprecated Will be turned into internal class when {@link
+ *     org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer} is removed. Replace with
+ *     {@link org.apache.kafka.common.TopicPartition}.
  */
 @PublicEvolving
+@Deprecated
 public final class KafkaTopicPartition implements Serializable {
 
     /**

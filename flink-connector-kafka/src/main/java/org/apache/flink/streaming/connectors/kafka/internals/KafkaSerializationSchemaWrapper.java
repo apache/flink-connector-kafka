@@ -35,6 +35,7 @@ import javax.annotation.Nullable;
  * KafkaSerializationSchema}.
  */
 @Internal
+@Deprecated
 public class KafkaSerializationSchemaWrapper<T>
         implements KafkaSerializationSchema<T>, KafkaContextAware<T> {
 

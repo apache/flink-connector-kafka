@@ -19,8 +19,14 @@ package org.apache.flink.streaming.connectors.kafka;
 
 import org.apache.flink.annotation.PublicEvolving;
 
-/** Error codes used in {@link FlinkKafkaException}. */
+/**
+ * Error codes used in {@link FlinkKafkaException}.
+ *
+ * @deprecated Will be removed with {@link FlinkKafkaProducer} and {@link
+ *     org.apache.flink.streaming.connectors.kafka.shuffle.FlinkKafkaShuffle}.
+ */
 @PublicEvolving
+@Deprecated
 public enum FlinkKafkaErrorCode {
     PRODUCERS_POOL_EMPTY,
     EXTERNAL_ERROR

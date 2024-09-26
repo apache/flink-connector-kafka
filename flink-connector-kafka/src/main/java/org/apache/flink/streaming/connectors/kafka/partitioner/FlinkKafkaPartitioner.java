@@ -24,8 +24,12 @@ import java.io.Serializable;
 /**
  * A {@link FlinkKafkaPartitioner} wraps logic on how to partition records across partitions of
  * multiple Kafka topics.
+ *
+ * @deprecated Will be turned into internal class when {@link
+ *     org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer} is removed.
  */
 @PublicEvolving
+@Deprecated
 public abstract class FlinkKafkaPartitioner<T> implements Serializable {
 
     private static final long serialVersionUID = -9086719227828020494L;

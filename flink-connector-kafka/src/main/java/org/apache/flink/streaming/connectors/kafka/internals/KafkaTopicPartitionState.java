@@ -29,6 +29,7 @@ import org.apache.flink.annotation.Internal;
  * @param <KPH> The type of the Kafka partition descriptor, which varies across Kafka versions.
  */
 @Internal
+@Deprecated
 public class KafkaTopicPartitionState<T, KPH> {
 
     // ------------------------------------------------------------------------

@@ -20,8 +20,14 @@ package org.apache.flink.streaming.connectors.kafka;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.util.FlinkException;
 
-/** Exception used by {@link FlinkKafkaProducer} and {@link FlinkKafkaConsumer}. */
+/**
+ * Exception used by {@link FlinkKafkaProducer} and {@link FlinkKafkaConsumer}.
+ *
+ * @deprecated Will be removed with {@link FlinkKafkaProducer} and {@link
+ *     org.apache.flink.streaming.connectors.kafka.shuffle.FlinkKafkaShuffle}.
+ */
 @PublicEvolving
+@Deprecated
 public class FlinkKafkaException extends FlinkException {
 
     private static final long serialVersionUID = 920269130311214200L;

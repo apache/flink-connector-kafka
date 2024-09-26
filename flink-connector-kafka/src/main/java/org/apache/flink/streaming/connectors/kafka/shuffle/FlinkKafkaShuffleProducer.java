@@ -44,6 +44,7 @@ import static org.apache.flink.streaming.connectors.kafka.shuffle.FlinkKafkaShuf
  * handling elements and watermarks
  */
 @Internal
+@Deprecated
 public class FlinkKafkaShuffleProducer<IN, KEY> extends FlinkKafkaProducer<IN> {
     private final KafkaSerializer<IN> kafkaSerializer;
     private final KeySelector<IN, KEY> keySelector;

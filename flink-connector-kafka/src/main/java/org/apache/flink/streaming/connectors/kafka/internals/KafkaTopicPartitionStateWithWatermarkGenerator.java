@@ -34,6 +34,7 @@ import org.apache.flink.api.common.eventtime.WatermarkOutput;
  * @param <KPH> The type of the Kafka partition descriptor, which varies across Kafka versions.
  */
 @Internal
+@Deprecated
 public final class KafkaTopicPartitionStateWithWatermarkGenerator<T, KPH>
         extends KafkaTopicPartitionState<T, KPH> {
 

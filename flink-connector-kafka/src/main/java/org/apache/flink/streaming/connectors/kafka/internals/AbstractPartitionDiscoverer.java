@@ -41,6 +41,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  * allows the discoverer to be interrupted during a {@link #discoverPartitions()} call.
  */
 @Internal
+@Deprecated
 public abstract class AbstractPartitionDiscoverer {
 
     /** Describes whether we are discovering partitions for fixed topics or a topic pattern. */

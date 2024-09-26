@@ -25,6 +25,7 @@ import org.apache.flink.annotation.Internal;
  * commit request completes, which should normally be triggered from checkpoint complete event.
  */
 @Internal
+@Deprecated
 public interface KafkaCommitCallback {
 
     /**

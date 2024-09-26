@@ -41,6 +41,7 @@ import java.io.IOException;
  * @param <V> The value type to be serialized.
  */
 @PublicEvolving
+@Deprecated
 public class TypeInformationKeyValueSerializationSchema<K, V>
         implements KafkaDeserializationSchema<Tuple2<K, V>>,
                 KeyedSerializationSchema<Tuple2<K, V>> {

@@ -27,6 +27,7 @@ import java.io.Serializable;
  * Serializable Topic Partition info with leader Node information. This class is used at runtime.
  */
 @Internal
+@Deprecated
 public class KafkaTopicPartitionLeader implements Serializable {
 
     private static final long serialVersionUID = 9145855900303748582L;

@@ -34,6 +34,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  * brokers via the Kafka high-level consumer API.
  */
 @Internal
+@Deprecated
 public class KafkaPartitionDiscoverer extends AbstractPartitionDiscoverer {
 
     private final Properties kafkaProperties;

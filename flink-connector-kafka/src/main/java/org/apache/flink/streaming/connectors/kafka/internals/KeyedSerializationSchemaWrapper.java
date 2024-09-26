@@ -27,6 +27,7 @@ import org.apache.flink.streaming.util.serialization.KeyedSerializationSchema;
  * @param <T> The type to serialize
  */
 @Internal
+@Deprecated
 public class KeyedSerializationSchemaWrapper<T> implements KeyedSerializationSchema<T> {
 
     private static final long serialVersionUID = 1351665280744549933L;

@@ -21,6 +21,7 @@ import org.apache.flink.annotation.Internal;
 
 /** Utility for assigning Kafka partitions to consumer subtasks. */
 @Internal
+@Deprecated
 public class KafkaTopicPartitionAssigner {
 
     /**

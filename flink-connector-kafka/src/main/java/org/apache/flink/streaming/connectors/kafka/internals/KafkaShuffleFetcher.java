@@ -50,6 +50,7 @@ import static org.apache.flink.streaming.connectors.kafka.shuffle.FlinkKafkaShuf
 
 /** Fetch data from Kafka for Kafka Shuffle. */
 @Internal
+@Deprecated
 public class KafkaShuffleFetcher<T> extends KafkaFetcher<T> {
     /** The handler to check and generate watermarks from fetched records. * */
     private final WatermarkHandler watermarkHandler;
