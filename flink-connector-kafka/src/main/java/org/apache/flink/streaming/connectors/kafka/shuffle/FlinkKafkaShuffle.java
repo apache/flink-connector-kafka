@@ -98,8 +98,13 @@ import java.util.Properties;
  *                                                |
  *                                                | ----------> KafkaShuffleConsumerReuse -> ...
  * </pre>
+ *
+ * @deprecated This experimental feature never graduated to a stable feature and will be removed in
+ *     future releases. In case of interest to port it to the Source/Sink API, please reach out to
+ *     the Flink community.
  */
 @Experimental
+@Deprecated
 public class FlinkKafkaShuffle {
     static final String PRODUCER_PARALLELISM = "producer parallelism";
     static final String PARTITION_NUMBER = "partition number";

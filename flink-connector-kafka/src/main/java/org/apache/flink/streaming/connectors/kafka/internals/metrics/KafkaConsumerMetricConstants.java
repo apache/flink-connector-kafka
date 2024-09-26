@@ -26,6 +26,7 @@ import org.apache.flink.annotation.Internal;
  * metrics.
  */
 @Internal
+@Deprecated
 public class KafkaConsumerMetricConstants {
 
     public static final String KAFKA_CONSUMER_METRICS_GROUP = "KafkaConsumer";

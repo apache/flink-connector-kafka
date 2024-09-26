@@ -39,6 +39,7 @@ import static org.apache.flink.streaming.connectors.kafka.shuffle.FlinkKafkaShuf
 
 /** Flink Kafka Shuffle Consumer Function. */
 @Internal
+@Deprecated
 public class FlinkKafkaShuffleConsumer<T> extends FlinkKafkaConsumer<T> {
     private final TypeSerializer<T> typeSerializer;
     private final int producerParallelism;

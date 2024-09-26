@@ -26,6 +26,7 @@ import org.apache.flink.annotation.Internal;
  * <p>The exact value of this is determined at runtime in the consumer subtasks.
  */
 @Internal
+@Deprecated
 public enum OffsetCommitMode {
 
     /** Completely disable offset committing. */

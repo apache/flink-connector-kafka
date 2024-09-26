@@ -58,6 +58,7 @@ import java.util.stream.Collectors;
 
 /** Internal flink kafka producer. */
 @PublicEvolving
+@Deprecated
 public class FlinkKafkaInternalProducer<K, V> implements Producer<K, V> {
     private static final Logger LOG = LoggerFactory.getLogger(FlinkKafkaInternalProducer.class);
 

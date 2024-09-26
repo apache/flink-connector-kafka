@@ -49,6 +49,7 @@ import static java.util.Objects.requireNonNull;
  * @param <E> The type of elements in the queue.
  */
 @Internal
+@Deprecated
 public class ClosableBlockingQueue<E> {
 
     /** The lock used to make queue accesses and open checks atomic. */

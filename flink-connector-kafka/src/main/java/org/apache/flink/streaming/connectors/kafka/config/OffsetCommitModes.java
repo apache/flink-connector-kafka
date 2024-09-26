@@ -21,6 +21,7 @@ import org.apache.flink.annotation.Internal;
 
 /** Utilities for {@link OffsetCommitMode}. */
 @Internal
+@Deprecated
 public class OffsetCommitModes {
 
     /**

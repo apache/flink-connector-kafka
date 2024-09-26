@@ -65,6 +65,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * }</pre>
  */
 @Internal
+@Deprecated
 public class ExceptionProxy {
 
     /** The thread that should be interrupted when an exception occurs. */

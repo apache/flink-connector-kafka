@@ -29,6 +29,7 @@ import org.apache.flink.streaming.api.watermark.Watermark;
  * this way to avoid public interface change.
  */
 @Internal
+@Deprecated
 class StreamKafkaShuffleSink<IN> extends StreamSink<IN> {
 
     public StreamKafkaShuffleSink(FlinkKafkaShuffleProducer flinkKafkaShuffleProducer) {

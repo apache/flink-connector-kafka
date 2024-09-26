@@ -61,6 +61,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  * @param <KPH> The type of topic/partition identifier used by Kafka in the specific version.
  */
 @Internal
+@Deprecated
 public abstract class AbstractFetcher<T, KPH> {
 
     private static final int NO_TIMESTAMPS_WATERMARKS = 0;

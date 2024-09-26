@@ -40,6 +40,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  * subtask.
  */
 @Internal
+@Deprecated
 public class TransactionalIdsGenerator {
     private final String prefix;
     private final int subtaskIndex;

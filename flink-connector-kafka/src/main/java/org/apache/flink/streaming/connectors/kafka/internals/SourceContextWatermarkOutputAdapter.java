@@ -25,6 +25,7 @@ import org.apache.flink.streaming.api.functions.source.SourceFunction.SourceCont
  * A {@link org.apache.flink.api.common.eventtime.WatermarkOutput} that forwards calls to a {@link
  * org.apache.flink.streaming.api.functions.source.SourceFunction.SourceContext}.
  */
+@Deprecated
 public class SourceContextWatermarkOutputAdapter<T> implements WatermarkOutput {
     private final SourceContext<T> sourceContext;
 

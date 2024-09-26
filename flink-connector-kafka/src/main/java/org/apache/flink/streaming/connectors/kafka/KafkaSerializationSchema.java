@@ -35,8 +35,10 @@ import java.io.Serializable;
  * which the Kafka Producer is running.
  *
  * @param <T> the type of values being serialized
+ * @deprecated Will be turned into internal API when {@link FlinkKafkaProducer} is removed.
  */
 @PublicEvolving
+@Deprecated
 public interface KafkaSerializationSchema<T> extends Serializable {
 
     /**
