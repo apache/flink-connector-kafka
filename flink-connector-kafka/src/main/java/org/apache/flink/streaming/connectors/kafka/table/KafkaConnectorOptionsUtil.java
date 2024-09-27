@@ -24,11 +24,11 @@ import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.kafka.sink.KafkaPartitioner;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.streaming.connectors.kafka.internals.KafkaTopicPartition;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkFixedPartitioner;
-import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanBoundedMode;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanStartupMode;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ValueFieldsStrategy;
@@ -386,7 +386,7 @@ class KafkaConnectorOptionsUtil {
      * The partitioner can be either "fixed", "round-robin" or a customized partitioner full class
      * name.
      */
-    public static Optional<FlinkKafkaPartitioner<RowData>> getFlinkKafkaPartitioner(
+    public static Optional<KafkaPartitioner<RowData>> getFlinkKafkaPartitioner(
             ReadableConfig tableOptions, ClassLoader classLoader) {
         return tableOptions
                 .getOptional(SINK_PARTITIONER)
@@ -465,19 +465,19 @@ class KafkaConnectorOptionsUtil {
     }
 
     /** Returns a class value with the given class name. */
-    private static <T> FlinkKafkaPartitioner<T> initializePartitioner(
+    private static <T> KafkaPartitioner<T> initializePartitioner(
             String name, ClassLoader classLoader) {
         try {
             Class<?> clazz = Class.forName(name, true, classLoader);
-            if (!FlinkKafkaPartitioner.class.isAssignableFrom(clazz)) {
+            if (!KafkaPartitioner.class.isAssignableFrom(clazz)) {
                 throw new ValidationException(
                         String.format(
-                                "Sink partitioner class '%s' should extend from the required class %s",
-                                name, FlinkKafkaPartitioner.class.getName()));
+                                "Sink partitioner class '%s' should implement the required class %s",
+                                name, KafkaPartitioner.class.getName()));
             }
             @SuppressWarnings("unchecked")
-            final FlinkKafkaPartitioner<T> kafkaPartitioner =
-                    InstantiationUtil.instantiate(name, FlinkKafkaPartitioner.class, classLoader);
+            final KafkaPartitioner<T> kafkaPartitioner =
+                    InstantiationUtil.instantiate(name, KafkaPartitioner.class, classLoader);
 
             return kafkaPartitioner;
         } catch (ClassNotFoundException | FlinkException e) {
