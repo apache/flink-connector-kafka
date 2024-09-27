@@ -82,7 +82,7 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
 
     @Nullable private Function<? super IN, String> topicSelector;
     @Nullable private SerializationSchema<? super IN> valueSerializationSchema;
-    @Nullable private FlinkKafkaPartitioner<? super IN> partitioner;
+    @Nullable private KafkaPartitioner<? super IN> partitioner;
     @Nullable private SerializationSchema<? super IN> keySerializationSchema;
     @Nullable private HeaderProvider<? super IN> headerProvider;
 
@@ -91,9 +91,23 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
      *
      * @param partitioner
      * @return {@code this}
+     * @deprecated use {@link #setPartitioner(KafkaPartitioner)}
      */
     public <T extends IN> KafkaRecordSerializationSchemaBuilder<T> setPartitioner(
             FlinkKafkaPartitioner<? super T> partitioner) {
+        KafkaRecordSerializationSchemaBuilder<T> self = self();
+        self.partitioner = checkNotNull(partitioner);
+        return self;
+    }
+
+    /**
+     * Sets a custom partitioner determining the target partition of the target topic.
+     *
+     * @param partitioner
+     * @return {@code this}
+     */
+    public <T extends IN> KafkaRecordSerializationSchemaBuilder<T> setPartitioner(
+            KafkaPartitioner<? super T> partitioner) {
         KafkaRecordSerializationSchemaBuilder<T> self = self();
         self.partitioner = checkNotNull(partitioner);
         return self;
@@ -295,7 +309,7 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
             implements KafkaRecordSerializationSchema<IN> {
         private final SerializationSchema<? super IN> valueSerializationSchema;
         private final Function<? super IN, String> topicSelector;
-        private final FlinkKafkaPartitioner<? super IN> partitioner;
+        private final KafkaPartitioner<? super IN> partitioner;
         private final SerializationSchema<? super IN> keySerializationSchema;
         private final HeaderProvider<? super IN> headerProvider;
 
@@ -303,7 +317,7 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
                 Function<? super IN, String> topicSelector,
                 SerializationSchema<? super IN> valueSerializationSchema,
                 @Nullable SerializationSchema<? super IN> keySerializationSchema,
-                @Nullable FlinkKafkaPartitioner<? super IN> partitioner,
+                @Nullable KafkaPartitioner<? super IN> partitioner,
                 @Nullable HeaderProvider<? super IN> headerProvider) {
             this.topicSelector = checkNotNull(topicSelector);
             this.valueSerializationSchema = checkNotNull(valueSerializationSchema);

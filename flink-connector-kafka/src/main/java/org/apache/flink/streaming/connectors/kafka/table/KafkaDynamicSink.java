@@ -24,11 +24,11 @@ import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.kafka.sink.KafkaPartitioner;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.sink.KafkaSinkBuilder;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
-import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.Projection;
@@ -125,7 +125,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
     protected final Properties properties;
 
     /** Partitioner to select Kafka partition for each item. */
-    protected final @Nullable FlinkKafkaPartitioner<RowData> partitioner;
+    protected final @Nullable KafkaPartitioner<RowData> partitioner;
 
     /**
      * Flag to determine sink mode. In upsert mode sink transforms the delete/update-before message
@@ -150,7 +150,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
             @Nullable List<String> topics,
             @Nullable Pattern topicPattern,
             Properties properties,
-            @Nullable FlinkKafkaPartitioner<RowData> partitioner,
+            @Nullable KafkaPartitioner<RowData> partitioner,
             DeliveryGuarantee deliveryGuarantee,
             boolean upsertMode,
             SinkBufferFlushMode flushMode,
