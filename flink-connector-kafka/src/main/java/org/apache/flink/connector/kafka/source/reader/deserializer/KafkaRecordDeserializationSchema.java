@@ -98,6 +98,13 @@ public interface KafkaRecordDeserializationSchema<T> extends Serializable, Resul
         return new KafkaValueOnlyDeserializationSchemaWrapper<>(valueDeserializationSchema);
     }
 
+    static <V> KafkaRecordDeserializationSchema<V> valueOnly(
+            DeserializationSchema<V> valueDeserializationSchema,
+            boolean valueIncludeKafkaConnectJsonSchema) {
+        return new KafkaValueOnlyDeserializationSchemaWrapper<>(
+                valueDeserializationSchema, valueIncludeKafkaConnectJsonSchema);
+    }
+
     /**
      * Wraps a Kafka {@link Deserializer} to a {@link KafkaRecordDeserializationSchema}.
      *
