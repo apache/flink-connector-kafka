@@ -20,9 +20,9 @@ package org.apache.flink.streaming.connectors.kafka;
 
 import org.apache.flink.FlinkVersion;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.TypeSerializerMatchers;
 import org.apache.flink.api.common.typeutils.TypeSerializerSchemaCompatibility;
 import org.apache.flink.streaming.connectors.kafka.internals.FlinkKafkaInternalProducer;
+import org.apache.flink.streaming.connectors.kafka.testutils.TypeSerializerMatchers;
 import org.apache.flink.streaming.connectors.kafka.testutils.TypeSerializerUpgradeTestBase;
 
 import org.hamcrest.Matcher;
