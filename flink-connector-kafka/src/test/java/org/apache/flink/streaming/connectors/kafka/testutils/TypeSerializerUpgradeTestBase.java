@@ -20,9 +20,7 @@ package org.apache.flink.streaming.connectors.kafka.testutils;
 
 import org.apache.flink.FlinkVersion;
 import org.apache.flink.api.common.typeutils.ClassRelocator;
-import org.apache.flink.api.common.typeutils.ThreadContextClassLoader;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.TypeSerializerMatchers;
 import org.apache.flink.api.common.typeutils.TypeSerializerSchemaCompatibility;
 import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
 import org.apache.flink.api.common.typeutils.TypeSerializerSnapshotSerializationUtil;
@@ -61,7 +59,7 @@ import static org.hamcrest.CoreMatchers.not;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedElementT> {
 
-    public static final FlinkVersion CURRENT_VERSION = FlinkVersion.v1_17;
+    public static final FlinkVersion CURRENT_VERSION = FlinkVersion.current();
 
     public static final Set<FlinkVersion> MIGRATION_VERSIONS =
             FlinkVersion.rangeOf(FlinkVersion.v1_11, CURRENT_VERSION);
@@ -136,9 +134,6 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
             try (ThreadContextClassLoader ignored =
                     new ThreadContextClassLoader(setupClassloader)) {
                 return delegateSetup.createPriorSerializer();
-            } catch (IOException e) {
-                throw new RuntimeException(
-                        "Error creating prior serializer via ClassLoaderSafePreUpgradeSetup.", e);
             }
         }
 
@@ -147,9 +142,6 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
             try (ThreadContextClassLoader ignored =
                     new ThreadContextClassLoader(setupClassloader)) {
                 return delegateSetup.createTestData();
-            } catch (IOException e) {
-                throw new RuntimeException(
-                        "Error creating test data via ThreadContextClassLoader.", e);
             }
         }
     }
@@ -179,10 +171,6 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
             try (ThreadContextClassLoader ignored =
                     new ThreadContextClassLoader(verifierClassloader)) {
                 return delegateVerifier.createUpgradedSerializer();
-            } catch (IOException e) {
-                throw new RuntimeException(
-                        "Error creating upgraded serializer via ClassLoaderSafeUpgradeVerifier.",
-                        e);
             }
         }
 
@@ -191,9 +179,6 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
             try (ThreadContextClassLoader ignored =
                     new ThreadContextClassLoader(verifierClassloader)) {
                 return delegateVerifier.testDataMatcher();
-            } catch (IOException e) {
-                throw new RuntimeException(
-                        "Error creating expected test data via ClassLoaderSafeUpgradeVerifier.", e);
             }
         }
 
@@ -203,10 +188,6 @@ public abstract class TypeSerializerUpgradeTestBase<PreviousElementT, UpgradedEl
             try (ThreadContextClassLoader ignored =
                     new ThreadContextClassLoader(verifierClassloader)) {
                 return delegateVerifier.schemaCompatibilityMatcher(version);
-            } catch (IOException e) {
-                throw new RuntimeException(
-                        "Error creating schema compatibility matcher via ClassLoaderSafeUpgradeVerifier.",
-                        e);
             }
         }
     }

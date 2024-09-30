@@ -39,7 +39,8 @@ under the License.
         FlinkKafkaProducerBaseTest --> --add-opens=java.base/java.lang=ALL-UNNAMED <!--
         FlinkKafkaProducerBaseTest --> --add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED <!--
         FlinkKafkaConsumerBaseTest --> --add-opens=java.base/java.util=ALL-UNNAMED <!--
-        KafkaProducerExactlyOnceITCase --> --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED </flink.connector.module.config>
+        KafkaProducerExactlyOnceITCase --> --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED
+        </flink.connector.module.config>
     </properties>
 
     <dependencies>
@@ -81,10 +82,10 @@ under the License.
             <version>${kafka.version}</version>
         </dependency>
 
-		<dependency>
-			<groupId>com.google.guava</groupId>
-			<artifactId>guava</artifactId>
-		</dependency>
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+        </dependency>
 
         <!-- Tests -->
 
@@ -211,6 +212,7 @@ under the License.
             <version>${flink.version}</version>
             <scope>test</scope>
         </dependency>
+
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-table-planner_${scala.binary.version}</artifactId>
