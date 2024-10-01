@@ -86,7 +86,6 @@ import javax.annotation.Nullable;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -101,9 +100,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
+import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.fail;
 
 /** Tests for using KafkaSink writing to a Kafka cluster. */
 public class KafkaSinkITCase extends TestLogger {
@@ -158,6 +157,7 @@ public class KafkaSinkITCase extends TestLogger {
 
     @After
     public void tearDown() throws ExecutionException, InterruptedException, TimeoutException {
+        checkProducerLeak();
         deleteTestTopic(topic);
     }
 
@@ -329,7 +329,6 @@ public class KafkaSinkITCase extends TestLogger {
         builder.setTransactionalIdPrefix(transactionalIdPrefix);
         stream.sinkTo(builder.build());
         env.execute();
-        checkProducerLeak();
     }
 
     private void testRecoveryWithAssertion(
@@ -598,40 +597,6 @@ public class KafkaSinkITCase extends TestLogger {
 
         @Override
         public void initializeState(FunctionInitializationContext context) throws Exception {}
-    }
-
-    private void checkProducerLeak() throws InterruptedException {
-        List<Map.Entry<Thread, StackTraceElement[]>> leaks = null;
-        for (int tries = 0; tries < 10; tries++) {
-            leaks =
-                    Thread.getAllStackTraces().entrySet().stream()
-                            .filter(this::findAliveKafkaThread)
-                            .collect(Collectors.toList());
-            if (leaks.isEmpty()) {
-                return;
-            }
-            Thread.sleep(1000);
-        }
-
-        for (Map.Entry<Thread, StackTraceElement[]> leak : leaks) {
-            leak.getKey().stop();
-        }
-        fail(
-                "Detected producer leaks:\n"
-                        + leaks.stream().map(this::format).collect(Collectors.joining("\n\n")));
-    }
-
-    private String format(Map.Entry<Thread, StackTraceElement[]> leak) {
-        String stackTrace =
-                Arrays.stream(leak.getValue())
-                        .map(StackTraceElement::toString)
-                        .collect(Collectors.joining("\n"));
-        return leak.getKey().getName() + ":\n" + stackTrace;
-    }
-
-    private boolean findAliveKafkaThread(Map.Entry<Thread, StackTraceElement[]> threadStackTrace) {
-        return threadStackTrace.getKey().getState() != Thread.State.TERMINATED
-                && threadStackTrace.getKey().getName().contains("kafka-producer-network-thread");
     }
 
     /**

@@ -24,6 +24,7 @@ import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -32,15 +33,21 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.Properties;
 
+import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link KafkaCommitter}. */
 @ExtendWith({TestLoggerExtension.class})
-public class KafkaCommitterTest {
+class KafkaCommitterTest {
 
     private static final int PRODUCER_ID = 0;
     private static final short EPOCH = 0;
     private static final String TRANSACTIONAL_ID = "transactionalId";
+
+    @AfterEach
+    public void check() {
+        checkProducerLeak();
+    }
 
     /** Causes a network error by inactive broker and tests that a retry will happen. */
     @Test
