@@ -33,11 +33,14 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
+
+import static org.assertj.core.api.Assertions.fail;
 
 /** Collection of methods to interact with a Kafka cluster. */
 public class KafkaUtil {
@@ -188,5 +191,45 @@ public class KafkaUtil {
         return consumer.partitionsFor(topic).stream()
                 .map(info -> new TopicPartition(info.topic(), info.partition()))
                 .collect(Collectors.toSet());
+    }
+
+    public static void checkProducerLeak() {
+        List<Map.Entry<Thread, StackTraceElement[]>> leaks = null;
+        for (int tries = 0; tries < 10; tries++) {
+            leaks =
+                    Thread.getAllStackTraces().entrySet().stream()
+                            .filter(KafkaUtil::findAliveKafkaThread)
+                            .collect(Collectors.toList());
+            if (leaks.isEmpty()) {
+                return;
+            }
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+            }
+        }
+
+        for (Map.Entry<Thread, StackTraceElement[]> leak : leaks) {
+            leak.getKey().stop();
+        }
+        fail(
+                "Detected producer leaks:\n"
+                        + leaks.stream()
+                                .map(KafkaUtil::format)
+                                .collect(Collectors.joining("\n\n")));
+    }
+
+    private static String format(Map.Entry<Thread, StackTraceElement[]> leak) {
+        String stackTrace =
+                Arrays.stream(leak.getValue())
+                        .map(StackTraceElement::toString)
+                        .collect(Collectors.joining("\n"));
+        return leak.getKey().getName() + ":\n" + stackTrace;
+    }
+
+    private static boolean findAliveKafkaThread(
+            Map.Entry<Thread, StackTraceElement[]> threadStackTrace) {
+        return threadStackTrace.getKey().getState() != Thread.State.TERMINATED
+                && threadStackTrace.getKey().getName().contains("kafka-producer-network-thread");
     }
 }

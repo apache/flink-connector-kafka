@@ -165,6 +165,9 @@ public class KafkaWriterITCase extends KafkaWriterTestBase {
                 .as("the exception is not thrown again")
                 .doesNotThrowAnyException();
         assertThat(numRecordsOutErrors.getCount()).isEqualTo(1L);
+
+        // async exception is checked and thrown on close
+        assertThatCode(writer::close).hasRootCauseInstanceOf(ProducerFencedException.class);
     }
 
     @Test
@@ -191,6 +194,9 @@ public class KafkaWriterITCase extends KafkaWriterTestBase {
                 .as("the exception is not thrown again")
                 .doesNotThrowAnyException();
         assertThat(numRecordsOutErrors.getCount()).isEqualTo(1L);
+
+        // async exception is checked and thrown on close
+        assertThatCode(writer::close).hasRootCauseInstanceOf(ProducerFencedException.class);
     }
 
     @Test
@@ -225,6 +231,9 @@ public class KafkaWriterITCase extends KafkaWriterTestBase {
                 .as("the exception is not thrown again")
                 .doesNotThrowAnyException();
         assertThat(numRecordsOutErrors.getCount()).isEqualTo(1L);
+
+        // async exception is checked and thrown on close
+        assertThatCode(writer::close).hasRootCauseInstanceOf(ProducerFencedException.class);
     }
 
     @Test

@@ -63,20 +63,21 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
 
         final SinkWriterMetricGroup metricGroup = createSinkWriterMetricGroup();
 
-        final KafkaWriter<Integer> writer =
+        try (KafkaWriter<Integer> writer =
                 createWriterWithConfiguration(
-                        properties, DeliveryGuarantee.AT_LEAST_ONCE, metricGroup);
+                        properties, DeliveryGuarantee.AT_LEAST_ONCE, metricGroup)) {
 
-        writer.write(1, SINK_WRITER_CONTEXT);
+            writer.write(1, SINK_WRITER_CONTEXT);
 
-        KAFKA_CONTAINER.stop();
+            KAFKA_CONTAINER.stop();
 
-        try {
-            writer.getCurrentProducer().flush();
-            assertThatCode(() -> writer.write(1, SINK_WRITER_CONTEXT))
-                    .hasRootCauseExactlyInstanceOf(NetworkException.class);
-        } finally {
-            KAFKA_CONTAINER.start();
+            try {
+                writer.getCurrentProducer().flush();
+                assertThatCode(() -> writer.write(1, SINK_WRITER_CONTEXT))
+                        .hasRootCauseExactlyInstanceOf(NetworkException.class);
+            } finally {
+                KAFKA_CONTAINER.start();
+            }
         }
     }
 
@@ -86,17 +87,18 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
 
         final SinkWriterMetricGroup metricGroup = createSinkWriterMetricGroup();
 
-        final KafkaWriter<Integer> writer =
+        try (KafkaWriter<Integer> writer =
                 createWriterWithConfiguration(
-                        properties, DeliveryGuarantee.AT_LEAST_ONCE, metricGroup);
-        writer.write(1, SINK_WRITER_CONTEXT);
+                        properties, DeliveryGuarantee.AT_LEAST_ONCE, metricGroup)) {
+            writer.write(1, SINK_WRITER_CONTEXT);
 
-        KAFKA_CONTAINER.stop();
-        try {
-            assertThatCode(() -> writer.flush(false))
-                    .hasRootCauseExactlyInstanceOf(NetworkException.class);
-        } finally {
-            KAFKA_CONTAINER.start();
+            KAFKA_CONTAINER.stop();
+            try {
+                assertThatCode(() -> writer.flush(false))
+                        .hasRootCauseExactlyInstanceOf(NetworkException.class);
+            } finally {
+                KAFKA_CONTAINER.start();
+            }
         }
     }
 
@@ -106,7 +108,7 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
 
         final SinkWriterMetricGroup metricGroup = createSinkWriterMetricGroup();
 
-        final KafkaWriter<Integer> writer =
+        KafkaWriter<Integer> writer =
                 createWriterWithConfiguration(
                         properties, DeliveryGuarantee.AT_LEAST_ONCE, metricGroup);
 
@@ -119,6 +121,9 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
             // closing producer resource throws exception first
             assertThatCode(() -> writer.close())
                     .hasRootCauseExactlyInstanceOf(NetworkException.class);
+        } catch (Exception e) {
+            writer.close();
+            throw e;
         } finally {
             KAFKA_CONTAINER.start();
         }
@@ -130,26 +135,27 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
         SinkInitContext sinkInitContext =
                 new SinkInitContext(createSinkWriterMetricGroup(), timeService, null);
 
-        final KafkaWriter<Integer> writer =
+        try (KafkaWriter<Integer> writer =
                 createWriterWithConfiguration(
-                        properties, DeliveryGuarantee.AT_LEAST_ONCE, sinkInitContext);
+                        properties, DeliveryGuarantee.AT_LEAST_ONCE, sinkInitContext)) {
 
-        KAFKA_CONTAINER.stop();
+            KAFKA_CONTAINER.stop();
 
-        writer.write(1, SINK_WRITER_CONTEXT);
+            writer.write(1, SINK_WRITER_CONTEXT);
 
-        try {
-            writer.getCurrentProducer().flush();
+            try {
+                writer.getCurrentProducer().flush();
 
-            assertThatCode(
-                            () -> {
-                                while (sinkInitContext.getMailboxExecutor().tryYield()) {
-                                    // execute all mails
-                                }
-                            })
-                    .hasRootCauseExactlyInstanceOf(TimeoutException.class);
-        } finally {
-            KAFKA_CONTAINER.start();
+                assertThatCode(
+                                () -> {
+                                    while (sinkInitContext.getMailboxExecutor().tryYield()) {
+                                        // execute all mails
+                                    }
+                                })
+                        .hasRootCauseExactlyInstanceOf(TimeoutException.class);
+            } finally {
+                KAFKA_CONTAINER.start();
+            }
         }
     }
 

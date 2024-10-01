@@ -151,20 +151,19 @@ public class DataGenerators {
         @Override
         public void run() {
             // we manually feed data into the Kafka sink
-            OneInputStreamOperatorTestHarness<String, Object> testHarness = null;
-            try {
-                Properties producerProperties =
-                        KafkaUtils.getPropertiesFromBrokerList(server.getBrokerConnectionString());
-                producerProperties.setProperty("retries", "3");
 
-                StreamSink<String> sink =
-                        server.getProducerSink(
-                                topic,
-                                new SimpleStringSchema(),
-                                producerProperties,
-                                new FlinkFixedPartitioner<>());
+            Properties producerProperties =
+                    KafkaUtils.getPropertiesFromBrokerList(server.getBrokerConnectionString());
+            producerProperties.setProperty("retries", "3");
 
-                testHarness = new OneInputStreamOperatorTestHarness<>(sink);
+            StreamSink<String> sink =
+                    server.getProducerSink(
+                            topic,
+                            new SimpleStringSchema(),
+                            producerProperties,
+                            new FlinkFixedPartitioner<>());
+            try (OneInputStreamOperatorTestHarness<String, Object> testHarness =
+                    new OneInputStreamOperatorTestHarness<>(sink)) {
                 testHarness.open();
 
                 final StringBuilder bld = new StringBuilder();
@@ -183,20 +182,11 @@ public class DataGenerators {
                 }
             } catch (Throwable t) {
                 this.error = t;
-            } finally {
-                if (testHarness != null) {
-                    try {
-                        testHarness.close();
-                    } catch (Throwable t) {
-                        // ignore
-                    }
-                }
             }
         }
 
         public void shutdown() {
             this.running = false;
-            this.interrupt();
         }
 
         public Throwable getError() {

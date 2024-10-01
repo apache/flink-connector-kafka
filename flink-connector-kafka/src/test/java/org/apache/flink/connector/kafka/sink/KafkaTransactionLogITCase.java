@@ -29,8 +29,6 @@ import org.apache.kafka.common.serialization.IntegerSerializer;
 import org.junit.After;
 import org.junit.ClassRule;
 import org.junit.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.KafkaContainer;
 
 import java.util.ArrayList;
@@ -44,13 +42,13 @@ import static org.apache.flink.connector.kafka.sink.KafkaTransactionLog.Transact
 import static org.apache.flink.connector.kafka.sink.KafkaTransactionLog.TransactionState.Ongoing;
 import static org.apache.flink.connector.kafka.sink.KafkaTransactionLog.TransactionState.PrepareAbort;
 import static org.apache.flink.connector.kafka.sink.KafkaTransactionLog.TransactionState.PrepareCommit;
+import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link KafkaTransactionLog} to retrieve abortable Kafka transactions. */
 public class KafkaTransactionLogITCase extends TestLogger {
 
-    private static final Logger LOG = LoggerFactory.getLogger(KafkaSinkITCase.class);
     private static final String TOPIC_NAME = "kafkaTransactionLogTest";
     private static final String TRANSACTIONAL_ID_PREFIX = "kafka-log";
 
@@ -63,6 +61,7 @@ public class KafkaTransactionLogITCase extends TestLogger {
     @After
     public void tearDown() {
         openProducers.forEach(Producer::close);
+        checkProducerLeak();
     }
 
     @Test

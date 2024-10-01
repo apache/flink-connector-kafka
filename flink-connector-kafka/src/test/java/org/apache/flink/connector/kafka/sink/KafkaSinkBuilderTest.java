@@ -52,7 +52,6 @@ public class KafkaSinkBuilderTest extends TestLogger {
                 getBasicBuilder().setProperty("k1", "v1"),
                 p -> {
                     Arrays.stream(DEFAULT_KEYS).forEach(k -> assertThat(p).containsKey(k));
-                    p.containsKey("k1");
                 });
 
         Properties testConf = new Properties();

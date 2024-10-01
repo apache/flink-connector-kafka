@@ -36,6 +36,7 @@ import org.apache.flink.util.UserCodeClassLoader;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestInfo;
 import org.slf4j.Logger;
@@ -55,6 +56,7 @@ import java.util.Properties;
 import java.util.concurrent.ScheduledFuture;
 import java.util.function.Consumer;
 
+import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 
 /** Test base for KafkaWriter. */
@@ -82,6 +84,11 @@ public abstract class KafkaWriterTestBase {
         metricListener = new MetricListener();
         timeService = new TriggerTimeService();
         topic = testInfo.getDisplayName().replaceAll("\\W", "");
+    }
+
+    @AfterEach
+    public void check() {
+        checkProducerLeak();
     }
 
     protected KafkaWriter<Integer> createWriterWithConfiguration(

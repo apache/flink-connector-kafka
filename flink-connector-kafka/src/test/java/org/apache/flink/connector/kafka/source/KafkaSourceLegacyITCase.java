@@ -23,9 +23,12 @@ import org.apache.flink.streaming.connectors.kafka.KafkaConsumerTestBase;
 import org.apache.flink.streaming.connectors.kafka.KafkaProducerTestBase;
 import org.apache.flink.streaming.connectors.kafka.KafkaTestEnvironmentImpl;
 
+import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Ignore;
 import org.junit.Test;
+
+import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 
 /**
  * An IT case class that runs all the IT cases of the legacy {@link
@@ -42,6 +45,11 @@ public class KafkaSourceLegacyITCase extends KafkaConsumerTestBase {
         KafkaProducerTestBase.prepare();
         ((KafkaTestEnvironmentImpl) kafkaServer)
                 .setProducerSemantic(FlinkKafkaProducer.Semantic.AT_LEAST_ONCE);
+    }
+
+    @After
+    public void check() {
+        checkProducerLeak();
     }
 
     @Test

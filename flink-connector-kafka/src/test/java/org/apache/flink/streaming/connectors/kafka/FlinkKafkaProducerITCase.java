@@ -45,6 +45,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.apache.flink.util.ExceptionUtils.findThrowable;
 import static org.apache.flink.util.Preconditions.checkState;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -815,13 +816,5 @@ public class FlinkKafkaProducerITCase extends KafkaTestBase {
             return cause.get().getErrorCode().equals(expectedErrorCode);
         }
         return false;
-    }
-
-    private void checkProducerLeak() {
-        for (Thread t : Thread.getAllStackTraces().keySet()) {
-            if (t.getName().contains("kafka-producer-network-thread")) {
-                fail("Detected producer leak. Thread name: " + t.getName());
-            }
-        }
     }
 }
