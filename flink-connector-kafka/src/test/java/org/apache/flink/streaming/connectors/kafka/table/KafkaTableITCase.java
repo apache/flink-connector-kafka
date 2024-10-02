@@ -23,8 +23,8 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.execution.SavepointFormatType;
-import org.apache.flink.core.testutils.FlinkAssertions;
 import org.apache.flink.runtime.jobgraph.SavepointConfigOptions;
+import org.apache.flink.runtime.messages.FlinkJobTerminatedWithoutCancellationException;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
@@ -36,11 +36,14 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.utils.EncodingUtils;
 import org.apache.flink.test.util.SuccessException;
 import org.apache.flink.types.Row;
+import org.apache.flink.util.function.RunnableWithException;
 
 import org.apache.kafka.clients.consumer.NoOffsetForPartitionException;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.assertj.core.api.Assertions;
+import org.assertj.core.api.ThrowingConsumer;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -65,6 +68,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.flink.core.testutils.CommonTestUtils.waitUtil;
+import static org.apache.flink.core.testutils.FlinkAssertions.anyCauseMatches;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaTableTestUtils.collectAllRows;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaTableTestUtils.collectRows;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaTableTestUtils.readLines;
@@ -186,7 +190,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         // ------------- cleanup -------------------
 
-        deleteTestTopic(topic);
+        cleanupTopic(topic);
     }
 
     @Test
@@ -266,8 +270,8 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         assertThat(topic2Results).containsExactly(Row.of(topic2, 2, 1103, "behavior 2"));
 
         // ------------- cleanup -------------------
-        deleteTestTopic(topic1);
-        deleteTestTopic(topic2);
+        cleanupTopic(topic1);
+        cleanupTopic(topic2);
     }
 
     @Test
@@ -349,8 +353,8 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         // ------------- cleanup -------------------
 
-        deleteTestTopic(topic1);
-        deleteTestTopic(topic2);
+        cleanupTopic(topic1);
+        cleanupTopic(topic2);
     }
 
     @Test
@@ -406,7 +410,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         // ------------- cleanup -------------------
 
-        deleteTestTopic(topic);
+        cleanupTopic(topic);
     }
 
     @Test
@@ -460,7 +464,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         // ------------- cleanup -------------------
 
-        deleteTestTopic(topic);
+        cleanupTopic(topic);
     }
 
     @Test
@@ -517,7 +521,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         // ------------- cleanup -------------------
 
-        deleteTestTopic(topic);
+        cleanupTopic(topic);
     }
 
     @Test
@@ -702,7 +706,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         // ------------- cleanup -------------------
 
-        deleteTestTopic(topic);
+        cleanupTopic(topic);
     }
 
     @Test
@@ -783,7 +787,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         // ------------- cleanup -------------------
 
-        deleteTestTopic(topic);
+        cleanupTopic(topic);
     }
 
     @Test
@@ -861,7 +865,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         // ------------- cleanup -------------------
 
-        deleteTestTopic(topic);
+        cleanupTopic(topic);
     }
 
     @Test
@@ -977,8 +981,8 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         // ------------- cleanup -------------------
 
-        deleteTestTopic(orderTopic);
-        deleteTestTopic(productTopic);
+        cleanupTopic(orderTopic);
+        cleanupTopic(productTopic);
     }
 
     private void initialProductChangelog(String topic, String bootstraps) throws Exception {
@@ -1093,8 +1097,8 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         // ------------- cleanup -------------------
 
-        tableResult.getJobClient().ifPresent(JobClient::cancel);
-        deleteTestTopic(topic);
+        cancelJob(tableResult);
+        cleanupTopic(topic);
     }
 
     @Test
@@ -1168,8 +1172,8 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         // ------------- cleanup -------------------
 
-        tableResult.getJobClient().ifPresent(JobClient::cancel);
-        deleteTestTopic(topic);
+        cancelJob(tableResult);
+        cleanupTopic(topic);
     }
 
     @Test
@@ -1300,8 +1304,8 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         // ------------- cleanup -------------------
 
-        tableResult.getJobClient().ifPresent(JobClient::cancel);
-        deleteTestTopic(topic);
+        cancelJob(tableResult);
+        cleanupTopic(topic);
     }
 
     @Test
@@ -1317,7 +1321,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
     @Test
     public void testStartFromGroupOffsetsNone() {
         Assertions.assertThatThrownBy(() -> testStartFromGroupOffsetsWithNoneResetStrategy())
-                .satisfies(FlinkAssertions.anyCauseMatches(NoOffsetForPartitionException.class));
+                .satisfies(anyCauseMatches(NoOffsetForPartitionException.class));
     }
 
     private List<String> appendNewData(
@@ -1433,10 +1437,8 @@ public class KafkaTableITCase extends KafkaTableTestBase {
             KafkaTableTestUtils.waitingExpectedResults(sinkName, expected, Duration.ofSeconds(15));
         } finally {
             // ------------- cleanup -------------------
-            if (tableResult != null) {
-                tableResult.getJobClient().ifPresent(JobClient::cancel);
-            }
-            deleteTestTopic(topic);
+            cancelJob(tableResult);
+            cleanupTopic(topic);
         }
     }
 
@@ -1455,10 +1457,8 @@ public class KafkaTableITCase extends KafkaTableTestBase {
             tableResult.await();
         } finally {
             // ------------- cleanup -------------------
-            if (tableResult != null) {
-                tableResult.getJobClient().ifPresent(JobClient::cancel);
-            }
-            deleteTestTopic(topic);
+            cancelJob(tableResult);
+            cleanupTopic(topic);
         }
     }
 
@@ -1512,6 +1512,35 @@ public class KafkaTableITCase extends KafkaTableTestBase {
             return isCausedByJobFinished(e.getCause());
         } else {
             return false;
+        }
+    }
+
+    private void cleanupTopic(String topic) {
+        ignoreExceptions(
+                () -> deleteTestTopic(topic),
+                anyCauseMatches(UnknownTopicOrPartitionException.class));
+    }
+
+    private static void cancelJob(TableResult tableResult) {
+        if (tableResult != null && tableResult.getJobClient().isPresent()) {
+            ignoreExceptions(
+                    () -> tableResult.getJobClient().get().cancel().get(),
+                    anyCauseMatches(FlinkJobTerminatedWithoutCancellationException.class),
+                    anyCauseMatches(
+                            "MiniCluster is not yet running or has already been shut down."));
+        }
+    }
+
+    @SafeVarargs
+    private static void ignoreExceptions(
+            RunnableWithException runnable, ThrowingConsumer<? super Throwable>... ignoreIf) {
+        try {
+            runnable.run();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception ex) {
+            // check if the exception is one of the ignored ones
+            assertThat(ex).satisfiesAnyOf(ignoreIf);
         }
     }
 }
