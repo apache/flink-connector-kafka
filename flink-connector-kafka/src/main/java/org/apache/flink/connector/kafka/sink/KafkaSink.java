@@ -24,10 +24,15 @@ import org.apache.flink.api.connector.sink2.Committer;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 
+import org.apache.kafka.clients.producer.ProducerConfig;
+
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.apache.flink.connector.kafka.source.KafkaSourceOptions.CLIENT_ID_PREFIX;
 
 /**
  * Flink Sink to produce data into a Kafka topic. The sink supports all delivery guarantees
@@ -56,6 +61,9 @@ import java.util.Properties;
 public class KafkaSink<IN>
         implements TwoPhaseCommittingStatefulSink<IN, KafkaWriterState, KafkaCommittable> {
 
+    private static final AtomicInteger PRODUCER_CLIENT_ID_SEQUENCE = new AtomicInteger(1);
+    private static final String clientIdWriterSuffix = "-writer-";
+    private static final String clientIdCommitterSuffix = "-commiter";
     private final DeliveryGuarantee deliveryGuarantee;
 
     private final KafkaRecordSerializationSchema<IN> recordSerializer;
@@ -86,7 +94,8 @@ public class KafkaSink<IN>
     @Internal
     @Override
     public Committer<KafkaCommittable> createCommitter() throws IOException {
-        return new KafkaCommitter(kafkaProducerConfig);
+        return new KafkaCommitter(
+                maybeOverwriteClientIdPrefix(kafkaProducerConfig, clientIdCommitterSuffix));
     }
 
     @Internal
@@ -100,7 +109,8 @@ public class KafkaSink<IN>
     public KafkaWriter<IN> createWriter(InitContext context) throws IOException {
         return new KafkaWriter<IN>(
                 deliveryGuarantee,
-                kafkaProducerConfig,
+                maybeOverwriteClientIdPrefix(
+                        kafkaProducerConfig, clientIdWriterSuffix + context.getSubtaskId()),
                 transactionalIdPrefix,
                 context,
                 recordSerializer,
@@ -114,7 +124,8 @@ public class KafkaSink<IN>
             InitContext context, Collection<KafkaWriterState> recoveredState) throws IOException {
         return new KafkaWriter<>(
                 deliveryGuarantee,
-                kafkaProducerConfig,
+                maybeOverwriteClientIdPrefix(
+                        kafkaProducerConfig, clientIdWriterSuffix + context.getSubtaskId()),
                 transactionalIdPrefix,
                 context,
                 recordSerializer,
@@ -131,5 +142,31 @@ public class KafkaSink<IN>
     @VisibleForTesting
     protected Properties getKafkaProducerConfig() {
         return kafkaProducerConfig;
+    }
+
+    private Properties maybeOverwriteClientIdPrefix(Properties kafkaProducerConfig, String suffix) {
+        String clientIdPrefix = kafkaProducerConfig.getProperty(CLIENT_ID_PREFIX.key());
+        if (clientIdPrefix == null) {
+            return kafkaProducerConfig;
+        }
+
+        Properties props = new Properties();
+        props.putAll(kafkaProducerConfig);
+        props.setProperty(CLIENT_ID_PREFIX.key(), clientIdPrefix + suffix);
+        return props;
+    }
+
+    public static Properties withClientId(Properties properties, String suffix) {
+        String clientIdPrefix = properties.getProperty(CLIENT_ID_PREFIX.key());
+        if (clientIdPrefix == null) {
+            return properties;
+        }
+        String clientId =
+                clientIdPrefix + suffix + "-" + PRODUCER_CLIENT_ID_SEQUENCE.getAndIncrement();
+
+        Properties props = new Properties();
+        props.putAll(properties);
+        props.setProperty(ProducerConfig.CLIENT_ID_CONFIG, clientId);
+        return props;
     }
 }
