@@ -99,23 +99,17 @@ public class FlinkKafkaProducerITCase extends KafkaTestBase {
     public void resourceCleanUp(FlinkKafkaProducer.Semantic semantic) throws Exception {
         String topic = "flink-kafka-producer-resource-cleanup-" + semantic;
 
-        final int allowedEpsilonThreadCountGrow = 50;
+        try (OneInputStreamOperatorTestHarness<Integer, Object> testHarness1 =
+                createTestHarness(topic, 1, 1, 0, semantic)) {
+            testHarness1.setup();
+            testHarness1.open();
+            testHarness1.snapshot(1L, 100L);
+            testHarness1.notifyOfCompletedCheckpoint(1L);
 
-        Optional<Integer> initialActiveThreads = Optional.empty();
-        for (int i = 0; i < allowedEpsilonThreadCountGrow * 2; i++) {
-            try (OneInputStreamOperatorTestHarness<Integer, Object> testHarness1 =
-                    createTestHarness(topic, 1, 1, 0, semantic)) {
-                testHarness1.setup();
-                testHarness1.open();
-            }
-
-            if (initialActiveThreads.isPresent()) {
-                assertThat(Thread.activeCount())
-                        .as("active threads count")
-                        .isLessThan(initialActiveThreads.get() + allowedEpsilonThreadCountGrow);
-            } else {
-                initialActiveThreads = Optional.of(Thread.activeCount());
-            }
+            // test the leak fixed by FLINK-36441
+            testHarness1.getOneInputOperator().finish();
+            testHarness1.snapshot(2L, 100L);
+            testHarness1.notifyOfCompletedCheckpoint(2L);
         }
         checkProducerLeak();
     }
