@@ -28,6 +28,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
+import static org.apache.flink.connector.kafka.sink.KafkaSink.withClientId;
+
 /**
  * Context providing information to assist constructing a {@link
  * org.apache.kafka.clients.producer.ProducerRecord}.
@@ -37,6 +39,7 @@ public class DefaultKafkaSinkContext implements KafkaRecordSerializationSchema.K
     private final int subtaskId;
     private final int numberOfParallelInstances;
     private final Properties kafkaProducerConfig;
+    private static final String clientIdSuffix = "-metadata-fetcher";
 
     private final Map<String, int[]> cachedPartitions = new HashMap<>();
 
@@ -63,7 +66,8 @@ public class DefaultKafkaSinkContext implements KafkaRecordSerializationSchema.K
     }
 
     private int[] fetchPartitionsForTopic(String topic) {
-        try (final Producer<?, ?> producer = new KafkaProducer<>(kafkaProducerConfig)) {
+        try (final Producer<?, ?> producer =
+                new KafkaProducer<>(withClientId(kafkaProducerConfig, clientIdSuffix))) {
             // the fetched list is immutable, so we're creating a mutable copy in order to sort
             // it
             final List<PartitionInfo> partitionsList =
