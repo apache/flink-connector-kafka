@@ -71,6 +71,7 @@ public class KafkaSinkBuilder<IN> {
 
     private DeliveryGuarantee deliveryGuarantee = DeliveryGuarantee.NONE;
     private String transactionalIdPrefix = "kafka-sink";
+    private String clientIdPrefix = null;
 
     private final Properties kafkaProducerConfig;
     private KafkaRecordSerializationSchema<IN> recordSerializer;
@@ -190,6 +191,20 @@ public class KafkaSinkBuilder<IN> {
         return setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
     }
 
+    /**
+     * Set the prefix for all KafkaProducer `client.id` values.
+     * This will overwrite any value set for `client.id` in the provided Kafka producer configuration.
+     * Instead, a value for `client.id` will be derived from the prefix provided.
+     * Using a prefix will create a unique Kafka `client.id` for all producers.
+     *
+     * @param clientIdPrefix Prefix to use
+     * @return {@link KafkaSinkBuilder}
+     */
+    public KafkaSinkBuilder<IN> setClientIdPrefix(String clientIdPrefix) {
+        this.clientIdPrefix = checkNotNull(clientIdPrefix, "clientIdPrefix");
+        return this;
+    }
+
     private void sanityCheck() {
         checkNotNull(
                 kafkaProducerConfig.getProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG),
@@ -202,6 +217,25 @@ public class KafkaSinkBuilder<IN> {
         checkNotNull(recordSerializer, "recordSerializer");
     }
 
+    private static void overwriteConfig(Properties properties, String clientIdPrefix, int subtaskId) {
+        if (clientIdPrefix == null) {
+            return;
+        }
+        String updatedClientId = ClientIdFactory.buildClientId(clientIdPrefix, subtaskId);
+        overrideProperty(properties, ProducerConfig.CLIENT_ID_CONFIG, updatedClientId);
+    }
+
+    private static void overrideProperty(Properties properties, String key, String value) {
+        String userValue = properties.getProperty(key);
+        if (userValue != null) {
+            LOG.warn(
+                    String.format(
+                            "Property %s is provided but will be overridden from %s to %s",
+                            key, userValue, value));
+        }
+        properties.setProperty(key, value);
+    }
+
     /**
      * Constructs the {@link KafkaSink} with the configured properties.
      *
@@ -210,6 +244,6 @@ public class KafkaSinkBuilder<IN> {
     public KafkaSink<IN> build() {
         sanityCheck();
         return new KafkaSink<>(
-                deliveryGuarantee, kafkaProducerConfig, transactionalIdPrefix, recordSerializer);
+                deliveryGuarantee, kafkaProducerConfig, transactionalIdPrefix, clientIdPrefix, recordSerializer);
     }
 }
