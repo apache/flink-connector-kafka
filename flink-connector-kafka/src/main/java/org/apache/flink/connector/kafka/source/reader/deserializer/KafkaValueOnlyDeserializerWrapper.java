@@ -21,6 +21,9 @@ package org.apache.flink.connector.kafka.source.reader.deserializer;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.typeutils.TypeExtractor;
+import org.apache.flink.connector.kafka.lineage.LineageFacetProvider;
+import org.apache.flink.connector.kafka.lineage.facets.TypeInformationFacet;
+import org.apache.flink.streaming.api.lineage.LineageDatasetFacet;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.TemporaryClassLoaderContext;
@@ -32,10 +35,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 /** A package private class to wrap {@link Deserializer}. */
-class KafkaValueOnlyDeserializerWrapper<T> implements KafkaRecordDeserializationSchema<T> {
+class KafkaValueOnlyDeserializerWrapper<T>
+        implements KafkaRecordDeserializationSchema<T>, LineageFacetProvider {
 
     private static final long serialVersionUID = 5409547407386004054L;
 
@@ -102,5 +108,10 @@ class KafkaValueOnlyDeserializerWrapper<T> implements KafkaRecordDeserialization
     @Override
     public TypeInformation<T> getProducedType() {
         return TypeExtractor.createTypeInfo(Deserializer.class, deserializerClass, 0, null, null);
+    }
+
+    @Override
+    public List<LineageDatasetFacet> getDatasetFacets() {
+        return Collections.singletonList(new TypeInformationFacet(this.getProducedType()));
     }
 }
