@@ -18,9 +18,8 @@
 
 package org.apache.flink.connector.kafka.source.enumerator.subscriber;
 
-import org.apache.flink.connector.kafka.lineage.LineageFacetProvider;
-import org.apache.flink.connector.kafka.lineage.facets.KafkaTopicPatternFacet;
-import org.apache.flink.streaming.api.lineage.LineageDatasetFacet;
+import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetIdentifier;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifierProvider;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.TopicDescription;
@@ -29,17 +28,16 @@ import org.apache.kafka.common.TopicPartitionInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collections;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
 import static org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriberUtils.getTopicMetadata;
 
 /** A subscriber to a topic pattern. */
-class TopicPatternSubscriber implements KafkaSubscriber, LineageFacetProvider {
+class TopicPatternSubscriber implements KafkaSubscriber, KafkaDatasetIdentifierProvider {
     private static final long serialVersionUID = -7471048577725467797L;
     private static final Logger LOG = LoggerFactory.getLogger(TopicPatternSubscriber.class);
     private final Pattern topicPattern;
@@ -68,7 +66,7 @@ class TopicPatternSubscriber implements KafkaSubscriber, LineageFacetProvider {
     }
 
     @Override
-    public List<LineageDatasetFacet> getDatasetFacets() {
-        return Collections.singletonList(new KafkaTopicPatternFacet(topicPattern));
+    public Optional<DefaultKafkaDatasetIdentifier> getDatasetIdentifier() {
+        return Optional.of(DefaultKafkaDatasetIdentifier.ofPattern(topicPattern));
     }
 }

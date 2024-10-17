@@ -20,11 +20,14 @@ package org.apache.flink.connector.kafka.sink;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
-import org.apache.flink.connector.kafka.lineage.LineageFacetProvider;
-import org.apache.flink.connector.kafka.lineage.facets.KafkaTopicListFacet;
-import org.apache.flink.connector.kafka.lineage.facets.TypeInformationFacet;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
+import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetIdentifier;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacet;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacetProvider;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifierProvider;
+import org.apache.flink.connector.kafka.lineage.TypeDatasetFacetProvider;
 import org.apache.flink.connector.testutils.formats.DummyInitializationContext;
-import org.apache.flink.streaming.api.lineage.LineageDatasetFacet;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
 import org.apache.flink.util.TestLogger;
 
@@ -41,7 +44,6 @@ import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -60,6 +62,12 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
 
     private static Map<String, ?> configurableConfiguration;
     private static Map<String, ?> configuration;
+
+    private interface TestingTopicSelector extends TopicSelector, KafkaDatasetIdentifierProvider {}
+
+    private interface SerializationSchemaWithResultQueryable
+            extends SerializationSchema, ResultTypeQueryable {}
+
     private static boolean isKeySerializer;
 
     @Before
@@ -264,35 +272,128 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
     }
 
     @Test
-    public void testGetLineageDatasetFacets() {
-        final SerializationSchema<String> serializationSchema = new SimpleStringSchema();
-        final KafkaRecordSerializationSchema<String> schema =
+    public void testGetLineageDatasetFacetsWhenTopicSelectorNotKafkaTopicsIdentifierProvider() {
+        SerializationSchema<String> serializationSchema = new SimpleStringSchema();
+        KafkaRecordSerializationSchema<String> schema =
                 KafkaRecordSerializationSchema.builder()
-                        .setTopic(DEFAULT_TOPIC)
+                        .setTopicSelector((TopicSelector<Object>) o -> DEFAULT_TOPIC)
                         .setValueSerializationSchema(serializationSchema)
                         .setKeySerializationSchema(serializationSchema)
                         .build();
 
-        Collection<LineageDatasetFacet> facets = ((LineageFacetProvider) schema).getDatasetFacets();
+        assertThat(((KafkaDatasetFacetProvider) schema).getKafkaDatasetFacet()).isEmpty();
+    }
 
-        assertThat(facets).hasSize(2);
+    @Test
+    public void testGetLineageDatasetFacetsWhenNoTopicsIdentifiersFound() {
+        SerializationSchema<String> serializationSchema = new SimpleStringSchema();
+        KafkaRecordSerializationSchema<String> schema =
+                KafkaRecordSerializationSchema.builder()
+                        .setTopicSelector(
+                                new TestingTopicSelector() {
+                                    @Override
+                                    public Optional<DefaultKafkaDatasetIdentifier>
+                                            getDatasetIdentifier() {
+                                        return Optional.empty();
+                                    }
 
-        Optional<KafkaTopicListFacet> kafkaTopicListFacet =
-                facets.stream()
-                        .filter(f -> f instanceof KafkaTopicListFacet)
-                        .map(f -> (KafkaTopicListFacet) f)
-                        .findAny();
-        assertThat(kafkaTopicListFacet).isPresent();
-        assertThat(kafkaTopicListFacet.get())
-                .hasFieldOrPropertyWithValue("topics", Arrays.asList(DEFAULT_TOPIC));
+                                    @Override
+                                    public String apply(Object o) {
+                                        return DEFAULT_TOPIC;
+                                    }
+                                })
+                        .setValueSerializationSchema(serializationSchema)
+                        .setKeySerializationSchema(serializationSchema)
+                        .build();
+        assertThat(((KafkaDatasetFacetProvider) schema).getKafkaDatasetFacet()).isEmpty();
+    }
 
-        Optional<TypeInformationFacet> typeInformationFacet =
-                facets.stream()
-                        .filter(f -> f instanceof TypeInformationFacet)
-                        .map(f -> (TypeInformationFacet) f)
-                        .findAny();
-        assertThat(typeInformationFacet).isPresent();
-        assertThat(typeInformationFacet.get().getTypeInformation())
+    @Test
+    public void testGetLineageDatasetFacetsValueSerializationSchemaIsResultTypeQueryable() {
+        TypeInformation<String> stringTypeInformation = TypeInformation.of(String.class);
+        SerializationSchemaWithResultQueryable serializationSchema =
+                new SerializationSchemaWithResultQueryable() {
+
+                    @Override
+                    public TypeInformation getProducedType() {
+                        return stringTypeInformation;
+                    }
+
+                    @Override
+                    public byte[] serialize(Object o) {
+                        return new byte[0];
+                    }
+                };
+
+        KafkaRecordSerializationSchema<String> schema =
+                KafkaRecordSerializationSchema.builder()
+                        .setTopicSelector(
+                                new TestingTopicSelector() {
+                                    @Override
+                                    public Optional<DefaultKafkaDatasetIdentifier>
+                                            getDatasetIdentifier() {
+                                        return Optional.of(
+                                                DefaultKafkaDatasetIdentifier.ofTopics(
+                                                        Arrays.asList("topic1", "topic2")));
+                                    }
+
+                                    @Override
+                                    public Object apply(Object o) {
+                                        return DEFAULT_TOPIC;
+                                    }
+                                })
+                        .setValueSerializationSchema(serializationSchema)
+                        .setKeySerializationSchema(serializationSchema)
+                        .build();
+
+        Optional<KafkaDatasetFacet> kafkaDatasetFacet =
+                ((KafkaDatasetFacetProvider) schema).getKafkaDatasetFacet();
+
+        assertThat(kafkaDatasetFacet).isPresent();
+        assertThat(kafkaDatasetFacet.get().getTopicIdentifier().getTopics())
+                .containsExactly("topic1", "topic2");
+        assertThat(
+                        ((TypeDatasetFacetProvider) schema)
+                                .getTypeDatasetFacet()
+                                .get()
+                                .getTypeInformation())
+                .isEqualTo(stringTypeInformation);
+    }
+
+    @Test
+    public void testGetLineageDatasetFacets() {
+        KafkaRecordSerializationSchema<String> schema =
+                KafkaRecordSerializationSchema.builder()
+                        .setTopicSelector(
+                                new TestingTopicSelector() {
+                                    @Override
+                                    public Optional<DefaultKafkaDatasetIdentifier>
+                                            getDatasetIdentifier() {
+                                        return Optional.of(
+                                                DefaultKafkaDatasetIdentifier.ofTopics(
+                                                        Arrays.asList("topic1", "topic2")));
+                                    }
+
+                                    @Override
+                                    public Object apply(Object o) {
+                                        return DEFAULT_TOPIC;
+                                    }
+                                })
+                        .setValueSerializationSchema(new SimpleStringSchema())
+                        .setKeySerializationSchema(new SimpleStringSchema())
+                        .build();
+
+        Optional<KafkaDatasetFacet> kafkaDatasetFacet =
+                ((KafkaDatasetFacetProvider) schema).getKafkaDatasetFacet();
+
+        assertThat(kafkaDatasetFacet).isPresent();
+        assertThat(kafkaDatasetFacet.get().getTopicIdentifier().getTopics())
+                .containsExactly("topic1", "topic2");
+        assertThat(
+                        ((TypeDatasetFacetProvider) schema)
+                                .getTypeDatasetFacet()
+                                .get()
+                                .getTypeInformation())
                 .isEqualTo(BasicTypeInfo.STRING_TYPE_INFO);
     }
 

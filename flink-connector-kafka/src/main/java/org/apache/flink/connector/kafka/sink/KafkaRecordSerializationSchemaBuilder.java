@@ -21,27 +21,30 @@ import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
-import org.apache.flink.connector.kafka.lineage.LineageFacetProvider;
-import org.apache.flink.connector.kafka.lineage.facets.KafkaTopicListFacet;
-import org.apache.flink.connector.kafka.lineage.facets.TypeInformationFacet;
-import org.apache.flink.streaming.api.lineage.LineageDatasetFacet;
+import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetFacet;
+import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetIdentifier;
+import org.apache.flink.connector.kafka.lineage.DefaultTypeDatasetFacet;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacet;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacetProvider;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifierProvider;
+import org.apache.flink.connector.kafka.lineage.TypeDatasetFacet;
+import org.apache.flink.connector.kafka.lineage.TypeDatasetFacetProvider;
+import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
 
-import com.google.common.reflect.Invokable;
 import com.google.common.reflect.TypeToken;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.Serializer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.Function;
 
@@ -92,6 +95,7 @@ import static org.apache.flink.util.Preconditions.checkState;
  */
 @PublicEvolving
 public class KafkaRecordSerializationSchemaBuilder<IN> {
+    private static final Logger LOG = LoggerFactory.getLogger(KafkaSource.class);
 
     @Nullable private Function<? super IN, String> topicSelector;
     @Nullable private SerializationSchema<? super IN> valueSerializationSchema;
@@ -298,7 +302,7 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
     }
 
     private static class ConstantTopicSelector<IN>
-            implements Function<IN, String>, Serializable, LineageFacetProvider {
+            implements Function<IN, String>, Serializable, KafkaDatasetIdentifierProvider {
 
         private String topic;
 
@@ -312,13 +316,14 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
         }
 
         @Override
-        public Collection<LineageDatasetFacet> getDatasetFacets() {
-            return Collections.singletonList(
-                    new KafkaTopicListFacet(Collections.singletonList(topic)));
+        public Optional<DefaultKafkaDatasetIdentifier> getDatasetIdentifier() {
+            return Optional.of(
+                    DefaultKafkaDatasetIdentifier.ofTopics(Collections.singletonList(topic)));
         }
     }
 
-    private static class CachingTopicSelector<IN> implements Function<IN, String>, Serializable {
+    private static class CachingTopicSelector<IN>
+            implements Function<IN, String>, KafkaDatasetIdentifierProvider, Serializable {
 
         private static final int CACHE_RESET_SIZE = 5;
         private final Map<IN, String> cache;
@@ -338,10 +343,21 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
             }
             return topic;
         }
+
+        @Override
+        public Optional<DefaultKafkaDatasetIdentifier> getDatasetIdentifier() {
+            if (topicSelector instanceof KafkaDatasetIdentifierProvider) {
+                return ((KafkaDatasetIdentifierProvider) topicSelector).getDatasetIdentifier();
+            } else {
+                return Optional.empty();
+            }
+        }
     }
 
     private static class KafkaRecordSerializationSchemaWrapper<IN>
-            implements LineageFacetProvider, KafkaRecordSerializationSchema<IN> {
+            implements KafkaDatasetFacetProvider,
+                    KafkaRecordSerializationSchema<IN>,
+                    TypeDatasetFacetProvider {
         private final SerializationSchema<? super IN> valueSerializationSchema;
         private final Function<? super IN, String> topicSelector;
         private final KafkaPartitioner<? super IN> partitioner;
@@ -406,32 +422,44 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
         }
 
         @Override
-        public List<LineageDatasetFacet> getDatasetFacets() {
-            List<LineageDatasetFacet> facets = new ArrayList<>();
-            if (topicSelector instanceof LineageFacetProvider) {
-                facets.addAll(((LineageFacetProvider) topicSelector).getDatasetFacets());
+        public Optional<KafkaDatasetFacet> getKafkaDatasetFacet() {
+            if (!(topicSelector instanceof KafkaDatasetIdentifierProvider)) {
+                LOG.info("Cannot identify topics. Not an TopicsIdentifierProvider");
+                return Optional.empty();
             }
 
+            Optional<DefaultKafkaDatasetIdentifier> topicsIdentifier =
+                    ((KafkaDatasetIdentifierProvider) (topicSelector)).getDatasetIdentifier();
+
+            if (!topicsIdentifier.isPresent()) {
+                LOG.info("No topics' identifiers provided");
+                return Optional.empty();
+            }
+
+            return Optional.of(new DefaultKafkaDatasetFacet(topicsIdentifier.get()));
+        }
+
+        @Override
+        public Optional<TypeDatasetFacet> getTypeDatasetFacet() {
             if (this.valueSerializationSchema instanceof ResultTypeQueryable) {
-                facets.add(
-                        new TypeInformationFacet(
+                return Optional.of(
+                        new DefaultTypeDatasetFacet(
                                 ((ResultTypeQueryable<?>) this.valueSerializationSchema)
                                         .getProducedType()));
             } else {
                 // gets type information from serialize method signature
-                Arrays.stream(this.valueSerializationSchema.getClass().getMethods())
-                        .map(m -> Invokable.from(m))
-                        .filter(m -> "serialize".equalsIgnoreCase(m.getName()))
-                        .map(m -> m.getParameters().get(0))
-                        .filter(p -> !p.getType().equals(TypeToken.of(Object.class)))
-                        .findFirst()
-                        .map(p -> p.getType())
-                        .map(t -> TypeInformation.of(t.getRawType()))
-                        .map(g -> new TypeInformationFacet(g))
-                        .ifPresent(f -> facets.add(f));
+                TypeToken serializationSchemaType =
+                        TypeToken.of(valueSerializationSchema.getClass());
+                Class parameterType =
+                        serializationSchemaType
+                                .resolveType(SerializationSchema.class.getTypeParameters()[0])
+                                .getRawType();
+                if (parameterType != Object.class) {
+                    return Optional.of(
+                            new DefaultTypeDatasetFacet(TypeInformation.of(parameterType)));
+                }
             }
-
-            return facets;
+            return Optional.empty();
         }
     }
 }
