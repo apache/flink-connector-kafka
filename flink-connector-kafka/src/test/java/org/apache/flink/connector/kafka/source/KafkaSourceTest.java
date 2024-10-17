@@ -17,17 +17,24 @@
 
 package org.apache.flink.connector.kafka.source;
 
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.connector.source.Boundedness;
-import org.apache.flink.connector.kafka.lineage.LineageFacetProvider;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacetProvider;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifierProvider;
+import org.apache.flink.connector.kafka.lineage.facets.KafkaDatasetFacet;
+import org.apache.flink.connector.kafka.lineage.facets.KafkaDatasetFacet.KafkaDatasetIdentifier;
+import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
-import org.apache.flink.streaming.api.lineage.LineageDatasetFacet;
 import org.apache.flink.streaming.api.lineage.LineageVertex;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Optional;
 import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,27 +44,72 @@ import static org.mockito.Mockito.withSettings;
 
 /** Tests for {@link KafkaSource}. */
 public class KafkaSourceTest {
+    Properties kafkaProperties;
+
+    @BeforeEach
+    void setup() {
+        kafkaProperties = new Properties();
+        kafkaProperties.put("bootstrap.servers", "host1;host2");
+    }
+
+    @Test
+    public void testGetLineageVertexWhenSubscriberNotAnKafkaDatasetFacetProvider() {
+        KafkaSource source =
+                new KafkaSource(
+                        mock(KafkaSubscriber.class),
+                        mock(OffsetsInitializer.class),
+                        null,
+                        Boundedness.CONTINUOUS_UNBOUNDED,
+                        mock(KafkaRecordDeserializationSchema.class),
+                        kafkaProperties,
+                        null);
+        assertThat(source.getLineageVertex()).isNull();
+    }
+
+    @Test
+    public void testGetLineageVertexWhenNoKafkaTopicsIdentifier() {
+        KafkaSubscriber subscriber =
+                mock(
+                        KafkaSubscriber.class,
+                        withSettings().extraInterfaces(KafkaDatasetIdentifierProvider.class));
+        when(((KafkaDatasetIdentifierProvider) subscriber).getDatasetIdentifier())
+                .thenReturn(Optional.empty());
+
+        KafkaSource source =
+                new KafkaSource(
+                        subscriber,
+                        mock(OffsetsInitializer.class),
+                        null,
+                        Boundedness.CONTINUOUS_UNBOUNDED,
+                        mock(KafkaRecordDeserializationSchema.class),
+                        kafkaProperties,
+                        null);
+        assertThat(source.getLineageVertex()).isNull();
+    }
 
     @Test
     public void testGetLineageVertex() {
-        LineageDatasetFacet facet1 = mock(LineageDatasetFacet.class);
-        LineageDatasetFacet facet2 = mock(LineageDatasetFacet.class);
-        when(facet1.name()).thenReturn("facet1");
-        when(facet2.name()).thenReturn("facet2");
-
-        KafkaRecordDeserializationSchema schema =
+        KafkaRecordSerializationSchema recordSerializer =
                 mock(
-                        KafkaRecordDeserializationSchema.class,
-                        withSettings().extraInterfaces(LineageFacetProvider.class));
+                        KafkaRecordSerializationSchema.class,
+                        withSettings().extraInterfaces(KafkaDatasetFacetProvider.class));
 
-        when(((LineageFacetProvider) schema).getDatasetFacets())
-                .thenReturn(Arrays.asList(facet1, facet2));
-        Properties kafkaProperties = new Properties();
+        when(((KafkaDatasetFacetProvider) recordSerializer).getKafkaDatasetFacet())
+                .thenReturn(
+                        Optional.of(
+                                new KafkaDatasetFacet(
+                                        KafkaDatasetIdentifier.of(
+                                                Collections.singletonList("topic1")),
+                                        new Properties(),
+                                        TypeInformation.of(String.class))));
 
-        kafkaProperties.put("bootstrap.servers", "host1;host2");
+        TypeInformation typeInformation = mock(TypeInformation.class);
+        KafkaRecordDeserializationSchema schema = mock(KafkaRecordDeserializationSchema.class);
+        when(schema.getProducedType()).thenReturn(typeInformation);
+
         KafkaSource source =
                 new KafkaSource(
-                        KafkaSubscriber.getTopicListSubscriber(Arrays.asList("topic1", "topic2")),
+                        KafkaSubscriber.getTopicListSubscriber(Arrays.asList("topic1")),
                         mock(OffsetsInitializer.class),
                         null,
                         Boundedness.CONTINUOUS_UNBOUNDED,
@@ -66,20 +118,16 @@ public class KafkaSourceTest {
                         null);
 
         LineageVertex lineageVertex = source.getLineageVertex();
-        assertThat(lineageVertex.datasets()).hasSize(2);
+        assertThat(lineageVertex.datasets()).hasSize(1);
 
         assertThat(lineageVertex.datasets().get(0).namespace()).isEqualTo("kafka://host1");
         assertThat(lineageVertex.datasets().get(0).name()).isEqualTo("topic1");
 
-        assertThat(lineageVertex.datasets().get(1).namespace()).isEqualTo("kafka://host1");
-        assertThat(lineageVertex.datasets().get(1).name()).isEqualTo("topic2");
-
-        // facets shall be the same for both datasets
-        assertThat(lineageVertex.datasets().get(0).facets())
-                .isEqualTo(lineageVertex.datasets().get(1).facets());
-
-        assertThat(lineageVertex.datasets().get(0).facets())
-                .containsEntry("facet1", facet1)
-                .containsEntry("facet2", facet2);
+        assertThat(lineageVertex.datasets().get(0).facets().get(KafkaDatasetFacet.KAFKA_FACET_NAME))
+                .hasFieldOrPropertyWithValue("properties", kafkaProperties)
+                .hasFieldOrPropertyWithValue("typeInformation", typeInformation)
+                .hasFieldOrPropertyWithValue(
+                        "topicIdentifier",
+                        KafkaDatasetIdentifier.of(Collections.singletonList("topic1")));
     }
 }
