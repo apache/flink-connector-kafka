@@ -22,11 +22,20 @@ import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.sink2.Committer;
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacetProvider;
+import org.apache.flink.connector.kafka.lineage.LineageUtil;
+import org.apache.flink.connector.kafka.lineage.facets.KafkaDatasetFacet;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
+import org.apache.flink.streaming.api.lineage.LineageVertex;
+import org.apache.flink.streaming.api.lineage.LineageVertexProvider;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Optional;
 import java.util.Properties;
 
 /**
@@ -54,8 +63,9 @@ import java.util.Properties;
  */
 @PublicEvolving
 public class KafkaSink<IN>
-        implements TwoPhaseCommittingStatefulSink<IN, KafkaWriterState, KafkaCommittable> {
-
+        implements LineageVertexProvider,
+                TwoPhaseCommittingStatefulSink<IN, KafkaWriterState, KafkaCommittable> {
+    private static final Logger LOG = LoggerFactory.getLogger(KafkaSink.class);
     private final DeliveryGuarantee deliveryGuarantee;
 
     private final KafkaRecordSerializationSchema<IN> recordSerializer;
@@ -131,5 +141,31 @@ public class KafkaSink<IN>
     @VisibleForTesting
     protected Properties getKafkaProducerConfig() {
         return kafkaProducerConfig;
+    }
+
+    @Override
+    public LineageVertex getLineageVertex() {
+        // enrich dataset facet with properties
+        if (recordSerializer instanceof KafkaDatasetFacetProvider) {
+            Optional<KafkaDatasetFacet> kafkaDatasetFacet =
+                    ((KafkaDatasetFacetProvider) recordSerializer).getKafkaDatasetFacet();
+
+            if (!kafkaDatasetFacet.isPresent()) {
+                LOG.warn("Provided did not return kafka dataset facet");
+                return null;
+            }
+
+            kafkaDatasetFacet.get().addProperties(this.kafkaProducerConfig);
+
+            String namespace = LineageUtil.namespaceOf(kafkaProducerConfig);
+            return LineageUtil.sourceLineageVertexOf(
+                    Collections.singleton(
+                            LineageUtil.datasetOf(namespace, kafkaDatasetFacet.get())));
+        } else {
+            LOG.warn(
+                    "recordSerializer does not implement KafkaDatasetFacetProvider: {}",
+                    recordSerializer);
+            return LineageUtil.sourceLineageVertexOf(Collections.emptyList());
+        }
     }
 }

@@ -18,6 +18,9 @@
 
 package org.apache.flink.connector.kafka.source.enumerator.subscriber;
 
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifierProvider;
+import org.apache.flink.connector.kafka.lineage.facets.KafkaDatasetFacet.KafkaDatasetIdentifier;
+
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.common.TopicPartition;
@@ -26,13 +29,14 @@ import org.slf4j.LoggerFactory;
 
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriberUtils.getTopicMetadata;
 
 /** A subscriber for a partition set. */
-class PartitionSetSubscriber implements KafkaSubscriber {
+class PartitionSetSubscriber implements KafkaDatasetIdentifierProvider, KafkaSubscriber {
     private static final long serialVersionUID = 390970375272146036L;
     private static final Logger LOG = LoggerFactory.getLogger(PartitionSetSubscriber.class);
     private final Set<TopicPartition> subscribedPartitions;
@@ -72,5 +76,15 @@ class PartitionSetSubscriber implements KafkaSubscriber {
 
     private boolean partitionExistsInTopic(TopicPartition partition, TopicDescription topic) {
         return topic.partitions().size() > partition.partition();
+    }
+
+    @Override
+    public Optional<KafkaDatasetIdentifier> getDatasetIdentifier() {
+        return Optional.of(
+                KafkaDatasetIdentifier.of(
+                        subscribedPartitions.stream()
+                                .map(TopicPartition::topic)
+                                .distinct()
+                                .collect(Collectors.toList())));
     }
 }
