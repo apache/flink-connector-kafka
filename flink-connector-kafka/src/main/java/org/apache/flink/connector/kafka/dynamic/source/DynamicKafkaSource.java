@@ -29,6 +29,7 @@ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
+import org.apache.flink.connector.base.source.reader.RecordEvaluator;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.source.enumerator.DynamicKafkaSourceEnumState;
 import org.apache.flink.connector.kafka.dynamic.source.enumerator.DynamicKafkaSourceEnumStateSerializer;
@@ -41,6 +42,8 @@ import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
+
+import javax.annotation.Nullable;
 
 import java.util.Properties;
 
@@ -87,6 +90,7 @@ public class DynamicKafkaSource<T>
     private final OffsetsInitializer stoppingOffsetsInitializer;
     private final Properties properties;
     private final Boundedness boundedness;
+    @Nullable private final RecordEvaluator<T> eofRecordEvaluator;
 
     DynamicKafkaSource(
             KafkaStreamSubscriber kafkaStreamSubscriber,
@@ -95,7 +99,8 @@ public class DynamicKafkaSource<T>
             OffsetsInitializer startingOffsetsInitializer,
             OffsetsInitializer stoppingOffsetsInitializer,
             Properties properties,
-            Boundedness boundedness) {
+            Boundedness boundedness,
+            @Nullable RecordEvaluator<T> eofRecordEvaluator) {
         this.kafkaStreamSubscriber = kafkaStreamSubscriber;
         this.deserializationSchema = deserializationSchema;
         this.properties = properties;
@@ -103,6 +108,7 @@ public class DynamicKafkaSource<T>
         this.startingOffsetsInitializer = startingOffsetsInitializer;
         this.stoppingOffsetsInitializer = stoppingOffsetsInitializer;
         this.boundedness = boundedness;
+        this.eofRecordEvaluator = eofRecordEvaluator;
     }
 
     /**
@@ -134,7 +140,8 @@ public class DynamicKafkaSource<T>
     @Override
     public SourceReader<T, DynamicKafkaSourceSplit> createReader(
             SourceReaderContext readerContext) {
-        return new DynamicKafkaSourceReader<>(readerContext, deserializationSchema, properties);
+        return new DynamicKafkaSourceReader<>(
+                readerContext, deserializationSchema, properties, eofRecordEvaluator);
     }
 
     /**

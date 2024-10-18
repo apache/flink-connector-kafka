@@ -25,6 +25,7 @@ import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitReader;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
+import org.apache.flink.connector.base.source.reader.splitreader.SplitsRemoval;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.connector.kafka.source.metrics.KafkaSourceReaderMetrics;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
@@ -76,6 +77,9 @@ public class KafkaPartitionSplitReader
     // Tracking empty splits that has not been added to finished splits in fetch()
     private final Set<String> emptySplits = new HashSet<>();
 
+    // Tracking removed splits that has not been added to finished splits in fetch()
+    private final Set<String> removedSplits = new HashSet<>();
+
     public KafkaPartitionSplitReader(
             Properties props,
             SourceReaderContext context,
@@ -116,7 +120,7 @@ public class KafkaPartitionSplitReader
             KafkaPartitionSplitRecords recordsBySplits =
                     new KafkaPartitionSplitRecords(
                             ConsumerRecords.empty(), kafkaSourceReaderMetrics);
-            markEmptySplitsAsFinished(recordsBySplits);
+            markSplitsAsFinished(recordsBySplits);
             return recordsBySplits;
         }
         KafkaPartitionSplitRecords recordsBySplits =
@@ -148,7 +152,7 @@ public class KafkaPartitionSplitReader
                             kafkaSourceReaderMetrics.maybeAddRecordsLagMetric(consumer, trackTp);
                         });
 
-        markEmptySplitsAsFinished(recordsBySplits);
+        markSplitsAsFinished(recordsBySplits);
 
         // Unassign the partitions that has finished.
         if (!finishedPartitions.isEmpty()) {
@@ -162,25 +166,55 @@ public class KafkaPartitionSplitReader
         return recordsBySplits;
     }
 
-    private void markEmptySplitsAsFinished(KafkaPartitionSplitRecords recordsBySplits) {
+    private void markSplitsAsFinished(KafkaPartitionSplitRecords recordsBySplits) {
         // Some splits are discovered as empty when handling split additions. These splits should be
         // added to finished splits to clean up states in split fetcher and source reader.
-        if (!emptySplits.isEmpty()) {
-            recordsBySplits.finishedSplits.addAll(emptySplits);
-            emptySplits.clear();
+        markSplitsAsFinished(emptySplits, recordsBySplits);
+
+        // Some splits are removed when handling split changes. These splits should be
+        // added to finished splits to clean up states in split fetcher and source reader.
+        markSplitsAsFinished(removedSplits, recordsBySplits);
+    }
+
+    private void markSplitsAsFinished(
+            Set<String> splits, KafkaPartitionSplitRecords recordsBySplits) {
+        // Some splits are discovered as empty when handling split additions. These splits should be
+        // added to finished splits to clean up states in split fetcher and source reader.
+        if (!splits.isEmpty()) {
+            recordsBySplits.finishedSplits.addAll(splits);
+            splits.clear();
         }
     }
 
     @Override
     public void handleSplitsChanges(SplitsChange<KafkaPartitionSplit> splitsChange) {
-        // Get all the partition assignments and stopping offsets.
-        if (!(splitsChange instanceof SplitsAddition)) {
+        if (splitsChange instanceof SplitsAddition) {
+            // Get all the partition assignments and stopping offsets.
+            handleSplitsAddition(splitsChange);
+        } else if (splitsChange instanceof SplitsRemoval) {
+            handleSplitsRemoval(splitsChange);
+        } else {
             throw new UnsupportedOperationException(
                     String.format(
                             "The SplitChange type of %s is not supported.",
                             splitsChange.getClass()));
         }
+    }
 
+    private void handleSplitsRemoval(SplitsChange<KafkaPartitionSplit> splitsRemoval) {
+        removedSplits.addAll(
+                splitsRemoval.splits().stream()
+                        .map(KafkaPartitionSplit::splitId)
+                        .collect(Collectors.toSet()));
+        List<TopicPartition> finishedPartitions =
+                splitsRemoval.splits().stream()
+                        .map(KafkaPartitionSplit::getTopicPartition)
+                        .collect(Collectors.toList());
+        finishedPartitions.forEach(kafkaSourceReaderMetrics::removeRecordsLagMetric);
+        unassignPartitions(finishedPartitions);
+    }
+
+    private void handleSplitsAddition(SplitsChange<KafkaPartitionSplit> splitsAddition) {
         // Assignment.
         List<TopicPartition> newPartitionAssignments = new ArrayList<>();
         // Starting offsets.
@@ -192,7 +226,7 @@ public class KafkaPartitionSplitReader
         Set<TopicPartition> partitionsStoppingAtCommitted = new HashSet<>();
 
         // Parse the starting and stopping offsets.
-        splitsChange
+        splitsAddition
                 .splits()
                 .forEach(
                         s -> {
@@ -223,7 +257,7 @@ public class KafkaPartitionSplitReader
         // After acquiring the starting and stopping offsets, remove the empty splits if necessary.
         removeEmptySplits();
 
-        maybeLogSplitChangesHandlingResult(splitsChange);
+        maybeLogSplitChangesHandlingResult(splitsAddition);
     }
 
     @Override

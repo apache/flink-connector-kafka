@@ -271,7 +271,8 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
         return new DynamicKafkaSourceReader<>(
                 context,
                 KafkaRecordDeserializationSchema.valueOnly(IntegerDeserializer.class),
-                properties);
+                properties,
+                null);
     }
 
     private SourceReader<Integer, DynamicKafkaSourceSplit> startReader(

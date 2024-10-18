@@ -22,6 +22,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
+import org.apache.flink.connector.base.source.reader.splitreader.SplitsRemoval;
 import org.apache.flink.connector.kafka.source.metrics.KafkaSourceReaderMetrics;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.connector.kafka.testutils.KafkaSourceTestEnv;
@@ -100,10 +101,21 @@ public class KafkaPartitionSplitReaderTest {
     }
 
     @Test
-    public void testHandleSplitChangesAndFetch() throws Exception {
+    public void testHandleSplitsAdditionAndFetch() throws Exception {
         KafkaPartitionSplitReader reader = createReader();
         assignSplitsAndFetchUntilFinish(reader, 0);
         assignSplitsAndFetchUntilFinish(reader, 1);
+    }
+
+    @Test
+    public void testHandleSplitsRemovalAndFetch() throws Exception {
+        KafkaPartitionSplitReader reader = createReader();
+
+        Map<String, KafkaPartitionSplit> splits = assignAndRemoveSplits(reader, 0);
+        assignSplitsAndFetchUntilFinish(reader, splits);
+
+        splits = assignAndRemoveSplits(reader, 1);
+        assignSplitsAndFetchUntilFinish(reader, splits);
     }
 
     @Test
@@ -358,7 +370,12 @@ public class KafkaPartitionSplitReaderTest {
             throws IOException {
         Map<String, KafkaPartitionSplit> splits =
                 assignSplits(reader, splitsByOwners.get(readerId));
+        assignSplitsAndFetchUntilFinish(reader, splits);
+    }
 
+    private void assignSplitsAndFetchUntilFinish(
+            KafkaPartitionSplitReader reader, Map<String, KafkaPartitionSplit> splits)
+            throws IOException {
         Map<String, Integer> numConsumedRecords = new HashMap<>();
         Set<String> finishedSplits = new HashSet<>();
         while (finishedSplits.size() < splits.size()) {
@@ -407,6 +424,19 @@ public class KafkaPartitionSplitReaderTest {
                 });
     }
 
+    private Map<String, KafkaPartitionSplit> assignAndRemoveSplits(
+            KafkaPartitionSplitReader reader, int readerId) {
+        Map<String, KafkaPartitionSplit> splits =
+                assignSplits(reader, splitsByOwners.get(readerId));
+        Map<String, KafkaPartitionSplit> originalSplits = splitsByOwners.get(readerId);
+        for (String key : originalSplits.keySet()) {
+            removeSplits(reader, Collections.singletonList(originalSplits.get(key)));
+            splits.remove(key);
+            break;
+        }
+        return splits;
+    }
+
     // ------------------
 
     private KafkaPartitionSplitReader createReader() {
@@ -444,6 +474,11 @@ public class KafkaPartitionSplitReaderTest {
                 new SplitsAddition<>(new ArrayList<>(splits.values()));
         reader.handleSplitsChanges(splitsChange);
         return splits;
+    }
+
+    private void removeSplits(KafkaPartitionSplitReader reader, List<KafkaPartitionSplit> splits) {
+        SplitsChange<KafkaPartitionSplit> splitsChange = new SplitsRemoval<>(splits);
+        reader.handleSplitsChanges(splitsChange);
     }
 
     private boolean verifyConsumed(
