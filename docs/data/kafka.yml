@@ -17,7 +17,7 @@
 ################################################################################
 
 version: 3.3.0
-flink_compatibility: [1.19, 1.20]
+flink_compatibility: ["1.19", "1.20"]
 variants:
   - maven: flink-connector-kafka
     sql_url: https://repo.maven.apache.org/maven2/org/apache/flink/flink-sql-connector-kafka/$full_version/flink-sql-connector-kafka-$full_version.jar
