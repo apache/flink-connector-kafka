@@ -24,6 +24,7 @@ import java.io.Serializable;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /** Metadata service that returns Kafka details. */
 @Experimental
@@ -34,6 +35,14 @@ public interface KafkaMetadataService extends AutoCloseable, Serializable {
      * @return set of all streams
      */
     Set<KafkaStream> getAllStreams();
+
+    /**
+     * Get current metadata for pattern streams.
+     *
+     * @param streamPattern
+     * @return
+     */
+    Set<KafkaStream> getPatternStreams(Pattern streamPattern);
 
     /**
      * Get current metadata for queried streams.
