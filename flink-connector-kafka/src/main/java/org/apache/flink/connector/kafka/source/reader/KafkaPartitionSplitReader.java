@@ -124,7 +124,7 @@ public class KafkaPartitionSplitReader
         List<TopicPartition> finishedPartitions = new ArrayList<>();
         for (TopicPartition tp : consumer.assignment()) {
             long stoppingOffset = getStoppingOffset(tp);
-            long consumerPosition = consumer.position(tp);
+            long consumerPosition = getConsumerPosition(tp, "retrieving consumer position");
             // Stop fetching when the consumer's position reaches the stoppingOffset.
             // Control messages may follow the last record; therefore, using the last record's
             // offset as a stopping condition could result in indefinite blocking.
@@ -371,10 +371,9 @@ public class KafkaPartitionSplitReader
         List<TopicPartition> emptyPartitions = new ArrayList<>();
         // If none of the partitions have any records,
         for (TopicPartition tp : consumer.assignment()) {
-            if (retryOnWakeup(
-                            () -> consumer.position(tp),
-                            "getting starting offset to check if split is empty")
-                    >= getStoppingOffset(tp)) {
+            long startingOffset =
+                    getConsumerPosition(tp, "getting starting offset to check if split is empty");
+            if (startingOffset >= getStoppingOffset(tp)) {
                 emptyPartitions.add(tp);
             }
         }
@@ -403,9 +402,8 @@ public class KafkaPartitionSplitReader
                 }
 
                 long startingOffset =
-                        retryOnWakeup(
-                                () -> consumer.position(split.getTopicPartition()),
-                                "logging starting position");
+                        getConsumerPosition(split.getTopicPartition(), "logging starting position");
+
                 long stoppingOffset = getStoppingOffset(split.getTopicPartition());
                 splitsInfo.add(
                         String.format(
@@ -444,6 +442,11 @@ public class KafkaPartitionSplitReader
 
     private long getStoppingOffset(TopicPartition tp) {
         return stoppingOffsets.getOrDefault(tp, Long.MAX_VALUE);
+    }
+
+    @VisibleForTesting
+    protected long getConsumerPosition(TopicPartition tp, String msg) {
+        return retryOnWakeup(() -> consumer.position(tp), msg);
     }
 
     private void maybeRegisterKafkaConsumerMetrics(
