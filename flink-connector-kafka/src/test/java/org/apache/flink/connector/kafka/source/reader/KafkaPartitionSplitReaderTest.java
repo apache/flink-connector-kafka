@@ -38,7 +38,6 @@ import org.apache.flink.runtime.metrics.groups.UnregisteredMetricGroups;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
@@ -140,16 +139,13 @@ public class KafkaPartitionSplitReaderTest {
     public void testWakeUpOnConsumerPosition() throws Exception {
         Properties props = new Properties();
         props.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-
         KafkaPartitionSplitReader reader =
                 createReader(props, UnregisteredMetricsGroup.createSourceReaderMetricGroup());
-
         AtomicReference<Throwable> error = new AtomicReference<>();
-
         TopicPartition tp = new TopicPartition(TOPIC3, 0);
 
-        KafkaConsumer<byte[], byte[]> consumer = reader.consumer();
-        consumer.assign(Collections.singletonList(tp));
+        reader.consumer().assign(Collections.singletonList(tp));
+
         Thread t =
                 new Thread(
                         () -> {

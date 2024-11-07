@@ -279,6 +279,10 @@ public class KafkaPartitionSplitReader
         }
     }
 
+    long getConsumerPosition(TopicPartition tp, String msg) {
+        return retryOnWakeup(() -> consumer.position(tp), msg);
+    }
+
     private void parseStartingOffsets(
             KafkaPartitionSplit split,
             List<TopicPartition> partitionsStartingFromEarliest,
@@ -442,11 +446,6 @@ public class KafkaPartitionSplitReader
 
     private long getStoppingOffset(TopicPartition tp) {
         return stoppingOffsets.getOrDefault(tp, Long.MAX_VALUE);
-    }
-
-    @VisibleForTesting
-    protected long getConsumerPosition(TopicPartition tp, String msg) {
-        return retryOnWakeup(() -> consumer.position(tp), msg);
     }
 
     private void maybeRegisterKafkaConsumerMetrics(
