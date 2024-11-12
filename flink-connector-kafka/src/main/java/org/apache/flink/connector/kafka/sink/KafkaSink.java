@@ -154,7 +154,7 @@ public class KafkaSink<IN>
                     ((KafkaDatasetFacetProvider) recordSerializer).getKafkaDatasetFacet();
 
             if (!kafkaDatasetFacet.isPresent()) {
-                LOG.info("Provided did not return kafka dataset facet");
+                LOG.info("Provider did not return kafka dataset facet");
                 return LineageUtil.sourceLineageVertexOf(Collections.emptyList());
             }
             kafkaDatasetFacet.get().setProperties(this.kafkaProducerConfig);

@@ -66,7 +66,7 @@ public class LineageUtil {
 
             @Override
             public Map<String, LineageDatasetFacet> facets() {
-                Map facetMap = new HashMap<String, LineageDatasetFacet>();
+                Map<String, LineageDatasetFacet> facetMap = new HashMap<>();
                 facetMap.put(DefaultKafkaDatasetFacet.KAFKA_FACET_NAME, kafkaDatasetFacet);
                 facetMap.putAll(
                         facets.stream()

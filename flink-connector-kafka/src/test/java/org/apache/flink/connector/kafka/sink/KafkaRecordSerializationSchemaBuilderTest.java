@@ -26,6 +26,7 @@ import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetIdentifier;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacetProvider;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifierProvider;
+import org.apache.flink.connector.kafka.lineage.TypeDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.TypeDatasetFacetProvider;
 import org.apache.flink.connector.testutils.formats.DummyInitializationContext;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
@@ -39,6 +40,7 @@ import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -63,10 +65,11 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
     private static Map<String, ?> configurableConfiguration;
     private static Map<String, ?> configuration;
 
-    private interface TestingTopicSelector extends TopicSelector, KafkaDatasetIdentifierProvider {}
+    private interface TestingTopicSelector<T>
+            extends TopicSelector<T>, KafkaDatasetIdentifierProvider {}
 
-    private interface SerializationSchemaWithResultQueryable
-            extends SerializationSchema, ResultTypeQueryable {}
+    private interface SerializationSchemaWithResultQueryable<T>
+            extends SerializationSchema<T>, ResultTypeQueryable<T> {}
 
     private static boolean isKeySerializer;
 
@@ -281,7 +284,9 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
                         .setKeySerializationSchema(serializationSchema)
                         .build();
 
-        assertThat(((KafkaDatasetFacetProvider) schema).getKafkaDatasetFacet()).isEmpty();
+        assertThat(schema)
+                .asInstanceOf(InstanceOfAssertFactories.type(KafkaDatasetFacetProvider.class))
+                .returns(Optional.empty(), KafkaDatasetFacetProvider::getKafkaDatasetFacet);
     }
 
     @Test
@@ -290,7 +295,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
         KafkaRecordSerializationSchema<String> schema =
                 KafkaRecordSerializationSchema.builder()
                         .setTopicSelector(
-                                new TestingTopicSelector() {
+                                new TestingTopicSelector<Object>() {
                                     @Override
                                     public Optional<DefaultKafkaDatasetIdentifier>
                                             getDatasetIdentifier() {
@@ -305,22 +310,24 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
                         .setValueSerializationSchema(serializationSchema)
                         .setKeySerializationSchema(serializationSchema)
                         .build();
-        assertThat(((KafkaDatasetFacetProvider) schema).getKafkaDatasetFacet()).isEmpty();
+        assertThat(schema)
+                .asInstanceOf(InstanceOfAssertFactories.type(KafkaDatasetFacetProvider.class))
+                .returns(Optional.empty(), KafkaDatasetFacetProvider::getKafkaDatasetFacet);
     }
 
     @Test
     public void testGetLineageDatasetFacetsValueSerializationSchemaIsResultTypeQueryable() {
         TypeInformation<String> stringTypeInformation = TypeInformation.of(String.class);
-        SerializationSchemaWithResultQueryable serializationSchema =
-                new SerializationSchemaWithResultQueryable() {
+        SerializationSchemaWithResultQueryable<String> serializationSchema =
+                new SerializationSchemaWithResultQueryable<String>() {
 
                     @Override
-                    public TypeInformation getProducedType() {
+                    public TypeInformation<String> getProducedType() {
                         return stringTypeInformation;
                     }
 
                     @Override
-                    public byte[] serialize(Object o) {
+                    public byte[] serialize(String o) {
                         return new byte[0];
                     }
                 };
@@ -328,7 +335,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
         KafkaRecordSerializationSchema<String> schema =
                 KafkaRecordSerializationSchema.builder()
                         .setTopicSelector(
-                                new TestingTopicSelector() {
+                                new TestingTopicSelector<Object>() {
                                     @Override
                                     public Optional<DefaultKafkaDatasetIdentifier>
                                             getDatasetIdentifier() {
@@ -338,7 +345,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
                                     }
 
                                     @Override
-                                    public Object apply(Object o) {
+                                    public String apply(Object o) {
                                         return DEFAULT_TOPIC;
                                     }
                                 })
@@ -352,11 +359,10 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
         assertThat(kafkaDatasetFacet).isPresent();
         assertThat(kafkaDatasetFacet.get().getTopicIdentifier().getTopics())
                 .containsExactly("topic1", "topic2");
-        assertThat(
-                        ((TypeDatasetFacetProvider) schema)
-                                .getTypeDatasetFacet()
-                                .get()
-                                .getTypeInformation())
+        assertThat(((TypeDatasetFacetProvider) schema).getTypeDatasetFacet())
+                .isPresent()
+                .get()
+                .extracting(TypeDatasetFacet::getTypeInformation)
                 .isEqualTo(stringTypeInformation);
     }
 
@@ -365,7 +371,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
         KafkaRecordSerializationSchema<String> schema =
                 KafkaRecordSerializationSchema.builder()
                         .setTopicSelector(
-                                new TestingTopicSelector() {
+                                new TestingTopicSelector<Object>() {
                                     @Override
                                     public Optional<DefaultKafkaDatasetIdentifier>
                                             getDatasetIdentifier() {
@@ -375,7 +381,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
                                     }
 
                                     @Override
-                                    public Object apply(Object o) {
+                                    public String apply(Object o) {
                                         return DEFAULT_TOPIC;
                                     }
                                 })
@@ -389,11 +395,10 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
         assertThat(kafkaDatasetFacet).isPresent();
         assertThat(kafkaDatasetFacet.get().getTopicIdentifier().getTopics())
                 .containsExactly("topic1", "topic2");
-        assertThat(
-                        ((TypeDatasetFacetProvider) schema)
-                                .getTypeDatasetFacet()
-                                .get()
-                                .getTypeInformation())
+        assertThat(((TypeDatasetFacetProvider) schema).getTypeDatasetFacet())
+                .isPresent()
+                .get()
+                .extracting(TypeDatasetFacet::getTypeInformation)
                 .isEqualTo(BasicTypeInfo.STRING_TYPE_INFO);
     }
 

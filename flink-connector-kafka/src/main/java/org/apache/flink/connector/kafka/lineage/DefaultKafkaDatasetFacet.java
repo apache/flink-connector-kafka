@@ -1,11 +1,13 @@
 package org.apache.flink.connector.kafka.lineage;
 
+import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.connector.kafka.source.KafkaPropertiesUtil;
 
 import java.util.Objects;
 import java.util.Properties;
 
 /** Default implementation of {@link KafkaDatasetFacet}. */
+@PublicEvolving
 public class DefaultKafkaDatasetFacet implements KafkaDatasetFacet {
 
     public static final String KAFKA_FACET_NAME = "kafka";

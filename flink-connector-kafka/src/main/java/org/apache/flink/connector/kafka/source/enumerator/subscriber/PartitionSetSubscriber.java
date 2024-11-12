@@ -36,7 +36,7 @@ import java.util.stream.Collectors;
 import static org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriberUtils.getTopicMetadata;
 
 /** A subscriber for a partition set. */
-class PartitionSetSubscriber implements KafkaDatasetIdentifierProvider, KafkaSubscriber {
+class PartitionSetSubscriber implements KafkaSubscriber, KafkaDatasetIdentifierProvider {
     private static final long serialVersionUID = 390970375272146036L;
     private static final Logger LOG = LoggerFactory.getLogger(PartitionSetSubscriber.class);
     private final Set<TopicPartition> subscribedPartitions;

@@ -18,13 +18,14 @@
 package org.apache.flink.connector.kafka.source;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetIdentifier;
 import org.apache.flink.connector.kafka.lineage.DefaultTypeDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifierProvider;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
+import org.apache.flink.streaming.api.lineage.LineageDataset;
 import org.apache.flink.streaming.api.lineage.LineageVertex;
 import org.apache.flink.util.Collector;
 
@@ -46,9 +47,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class KafkaSourceTest {
     Properties kafkaProperties;
 
-    private interface TestingKafkaSubscriber
-            extends KafkaSubscriber, KafkaDatasetIdentifierProvider {}
-
     @BeforeEach
     void setup() {
         kafkaProperties = new Properties();
@@ -57,109 +55,129 @@ public class KafkaSourceTest {
 
     @Test
     public void testGetLineageVertexWhenSubscriberNotAnKafkaDatasetFacetProvider() {
-        KafkaSource source =
-                new KafkaSource(
-                        new KafkaSubscriber() {
-                            @Override
-                            public Set<TopicPartition> getSubscribedTopicPartitions(
-                                    AdminClient adminClient) {
-                                return null;
-                            }
-                        },
-                        null,
-                        null,
-                        Boundedness.CONTINUOUS_UNBOUNDED,
-                        null,
-                        kafkaProperties,
-                        null);
-        assertThat(source.getLineageVertex().datasets()).isEmpty();
+        KafkaSource<String> source =
+                new KafkaSourceBuilder<String>()
+                        .setKafkaSubscriber(
+                                new KafkaSubscriber() {
+                                    @Override
+                                    public Set<TopicPartition> getSubscribedTopicPartitions(
+                                            AdminClient adminClient) {
+                                        return null;
+                                    }
+                                })
+                        .setProperties(kafkaProperties)
+                        .setGroupId("")
+                        .setDeserializer(
+                                new KafkaRecordDeserializationSchema<String>() {
+                                    @Override
+                                    public TypeInformation<String> getProducedType() {
+                                        return null;
+                                    }
+
+                                    @Override
+                                    public void deserialize(
+                                            ConsumerRecord<byte[], byte[]> record,
+                                            Collector<String> out)
+                                            throws IOException {}
+                                })
+                        .setUnbounded(OffsetsInitializer.committedOffsets())
+                        .build();
+
+        assertThat(source.getLineageVertex())
+                .extracting(LineageVertex::datasets)
+                .asList()
+                .isEmpty();
     }
 
     @Test
     public void testGetLineageVertexWhenNoKafkaTopicsIdentifier() {
-        KafkaSource source =
-                new KafkaSource(
-                        new TestingKafkaSubscriber() {
-                            @Override
-                            public Optional<DefaultKafkaDatasetIdentifier> getDatasetIdentifier() {
-                                return Optional.empty();
-                            }
+        KafkaSource<String> source =
+                new KafkaSourceBuilder<String>()
+                        .setKafkaSubscriber(
+                                new TestingKafkaSubscriber() {
+                                    @Override
+                                    public Optional<DefaultKafkaDatasetIdentifier>
+                                            getDatasetIdentifier() {
+                                        return Optional.empty();
+                                    }
+                                })
+                        .setProperties(kafkaProperties)
+                        .setGroupId("")
+                        .setDeserializer(
+                                new KafkaRecordDeserializationSchema<String>() {
+                                    @Override
+                                    public void deserialize(
+                                            ConsumerRecord<byte[], byte[]> record,
+                                            Collector<String> out)
+                                            throws IOException {}
 
-                            @Override
-                            public Set<TopicPartition> getSubscribedTopicPartitions(
-                                    AdminClient adminClient) {
-                                return null;
-                            }
-                        },
-                        null,
-                        null,
-                        Boundedness.CONTINUOUS_UNBOUNDED,
-                        null,
-                        kafkaProperties,
-                        null);
-        assertThat(source.getLineageVertex().datasets()).isEmpty();
-        assertThat(source.getLineageVertex().datasets()).isEmpty();
+                                    @Override
+                                    public TypeInformation<String> getProducedType() {
+                                        return TypeInformation.of(String.class);
+                                    }
+                                })
+                        .setUnbounded(OffsetsInitializer.committedOffsets())
+                        .build();
+        assertThat(source.getLineageVertex())
+                .extracting(LineageVertex::datasets)
+                .asList()
+                .isEmpty();
     }
 
     @Test
     public void testGetLineageVertex() {
         TypeInformation<String> typeInformation = TypeInformation.of(String.class);
-        KafkaSource source =
-                new KafkaSource(
-                        new TestingKafkaSubscriber() {
-                            @Override
-                            public Optional<DefaultKafkaDatasetIdentifier> getDatasetIdentifier() {
-                                return Optional.of(
-                                        DefaultKafkaDatasetIdentifier.ofTopics(
-                                                Collections.singletonList("topic1")));
-                            }
+        KafkaSource<String> source =
+                new KafkaSourceBuilder<String>()
+                        .setKafkaSubscriber(new TestingKafkaSubscriber())
+                        .setProperties(kafkaProperties)
+                        .setGroupId("")
+                        .setDeserializer(
+                                new KafkaRecordDeserializationSchema<String>() {
+                                    @Override
+                                    public void deserialize(
+                                            ConsumerRecord<byte[], byte[]> record,
+                                            Collector<String> out)
+                                            throws IOException {}
 
-                            @Override
-                            public Set<TopicPartition> getSubscribedTopicPartitions(
-                                    AdminClient adminClient) {
-                                return null;
-                            }
-                        },
-                        null,
-                        null,
-                        Boundedness.CONTINUOUS_UNBOUNDED,
-                        new KafkaRecordDeserializationSchema() {
-                            @Override
-                            public void deserialize(ConsumerRecord record, Collector out)
-                                    throws IOException {}
-
-                            @Override
-                            public TypeInformation getProducedType() {
-                                return typeInformation;
-                            }
-                        },
-                        kafkaProperties,
-                        null);
+                                    @Override
+                                    public TypeInformation<String> getProducedType() {
+                                        return typeInformation;
+                                    }
+                                })
+                        .setUnbounded(OffsetsInitializer.committedOffsets())
+                        .build();
 
         LineageVertex lineageVertex = source.getLineageVertex();
         assertThat(lineageVertex.datasets()).hasSize(1);
+        LineageDataset dataset = lineageVertex.datasets().get(0);
 
-        assertThat(lineageVertex.datasets().get(0).namespace()).isEqualTo("kafka://host1");
-        assertThat(lineageVertex.datasets().get(0).name()).isEqualTo("topic1");
+        assertThat(dataset.namespace()).isEqualTo("kafka://host1");
+        assertThat(dataset.name()).isEqualTo("topic1");
 
-        assertThat(
-                        lineageVertex
-                                .datasets()
-                                .get(0)
-                                .facets()
-                                .get(DefaultKafkaDatasetFacet.KAFKA_FACET_NAME))
-                .hasFieldOrPropertyWithValue("properties", kafkaProperties)
-                .hasFieldOrPropertyWithValue(
-                        "topicIdentifier",
-                        DefaultKafkaDatasetIdentifier.ofTopics(
-                                Collections.singletonList("topic1")));
+        assertThat(dataset.facets()).containsKey(DefaultKafkaDatasetFacet.KAFKA_FACET_NAME);
+        DefaultKafkaDatasetFacet kafkaFacet =
+                (DefaultKafkaDatasetFacet)
+                        dataset.facets().get(DefaultKafkaDatasetFacet.KAFKA_FACET_NAME);
 
-        assertThat(
-                        lineageVertex
-                                .datasets()
-                                .get(0)
-                                .facets()
-                                .get(DefaultTypeDatasetFacet.TYPE_FACET_NAME))
+        assertThat(kafkaFacet.getProperties()).containsEntry("bootstrap.servers", "host1;host2");
+
+        assertThat(dataset.facets()).containsKey(DefaultTypeDatasetFacet.TYPE_FACET_NAME);
+        assertThat(dataset.facets().get(DefaultTypeDatasetFacet.TYPE_FACET_NAME))
                 .hasFieldOrPropertyWithValue("typeInformation", TypeInformation.of(String.class));
+    }
+
+    private static class TestingKafkaSubscriber
+            implements KafkaSubscriber, KafkaDatasetIdentifierProvider {
+        @Override
+        public Optional<DefaultKafkaDatasetIdentifier> getDatasetIdentifier() {
+            return Optional.of(
+                    DefaultKafkaDatasetIdentifier.ofTopics(Collections.singletonList("topic1")));
+        }
+
+        @Override
+        public Set<TopicPartition> getSubscribedTopicPartitions(AdminClient adminClient) {
+            return null;
+        }
     }
 }

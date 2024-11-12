@@ -1,25 +1,28 @@
 package org.apache.flink.connector.kafka.lineage;
 
+import org.apache.flink.annotation.PublicEvolving;
+
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
 /** Default implementation of {@link KafkaDatasetIdentifier}. */
+@PublicEvolving
 public class DefaultKafkaDatasetIdentifier implements KafkaDatasetIdentifier {
 
     @Nullable private final List<String> topics;
     @Nullable private final Pattern topicPattern;
 
-    public DefaultKafkaDatasetIdentifier(List<String> fixedTopics, Pattern topicPattern) {
+    private DefaultKafkaDatasetIdentifier(
+            @Nullable List<String> fixedTopics, @Nullable Pattern topicPattern) {
         this.topics = fixedTopics;
         this.topicPattern = topicPattern;
     }
 
     public static DefaultKafkaDatasetIdentifier ofPattern(Pattern pattern) {
-        return new DefaultKafkaDatasetIdentifier(Collections.emptyList(), pattern);
+        return new DefaultKafkaDatasetIdentifier(null, pattern);
     }
 
     public static DefaultKafkaDatasetIdentifier ofTopics(List<String> fixedTopics) {

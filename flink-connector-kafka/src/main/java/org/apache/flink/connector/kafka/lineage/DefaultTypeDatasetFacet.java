@@ -1,10 +1,12 @@
 package org.apache.flink.connector.kafka.lineage;
 
+import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 
 import java.util.Objects;
 
 /** Default implementation of {@link KafkaDatasetFacet}. */
+@PublicEvolving
 public class DefaultTypeDatasetFacet implements TypeDatasetFacet {
 
     public static final String TYPE_FACET_NAME = "type";
