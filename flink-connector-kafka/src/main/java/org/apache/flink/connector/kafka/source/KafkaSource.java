@@ -33,6 +33,11 @@ import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.synchronization.FutureCompletingBlockingQueue;
+import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetFacet;
+import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetIdentifier;
+import org.apache.flink.connector.kafka.lineage.DefaultTypeDatasetFacet;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifierProvider;
+import org.apache.flink.connector.kafka.lineage.LineageUtil;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumStateSerializer;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumerator;
@@ -48,15 +53,20 @@ import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplitSerializer;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.metrics.MetricGroup;
+import org.apache.flink.streaming.api.lineage.LineageVertexProvider;
+import org.apache.flink.streaming.api.lineage.SourceLineageVertex;
 import org.apache.flink.util.UserCodeClassLoader;
 import org.apache.flink.util.function.SerializableSupplier;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.function.Consumer;
@@ -87,8 +97,10 @@ import java.util.function.Supplier;
  */
 @PublicEvolving
 public class KafkaSource<OUT>
-        implements Source<OUT, KafkaPartitionSplit, KafkaSourceEnumState>,
+        implements LineageVertexProvider,
+                Source<OUT, KafkaPartitionSplit, KafkaSourceEnumState>,
                 ResultTypeQueryable<OUT> {
+    private static final Logger LOG = LoggerFactory.getLogger(KafkaSource.class);
     private static final long serialVersionUID = -8755372893283732098L;
     // Users can choose only one of the following ways to specify the topics to consume from.
     private final KafkaSubscriber subscriber;
@@ -250,5 +262,32 @@ public class KafkaSource<OUT>
     @VisibleForTesting
     OffsetsInitializer getStoppingOffsetsInitializer() {
         return stoppingOffsetsInitializer;
+    }
+
+    @Override
+    public SourceLineageVertex getLineageVertex() {
+        if (!(subscriber instanceof KafkaDatasetIdentifierProvider)) {
+            LOG.info("unable to determine topic identifier");
+            return LineageUtil.sourceLineageVertexOf(Collections.emptyList());
+        }
+
+        Optional<DefaultKafkaDatasetIdentifier> topicsIdentifier =
+                ((KafkaDatasetIdentifierProvider) subscriber).getDatasetIdentifier();
+
+        if (!topicsIdentifier.isPresent()) {
+            LOG.info("No topics' identifier returned from subscriber");
+            return LineageUtil.sourceLineageVertexOf(Collections.emptyList());
+        }
+
+        DefaultKafkaDatasetFacet kafkaDatasetFacet =
+                new DefaultKafkaDatasetFacet(topicsIdentifier.get(), props);
+
+        String namespace = LineageUtil.namespaceOf(props);
+        return LineageUtil.sourceLineageVertexOf(
+                Collections.singletonList(
+                        LineageUtil.datasetOf(
+                                namespace,
+                                kafkaDatasetFacet,
+                                new DefaultTypeDatasetFacet(getProducedType()))));
     }
 }

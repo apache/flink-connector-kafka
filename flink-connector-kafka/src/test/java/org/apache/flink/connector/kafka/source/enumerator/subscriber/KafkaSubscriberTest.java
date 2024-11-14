@@ -18,6 +18,8 @@
 
 package org.apache.flink.connector.kafka.source.enumerator.subscriber;
 
+import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetIdentifier;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifierProvider;
 import org.apache.flink.connector.kafka.testutils.KafkaSourceTestEnv;
 
 import org.apache.kafka.clients.admin.AdminClient;
@@ -71,6 +73,8 @@ public class KafkaSubscriberTest {
                 new HashSet<>(KafkaSourceTestEnv.getPartitionsForTopics(topics));
 
         assertThat(subscribedPartitions).isEqualTo(expectedSubscribedPartitions);
+        assertThat(((KafkaDatasetIdentifierProvider) subscriber).getDatasetIdentifier().get())
+                .isEqualTo(DefaultKafkaDatasetIdentifier.ofTopics(topics));
     }
 
     @Test
@@ -86,8 +90,8 @@ public class KafkaSubscriberTest {
 
     @Test
     public void testTopicPatternSubscriber() {
-        KafkaSubscriber subscriber =
-                KafkaSubscriber.getTopicPatternSubscriber(Pattern.compile("pattern.*"));
+        Pattern pattern = Pattern.compile("pattern.*");
+        KafkaSubscriber subscriber = KafkaSubscriber.getTopicPatternSubscriber(pattern);
         final Set<TopicPartition> subscribedPartitions =
                 subscriber.getSubscribedTopicPartitions(adminClient);
 
@@ -96,6 +100,8 @@ public class KafkaSubscriberTest {
                         KafkaSourceTestEnv.getPartitionsForTopics(Collections.singleton(TOPIC2)));
 
         assertThat(subscribedPartitions).isEqualTo(expectedSubscribedPartitions);
+        assertThat(((KafkaDatasetIdentifierProvider) subscriber).getDatasetIdentifier().get())
+                .isEqualTo(DefaultKafkaDatasetIdentifier.ofPattern(pattern));
     }
 
     @Test
@@ -111,6 +117,8 @@ public class KafkaSubscriberTest {
                 subscriber.getSubscribedTopicPartitions(adminClient);
 
         assertThat(subscribedPartitions).isEqualTo(partitions);
+        assertThat(((KafkaDatasetIdentifierProvider) subscriber).getDatasetIdentifier().get())
+                .isEqualTo(DefaultKafkaDatasetIdentifier.ofTopics(topics));
     }
 
     @Test

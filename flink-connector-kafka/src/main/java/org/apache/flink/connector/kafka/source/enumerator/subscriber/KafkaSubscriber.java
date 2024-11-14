@@ -39,6 +39,10 @@ import java.util.regex.Pattern;
  *
  * <p>The KafkaSubscriber provides a unified interface for the Kafka source to support all these
  * three types of subscribing mode.
+ *
+ * <p>When implementing a subscriber, {@link
+ * org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifierProvider} can be implemented to
+ * provide lineage metadata with source topics.
  */
 @PublicEvolving
 public interface KafkaSubscriber extends Serializable {
