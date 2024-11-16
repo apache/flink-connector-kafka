@@ -62,6 +62,7 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_BOUNDED_MODE;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_BOUNDED_SPECIFIC_OFFSETS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_BOUNDED_TIMESTAMP_MILLIS;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_PARALLELISM;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SINK_BUFFER_FLUSH_INTERVAL;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SINK_BUFFER_FLUSH_MAX_ROWS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SINK_PARALLELISM;
@@ -115,6 +116,7 @@ public class UpsertKafkaDynamicTableFactory
         options.add(SCAN_BOUNDED_TIMESTAMP_MILLIS);
         options.add(DELIVERY_GUARANTEE);
         options.add(TRANSACTIONAL_ID_PREFIX);
+        options.add(SCAN_PARALLELISM);
         return options;
     }
 
@@ -150,6 +152,8 @@ public class UpsertKafkaDynamicTableFactory
 
         final BoundedOptions boundedOptions = getBoundedOptions(tableOptions);
 
+        Integer parallelism = tableOptions.get(SCAN_PARALLELISM);
+
         return new KafkaDynamicSource(
                 context.getPhysicalRowDataType(),
                 keyDecodingFormat,
@@ -167,7 +171,8 @@ public class UpsertKafkaDynamicTableFactory
                 boundedOptions.specificOffsets,
                 boundedOptions.boundedTimestampMillis,
                 true,
-                context.getObjectIdentifier().asSummaryString());
+                context.getObjectIdentifier().asSummaryString(),
+                parallelism);
     }
 
     @Override

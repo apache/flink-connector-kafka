@@ -343,6 +343,14 @@ CREATE TABLE KafkaTable (
       <td>Consumer 定期探测动态创建的 Kafka topic 和 partition 的时间间隔。需要显式地设置'scan.topic-partition-discovery.interval'为0才能关闭此功能</td>
     </tr>
     <tr>
+      <td><h5>scan.parallelism</h5></td>
+      <td>optional</td>
+      <td>no</td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>Integer</td>
+      <td>定义 Kafka source 算子的并行度。默认情况下会使用全局默认并行度。</td>
+    </tr>
+    <tr>
       <td><h5>sink.partitioner</h5></td>
       <td>可选</td>
       <td style="word-wrap: break-word;">'default'</td>

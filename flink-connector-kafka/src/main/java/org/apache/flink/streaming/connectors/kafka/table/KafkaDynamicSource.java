@@ -71,6 +71,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -171,6 +172,9 @@ public class KafkaDynamicSource
 
     protected final String tableIdentifier;
 
+    /** Parallelism of the physical Kafka consumer. * */
+    protected final @Nullable Integer parallelism;
+
     public KafkaDynamicSource(
             DataType physicalDataType,
             @Nullable DecodingFormat<DeserializationSchema<RowData>> keyDecodingFormat,
@@ -188,7 +192,8 @@ public class KafkaDynamicSource
             Map<KafkaTopicPartition, Long> specificBoundedOffsets,
             long boundedTimestampMillis,
             boolean upsertMode,
-            String tableIdentifier) {
+            String tableIdentifier,
+            @Nullable Integer parallelism) {
         // Format attributes
         this.physicalDataType =
                 Preconditions.checkNotNull(
@@ -228,6 +233,7 @@ public class KafkaDynamicSource
         this.boundedTimestampMillis = boundedTimestampMillis;
         this.upsertMode = upsertMode;
         this.tableIdentifier = tableIdentifier;
+        this.parallelism = parallelism;
     }
 
     @Override
@@ -266,6 +272,11 @@ public class KafkaDynamicSource
             @Override
             public boolean isBounded() {
                 return kafkaSource.getBoundedness() == Boundedness.BOUNDED;
+            }
+
+            @Override
+            public Optional<Integer> getParallelism() {
+                return Optional.ofNullable(parallelism);
             }
         };
     }
@@ -344,7 +355,8 @@ public class KafkaDynamicSource
                         specificBoundedOffsets,
                         boundedTimestampMillis,
                         upsertMode,
-                        tableIdentifier);
+                        tableIdentifier,
+                        parallelism);
         copy.producedDataType = producedDataType;
         copy.metadataKeys = metadataKeys;
         copy.watermarkStrategy = watermarkStrategy;
@@ -384,7 +396,8 @@ public class KafkaDynamicSource
                 && boundedTimestampMillis == that.boundedTimestampMillis
                 && Objects.equals(upsertMode, that.upsertMode)
                 && Objects.equals(tableIdentifier, that.tableIdentifier)
-                && Objects.equals(watermarkStrategy, that.watermarkStrategy);
+                && Objects.equals(watermarkStrategy, that.watermarkStrategy)
+                && Objects.equals(parallelism, that.parallelism);
     }
 
     @Override
@@ -409,7 +422,8 @@ public class KafkaDynamicSource
                 boundedTimestampMillis,
                 upsertMode,
                 tableIdentifier,
-                watermarkStrategy);
+                watermarkStrategy,
+                parallelism);
     }
 
     // --------------------------------------------------------------------------------------------
