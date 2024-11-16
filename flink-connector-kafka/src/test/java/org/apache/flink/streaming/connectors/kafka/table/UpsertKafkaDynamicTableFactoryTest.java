@@ -74,6 +74,8 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -168,13 +170,45 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         SOURCE_VALUE_FIELDS,
                         null,
                         Collections.singletonList(SOURCE_TOPIC),
-                        UPSERT_KAFKA_SOURCE_PROPERTIES);
+                        UPSERT_KAFKA_SOURCE_PROPERTIES,
+                        null);
         assertThat(actualSource).isEqualTo(expectedSource);
 
         final KafkaDynamicSource actualUpsertKafkaSource = (KafkaDynamicSource) actualSource;
         ScanTableSource.ScanRuntimeProvider provider =
                 actualUpsertKafkaSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
         assertKafkaSource(provider);
+    }
+
+    @Test
+    public void testTableSourceWithParallelism() {
+        final DataType producedDataType = SOURCE_SCHEMA.toPhysicalRowDataType();
+        // Construct table source using options and table source factory
+        final Map<String, String> modifiedOptions =
+                getModifiedOptions(
+                        getFullSourceOptions(), options -> options.put("scan.parallelism", "100"));
+        final DynamicTableSource actualSource = createTableSource(SOURCE_SCHEMA, modifiedOptions);
+
+        final KafkaDynamicSource expectedSource =
+                createExpectedScanSource(
+                        producedDataType,
+                        keyDecodingFormat,
+                        valueDecodingFormat,
+                        SOURCE_KEY_FIELDS,
+                        SOURCE_VALUE_FIELDS,
+                        null,
+                        Collections.singletonList(SOURCE_TOPIC),
+                        UPSERT_KAFKA_SOURCE_PROPERTIES,
+                        100);
+        assertThat(actualSource).isEqualTo(expectedSource);
+
+        final KafkaDynamicSource actualUpsertKafkaSource = (KafkaDynamicSource) actualSource;
+        ScanTableSource.ScanRuntimeProvider provider =
+                actualUpsertKafkaSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
+        assertThat(provider).isInstanceOf(DataStreamScanProvider.class);
+        final DataStreamScanProvider sourceProvider = (DataStreamScanProvider) provider;
+        assertThat(sourceProvider.getParallelism().isPresent()).isTrue();
+        assertThat(sourceProvider.getParallelism().get()).isEqualTo(100);
     }
 
     @Test
@@ -199,7 +233,8 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         SOURCE_VALUE_FIELDS,
                         null,
                         Arrays.asList(SOURCE_TOPIC, SOURCE_TOPIC),
-                        UPSERT_KAFKA_SOURCE_PROPERTIES);
+                        UPSERT_KAFKA_SOURCE_PROPERTIES,
+                        null);
         assertThat(actualSource).isEqualTo(expectedSource);
 
         final KafkaDynamicSource actualUpsertKafkaSource = (KafkaDynamicSource) actualSource;
@@ -851,7 +886,8 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
             int[] valueFields,
             String keyPrefix,
             List<String> topic,
-            Properties properties) {
+            Properties properties,
+            @Nullable Integer parallelism) {
         return new KafkaDynamicSource(
                 producedDataType,
                 keyDecodingFormat,
@@ -869,7 +905,8 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                 Collections.emptyMap(),
                 0,
                 true,
-                FactoryMocks.IDENTIFIER.asSummaryString());
+                FactoryMocks.IDENTIFIER.asSummaryString(),
+                parallelism);
     }
 
     private static KafkaDynamicSink createExpectedSink(
