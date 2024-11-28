@@ -33,6 +33,7 @@ import org.apache.flink.streaming.connectors.kafka.DynamicKafkaSourceTestHelper;
 
 import com.google.common.collect.ImmutableList;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.IntegerDeserializer;
@@ -271,7 +272,8 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
         return new DynamicKafkaSourceReader<>(
                 context,
                 KafkaRecordDeserializationSchema.valueOnly(IntegerDeserializer.class),
-                properties);
+                properties,
+                KafkaConsumer::new);
     }
 
     private SourceReader<Integer, DynamicKafkaSourceSplit> startReader(

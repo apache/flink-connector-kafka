@@ -114,6 +114,7 @@ public class KafkaSource<OUT>
     private final Properties props;
     // Client rackId callback
     private final SerializableSupplier<String> rackIdSupplier;
+    private final KafkaConsumerFactory kafkaConsumerFactory;
 
     KafkaSource(
             KafkaSubscriber subscriber,
@@ -122,7 +123,8 @@ public class KafkaSource<OUT>
             Boundedness boundedness,
             KafkaRecordDeserializationSchema<OUT> deserializationSchema,
             Properties props,
-            SerializableSupplier<String> rackIdSupplier) {
+            SerializableSupplier<String> rackIdSupplier,
+            KafkaConsumerFactory kafkaConsumerFactory) {
         this.subscriber = subscriber;
         this.startingOffsetsInitializer = startingOffsetsInitializer;
         this.stoppingOffsetsInitializer = stoppingOffsetsInitializer;
@@ -130,6 +132,7 @@ public class KafkaSource<OUT>
         this.deserializationSchema = deserializationSchema;
         this.props = props;
         this.rackIdSupplier = rackIdSupplier;
+        this.kafkaConsumerFactory = kafkaConsumerFactory;
     }
 
     /**
@@ -182,7 +185,8 @@ public class KafkaSource<OUT>
                                 kafkaSourceReaderMetrics,
                                 Optional.ofNullable(rackIdSupplier)
                                         .map(Supplier::get)
-                                        .orElse(null));
+                                        .orElse(null),
+                                kafkaConsumerFactory);
         KafkaRecordEmitter<OUT> recordEmitter = new KafkaRecordEmitter<>(deserializationSchema);
 
         return new KafkaSourceReader<>(

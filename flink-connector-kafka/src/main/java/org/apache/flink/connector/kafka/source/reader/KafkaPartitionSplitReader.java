@@ -25,6 +25,7 @@ import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitReader;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
+import org.apache.flink.connector.kafka.source.KafkaConsumerFactory;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.connector.kafka.source.metrics.KafkaSourceReaderMetrics;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
@@ -56,6 +57,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.StringJoiner;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -79,22 +81,24 @@ public class KafkaPartitionSplitReader
     public KafkaPartitionSplitReader(
             Properties props,
             SourceReaderContext context,
-            KafkaSourceReaderMetrics kafkaSourceReaderMetrics) {
-        this(props, context, kafkaSourceReaderMetrics, null);
+            KafkaSourceReaderMetrics kafkaSourceReaderMetrics,
+            KafkaConsumerFactory kafkaConsumerFactory) {
+        this(props, context, kafkaSourceReaderMetrics, null, kafkaConsumerFactory);
     }
 
     public KafkaPartitionSplitReader(
             Properties props,
             SourceReaderContext context,
             KafkaSourceReaderMetrics kafkaSourceReaderMetrics,
-            String rackIdSupplier) {
+            String rackIdSupplier,
+            KafkaConsumerFactory kafkaConsumerFactory) {
         this.subtaskId = context.getIndexOfSubtask();
         this.kafkaSourceReaderMetrics = kafkaSourceReaderMetrics;
         Properties consumerProps = new Properties();
         consumerProps.putAll(props);
         consumerProps.setProperty(ConsumerConfig.CLIENT_ID_CONFIG, createConsumerClientId(props));
         setConsumerClientRack(consumerProps, rackIdSupplier);
-        this.consumer = new KafkaConsumer<>(consumerProps);
+        this.consumer = kafkaConsumerFactory.get(consumerProps);
         this.stoppingOffsets = new HashMap<>();
         this.groupId = consumerProps.getProperty(ConsumerConfig.GROUP_ID_CONFIG);
 

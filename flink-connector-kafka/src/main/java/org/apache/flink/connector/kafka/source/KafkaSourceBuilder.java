@@ -26,9 +26,11 @@ import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsIni
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializerValidator;
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
+import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.function.SerializableSupplier;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.Deserializer;
@@ -107,6 +109,7 @@ public class KafkaSourceBuilder<OUT> {
     protected Properties props;
     // Client rackId supplier
     private SerializableSupplier<String> rackIdSupplier;
+    private KafkaConsumerFactory kafkaConsumerFactory;
 
     KafkaSourceBuilder() {
         this.subscriber = null;
@@ -116,6 +119,7 @@ public class KafkaSourceBuilder<OUT> {
         this.deserializationSchema = null;
         this.props = new Properties();
         this.rackIdSupplier = null;
+        this.kafkaConsumerFactory = KafkaConsumer::new;
     }
 
     /**
@@ -423,6 +427,13 @@ public class KafkaSourceBuilder<OUT> {
         return this;
     }
 
+    public KafkaSourceBuilder<OUT> setKafkaConsumerFactory(KafkaConsumerFactory kafkaConsumerFactory) {
+        Preconditions.checkNotNull(
+                kafkaConsumerFactory, "kafkaConsumerFactory can not be null.");
+        this.kafkaConsumerFactory = kafkaConsumerFactory;
+        return this;
+    }
+
     /**
      * Build the {@link KafkaSource}.
      *
@@ -438,7 +449,8 @@ public class KafkaSourceBuilder<OUT> {
                 boundedness,
                 deserializationSchema,
                 props,
-                rackIdSupplier);
+                rackIdSupplier,
+                kafkaConsumerFactory);
     }
 
     // ------------- private helpers  --------------

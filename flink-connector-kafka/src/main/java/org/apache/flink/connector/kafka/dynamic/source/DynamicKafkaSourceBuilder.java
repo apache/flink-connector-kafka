@@ -24,6 +24,7 @@ import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.KafkaStreamSetSubscriber;
 import org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.KafkaStreamSubscriber;
 import org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.StreamPatternSubscriber;
+import org.apache.flink.connector.kafka.source.KafkaConsumerFactory;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.NoStoppingOffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
@@ -33,6 +34,7 @@ import org.apache.flink.util.Preconditions;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,6 +54,7 @@ public class DynamicKafkaSourceBuilder<T> {
     private OffsetsInitializer stoppingOffsetsInitializer;
     private Boundedness boundedness;
     private final Properties props;
+    private KafkaConsumerFactory kafkaConsumerFactory;
 
     DynamicKafkaSourceBuilder() {
         this.kafkaStreamSubscriber = null;
@@ -61,6 +64,7 @@ public class DynamicKafkaSourceBuilder<T> {
         this.stoppingOffsetsInitializer = new NoStoppingOffsetsInitializer();
         this.boundedness = Boundedness.CONTINUOUS_UNBOUNDED;
         this.props = new Properties();
+        this.kafkaConsumerFactory = KafkaConsumer::new;
     }
 
     /**
@@ -201,6 +205,13 @@ public class DynamicKafkaSourceBuilder<T> {
         return setProperty(KafkaSourceOptions.CLIENT_ID_PREFIX.key(), prefix);
     }
 
+    public DynamicKafkaSourceBuilder<T> setKafkaConsumerFactory(KafkaConsumerFactory kafkaConsumerFactory) {
+        Preconditions.checkNotNull(
+                kafkaConsumerFactory, "kafkaConsumerFactory can not be null.");
+        this.kafkaConsumerFactory = kafkaConsumerFactory;
+        return this;
+    }
+
     /**
      * Construct the source with the configuration that was set.
      *
@@ -217,7 +228,8 @@ public class DynamicKafkaSourceBuilder<T> {
                 startingOffsetsInitializer,
                 stoppingOffsetsInitializer,
                 props,
-                boundedness);
+                boundedness,
+                kafkaConsumerFactory);
     }
 
     // Below are utility methods, code and structure are mostly copied over from KafkaSourceBuilder
