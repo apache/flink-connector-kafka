@@ -101,6 +101,7 @@ import static org.apache.flink.core.testutils.FlinkAssertions.anyCauseMatches;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.AVRO_CONFLUENT;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.DEBEZIUM_AVRO_CONFLUENT;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.PROPERTIES_PREFIX;
+import static org.apache.flink.table.factories.FactoryUtil.SOURCE_PARALLELISM;
 import static org.apache.flink.table.factories.utils.FactoryMocks.createTableSink;
 import static org.apache.flink.table.factories.utils.FactoryMocks.createTableSource;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -225,7 +226,8 @@ public class KafkaDynamicTableFactoryTest {
     public void testTableSourceWithParallelism() {
         final Map<String, String> modifiedOptions =
                 getModifiedOptions(
-                        getBasicSourceOptions(), options -> options.put("scan.parallelism", "100"));
+                        getBasicSourceOptions(),
+                        options -> options.put(SOURCE_PARALLELISM.key(), "100"));
         final DynamicTableSource actualSource = createTableSource(SCHEMA, modifiedOptions);
         final KafkaDynamicSource actualKafkaSource = (KafkaDynamicSource) actualSource;
 
@@ -258,8 +260,8 @@ public class KafkaDynamicTableFactoryTest {
                 actualKafkaSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
         assertThat(provider).isInstanceOf(DataStreamScanProvider.class);
         final DataStreamScanProvider sourceProvider = (DataStreamScanProvider) provider;
-        assertThat(sourceProvider.getParallelism().isPresent()).isTrue();
-        assertThat(sourceProvider.getParallelism().get()).isEqualTo(100);
+        assertThat(sourceProvider.getParallelism()).isPresent();
+        assertThat(sourceProvider.getParallelism()).hasValue(100);
     }
 
     @Test

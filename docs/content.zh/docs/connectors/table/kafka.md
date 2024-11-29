@@ -348,7 +348,7 @@ CREATE TABLE KafkaTable (
       <td>no</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>Integer</td>
-      <td>定义 Kafka source 算子的并行度。默认情况下会使用全局默认并发。</td>
+      <td>定义 Kafka source 算子的并行度。默认情况下会使用全局默认并行度。</td>
     </tr>
     <tr>
       <td><h5>sink.partitioner</h5></td>
