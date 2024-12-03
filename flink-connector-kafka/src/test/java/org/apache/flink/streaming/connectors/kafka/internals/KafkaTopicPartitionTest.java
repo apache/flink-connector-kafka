@@ -18,6 +18,7 @@
 
 package org.apache.flink.streaming.connectors.kafka.internals;
 
+import org.apache.kafka.common.TopicPartition;
 import org.junit.Test;
 
 import java.lang.reflect.Field;
@@ -26,14 +27,14 @@ import java.lang.reflect.Modifier;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
-/** Tests for the {@link KafkaTopicPartition}. */
+/** Tests for the {@link TopicPartition}. */
 public class KafkaTopicPartitionTest {
 
     @Test
     public void validateUid() {
         Field uidField;
         try {
-            uidField = KafkaTopicPartition.class.getDeclaredField("serialVersionUID");
+            uidField = TopicPartition.class.getDeclaredField("serialVersionUID");
             uidField.setAccessible(true);
         } catch (NoSuchFieldException e) {
             fail("serialVersionUID is not defined");
@@ -48,7 +49,7 @@ public class KafkaTopicPartitionTest {
 
         // the UID has to be constant to make sure old checkpoints/savepoints can be read
         try {
-            assertThat(uidField.getLong(null)).isEqualTo(722083576322742325L);
+            assertThat(uidField.getLong(null)).isEqualTo(-613627415771699627L);
         } catch (Exception e) {
             e.printStackTrace();
             fail(e.getMessage());

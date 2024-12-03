@@ -17,7 +17,7 @@
 
 package org.apache.flink.streaming.connectors.kafka;
 
-import org.apache.flink.annotation.PublicEvolving;
+import org.apache.flink.annotation.Internal;
 
 /**
  * An interface for {@link KafkaSerializationSchema KafkaSerializationSchemas} that need information
@@ -26,11 +26,8 @@ import org.apache.flink.annotation.PublicEvolving;
  *
  * <p>You only need to override the methods for the information that you need. However, {@link
  * #getTargetTopic(Object)} is required because it is used to determine the available partitions.
- *
- * @deprecated Will be turned into internal API when {@link FlinkKafkaProducer} is removed.
  */
-@PublicEvolving
-@Deprecated
+@Internal
 public interface KafkaContextAware<T> {
 
     /**

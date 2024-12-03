@@ -21,11 +21,11 @@ package org.apache.flink.streaming.connectors.kafka.table;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.kafka.sink.KafkaPartitioner;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkFixedPartitioner;
-import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
 import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
@@ -457,7 +457,7 @@ public class KafkaChangelogTableITCase extends KafkaTableTestBase {
     private void writeRecordsToKafka(String topic, List<String> lines) throws Exception {
         DataStreamSource<String> stream = env.fromCollection(lines);
         SerializationSchema<String> serSchema = new SimpleStringSchema();
-        FlinkKafkaPartitioner<String> partitioner = new FlinkFixedPartitioner<>();
+        KafkaPartitioner<String> partitioner = new FlinkFixedPartitioner<>();
 
         // the producer must not produce duplicates
         Properties producerProperties = getStandardProps();
