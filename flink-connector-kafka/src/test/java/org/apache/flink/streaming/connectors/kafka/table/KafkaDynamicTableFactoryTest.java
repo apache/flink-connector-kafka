@@ -26,6 +26,7 @@ import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.kafka.sink.KafkaPartitioner;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
@@ -42,9 +43,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.SourceTransformation;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
-import org.apache.flink.streaming.connectors.kafka.internals.KafkaTopicPartition;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkFixedPartitioner;
-import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanStartupMode;
 import org.apache.flink.streaming.connectors.kafka.testutils.MockPartitionOffsetsRetriever;
 import org.apache.flink.table.api.DataTypes;
@@ -191,9 +190,9 @@ public class KafkaDynamicTableFactoryTest {
         final DynamicTableSource actualSource = createTableSource(SCHEMA, getBasicSourceOptions());
         final KafkaDynamicSource actualKafkaSource = (KafkaDynamicSource) actualSource;
 
-        final Map<KafkaTopicPartition, Long> specificOffsets = new HashMap<>();
-        specificOffsets.put(new KafkaTopicPartition(TOPIC, PARTITION_0), OFFSET_0);
-        specificOffsets.put(new KafkaTopicPartition(TOPIC, PARTITION_1), OFFSET_1);
+        final Map<TopicPartition, Long> specificOffsets = new HashMap<>();
+        specificOffsets.put(new TopicPartition(TOPIC, PARTITION_0), OFFSET_0);
+        specificOffsets.put(new TopicPartition(TOPIC, PARTITION_1), OFFSET_1);
 
         final DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat =
                 new DecodingFormatMock(",", true);
@@ -235,7 +234,7 @@ public class KafkaDynamicTableFactoryTest {
                         });
         final DynamicTableSource actualSource = createTableSource(SCHEMA, modifiedOptions);
 
-        final Map<KafkaTopicPartition, Long> specificOffsets = new HashMap<>();
+        final Map<TopicPartition, Long> specificOffsets = new HashMap<>();
 
         DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat =
                 new DecodingFormatMock(",", true);
@@ -1169,9 +1168,9 @@ public class KafkaDynamicTableFactoryTest {
         props.putAll(KAFKA_SOURCE_PROPERTIES);
         // The default partition discovery interval is 5 minutes
         props.setProperty("partition.discovery.interval.ms", "300000");
-        final Map<KafkaTopicPartition, Long> specificOffsets = new HashMap<>();
-        specificOffsets.put(new KafkaTopicPartition(TOPIC, PARTITION_0), OFFSET_0);
-        specificOffsets.put(new KafkaTopicPartition(TOPIC, PARTITION_1), OFFSET_1);
+        final Map<TopicPartition, Long> specificOffsets = new HashMap<>();
+        specificOffsets.put(new TopicPartition(TOPIC, PARTITION_0), OFFSET_0);
+        specificOffsets.put(new TopicPartition(TOPIC, PARTITION_1), OFFSET_1);
         final DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat =
                 new DecodingFormatMock(",", true);
         // Test scan source equals
@@ -1207,9 +1206,9 @@ public class KafkaDynamicTableFactoryTest {
         props.putAll(KAFKA_SOURCE_PROPERTIES);
         // Disable discovery if the partition discovery interval is 0 minutes
         props.setProperty("partition.discovery.interval.ms", "0");
-        final Map<KafkaTopicPartition, Long> specificOffsets = new HashMap<>();
-        specificOffsets.put(new KafkaTopicPartition(TOPIC, PARTITION_0), OFFSET_0);
-        specificOffsets.put(new KafkaTopicPartition(TOPIC, PARTITION_1), OFFSET_1);
+        final Map<TopicPartition, Long> specificOffsets = new HashMap<>();
+        specificOffsets.put(new TopicPartition(TOPIC, PARTITION_0), OFFSET_0);
+        specificOffsets.put(new TopicPartition(TOPIC, PARTITION_1), OFFSET_1);
         final DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat =
                 new DecodingFormatMock(",", true);
         // Test scan source equals
@@ -1248,7 +1247,7 @@ public class KafkaDynamicTableFactoryTest {
             @Nullable Pattern topicPattern,
             Properties properties,
             StartupMode startupMode,
-            Map<KafkaTopicPartition, Long> specificStartupOffsets,
+            Map<TopicPartition, Long> specificStartupOffsets,
             long startupTimestampMillis) {
         return new KafkaDynamicSource(
                 physicalDataType,
@@ -1280,7 +1279,7 @@ public class KafkaDynamicTableFactoryTest {
             @Nullable List<String> topics,
             @Nullable Pattern topicPattern,
             Properties properties,
-            @Nullable FlinkKafkaPartitioner<RowData> partitioner,
+            @Nullable KafkaPartitioner<RowData> partitioner,
             DeliveryGuarantee deliveryGuarantee,
             @Nullable Integer parallelism,
             String transactionalIdPrefix) {

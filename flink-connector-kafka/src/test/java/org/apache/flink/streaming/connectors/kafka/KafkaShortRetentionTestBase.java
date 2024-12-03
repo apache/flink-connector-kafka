@@ -17,19 +17,12 @@
 
 package org.apache.flink.streaming.connectors.kafka;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
-import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.configuration.TaskManagerOptions;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
-import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
-import org.apache.flink.streaming.api.functions.source.RichParallelSourceFunction;
 import org.apache.flink.test.util.MiniClusterWithClientResource;
 import org.apache.flink.util.InstantiationUtil;
 
@@ -43,9 +36,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.Serializable;
 import java.util.Properties;
-import java.util.UUID;
-
-import static org.apache.flink.test.util.TestUtils.tryExecute;
 
 /**
  * A class containing a special Kafka broker which has a log retention of only 250 ms. This way, we
@@ -127,67 +117,6 @@ public class KafkaShortRetentionTestBase implements Serializable {
      * auto.offset.reset = 'earliest', some offsets will not show up)
      */
     private static boolean stopProducer = false;
-
-    public void runAutoOffsetResetTest() throws Exception {
-        final String topic = "auto-offset-reset-test-" + UUID.randomUUID();
-
-        final int parallelism = 1;
-        final int elementsPerPartition = 50000;
-
-        Properties tprops = new Properties();
-        tprops.setProperty("retention.ms", "250");
-        kafkaServer.createTestTopic(topic, parallelism, 1, tprops);
-
-        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(parallelism);
-        env.setRestartStrategy(RestartStrategies.noRestart()); // fail immediately
-
-        // ----------- add producer dataflow ----------
-
-        DataStream<String> stream =
-                env.addSource(
-                        new RichParallelSourceFunction<String>() {
-
-                            private boolean running = true;
-
-                            @Override
-                            public void run(SourceContext<String> ctx) throws InterruptedException {
-                                int cnt =
-                                        getRuntimeContext().getIndexOfThisSubtask()
-                                                * elementsPerPartition;
-                                int limit = cnt + elementsPerPartition;
-
-                                while (running && !stopProducer && cnt < limit) {
-                                    ctx.collect("element-" + cnt);
-                                    cnt++;
-                                    Thread.sleep(10);
-                                }
-                                LOG.info("Stopping producer");
-                            }
-
-                            @Override
-                            public void cancel() {
-                                running = false;
-                            }
-                        });
-        Properties props = new Properties();
-        props.putAll(standardProps);
-        props.putAll(secureProps);
-        kafkaServer.produceIntoKafka(stream, topic, new SimpleStringSchema(), props, null);
-
-        // ----------- add consumer dataflow ----------
-
-        NonContinousOffsetsDeserializationSchema deserSchema =
-                new NonContinousOffsetsDeserializationSchema();
-        FlinkKafkaConsumerBase<String> source = kafkaServer.getConsumer(topic, deserSchema, props);
-
-        DataStreamSource<String> consuming = env.addSource(source);
-        consuming.addSink(new DiscardingSink<String>());
-
-        tryExecute(env, "run auto offset reset test");
-
-        kafkaServer.deleteTestTopic(topic);
-    }
 
     private class NonContinousOffsetsDeserializationSchema
             implements KafkaDeserializationSchema<String> {
