@@ -19,13 +19,13 @@
 package org.apache.flink.streaming.connectors.kafka.testutils;
 
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
+import org.apache.flink.connector.kafka.sink.KafkaPartitioner;
 
 /**
  * Special partitioner that uses the first field of a 2-tuple as the partition, and that expects a
  * specific number of partitions.
  */
-public class Tuple2FlinkPartitioner extends FlinkKafkaPartitioner<Tuple2<Integer, Integer>> {
+public class Tuple2FlinkPartitioner implements KafkaPartitioner<Tuple2<Integer, Integer>> {
     private static final long serialVersionUID = -3589898230375281549L;
 
     private final int expectedPartitions;
