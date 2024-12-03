@@ -30,7 +30,6 @@ import org.apache.flink.connector.kafka.sink.KafkaPartitioner;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
-import org.apache.flink.streaming.connectors.kafka.internals.KafkaTopicPartition;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.BoundedOptions;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -49,6 +48,7 @@ import org.apache.flink.table.factories.SerializationFormatFactory;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.types.RowKind;
 
+import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -397,10 +397,10 @@ public class KafkaDynamicTableFactory
             @Nullable Pattern topicPattern,
             Properties properties,
             StartupMode startupMode,
-            Map<KafkaTopicPartition, Long> specificStartupOffsets,
+            Map<TopicPartition, Long> specificStartupOffsets,
             long startupTimestampMillis,
             BoundedMode boundedMode,
-            Map<KafkaTopicPartition, Long> specificEndOffsets,
+            Map<TopicPartition, Long> specificEndOffsets,
             long endTimestampMillis,
             String tableIdentifier,
             Integer parallelism) {

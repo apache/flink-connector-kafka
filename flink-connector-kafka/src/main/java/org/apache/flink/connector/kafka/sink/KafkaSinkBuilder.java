@@ -99,20 +99,6 @@ public class KafkaSinkBuilder<IN> {
     }
 
     /**
-     * Sets the wanted the {@link DeliveryGuarantee}. The default delivery guarantee is {@link
-     * #deliveryGuarantee}.
-     *
-     * @param deliveryGuarantee
-     * @return {@link KafkaSinkBuilder}
-     * @deprecated Will be removed in future versions. Use {@link #setDeliveryGuarantee} instead.
-     */
-    @Deprecated
-    public KafkaSinkBuilder<IN> setDeliverGuarantee(DeliveryGuarantee deliveryGuarantee) {
-        this.deliveryGuarantee = checkNotNull(deliveryGuarantee, "deliveryGuarantee");
-        return this;
-    }
-
-    /**
      * Sets the configuration which used to instantiate all used {@link
      * org.apache.kafka.clients.producer.KafkaProducer}.
      *

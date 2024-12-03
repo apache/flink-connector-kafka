@@ -17,7 +17,7 @@
 
 package org.apache.flink.streaming.connectors.kafka;
 
-import org.apache.flink.annotation.PublicEvolving;
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -35,10 +35,8 @@ import java.io.Serializable;
  * which the Kafka Producer is running.
  *
  * @param <T> the type of values being serialized
- * @deprecated Will be turned into internal API when {@link FlinkKafkaProducer} is removed.
  */
-@PublicEvolving
-@Deprecated
+@Internal
 public interface KafkaSerializationSchema<T> extends Serializable {
 
     /**

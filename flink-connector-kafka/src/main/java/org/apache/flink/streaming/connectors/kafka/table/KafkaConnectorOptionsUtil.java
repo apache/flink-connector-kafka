@@ -27,7 +27,6 @@ import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaPartitioner;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
-import org.apache.flink.streaming.connectors.kafka.internals.KafkaTopicPartition;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkFixedPartitioner;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanBoundedMode;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanStartupMode;
@@ -44,6 +43,8 @@ import org.apache.flink.table.types.logical.utils.LogicalTypeChecks;
 import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.Preconditions;
+
+import org.apache.kafka.common.TopicPartition;
 
 import java.util.Arrays;
 import java.util.HashMap;
@@ -250,7 +251,7 @@ class KafkaConnectorOptionsUtil {
     }
 
     public static StartupOptions getStartupOptions(ReadableConfig tableOptions) {
-        final Map<KafkaTopicPartition, Long> specificOffsets = new HashMap<>();
+        final Map<TopicPartition, Long> specificOffsets = new HashMap<>();
         final StartupMode startupMode =
                 tableOptions
                         .getOptional(SCAN_STARTUP_MODE)
@@ -273,7 +274,7 @@ class KafkaConnectorOptionsUtil {
     }
 
     public static BoundedOptions getBoundedOptions(ReadableConfig tableOptions) {
-        final Map<KafkaTopicPartition, Long> specificOffsets = new HashMap<>();
+        final Map<TopicPartition, Long> specificOffsets = new HashMap<>();
         final BoundedMode boundedMode =
                 KafkaConnectorOptionsUtil.fromOption(tableOptions.get(SCAN_BOUNDED_MODE));
         if (boundedMode == BoundedMode.SPECIFIC_OFFSETS) {
@@ -290,32 +291,26 @@ class KafkaConnectorOptionsUtil {
     }
 
     private static void buildSpecificOffsets(
-            ReadableConfig tableOptions,
-            String topic,
-            Map<KafkaTopicPartition, Long> specificOffsets) {
+            ReadableConfig tableOptions, String topic, Map<TopicPartition, Long> specificOffsets) {
         String specificOffsetsStrOpt = tableOptions.get(SCAN_STARTUP_SPECIFIC_OFFSETS);
         final Map<Integer, Long> offsetMap =
                 parseSpecificOffsets(specificOffsetsStrOpt, SCAN_STARTUP_SPECIFIC_OFFSETS.key());
         offsetMap.forEach(
                 (partition, offset) -> {
-                    final KafkaTopicPartition topicPartition =
-                            new KafkaTopicPartition(topic, partition);
+                    final TopicPartition topicPartition = new TopicPartition(topic, partition);
                     specificOffsets.put(topicPartition, offset);
                 });
     }
 
     public static void buildBoundedOffsets(
-            ReadableConfig tableOptions,
-            String topic,
-            Map<KafkaTopicPartition, Long> specificOffsets) {
+            ReadableConfig tableOptions, String topic, Map<TopicPartition, Long> specificOffsets) {
         String specificOffsetsEndOpt = tableOptions.get(SCAN_BOUNDED_SPECIFIC_OFFSETS);
         final Map<Integer, Long> offsetMap =
                 parseSpecificOffsets(specificOffsetsEndOpt, SCAN_BOUNDED_SPECIFIC_OFFSETS.key());
 
         offsetMap.forEach(
                 (partition, offset) -> {
-                    final KafkaTopicPartition topicPartition =
-                            new KafkaTopicPartition(topic, partition);
+                    final TopicPartition topicPartition = new TopicPartition(topic, partition);
                     specificOffsets.put(topicPartition, offset);
                 });
     }
@@ -668,14 +663,14 @@ class KafkaConnectorOptionsUtil {
     /** Kafka startup options. * */
     public static class StartupOptions {
         public StartupMode startupMode;
-        public Map<KafkaTopicPartition, Long> specificOffsets;
+        public Map<TopicPartition, Long> specificOffsets;
         public long startupTimestampMillis;
     }
 
     /** Kafka bounded options. * */
     public static class BoundedOptions {
         public BoundedMode boundedMode;
-        public Map<KafkaTopicPartition, Long> specificOffsets;
+        public Map<TopicPartition, Long> specificOffsets;
         public long boundedTimestampMillis;
     }
 

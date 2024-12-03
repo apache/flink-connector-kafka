@@ -21,6 +21,7 @@ package org.apache.flink.streaming.connectors.kafka.table;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
+import org.apache.flink.connector.kafka.sink.KafkaPartitioner;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.runtime.jobgraph.SavepointConfigOptions;
@@ -28,7 +29,6 @@ import org.apache.flink.runtime.messages.FlinkJobTerminatedWithoutCancellationEx
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
-import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.api.config.TableConfigOptions;
@@ -1467,7 +1467,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
     // --------------------------------------------------------------------------------------------
 
     /** Extract the partition id from the row and set it on the record. */
-    public static class TestPartitioner extends FlinkKafkaPartitioner<RowData> {
+    public static class TestPartitioner implements KafkaPartitioner<RowData> {
 
         private static final long serialVersionUID = 1L;
         private static final int PARTITION_ID_FIELD_IN_SCHEMA = 0;
