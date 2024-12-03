@@ -30,7 +30,6 @@ import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifierProvider;
 import org.apache.flink.connector.kafka.lineage.TypeDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.TypeDatasetFacetProvider;
 import org.apache.flink.connector.kafka.source.KafkaSource;
-import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
 
 import com.google.common.reflect.TypeToken;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -102,20 +101,6 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
     @Nullable private KafkaPartitioner<? super IN> partitioner;
     @Nullable private SerializationSchema<? super IN> keySerializationSchema;
     @Nullable private HeaderProvider<? super IN> headerProvider;
-
-    /**
-     * Sets a custom partitioner determining the target partition of the target topic.
-     *
-     * @param partitioner
-     * @return {@code this}
-     * @deprecated use {@link #setPartitioner(KafkaPartitioner)}
-     */
-    public <T extends IN> KafkaRecordSerializationSchemaBuilder<T> setPartitioner(
-            FlinkKafkaPartitioner<? super T> partitioner) {
-        KafkaRecordSerializationSchemaBuilder<T> self = self();
-        self.partitioner = checkNotNull(partitioner);
-        return self;
-    }
 
     /**
      * Sets a custom partitioner determining the target partition of the target topic.
