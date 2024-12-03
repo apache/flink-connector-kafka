@@ -217,6 +217,29 @@ public class KafkaSourceBuilderTest {
                 .hasMessageContaining(expectedError);
     }
 
+    @Test
+    public void testDefaultPartitionDiscovery() {
+        final KafkaSource<String> kafkaSource = getBasicBuilder().build();
+        // Commit on checkpoint and auto commit should be disabled because group.id is not specified
+        assertThat(
+                        kafkaSource
+                                .getConfiguration()
+                                .get(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS))
+                .isEqualTo(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.defaultValue());
+    }
+
+    @Test
+    public void testPeriodPartitionDiscovery() {
+        final KafkaSource<String> kafkaSource =
+                getBasicBuilder().setBounded(OffsetsInitializer.latest()).build();
+        // Commit on checkpoint and auto commit should be disabled because group.id is not specified
+        assertThat(
+                        kafkaSource
+                                .getConfiguration()
+                                .get(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS))
+                .isEqualTo(-1L);
+    }
+
     private KafkaSourceBuilder<String> getBasicBuilder() {
         return new KafkaSourceBuilder<String>()
                 .setBootstrapServers("testServer")
