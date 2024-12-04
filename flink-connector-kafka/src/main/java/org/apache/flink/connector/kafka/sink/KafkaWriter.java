@@ -24,10 +24,10 @@ import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.connector.sink2.Sink;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.MetricUtil;
-import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
+import org.apache.flink.runtime.checkpoint.CheckpointIDCounter;
 import org.apache.flink.streaming.connectors.kafka.internals.metrics.KafkaMetricMutableWrapper;
 import org.apache.flink.util.FlinkRuntimeException;
 
@@ -36,6 +36,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.Metric;
 import org.apache.kafka.common.MetricName;
+import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.errors.UnknownProducerIdException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,11 +44,15 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.function.Consumer;
 
@@ -110,7 +115,7 @@ class KafkaWriter<IN>
     KafkaWriter(
             DeliveryGuarantee deliveryGuarantee,
             Properties kafkaProducerConfig,
-            Sink.InitContext sinkInitContext,
+            WriterInitContext sinkInitContext,
             KafkaRecordSerializationSchema<IN> recordSerializer,
             SerializationSchema.InitializationContext schemaContext) {
         this.deliveryGuarantee = checkNotNull(deliveryGuarantee, "deliveryGuarantee");
@@ -135,8 +140,8 @@ class KafkaWriter<IN>
         this.numRecordsOutErrorsCounter = metricGroup.getNumRecordsOutErrorsCounter();
         this.kafkaSinkContext =
                 new DefaultKafkaSinkContext(
-                        sinkInitContext.getSubtaskId(),
-                        sinkInitContext.getNumberOfParallelSubtasks(),
+                        sinkInitContext.getTaskInfo().getIndexOfThisSubtask(),
+                        sinkInitContext.getTaskInfo().getNumberOfParallelSubtasks(),
                         kafkaProducerConfig);
         try {
             recordSerializer.open(schemaContext, kafkaSinkContext);

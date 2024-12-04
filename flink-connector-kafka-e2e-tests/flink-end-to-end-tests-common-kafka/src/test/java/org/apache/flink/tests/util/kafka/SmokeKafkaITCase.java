@@ -24,7 +24,6 @@ import org.apache.flink.connector.kafka.testutils.KafkaUtil;
 import org.apache.flink.connector.testframe.container.FlinkContainers;
 import org.apache.flink.connector.testframe.container.FlinkContainersSettings;
 import org.apache.flink.connector.testframe.container.TestcontainersSettings;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.test.resources.ResourceTestUtils;
 import org.apache.flink.test.util.JobSubmission;
 import org.apache.flink.util.TestLoggerExtension;
@@ -60,6 +59,7 @@ import java.util.Properties;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.configuration.CheckpointingOptions.ENABLE_CHECKPOINTS_AFTER_TASKS_FINISH;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -99,8 +99,8 @@ class SmokeKafkaITCase {
     private static Configuration getConfiguration() {
         // modify configuration to have enough slots
         final Configuration flinkConfig = new Configuration();
-        flinkConfig.setInteger(TaskManagerOptions.NUM_TASK_SLOTS, 3);
-        flinkConfig.set(ExecutionCheckpointingOptions.ENABLE_CHECKPOINTS_AFTER_TASKS_FINISH, true);
+        flinkConfig.set(TaskManagerOptions.NUM_TASK_SLOTS, 3);
+        flinkConfig.set(ENABLE_CHECKPOINTS_AFTER_TASKS_FINISH, true);
         // Workaround for FLINK-36454 ; default config is entirely overwritten
         flinkConfig.setString(
                 "env.java.opts.all",
