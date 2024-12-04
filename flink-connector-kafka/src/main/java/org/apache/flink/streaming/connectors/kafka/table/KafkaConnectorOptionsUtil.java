@@ -643,7 +643,7 @@ class KafkaConnectorOptionsUtil {
                         .stringType()
                         .noDefaultValue();
         if (!configuration.getOptional(subjectOption).isPresent()) {
-            configuration.setString(subjectOption, subject);
+            configuration.set(subjectOption, subject);
         }
     }
 

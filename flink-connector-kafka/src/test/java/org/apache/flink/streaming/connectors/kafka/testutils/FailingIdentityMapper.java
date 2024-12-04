@@ -18,9 +18,9 @@
 
 package org.apache.flink.streaming.connectors.kafka.testutils;
 
+import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.common.state.CheckpointListener;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.checkpoint.ListCheckpointed;
 
 import org.slf4j.Logger;
@@ -58,8 +58,8 @@ public class FailingIdentityMapper<T> extends RichMapFunction<T, T>
     }
 
     @Override
-    public void open(Configuration parameters) {
-        failer = getRuntimeContext().getIndexOfThisSubtask() == 0;
+    public void open(OpenContext openContext) {
+        failer = getRuntimeContext().getTaskInfo().getIndexOfThisSubtask() == 0;
         printer = new Thread(this, "FailingIdentityMapper Status Printer");
         printer.start();
     }
@@ -121,7 +121,7 @@ public class FailingIdentityMapper<T> extends RichMapFunction<T, T>
             }
             LOG.info(
                     "============================> Failing mapper  {}: count={}, totalCount={}",
-                    getRuntimeContext().getIndexOfThisSubtask(),
+                    getRuntimeContext().getTaskInfo().getIndexOfThisSubtask(),
                     numElementsThisTime,
                     numElementsTotal);
         }

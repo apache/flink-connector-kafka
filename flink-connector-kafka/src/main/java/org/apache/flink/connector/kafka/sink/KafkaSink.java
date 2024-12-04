@@ -21,6 +21,8 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.sink2.Committer;
+import org.apache.flink.api.connector.sink2.CommitterInitContext;
+import org.apache.flink.api.connector.sink2.WriterInitContext;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacetProvider;
@@ -97,7 +99,8 @@ public class KafkaSink<IN>
 
     @Internal
     @Override
-    public Committer<KafkaCommittable> createCommitter() throws IOException {
+    public Committer<KafkaCommittable> createCommitter(CommitterInitContext committerInitContext)
+            throws IOException {
         return new KafkaCommitter(kafkaProducerConfig);
     }
 
@@ -109,8 +112,8 @@ public class KafkaSink<IN>
 
     @Internal
     @Override
-    public KafkaWriter<IN> createWriter(InitContext context) throws IOException {
-        return new KafkaWriter<IN>(
+    public KafkaWriter<IN> createWriter(WriterInitContext context) throws IOException {
+        return new KafkaWriter<>(
                 deliveryGuarantee,
                 kafkaProducerConfig,
                 transactionalIdPrefix,
@@ -123,7 +126,8 @@ public class KafkaSink<IN>
     @Internal
     @Override
     public KafkaWriter<IN> restoreWriter(
-            InitContext context, Collection<KafkaWriterState> recoveredState) throws IOException {
+            WriterInitContext context, Collection<KafkaWriterState> recoveredState)
+            throws IOException {
         return new KafkaWriter<>(
                 deliveryGuarantee,
                 kafkaProducerConfig,

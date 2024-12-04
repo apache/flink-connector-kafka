@@ -358,7 +358,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
             Context context, ExecutionConfig executionConfig) {
         final TypeInformation<RowData> typeInformation =
                 context.createTypeInformation(consumedDataType);
-        return typeInformation.createSerializer(executionConfig);
+        return typeInformation.createSerializer(executionConfig.getSerializerConfig());
     }
 
     private int[] getMetadataPositions(List<LogicalType> physicalChildren) {
