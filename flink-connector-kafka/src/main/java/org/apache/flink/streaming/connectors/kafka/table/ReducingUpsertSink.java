@@ -17,9 +17,11 @@
 
 package org.apache.flink.streaming.connectors.kafka.table;
 
-import org.apache.flink.api.connector.sink.Sink;
-import org.apache.flink.api.connector.sink.SinkWriter;
 import org.apache.flink.api.connector.sink2.Committer;
+import org.apache.flink.api.connector.sink2.CommitterInitContext;
+import org.apache.flink.api.connector.sink2.Sink;
+import org.apache.flink.api.connector.sink2.SinkWriter;
+import org.apache.flink.api.connector.sink2.WriterInitContext;
 import org.apache.flink.connector.kafka.sink.TwoPhaseCommittingStatefulSink;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.table.data.RowData;
@@ -60,9 +62,8 @@ class ReducingUpsertSink<WriterState, Comm>
     }
 
     @Override
-    public TwoPhaseCommittingStatefulSink.PrecommittingStatefulSinkWriter<
-                    RowData, WriterState, Comm>
-            createWriter(InitContext context) throws IOException {
+    public PrecommittingStatefulSinkWriter<RowData, WriterState, Comm> createWriter(
+            WriterInitContext context) throws IOException {
         return new ReducingUpsertWriter<>(
                 wrappedSink.createWriter(context),
                 physicalDataType,
@@ -73,8 +74,9 @@ class ReducingUpsertSink<WriterState, Comm>
     }
 
     @Override
-    public Committer<Comm> createCommitter() throws IOException {
-        return wrappedSink.createCommitter();
+    public Committer<Comm> createCommitter(CommitterInitContext committerInitContext)
+            throws IOException {
+        return wrappedSink.createCommitter(committerInitContext);
     }
 
     @Override
@@ -83,10 +85,8 @@ class ReducingUpsertSink<WriterState, Comm>
     }
 
     @Override
-    public TwoPhaseCommittingStatefulSink.PrecommittingStatefulSinkWriter<
-                    RowData, WriterState, Comm>
-            restoreWriter(InitContext context, Collection<WriterState> recoveredState)
-                    throws IOException {
+    public PrecommittingStatefulSinkWriter<RowData, WriterState, Comm> restoreWriter(
+            WriterInitContext context, Collection<WriterState> recoveredState) throws IOException {
         final TwoPhaseCommittingStatefulSink.PrecommittingStatefulSinkWriter<
                         RowData, WriterState, Comm>
                 wrappedWriter = wrappedSink.restoreWriter(context, recoveredState);
