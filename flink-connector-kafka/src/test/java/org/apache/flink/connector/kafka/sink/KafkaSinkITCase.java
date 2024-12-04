@@ -18,7 +18,6 @@
 package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.api.common.functions.MapFunction;
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.common.state.CheckpointListener;
 import org.apache.flink.api.common.state.ListState;
@@ -29,32 +28,24 @@ import org.apache.flink.api.common.typeutils.base.TypeSerializerSingleton;
 import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
+import org.apache.flink.configuration.ExternalizedCheckpointRetention;
+import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.configuration.StateBackendOptions;
+import org.apache.flink.configuration.StateRecoveryOptions;
 import org.apache.flink.connector.base.DeliveryGuarantee;
-import org.apache.flink.connector.kafka.sink.testutils.KafkaSinkExternalContextFactory;
-import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
 import org.apache.flink.connector.kafka.testutils.KafkaUtil;
-import org.apache.flink.connector.testframe.environment.MiniClusterTestEnvironment;
-import org.apache.flink.connector.testframe.external.DefaultContainerizedExternalSystem;
-import org.apache.flink.connector.testframe.junit.annotations.TestContext;
-import org.apache.flink.connector.testframe.junit.annotations.TestEnv;
-import org.apache.flink.connector.testframe.junit.annotations.TestExternalSystem;
-import org.apache.flink.connector.testframe.junit.annotations.TestSemantics;
-import org.apache.flink.connector.testframe.testsuites.SinkTestSuiteBase;
+import org.apache.flink.core.execution.RecoveryClaimMode;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
-import org.apache.flink.runtime.jobgraph.SavepointConfigOptions;
 import org.apache.flink.runtime.state.FunctionInitializationContext;
 import org.apache.flink.runtime.state.FunctionSnapshotContext;
-import org.apache.flink.streaming.api.CheckpointingMode;
+import org.apache.flink.state.forst.ForStStateBackendFactory;
 import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
-import org.apache.flink.streaming.api.environment.CheckpointConfig;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.LocalStreamEnvironment;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.source.SourceFunction;
+import org.apache.flink.streaming.api.functions.source.legacy.SourceFunction;
 import org.apache.flink.test.util.TestUtils;
 import org.apache.flink.testutils.junit.SharedObjects;
 import org.apache.flink.testutils.junit.SharedReference;
@@ -73,13 +64,11 @@ import org.junit.BeforeClass;
 import org.junit.ClassRule;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.jupiter.api.Nested;
 import org.junit.rules.TemporaryFolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.Network;
-import org.testcontainers.utility.DockerImageName;
 
 import javax.annotation.Nullable;
 
@@ -161,35 +150,38 @@ public class KafkaSinkITCase extends TestLogger {
         deleteTestTopic(topic);
     }
 
-    /** Integration test based on connector testing framework. */
-    @Nested
-    class IntegrationTests extends SinkTestSuiteBase<String> {
-        // Defines test environment on Flink MiniCluster
-        @SuppressWarnings("unused")
-        @TestEnv
-        MiniClusterTestEnvironment flink = new MiniClusterTestEnvironment();
-
-        // Defines external system
-        @TestExternalSystem
-        DefaultContainerizedExternalSystem<KafkaContainer> kafka =
-                DefaultContainerizedExternalSystem.builder()
-                        .fromContainer(
-                                new KafkaContainer(
-                                        DockerImageName.parse(DockerImageVersions.KAFKA)))
-                        .build();
-
-        @SuppressWarnings("unused")
-        @TestSemantics
-        CheckpointingMode[] semantics =
-                new CheckpointingMode[] {
-                    CheckpointingMode.EXACTLY_ONCE, CheckpointingMode.AT_LEAST_ONCE
-                };
-
-        @SuppressWarnings("unused")
-        @TestContext
-        KafkaSinkExternalContextFactory sinkContext =
-                new KafkaSinkExternalContextFactory(kafka.getContainer(), Collections.emptyList());
-    }
+    //        Release these tests after https://issues.apache.org/jira/browse/FLINK-36845 release.
+    //
+    //        /** Integration test based on connector testing framework. */
+    //        @Nested
+    //        class IntegrationTests extends SinkTestSuiteBase<String> {
+    //            // Defines test environment on Flink MiniCluster
+    //            @SuppressWarnings("unused")
+    //            @TestEnv
+    //            MiniClusterTestEnvironment flink = new MiniClusterTestEnvironment();
+    //
+    //            // Defines external system
+    //            @TestExternalSystem
+    //            DefaultContainerizedExternalSystem<KafkaContainer> kafka =
+    //                    DefaultContainerizedExternalSystem.builder()
+    //                            .fromContainer(
+    //                                    new KafkaContainer(
+    //                                            DockerImageName.parse(DockerImageVersions.KAFKA)))
+    //                            .build();
+    //
+    //            @SuppressWarnings("unused")
+    //            @TestSemantics
+    //            CheckpointingMode[] semantics =
+    //                    new CheckpointingMode[] {
+    //                        CheckpointingMode.EXACTLY_ONCE, CheckpointingMode.AT_LEAST_ONCE
+    //                    };
+    //
+    //            @SuppressWarnings("unused")
+    //            @TestContext
+    //            KafkaSinkExternalContextFactory sinkContext =
+    //                    new KafkaSinkExternalContextFactory(kafka.getContainer(),
+    //     Collections.emptyList());
+    //        }
 
     @Test
     public void testWriteRecordsToKafkaWithAtLeastOnceGuarantee() throws Exception {
@@ -245,13 +237,16 @@ public class KafkaSinkITCase extends TestLogger {
         // Run a first job failing during the async phase of a checkpoint to leave some
         // lingering transactions
         final Configuration config = new Configuration();
-        config.setString(StateBackendOptions.STATE_BACKEND, "filesystem");
-        final File checkpointDir = temp.newFolder();
-        config.setString(
-                CheckpointingOptions.CHECKPOINTS_DIRECTORY, checkpointDir.toURI().toString());
         config.set(
-                ExecutionCheckpointingOptions.EXTERNALIZED_CHECKPOINT,
-                CheckpointConfig.ExternalizedCheckpointCleanup.RETAIN_ON_CANCELLATION);
+                StateBackendOptions.STATE_BACKEND,
+                ForStStateBackendFactory.class.getCanonicalName());
+        final File checkpointDir = temp.newFolder();
+
+        config.set(CheckpointingOptions.CHECKPOINTS_DIRECTORY, checkpointDir.toURI().toString());
+        config.set(
+                CheckpointingOptions.EXTERNALIZED_CHECKPOINT_RETENTION,
+                ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION);
+        config.set(StateRecoveryOptions.RESTORE_MODE, RecoveryClaimMode.CLAIM);
         config.set(CheckpointingOptions.MAX_RETAINED_CHECKPOINTS, 2);
         try {
             executeWithMapper(new FailAsyncCheckpointMapper(1), config, "firstPrefix");
@@ -261,7 +256,7 @@ public class KafkaSinkITCase extends TestLogger {
         }
         final File completedCheckpoint = TestUtils.getMostRecentCompletedCheckpoint(checkpointDir);
 
-        config.set(SavepointConfigOptions.SAVEPOINT_PATH, completedCheckpoint.toURI().toString());
+        config.set(StateRecoveryOptions.SAVEPOINT_PATH, completedCheckpoint.toURI().toString());
 
         // Run a second job which aborts all lingering transactions and new consumer should
         // immediately see the newly written records
@@ -311,7 +306,9 @@ public class KafkaSinkITCase extends TestLogger {
             throws Exception {
         final StreamExecutionEnvironment env = new LocalStreamEnvironment(config);
         env.enableCheckpointing(100L);
-        env.setRestartStrategy(RestartStrategies.noRestart());
+        Configuration configuration = new Configuration();
+        configuration.set(RestartStrategyOptions.RESTART_STRATEGY, "disable");
+        env.configure(configuration);
         final DataStreamSource<Long> source = env.fromSequence(1, 10);
         final DataStream<Long> stream = source.map(mapper);
         final KafkaSinkBuilder<Long> builder =
@@ -621,7 +618,7 @@ public class KafkaSinkITCase extends TestLogger {
         }
 
         @Override
-        public void run(SourceContext<Long> ctx) throws Exception {
+        public void run(SourceFunction.SourceContext<Long> ctx) throws Exception {
             lock = ctx.getCheckpointLock();
             while (running) {
                 synchronized (lock) {

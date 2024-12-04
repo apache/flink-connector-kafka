@@ -17,7 +17,7 @@
 
 package org.apache.flink.streaming.connectors.kafka;
 
-import org.apache.flink.annotation.PublicEvolving;
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 import org.apache.flink.util.Collector;
@@ -31,10 +31,8 @@ import java.io.Serializable;
  * (Java/Scala objects) that are processed by Flink.
  *
  * @param <T> The type created by the keyed deserialization schema.
- * @deprecated Will be turned into internal API when {@link FlinkKafkaConsumer} is removed.
  */
-@PublicEvolving
-@Deprecated
+@Internal
 public interface KafkaDeserializationSchema<T> extends Serializable, ResultTypeQueryable<T> {
 
     /**
