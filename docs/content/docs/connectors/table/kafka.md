@@ -370,6 +370,14 @@ Connector Options
       <td>Interval for consumer to discover dynamically created Kafka topics and partitions periodically. To disable this feature, you need to explicitly set the 'scan.topic-partition-discovery.interval' value to 0.</td>
     </tr>
     <tr>
+      <td><h5>scan.parallelism</h5></td>
+      <td>optional</td>
+      <td>no</td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>Integer</td>
+      <td>Defines the parallelism of the Kafka source operator. If not set, the global default parallelism is used.</td>
+    </tr>
+    <tr>
       <td><h5>sink.partitioner</h5></td>
       <td>optional</td>
       <td>yes</td>

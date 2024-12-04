@@ -193,6 +193,14 @@ Connector Options
       </td>
     </tr>
     <tr>
+      <td><h5>scan.parallelism</h5></td>
+      <td>optional</td>
+      <td>no</td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>Integer</td>
+      <td>Defines the parallelism of the upsert-kafka source operator. If not set, the global default parallelism is used.</td>
+    </tr>
+    <tr>
       <td><h5>sink.parallelism</h5></td>
       <td>optional</td>
       <td style="word-wrap: break-word;">(none)</td>

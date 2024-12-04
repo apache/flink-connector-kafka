@@ -101,6 +101,7 @@ import static org.apache.flink.core.testutils.FlinkAssertions.anyCauseMatches;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.AVRO_CONFLUENT;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.DEBEZIUM_AVRO_CONFLUENT;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.PROPERTIES_PREFIX;
+import static org.apache.flink.table.factories.FactoryUtil.SOURCE_PARALLELISM;
 import static org.apache.flink.table.factories.utils.FactoryMocks.createTableSink;
 import static org.apache.flink.table.factories.utils.FactoryMocks.createTableSource;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -212,12 +213,55 @@ public class KafkaDynamicTableFactoryTest {
                         KAFKA_SOURCE_PROPERTIES,
                         StartupMode.SPECIFIC_OFFSETS,
                         specificOffsets,
-                        0);
+                        0,
+                        null);
         assertThat(actualKafkaSource).isEqualTo(expectedKafkaSource);
 
         ScanTableSource.ScanRuntimeProvider provider =
                 actualKafkaSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
         assertKafkaSource(provider);
+    }
+
+    @Test
+    public void testTableSourceWithParallelism() {
+        final Map<String, String> modifiedOptions =
+                getModifiedOptions(
+                        getBasicSourceOptions(),
+                        options -> options.put(SOURCE_PARALLELISM.key(), "100"));
+        final DynamicTableSource actualSource = createTableSource(SCHEMA, modifiedOptions);
+        final KafkaDynamicSource actualKafkaSource = (KafkaDynamicSource) actualSource;
+
+        final Map<KafkaTopicPartition, Long> specificOffsets = new HashMap<>();
+        specificOffsets.put(new KafkaTopicPartition(TOPIC, PARTITION_0), OFFSET_0);
+        specificOffsets.put(new KafkaTopicPartition(TOPIC, PARTITION_1), OFFSET_1);
+
+        final DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat =
+                new DecodingFormatMock(",", true);
+
+        // Test scan source equals
+        final KafkaDynamicSource expectedKafkaSource =
+                createExpectedScanSource(
+                        SCHEMA_DATA_TYPE,
+                        null,
+                        valueDecodingFormat,
+                        new int[0],
+                        new int[] {0, 1, 2},
+                        null,
+                        Collections.singletonList(TOPIC),
+                        null,
+                        KAFKA_SOURCE_PROPERTIES,
+                        StartupMode.SPECIFIC_OFFSETS,
+                        specificOffsets,
+                        0,
+                        100);
+        assertThat(actualKafkaSource).isEqualTo(expectedKafkaSource);
+
+        ScanTableSource.ScanRuntimeProvider provider =
+                actualKafkaSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
+        assertThat(provider).isInstanceOf(DataStreamScanProvider.class);
+        final DataStreamScanProvider sourceProvider = (DataStreamScanProvider) provider;
+        assertThat(sourceProvider.getParallelism()).isPresent();
+        assertThat(sourceProvider.getParallelism()).hasValue(100);
     }
 
     @Test
@@ -254,7 +298,8 @@ public class KafkaDynamicTableFactoryTest {
                         KAFKA_SOURCE_PROPERTIES,
                         StartupMode.EARLIEST,
                         specificOffsets,
-                        0);
+                        0,
+                        null);
         final KafkaDynamicSource actualKafkaSource = (KafkaDynamicSource) actualSource;
         assertThat(actualKafkaSource).isEqualTo(expectedKafkaSource);
 
@@ -295,7 +340,8 @@ public class KafkaDynamicTableFactoryTest {
                         KAFKA_FINAL_SOURCE_PROPERTIES,
                         StartupMode.GROUP_OFFSETS,
                         Collections.emptyMap(),
-                        0);
+                        0,
+                        null);
 
         assertThat(actualSource).isEqualTo(expectedKafkaSource);
     }
@@ -346,7 +392,8 @@ public class KafkaDynamicTableFactoryTest {
                         KAFKA_FINAL_SOURCE_PROPERTIES,
                         StartupMode.GROUP_OFFSETS,
                         Collections.emptyMap(),
-                        0);
+                        0,
+                        null);
         expectedKafkaSource.producedDataType = SCHEMA_WITH_METADATA.toSourceRowDataType();
         expectedKafkaSource.metadataKeys = Collections.singletonList("timestamp");
 
@@ -1188,7 +1235,8 @@ public class KafkaDynamicTableFactoryTest {
                         props,
                         StartupMode.SPECIFIC_OFFSETS,
                         specificOffsets,
-                        0);
+                        0,
+                        null);
         assertThat(actualSource).isEqualTo(expectedKafkaSource);
         ScanTableSource.ScanRuntimeProvider provider =
                 actualSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
@@ -1226,7 +1274,8 @@ public class KafkaDynamicTableFactoryTest {
                         props,
                         StartupMode.SPECIFIC_OFFSETS,
                         specificOffsets,
-                        0);
+                        0,
+                        null);
         assertThat(actualSource).isEqualTo(expectedKafkaSource);
         ScanTableSource.ScanRuntimeProvider provider =
                 actualSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
@@ -1249,7 +1298,8 @@ public class KafkaDynamicTableFactoryTest {
             Properties properties,
             StartupMode startupMode,
             Map<KafkaTopicPartition, Long> specificStartupOffsets,
-            long startupTimestampMillis) {
+            long startupTimestampMillis,
+            @Nullable Integer parallelism) {
         return new KafkaDynamicSource(
                 physicalDataType,
                 keyDecodingFormat,
@@ -1267,7 +1317,8 @@ public class KafkaDynamicTableFactoryTest {
                 Collections.emptyMap(),
                 0,
                 false,
-                FactoryMocks.IDENTIFIER.asSummaryString());
+                FactoryMocks.IDENTIFIER.asSummaryString(),
+                parallelism);
     }
 
     private static KafkaDynamicSink createExpectedSink(
