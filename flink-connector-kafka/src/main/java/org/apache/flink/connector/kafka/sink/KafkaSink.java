@@ -73,15 +73,18 @@ public class KafkaSink<IN>
     private final KafkaRecordSerializationSchema<IN> recordSerializer;
     private final Properties kafkaProducerConfig;
     private final String transactionalIdPrefix;
+    private final String clientIdPrefix;
 
     KafkaSink(
             DeliveryGuarantee deliveryGuarantee,
             Properties kafkaProducerConfig,
             String transactionalIdPrefix,
+            String clientIdPrefix,
             KafkaRecordSerializationSchema<IN> recordSerializer) {
         this.deliveryGuarantee = deliveryGuarantee;
         this.kafkaProducerConfig = kafkaProducerConfig;
         this.transactionalIdPrefix = transactionalIdPrefix;
+        this.clientIdPrefix = clientIdPrefix;
         this.recordSerializer = recordSerializer;
     }
 
@@ -114,6 +117,7 @@ public class KafkaSink<IN>
                 deliveryGuarantee,
                 kafkaProducerConfig,
                 transactionalIdPrefix,
+                clientIdPrefix,
                 context,
                 recordSerializer,
                 context.asSerializationSchemaInitializationContext(),
@@ -128,6 +132,7 @@ public class KafkaSink<IN>
                 deliveryGuarantee,
                 kafkaProducerConfig,
                 transactionalIdPrefix,
+                clientIdPrefix,
                 context,
                 recordSerializer,
                 context.asSerializationSchemaInitializationContext(),
