@@ -368,7 +368,9 @@ public class ReducingUpsertWriterTest {
                     }
                 },
                 enableObjectReuse
-                        ? typeInformation.createSerializer(new ExecutionConfig())::copy
+                        ? typeInformation.createSerializer(
+                                        new ExecutionConfig().getSerializerConfig())
+                                ::copy
                         : r -> r);
     }
 
