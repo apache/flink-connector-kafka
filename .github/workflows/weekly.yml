@@ -30,7 +30,7 @@ jobs:
     strategy:
       matrix:
         flink_branches: [{
-          flink: 1.20-SNAPSHOT,
+          flink: 2.0-SNAPSHOT,
           branch: main
         }, {
           flink: 1.19.1,
