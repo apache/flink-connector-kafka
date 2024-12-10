@@ -28,7 +28,7 @@ jobs:
   compile_and_test:
     strategy:
       matrix:
-        flink: [ 1.20.0 ]
+        flink: [ 2.0-preview1 ]
         jdk: [ '8, 11, 17, 21' ]
     uses: apache/flink-connector-shared-utils/.github/workflows/ci.yml@ci_utils
     with:
@@ -37,7 +37,7 @@ jobs:
   python_test:
     strategy:
       matrix:
-        flink: [ 1.20.0 ]
+        flink: [ 2.0-preview1 ]
     uses: apache/flink-connector-shared-utils/.github/workflows/python_ci.yml@ci_utils
     with:
       flink_version: ${{ matrix.flink }}
