@@ -124,19 +124,29 @@ public class KafkaPartitionSplitReader
         List<TopicPartition> finishedPartitions = new ArrayList<>();
         for (TopicPartition tp : consumerRecords.partitions()) {
             long stoppingOffset = getStoppingOffset(tp);
-            long consumerPosition = consumer.position(tp);
+            final List<ConsumerRecord<byte[], byte[]>> recordsFromPartition =
+                    consumerRecords.records(tp);
             // Stop fetching when the consumer's position reaches the stoppingOffset.
             // Control messages may follow the last record; therefore, using the last record's
             // offset as a stopping condition could result in indefinite blocking.
-            if (consumerPosition >= stoppingOffset) {
-                LOG.debug(
-                        "Position of {}: {}, has reached stopping offset: {}",
-                        tp,
-                        consumerPosition,
-                        stoppingOffset);
-                recordsBySplits.setPartitionStoppingOffset(tp, stoppingOffset);
-                finishSplitAtRecord(
-                        tp, stoppingOffset, consumerPosition, finishedPartitions, recordsBySplits);
+            if (!recordsFromPartition.isEmpty()) {
+                final ConsumerRecord<byte[], byte[]> lastRecord =
+                        recordsFromPartition.get(recordsFromPartition.size() - 1);
+
+                if (lastRecord.offset() >= stoppingOffset - 1) {
+                    LOG.debug(
+                            "Position of {}: {}, has reached stopping offset: {}",
+                            tp,
+                            lastRecord.offset(),
+                            stoppingOffset);
+                    recordsBySplits.setPartitionStoppingOffset(tp, stoppingOffset);
+                    finishSplitAtRecord(
+                            tp,
+                            stoppingOffset,
+                            lastRecord.offset(),
+                            finishedPartitions,
+                            recordsBySplits);
+                }
             }
         }
 
