@@ -122,7 +122,7 @@ public class KafkaPartitionSplitReader
         KafkaPartitionSplitRecords recordsBySplits =
                 new KafkaPartitionSplitRecords(consumerRecords, kafkaSourceReaderMetrics);
         List<TopicPartition> finishedPartitions = new ArrayList<>();
-        for (TopicPartition tp : consumer.assignment()) {
+        for (TopicPartition tp : consumerRecords.partitions()) {
             long stoppingOffset = getStoppingOffset(tp);
             long consumerPosition = consumer.position(tp);
             // Stop fetching when the consumer's position reaches the stoppingOffset.
