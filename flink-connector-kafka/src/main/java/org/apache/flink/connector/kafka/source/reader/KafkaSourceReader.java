@@ -86,10 +86,15 @@ public class KafkaSourceReader<T>
     protected void onSplitFinished(Map<String, KafkaPartitionSplitState> finishedSplitIds) {
         finishedSplitIds.forEach(
                 (ignored, splitState) -> {
-                    if (splitState.getCurrentOffset() >= 0) {
+                    if (splitState.getCurrentOffset() > 0) {
                         offsetsOfFinishedSplits.put(
                                 splitState.getTopicPartition(),
                                 new OffsetAndMetadata(splitState.getCurrentOffset()));
+                    } else if (splitState.getStoppingOffset().isPresent()
+                            && splitState.getStoppingOffset().get() >= 0) {
+                        offsetsOfFinishedSplits.put(
+                                splitState.getTopicPartition(),
+                                new OffsetAndMetadata(splitState.getStoppingOffset().get()));
                     }
                 });
     }
