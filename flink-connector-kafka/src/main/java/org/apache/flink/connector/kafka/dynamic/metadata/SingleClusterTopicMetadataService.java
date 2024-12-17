@@ -32,7 +32,9 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * A {@link KafkaMetadataService} that delegates metadata fetching to a single {@link AdminClient},
@@ -68,12 +70,24 @@ public class SingleClusterTopicMetadataService implements KafkaMetadataService {
         }
     }
 
+    @Override
+    public Set<KafkaStream> getPatternStreams(Pattern streamPattern) {
+        try {
+            Set<String> allTopicNames = adminClient.listTopics().names().get();
+            Stream<String> matchedTopicStream =
+                    allTopicNames.stream().filter(name -> streamPattern.matcher(name).matches());
+            return matchedTopicStream.map(this::createKafkaStream).collect(Collectors.toSet());
+        } catch (InterruptedException | ExecutionException e) {
+            throw new RuntimeException("Fetching stream failed", e);
+        }
+    }
+
     /** {@inheritDoc} */
     @Override
     public Map<String, KafkaStream> describeStreams(Collection<String> streamIds) {
         try {
-            return getAdminClient().describeTopics(new ArrayList<>(streamIds)).all().get().keySet()
-                    .stream()
+            return getAdminClient().describeTopics(new ArrayList<>(streamIds)).allTopicNames().get()
+                    .keySet().stream()
                     .collect(Collectors.toMap(topic -> topic, this::createKafkaStream));
         } catch (InterruptedException | ExecutionException e) {
             throw new RuntimeException("Fetching all streams failed", e);

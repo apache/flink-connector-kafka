@@ -265,10 +265,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                     .computeIfAbsent(split.getKafkaClusterId(), (ignore) -> new HashSet<>())
                     .add(split.getKafkaPartitionSplit().getTopic());
             // check if cluster topic exists in the metadata update
-            if (newClustersAndTopics.containsKey(split.getKafkaClusterId())
-                    && newClustersAndTopics
-                            .get(split.getKafkaClusterId())
-                            .contains(split.getKafkaPartitionSplit().getTopic())) {
+            if (isSplitForActiveClusters(split, newClustersAndTopics)) {
                 filteredNewClusterSplitStateMap
                         .computeIfAbsent(split.getKafkaClusterId(), (ignore) -> new ArrayList<>())
                         .add(split);

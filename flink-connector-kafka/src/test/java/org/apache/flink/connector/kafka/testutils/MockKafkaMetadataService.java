@@ -22,10 +22,12 @@ import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 
 import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /** A mock in-memory implementation of {@link KafkaMetadataService}. */
@@ -67,6 +69,19 @@ public class MockKafkaMetadataService implements KafkaMetadataService {
     public Set<KafkaStream> getAllStreams() {
         checkAndThrowException();
         return kafkaStreams;
+    }
+
+    @Override
+    public Set<KafkaStream> getPatternStreams(Pattern streamPattern) {
+        checkAndThrowException();
+        ImmutableSet.Builder<KafkaStream> builder = ImmutableSet.builder();
+        for (KafkaStream kafkaStream : kafkaStreams) {
+            String streamId = kafkaStream.getStreamId();
+            if (streamPattern.matcher(streamId).find()) {
+                builder.add(kafkaStream);
+            }
+        }
+        return builder.build();
     }
 
     @Override
