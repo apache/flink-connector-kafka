@@ -43,7 +43,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 /** SerializationSchema used by {@link KafkaDynamicSink} to configure a {@link KafkaSink}. */
 @Internal
 class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationSchema<RowData> {
-
+    private static final long serialVersionUID = 1L;
     private final Set<String> topics;
     private final Pattern topicPattern;
     private final KafkaPartitioner<RowData> partitioner;
