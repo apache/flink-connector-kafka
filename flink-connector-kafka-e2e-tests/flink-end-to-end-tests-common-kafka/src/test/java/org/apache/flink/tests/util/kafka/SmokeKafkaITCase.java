@@ -19,6 +19,7 @@
 package org.apache.flink.tests.util.kafka;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.configuration.TaskManagerOptions;
 import org.apache.flink.connector.kafka.testutils.KafkaUtil;
 import org.apache.flink.connector.testframe.container.FlinkContainers;
@@ -101,6 +102,12 @@ class SmokeKafkaITCase {
         final Configuration flinkConfig = new Configuration();
         flinkConfig.set(TaskManagerOptions.NUM_TASK_SLOTS, 3);
         flinkConfig.set(ENABLE_CHECKPOINTS_AFTER_TASKS_FINISH, true);
+        flinkConfig.set(
+                org.apache.flink.configuration.JobManagerOptions.TOTAL_PROCESS_MEMORY,
+                MemorySize.ofMebiBytes(1024));
+        flinkConfig.set(
+                org.apache.flink.configuration.TaskManagerOptions.TOTAL_PROCESS_MEMORY,
+                MemorySize.ofMebiBytes(1024));
         // Workaround for FLINK-36454 ; default config is entirely overwritten
         flinkConfig.setString(
                 "env.java.opts.all",
