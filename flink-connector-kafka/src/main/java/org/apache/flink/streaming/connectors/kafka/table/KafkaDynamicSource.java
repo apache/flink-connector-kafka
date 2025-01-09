@@ -31,7 +31,6 @@ import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDe
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.streaming.connectors.kafka.table.DynamicKafkaDeserializationSchema.MetadataConverter;
@@ -418,7 +417,7 @@ public class KafkaDynamicSource
             DeserializationSchema<RowData> valueDeserialization,
             TypeInformation<RowData> producedTypeInfo) {
 
-        final KafkaDeserializationSchema<RowData> kafkaDeserializer =
+        final KafkaRecordDeserializationSchema<RowData> kafkaDeserializer =
                 createKafkaDeserializationSchema(
                         keyDeserialization, valueDeserialization, producedTypeInfo);
 
@@ -483,9 +482,7 @@ public class KafkaDynamicSource
                 break;
         }
 
-        kafkaSourceBuilder
-                .setProperties(properties)
-                .setDeserializer(KafkaRecordDeserializationSchema.of(kafkaDeserializer));
+        kafkaSourceBuilder.setProperties(properties).setDeserializer(kafkaDeserializer);
 
         return kafkaSourceBuilder.build();
     }
@@ -507,7 +504,7 @@ public class KafkaDynamicSource
                                                         .collect(Collectors.joining(",")))));
     }
 
-    private KafkaDeserializationSchema<RowData> createKafkaDeserializationSchema(
+    private KafkaRecordDeserializationSchema<RowData> createKafkaDeserializationSchema(
             DeserializationSchema<RowData> keyDeserialization,
             DeserializationSchema<RowData> valueDeserialization,
             TypeInformation<RowData> producedTypeInfo) {

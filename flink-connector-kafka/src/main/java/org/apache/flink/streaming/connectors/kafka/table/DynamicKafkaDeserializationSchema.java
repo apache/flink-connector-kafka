@@ -21,8 +21,7 @@ package org.apache.flink.streaming.connectors.kafka.table;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
-import org.apache.flink.streaming.connectors.kafka.KafkaSerializationSchema;
+import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.types.DeserializationException;
@@ -34,13 +33,14 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
-/** A specific {@link KafkaSerializationSchema} for {@link KafkaDynamicSource}. */
+/** A specific {@link KafkaRecordDeserializationSchema} for {@link KafkaDynamicSource}. */
 @Internal
-class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<RowData> {
+class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSchema<RowData> {
 
     private static final long serialVersionUID = 1L;
 
@@ -97,18 +97,8 @@ class DynamicKafkaDeserializationSchema implements KafkaDeserializationSchema<Ro
     }
 
     @Override
-    public boolean isEndOfStream(RowData nextElement) {
-        return false;
-    }
-
-    @Override
-    public RowData deserialize(ConsumerRecord<byte[], byte[]> record) throws Exception {
-        throw new IllegalStateException("A collector is required for deserializing.");
-    }
-
-    @Override
     public void deserialize(ConsumerRecord<byte[], byte[]> record, Collector<RowData> collector)
-            throws Exception {
+            throws IOException {
         // shortcut in case no output projection is required,
         // also not for a cartesian product with the keys
         if (keyDeserialization == null && !hasMetadata) {
