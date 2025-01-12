@@ -29,7 +29,8 @@ from pyflink.common.watermark_strategy import WatermarkStrategy
 from pyflink.datastream.connectors.base import DeliveryGuarantee
 from pyflink.datastream.connectors.kafka import KafkaSource, KafkaTopicPartition, \
     KafkaOffsetsInitializer, KafkaOffsetResetStrategy, KafkaRecordSerializationSchema, KafkaSink, \
-    FlinkKafkaProducer, FlinkKafkaConsumer
+    FlinkKafkaProducer, FlinkKafkaConsumer, KafkaRecordDeserializationSchema, \
+    SimpleStringValueKafkaRecordDeserializationSchema
 from pyflink.datastream.formats.avro import AvroRowDeserializationSchema, AvroRowSerializationSchema
 from pyflink.datastream.formats.csv import CsvRowDeserializationSchema, CsvRowSerializationSchema
 from pyflink.datastream.formats.json import JsonRowDeserializationSchema, JsonRowSerializationSchema
@@ -331,6 +332,22 @@ class KafkaSourceTests(PyFlinkStreamingTestCase):
             AvroRowDeserializationSchema(avro_schema_string=avro_schema_string),
             'org.apache.flink.formats.avro.AvroRowDeserializationSchema'
         )
+
+    def test_set_kafka_record_deserialization_schema(self):
+        def _check(schema: KafkaRecordDeserializationSchema, java_class_name: str):
+            source = KafkaSource.builder() \
+                .set_bootstrap_servers('localhost:9092') \
+                .set_topics('test_topic') \
+                .set_deserializer(schema) \
+                .build()
+            kafka_record_deserialization_schema = get_field_value(source.get_java_function(),
+                                                                  'deserializationSchema')
+            self.assertEqual(kafka_record_deserialization_schema.getClass().getCanonicalName(),
+                             java_class_name)
+
+        _check(SimpleStringValueKafkaRecordDeserializationSchema(),
+               'org.apache.flink.connector.kafka.source.reader.deserializer.'
+               'KafkaValueOnlyDeserializationSchemaWrapper')
 
     def _check_reader_handled_offsets_initializer(self,
                                                   source: KafkaSource,

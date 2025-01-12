@@ -44,7 +44,9 @@ __all__ = [
     'KafkaOffsetResetStrategy',
     'KafkaRecordSerializationSchema',
     'KafkaRecordSerializationSchemaBuilder',
-    'KafkaTopicSelector'
+    'KafkaTopicSelector',
+    'KafkaRecordDeserializationSchema',
+    'SimpleStringValueKafkaRecordDeserializationSchema'
 ]
 
 
@@ -353,6 +355,38 @@ class FlinkKafkaProducer(FlinkKafkaProducerBase):
 
 # ---- KafkaSource ----
 
+class KafkaRecordDeserializationSchema:
+    """
+    Base class for KafkaRecordDeserializationSchema. The kafka record deserialization schema
+    describes how to turn the byte messages delivered by Apache Kafka into data types (Java/
+    Scala objects) that are processed by Flink.
+
+    In addition, the KafkaRecordDeserializationSchema describes the produced type which lets
+    Flink create internal serializers and structures to handle the type.
+    """
+    def __init__(self, j_kafka_record_deserialization_schema=None):
+        self.j_kafka_record_deserialization_schema = j_kafka_record_deserialization_schema
+
+
+class SimpleStringValueKafkaRecordDeserializationSchema(KafkaRecordDeserializationSchema):
+    """
+    Very simple deserialization schema for strings values. By default, the deserializer uses
+    'UTF-8' for byte to string conversion.
+    """
+
+    def __init__(self, charset: str = 'UTF-8'):
+        gate_way = get_gateway()
+        j_char_set = gate_way.jvm.java.nio.charset.Charset.forName(charset)
+        j_simple_string_serialization_schema = gate_way.jvm \
+            .org.apache.flink.api.common.serialization.SimpleStringSchema(j_char_set)
+        j_kafka_record_deserialization_schema = gate_way.jvm \
+            .org.apache.flink.connector.kafka.source.reader.deserializer \
+            .KafkaRecordDeserializationSchema.valueOnly(j_simple_string_serialization_schema)
+        KafkaRecordDeserializationSchema.__init__(
+            self, j_kafka_record_deserialization_schema=j_kafka_record_deserialization_schema)
+
+
+# ---- KafkaSource ----
 
 class KafkaSource(Source):
     """
@@ -609,6 +643,22 @@ class KafkaSourceBuilder(object):
         :return: this KafkaSourceBuilder.
         """
         self._j_builder.setValueOnlyDeserializer(deserialization_schema._j_deserialization_schema)
+        return self
+
+    def set_deserializer(
+        self,
+        kafka_record_deserialization_schema: KafkaRecordDeserializationSchema
+    ) -> 'KafkaSourceBuilder':
+        """
+        Sets the :class:`~pyflink.datastream.connectors.kafka.KafkaRecordDeserializationSchema`
+        for deserializing Kafka ConsumerRecords.
+
+        :param kafka_record_deserialization_schema: the :class:`KafkaRecordDeserializationSchema`
+            to use for deserialization.
+        :return: this KafkaSourceBuilder.
+        """
+        self._j_builder.setDeserializer(
+            kafka_record_deserialization_schema.j_kafka_record_deserialization_schema)
         return self
 
     def set_client_id_prefix(self, prefix: str) -> 'KafkaSourceBuilder':
