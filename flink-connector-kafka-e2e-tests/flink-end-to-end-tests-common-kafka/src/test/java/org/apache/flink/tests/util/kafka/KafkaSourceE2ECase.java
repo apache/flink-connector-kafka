@@ -30,6 +30,7 @@ import org.apache.flink.connector.testframe.testsuites.SourceTestSuiteBase;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.test.resources.ResourceTestUtils;
 
+import org.junit.jupiter.api.Disabled;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.utility.DockerImageName;
 
@@ -39,6 +40,8 @@ import static org.apache.flink.connector.kafka.testutils.KafkaSourceExternalCont
 import static org.apache.flink.connector.kafka.testutils.KafkaSourceExternalContext.SplitMappingMode.TOPIC;
 
 /** Kafka E2E test based on connector testing framework. */
+@Disabled(
+        "FIXME: Skip this test temporarily until bumping a version that includes the fix of https://issues.apache.org/jira/browse/FLINK-36568")
 public class KafkaSourceE2ECase extends SourceTestSuiteBase<String> {
     private static final String KAFKA_HOSTNAME = "kafka";
 
