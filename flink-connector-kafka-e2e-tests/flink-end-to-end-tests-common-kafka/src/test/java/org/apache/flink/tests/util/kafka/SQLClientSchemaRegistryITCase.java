@@ -40,6 +40,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.ClassRule;
 import org.junit.Test;
+import org.junit.jupiter.api.Disabled;
 import org.junit.rules.Timeout;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.Network;
@@ -57,6 +58,8 @@ import static org.hamcrest.CoreMatchers.equalTo;
 import static org.junit.Assert.assertThat;
 
 /** End-to-end test for SQL client using Avro Confluent Registry format. */
+@Disabled(
+        "FIXME: Skip this test temporarily until bumping a version that includes the fix of https://issues.apache.org/jira/browse/FLINK-36568")
 public class SQLClientSchemaRegistryITCase {
     public static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
     public static final String INTER_CONTAINER_REGISTRY_ALIAS = "registry";
