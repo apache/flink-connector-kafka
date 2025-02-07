@@ -33,6 +33,9 @@ import org.apache.flink.runtime.metrics.groups.ProxyMetricGroup;
 import org.apache.flink.runtime.metrics.groups.UnregisteredMetricGroups;
 import org.apache.flink.util.UserCodeClassLoader;
 
+import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
@@ -48,7 +51,9 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.PriorityQueue;
@@ -58,6 +63,7 @@ import java.util.function.Consumer;
 
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
+import static org.apache.kafka.clients.admin.AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG;
 
 /** Test base for KafkaWriter. */
 public abstract class KafkaWriterTestBase {
@@ -68,6 +74,7 @@ public abstract class KafkaWriterTestBase {
     protected static final String KAFKA_METRIC_WITH_GROUP_NAME =
             "KafkaProducer.incoming-byte-total";
     protected static final SinkWriter.Context SINK_WRITER_CONTEXT = new DummySinkWriterContext();
+    public static final String TEST_PREFIX = "test-prefix";
     protected static String topic;
 
     protected MetricListener metricListener;
@@ -84,6 +91,11 @@ public abstract class KafkaWriterTestBase {
         metricListener = new MetricListener();
         timeService = new TriggerTimeService();
         topic = testInfo.getDisplayName().replaceAll("\\W", "");
+        Map<String, Object> properties = new java.util.HashMap<>();
+        properties.put(BOOTSTRAP_SERVERS_CONFIG, KAFKA_CONTAINER.getBootstrapServers());
+        try (Admin admin = AdminClient.create(properties)) {
+            admin.createTopics(Collections.singleton(new NewTopic(topic, 10, (short) 1)));
+        }
     }
 
     @AfterEach
@@ -91,48 +103,33 @@ public abstract class KafkaWriterTestBase {
         checkProducerLeak();
     }
 
-    protected KafkaWriter<Integer> createWriterWithConfiguration(
-            Properties config, DeliveryGuarantee guarantee) throws IOException {
-        return createWriterWithConfiguration(config, guarantee, createSinkWriterMetricGroup());
+    KafkaWriter<Integer> createWriter(DeliveryGuarantee guarantee) throws IOException {
+        return createWriter(guarantee, createInitContext());
     }
 
-    protected KafkaWriter<Integer> createWriterWithConfiguration(
-            Properties config,
-            DeliveryGuarantee guarantee,
-            SinkWriterMetricGroup sinkWriterMetricGroup)
+    KafkaWriter<Integer> createWriter(DeliveryGuarantee guarantee, SinkInitContext sinkInitContext)
             throws IOException {
-        return createWriterWithConfiguration(config, guarantee, sinkWriterMetricGroup, null);
+        return createWriter(builder -> builder.setDeliveryGuarantee(guarantee), sinkInitContext);
     }
 
-    protected KafkaWriter<Integer> createWriterWithConfiguration(
-            Properties config,
-            DeliveryGuarantee guarantee,
-            SinkWriterMetricGroup sinkWriterMetricGroup,
-            @Nullable Consumer<RecordMetadata> metadataConsumer)
+    KafkaWriter<Integer> createWriter(
+            Consumer<KafkaSinkBuilder<?>> sinkBuilderAdjuster, SinkInitContext sinkInitContext)
             throws IOException {
-        KafkaSink<Integer> kafkaSink =
+        return (KafkaWriter<Integer>) createSink(sinkBuilderAdjuster).createWriter(sinkInitContext);
+    }
+
+    KafkaSink<Integer> createSink(Consumer<KafkaSinkBuilder<?>> sinkBuilderAdjuster) {
+        KafkaSinkBuilder<Integer> builder =
                 KafkaSink.<Integer>builder()
-                        .setKafkaProducerConfig(config)
-                        .setDeliveryGuarantee(guarantee)
-                        .setTransactionalIdPrefix("test-prefix")
-                        .setRecordSerializer(new DummyRecordSerializer())
-                        .build();
-        return (KafkaWriter<Integer>)
-                kafkaSink.createWriter(
-                        new SinkInitContext(sinkWriterMetricGroup, timeService, metadataConsumer));
+                        .setKafkaProducerConfig(getKafkaClientConfiguration())
+                        .setTransactionalIdPrefix(TEST_PREFIX)
+                        .setRecordSerializer(new DummyRecordSerializer());
+        sinkBuilderAdjuster.accept(builder);
+        return builder.build();
     }
 
-    protected KafkaWriter<Integer> createWriterWithConfiguration(
-            Properties config, DeliveryGuarantee guarantee, SinkInitContext sinkInitContext)
-            throws IOException {
-        KafkaSink<Integer> kafkaSink =
-                KafkaSink.<Integer>builder()
-                        .setKafkaProducerConfig(config)
-                        .setDeliveryGuarantee(guarantee)
-                        .setTransactionalIdPrefix("test-prefix")
-                        .setRecordSerializer(new DummyRecordSerializer())
-                        .build();
-        return (KafkaWriter<Integer>) kafkaSink.createWriter(sinkInitContext);
+    SinkInitContext createInitContext() {
+        return new SinkInitContext(createSinkWriterMetricGroup(), timeService, null);
     }
 
     protected SinkWriterMetricGroup createSinkWriterMetricGroup() {
@@ -141,7 +138,7 @@ public abstract class KafkaWriterTestBase {
         return InternalSinkWriterMetricGroup.wrap(operatorMetricGroup);
     }
 
-    protected static Properties getKafkaClientConfiguration() {
+    protected Properties getKafkaClientConfiguration() {
         final Properties standardProps = new Properties();
         standardProps.put("bootstrap.servers", KAFKA_CONTAINER.getBootstrapServers());
         standardProps.put("group.id", "kafkaWriter-tests");

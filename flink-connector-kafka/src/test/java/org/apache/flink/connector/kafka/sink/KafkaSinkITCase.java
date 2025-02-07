@@ -99,15 +99,15 @@ import javax.annotation.Nullable;
 import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -256,8 +256,8 @@ public class KafkaSinkITCase extends TestLogger {
                 CheckpointConfig.ExternalizedCheckpointCleanup.RETAIN_ON_CANCELLATION);
         config.set(CheckpointingOptions.MAX_RETAINED_CHECKPOINTS, 2);
         JobID firstJobId = null;
-        SharedReference<Collection<Long>> checkpointedRecords =
-                sharedObjects.add(new ConcurrentLinkedDeque<>());
+        SharedReference<Set<Long>> checkpointedRecords =
+                sharedObjects.add(new ConcurrentSkipListSet<>());
         try {
             firstJobId =
                     executeWithMapper(
@@ -297,8 +297,8 @@ public class KafkaSinkITCase extends TestLogger {
             boolean chained, @InjectClusterClient ClusterClient<?> clusterClient) throws Exception {
         // Run a first job opening 5 transactions one per subtask and fail in async checkpoint phase
         try {
-            SharedReference<Collection<Long>> checkpointedRecords =
-                    sharedObjects.add(new ConcurrentLinkedDeque<>());
+            SharedReference<Set<Long>> checkpointedRecords =
+                    sharedObjects.add(new ConcurrentSkipListSet<>());
             Configuration config = createConfiguration(5);
             executeWithMapper(
                     new FailAsyncCheckpointMapper(0),
@@ -315,8 +315,8 @@ public class KafkaSinkITCase extends TestLogger {
 
         // Second job aborts all transactions from previous runs with higher parallelism
         SharedReference<AtomicBoolean> failed = sharedObjects.add(new AtomicBoolean(true));
-        SharedReference<Collection<Long>> checkpointedRecords =
-                sharedObjects.add(new ConcurrentLinkedDeque<>());
+        SharedReference<Set<Long>> checkpointedRecords =
+                sharedObjects.add(new ConcurrentSkipListSet<>());
         Configuration config = createConfiguration(1);
         executeWithMapper(
                 new FailingCheckpointMapper(failed),
@@ -338,7 +338,7 @@ public class KafkaSinkITCase extends TestLogger {
 
     private JobID executeWithMapper(
             MapFunction<Long, Long> mapper,
-            SharedReference<Collection<Long>> checkpointedRecords,
+            SharedReference<Set<Long>> checkpointedRecords,
             Configuration config,
             boolean chained,
             @Nullable String transactionalIdPrefix,
@@ -353,7 +353,7 @@ public class KafkaSinkITCase extends TestLogger {
         env.setRestartStrategy(RestartStrategies.noRestart());
         final DataStreamSource<Long> source = env.fromSequence(1, 10);
         final DataStream<Long> stream =
-                source.map(mapper).map(new RecordFetcher(checkpointedRecords));
+                source.map(mapper).map(new RecordFetcher(checkpointedRecords)).uid("fetcher");
         final KafkaSinkBuilder<Long> builder =
                 new KafkaSinkBuilder<Long>()
                         .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
@@ -390,8 +390,8 @@ public class KafkaSinkITCase extends TestLogger {
         env.enableCheckpointing(300L);
         env.getCheckpointConfig().setMaxConcurrentCheckpoints(maxConcurrentCheckpoints);
         DataStreamSource<Long> source = env.fromSequence(1, 10);
-        SharedReference<Collection<Long>> checkpointedRecords =
-                sharedObjects.add(new ConcurrentLinkedDeque<>());
+        SharedReference<Set<Long>> checkpointedRecords =
+                sharedObjects.add(new ConcurrentSkipListSet<>());
         DataStream<Long> stream =
                 source.map(new FailingCheckpointMapper(sharedObjects.add(new AtomicBoolean(false))))
                         .map(new RecordFetcher(checkpointedRecords));
@@ -435,8 +435,8 @@ public class KafkaSinkITCase extends TestLogger {
         }
         env.enableCheckpointing(100L);
         final DataStream<Long> source = env.addSource(new InfiniteIntegerSource());
-        SharedReference<Collection<Long>> checkpointedRecords =
-                sharedObjects.add(new ConcurrentLinkedDeque<>());
+        SharedReference<Set<Long>> checkpointedRecords =
+                sharedObjects.add(new ConcurrentSkipListSet<>());
         source.map(new RecordFetcher(checkpointedRecords))
                 .sinkTo(
                         new KafkaSinkBuilder<Long>()
@@ -513,36 +513,55 @@ public class KafkaSinkITCase extends TestLogger {
         }
     }
 
+    /**
+     * Fetches records that have been successfully checkpointed. It relies on final checkpoints and
+     * subsumption to ultimately, emit all records that have been checkpointed.
+     *
+     * <p>Note that the current implementation only works by operating on a set because on failure,
+     * we may up with duplicate records being added to the {@link #checkpointedRecords}.
+     *
+     * <p>The fetcher uses three states to manage the records:
+     *
+     * <ol>
+     *   <li>{@link #recordsSinceLastCheckpoint} is used to buffer records between checkpoints.
+     *   <li>{@link #snapshottedRecords} is used to store the records that have been checkpointed.
+     *   <li>{@link #checkpointedRecords} is used to store snapshottedRecords where the checkpoint
+     *       has been acknowledged.
+     * </ol>
+     *
+     * <p>Records are promoted from data structure to the next (e.g. removed from the lower level).
+     */
     private static class RecordFetcher
             implements MapFunction<Long, Long>, CheckpointedFunction, CheckpointListener {
-        private final SharedReference<Collection<Long>> checkpointedRecords;
-        private List<Long> seenRecords = new ArrayList<>();
+        private final SharedReference<Set<Long>> checkpointedRecords;
+        private final List<Long> recordsSinceLastCheckpoint = new ArrayList<>();
         private static final ListStateDescriptor<Long> STATE_DESCRIPTOR =
                 new ListStateDescriptor<>("committed-records", BasicTypeInfo.LONG_TYPE_INFO);
         private ListState<Long> snapshottedRecords;
 
-        private RecordFetcher(SharedReference<Collection<Long>> checkpointedRecords) {
+        private RecordFetcher(SharedReference<Set<Long>> checkpointedRecords) {
             this.checkpointedRecords = checkpointedRecords;
         }
 
         @Override
         public Long map(Long value) {
-            seenRecords.add(value);
+            recordsSinceLastCheckpoint.add(value);
             return value;
         }
 
         @Override
         public void notifyCheckpointComplete(long checkpointId) throws Exception {
-            // sync with shared object, this guaranteed to sync because of final checkpoint
-            checkpointedRecords.get().clear();
+            // sync with shared object, this is guaranteed to sync eventually because of final
+            // checkpoint
             checkpointedRecords.get().addAll(Lists.newArrayList(snapshottedRecords.get()));
         }
 
         @Override
         public void snapshotState(FunctionSnapshotContext context) throws Exception {
-            LOG.info("snapshotState {} @ {}", seenRecords, context.getCheckpointId());
-            snapshottedRecords.addAll(seenRecords);
-            seenRecords.clear();
+            LOG.info(
+                    "snapshotState {} @ {}", recordsSinceLastCheckpoint, context.getCheckpointId());
+            snapshottedRecords.addAll(recordsSinceLastCheckpoint);
+            recordsSinceLastCheckpoint.clear();
         }
 
         @Override

@@ -59,13 +59,12 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
 
     @Test
     void testWriteExceptionWhenKafkaUnavailable() throws Exception {
-        Properties properties = getPropertiesForSendingFaultTolerance();
-
         final SinkWriterMetricGroup metricGroup = createSinkWriterMetricGroup();
 
         try (KafkaWriter<Integer> writer =
-                createWriterWithConfiguration(
-                        properties, DeliveryGuarantee.AT_LEAST_ONCE, metricGroup)) {
+                createWriter(
+                        DeliveryGuarantee.AT_LEAST_ONCE,
+                        new SinkInitContext(metricGroup, timeService, null))) {
 
             writer.write(1, SINK_WRITER_CONTEXT);
 
@@ -83,13 +82,12 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
 
     @Test
     void testFlushExceptionWhenKafkaUnavailable() throws Exception {
-        Properties properties = getPropertiesForSendingFaultTolerance();
-
         final SinkWriterMetricGroup metricGroup = createSinkWriterMetricGroup();
 
         try (KafkaWriter<Integer> writer =
-                createWriterWithConfiguration(
-                        properties, DeliveryGuarantee.AT_LEAST_ONCE, metricGroup)) {
+                createWriter(
+                        DeliveryGuarantee.AT_LEAST_ONCE,
+                        new SinkInitContext(metricGroup, timeService, null))) {
             writer.write(1, SINK_WRITER_CONTEXT);
 
             KAFKA_CONTAINER.stop();
@@ -104,13 +102,12 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
 
     @Test
     void testCloseExceptionWhenKafkaUnavailable() throws Exception {
-        Properties properties = getPropertiesForSendingFaultTolerance();
-
         final SinkWriterMetricGroup metricGroup = createSinkWriterMetricGroup();
 
         KafkaWriter<Integer> writer =
-                createWriterWithConfiguration(
-                        properties, DeliveryGuarantee.AT_LEAST_ONCE, metricGroup);
+                createWriter(
+                        DeliveryGuarantee.AT_LEAST_ONCE,
+                        new SinkInitContext(metricGroup, timeService, null));
 
         writer.write(1, SINK_WRITER_CONTEXT);
 
@@ -131,13 +128,11 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
 
     @Test
     void testMailboxExceptionWhenKafkaUnavailable() throws Exception {
-        Properties properties = getPropertiesForSendingFaultTolerance();
         SinkInitContext sinkInitContext =
                 new SinkInitContext(createSinkWriterMetricGroup(), timeService, null);
 
         try (KafkaWriter<Integer> writer =
-                createWriterWithConfiguration(
-                        properties, DeliveryGuarantee.AT_LEAST_ONCE, sinkInitContext)) {
+                createWriter(DeliveryGuarantee.AT_LEAST_ONCE, sinkInitContext)) {
 
             KAFKA_CONTAINER.stop();
 
@@ -159,8 +154,9 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
         }
     }
 
-    private Properties getPropertiesForSendingFaultTolerance() {
-        Properties properties = getKafkaClientConfiguration();
+    @Override
+    protected Properties getKafkaClientConfiguration() {
+        Properties properties = super.getKafkaClientConfiguration();
 
         // reduce the default vault for test case
         properties.setProperty("retries", INIT_KAFKA_RETRIES);
