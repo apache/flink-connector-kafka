@@ -23,6 +23,8 @@ import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.base.sink.writer.TestSinkInitContext;
+import org.apache.flink.connector.kafka.sink.internal.BackchannelFactory;
+import org.apache.flink.connector.kafka.sink.internal.WritableBackchannel;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.OperatorIOMetricGroup;
 import org.apache.flink.metrics.groups.OperatorMetricGroup;
@@ -77,7 +79,10 @@ public abstract class KafkaWriterTestBase {
     protected static final String KAFKA_METRIC_WITH_GROUP_NAME =
             "KafkaProducer.incoming-byte-total";
     protected static final SinkWriter.Context SINK_WRITER_CONTEXT = new DummySinkWriterContext();
-    public static final String TEST_PREFIX = "test-prefix";
+    private static final String TEST_PREFIX = "test-prefix";
+    private int writerIndex;
+    private static final int SUB_ID = 0;
+    private static final int ATTEMPT = 0;
     protected static String topic;
 
     protected MetricListener metricListener;
@@ -103,7 +108,7 @@ public abstract class KafkaWriterTestBase {
     }
 
     @AfterEach
-    public void check() {
+    public void teardown() {
         checkProducerLeak();
     }
 
@@ -127,7 +132,7 @@ public abstract class KafkaWriterTestBase {
         KafkaSinkBuilder<Integer> builder =
                 KafkaSink.<Integer>builder()
                         .setKafkaProducerConfig(getKafkaClientConfiguration())
-                        .setTransactionalIdPrefix(TEST_PREFIX)
+                        .setTransactionalIdPrefix(TEST_PREFIX + writerIndex++)
                         .setRecordSerializer(new DummyRecordSerializer());
         sinkBuilderAdjuster.accept(builder);
         return builder.build();
@@ -135,6 +140,11 @@ public abstract class KafkaWriterTestBase {
 
     SinkInitContext createInitContext() {
         return new SinkInitContext(createSinkWriterMetricGroup(), timeService, null);
+    }
+
+    WritableBackchannel<String> getBackchannel(ExactlyOnceKafkaWriter<?> writer) {
+        return BackchannelFactory.getInstance()
+                .getWritableBackchannel(SUB_ID, ATTEMPT, writer.getTransactionalIdPrefix());
     }
 
     protected SinkWriterMetricGroup createSinkWriterMetricGroup() {
@@ -182,7 +192,7 @@ public abstract class KafkaWriterTestBase {
 
         @Override
         public int getSubtaskId() {
-            return 0;
+            return SUB_ID;
         }
 
         @Override
@@ -192,7 +202,7 @@ public abstract class KafkaWriterTestBase {
 
         @Override
         public int getAttemptNumber() {
-            return 0;
+            return ATTEMPT;
         }
 
         @Override
@@ -238,7 +248,7 @@ public abstract class KafkaWriterTestBase {
     protected static class DummySinkWriterContext implements SinkWriter.Context {
         @Override
         public long currentWatermark() {
-            return 0;
+            return ATTEMPT;
         }
 
         @Override
@@ -274,7 +284,7 @@ public abstract class KafkaWriterTestBase {
 
         @Override
         public long getCurrentProcessingTime() {
-            return 0;
+            return ATTEMPT;
         }
 
         @Override

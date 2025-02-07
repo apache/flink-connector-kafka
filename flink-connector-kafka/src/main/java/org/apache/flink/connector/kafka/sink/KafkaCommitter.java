@@ -17,8 +17,13 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.sink2.Committer;
+import org.apache.flink.connector.kafka.sink.internal.BackchannelFactory;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
+import org.apache.flink.connector.kafka.sink.internal.WritableBackchannel;
+import org.apache.flink.util.ExceptionUtils;
+import org.apache.flink.util.IOUtils;
 
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.errors.InvalidTxnStateException;
@@ -49,11 +54,23 @@ class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
                     + "To avoid data loss, the application will restart.";
 
     private final Properties kafkaProducerConfig;
+    private final WritableBackchannel<String> backchannel;
+    @Nullable private FlinkKafkaInternalProducer<?, ?> committingProducer;
 
-    @Nullable private FlinkKafkaInternalProducer<?, ?> recoveryProducer;
-
-    KafkaCommitter(Properties kafkaProducerConfig) {
+    KafkaCommitter(
+            Properties kafkaProducerConfig,
+            String transactionalIdPrefix,
+            int subtaskId,
+            int attemptNumber) {
         this.kafkaProducerConfig = kafkaProducerConfig;
+        backchannel =
+                BackchannelFactory.getInstance()
+                        .getWritableBackchannel(subtaskId, attemptNumber, transactionalIdPrefix);
+    }
+
+    @VisibleForTesting
+    public WritableBackchannel<String> getBackchannel() {
+        return backchannel;
     }
 
     @Override
@@ -63,17 +80,12 @@ class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
             final KafkaCommittable committable = request.getCommittable();
             final String transactionalId = committable.getTransactionalId();
             LOG.debug("Committing Kafka transaction {}", transactionalId);
-            Optional<Recyclable<? extends FlinkKafkaInternalProducer<?, ?>>> recyclable =
-                    committable.getProducer();
+            Optional<FlinkKafkaInternalProducer<?, ?>> writerProducer = committable.getProducer();
             FlinkKafkaInternalProducer<?, ?> producer;
             try {
-                producer =
-                        recyclable
-                                .<FlinkKafkaInternalProducer<?, ?>>map(Recyclable::getObject)
-                                .orElseGet(() -> getRecoveryProducer(committable));
+                producer = writerProducer.orElseGet(() -> getProducer(committable));
                 producer.commitTransaction();
-                producer.flush();
-                recyclable.ifPresent(Recyclable::close);
+                backchannel.send(committable.getTransactionalId());
             } catch (RetriableException e) {
                 LOG.warn(
                         "Encountered retriable exception while committing {}.", transactionalId, e);
@@ -92,7 +104,7 @@ class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
                         ProducerConfig.TRANSACTION_TIMEOUT_CONFIG,
                         kafkaProducerConfig.getProperty(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG),
                         e);
-                recyclable.ifPresent(Recyclable::close);
+                backchannel.send(committable.getTransactionalId());
                 request.signalFailedWithKnownReason(e);
             } catch (InvalidTxnStateException e) {
                 // This exception only occurs when aborting after a commit or vice versa.
@@ -102,30 +114,32 @@ class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
                                 + "Most likely the transaction has been aborted for some reason. Please check the Kafka logs for more details.",
                         request,
                         e);
-                recyclable.ifPresent(Recyclable::close);
+                backchannel.send(committable.getTransactionalId());
                 request.signalFailedWithKnownReason(e);
             } catch (UnknownProducerIdException e) {
                 LOG.error(
                         "Unable to commit transaction ({}) " + UNKNOWN_PRODUCER_ID_ERROR_MESSAGE,
                         request,
                         e);
-                recyclable.ifPresent(Recyclable::close);
+                backchannel.send(committable.getTransactionalId());
                 request.signalFailedWithKnownReason(e);
             } catch (Exception e) {
                 LOG.error(
                         "Transaction ({}) encountered error and data has been potentially lost.",
                         request,
                         e);
-                recyclable.ifPresent(Recyclable::close);
+                // cause failover
                 request.signalFailedWithUnknownReason(e);
             }
         }
     }
 
     @Override
-    public void close() {
-        if (recoveryProducer != null) {
-            recoveryProducer.close();
+    public void close() throws IOException {
+        try {
+            IOUtils.closeAll(backchannel, committingProducer);
+        } catch (Exception e) {
+            ExceptionUtils.rethrow(e);
         }
     }
 
@@ -133,15 +147,15 @@ class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
      * Creates a producer that can commit into the same transaction as the upstream producer that
      * was serialized into {@link KafkaCommittable}.
      */
-    private FlinkKafkaInternalProducer<?, ?> getRecoveryProducer(KafkaCommittable committable) {
-        if (recoveryProducer == null) {
-            recoveryProducer =
+    private FlinkKafkaInternalProducer<?, ?> getProducer(KafkaCommittable committable) {
+        if (committingProducer == null) {
+            committingProducer =
                     new FlinkKafkaInternalProducer<>(
                             kafkaProducerConfig, committable.getTransactionalId());
         } else {
-            recoveryProducer.setTransactionId(committable.getTransactionalId());
+            committingProducer.setTransactionId(committable.getTransactionalId());
         }
-        recoveryProducer.resumeTransaction(committable.getProducerId(), committable.getEpoch());
-        return recoveryProducer;
+        committingProducer.resumeTransaction(committable.getProducerId(), committable.getEpoch());
+        return committingProducer;
     }
 }

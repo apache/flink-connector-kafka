@@ -21,6 +21,7 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.sink2.Committer;
+import org.apache.flink.api.connector.sink2.CommitterInitContext;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacet;
@@ -101,10 +102,13 @@ public class KafkaSink<IN>
         return new KafkaSinkBuilder<>();
     }
 
-    @Internal
     @Override
-    public Committer<KafkaCommittable> createCommitter() throws IOException {
-        return new KafkaCommitter(kafkaProducerConfig);
+    public Committer<KafkaCommittable> createCommitter(CommitterInitContext context) {
+        return new KafkaCommitter(
+                kafkaProducerConfig,
+                transactionalIdPrefix,
+                context.getTaskInfo().getIndexOfThisSubtask(),
+                context.getTaskInfo().getAttemptNumber());
     }
 
     @Internal

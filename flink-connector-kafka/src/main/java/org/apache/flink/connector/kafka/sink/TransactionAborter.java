@@ -50,18 +50,18 @@ class TransactionAborter implements Closeable {
     private final int subtaskId;
     private final int parallelism;
     private final Function<String, FlinkKafkaInternalProducer<byte[], byte[]>> producerFactory;
-    private final Consumer<FlinkKafkaInternalProducer<byte[], byte[]>> closeAction;
+    private final Consumer<FlinkKafkaInternalProducer<byte[], byte[]>> recycler;
     @Nullable FlinkKafkaInternalProducer<byte[], byte[]> producer = null;
 
     public TransactionAborter(
             int subtaskId,
             int parallelism,
             Function<String, FlinkKafkaInternalProducer<byte[], byte[]>> producerFactory,
-            Consumer<FlinkKafkaInternalProducer<byte[], byte[]>> closeAction) {
+            Consumer<FlinkKafkaInternalProducer<byte[], byte[]>> recycler) {
         this.subtaskId = subtaskId;
         this.parallelism = parallelism;
         this.producerFactory = checkNotNull(producerFactory);
-        this.closeAction = closeAction;
+        this.recycler = recycler;
     }
 
     void abortLingeringTransactions(List<String> prefixesToAbort, long startCheckpointId) {
@@ -103,14 +103,12 @@ class TransactionAborter implements Closeable {
             // initTransactions fences all old transactions with the same id by bumping the epoch
             String transactionalId =
                     TransactionalIdFactory.buildTransactionalId(prefix, subtaskId, checkpointId);
-            if (producer == null) {
-                producer = producerFactory.apply(transactionalId);
-            } else {
-                producer.initTransactionId(transactionalId);
-            }
+            producer = producerFactory.apply(transactionalId);
             producer.flush();
             // An epoch of 0 indicates that the id was unused before
-            if (producer.getEpoch() == 0) {
+            short epoch = producer.getEpoch();
+            recycler.accept(producer);
+            if (epoch == 0) {
                 // Note that the check works beyond transaction log timeouts and just depends on the
                 // retention of the transaction topic (typically 7d). Any transaction that is not in
                 // the that topic anymore is also not lingering (i.e., it will not block downstream
@@ -126,9 +124,5 @@ class TransactionAborter implements Closeable {
         return numTransactionAborted;
     }
 
-    public void close() {
-        if (producer != null) {
-            closeAction.accept(producer);
-        }
-    }
+    public void close() {}
 }
