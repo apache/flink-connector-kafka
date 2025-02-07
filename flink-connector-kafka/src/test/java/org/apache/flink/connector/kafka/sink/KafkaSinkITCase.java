@@ -17,15 +17,18 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.common.state.CheckpointListener;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
+import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeutils.SimpleTypeSerializerSnapshot;
 import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
 import org.apache.flink.api.common.typeutils.base.TypeSerializerSingleton;
+import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
@@ -43,22 +46,29 @@ import org.apache.flink.connector.testframe.junit.annotations.TestSemantics;
 import org.apache.flink.connector.testframe.testsuites.SinkTestSuiteBase;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
+import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.SavepointConfigOptions;
+import org.apache.flink.runtime.minicluster.MiniCluster;
 import org.apache.flink.runtime.state.FunctionInitializationContext;
 import org.apache.flink.runtime.state.FunctionSnapshotContext;
+import org.apache.flink.runtime.testutils.CommonTestUtils;
+import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
-import org.apache.flink.streaming.api.environment.LocalStreamEnvironment;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
-import org.apache.flink.test.util.TestUtils;
-import org.apache.flink.testutils.junit.SharedObjects;
+import org.apache.flink.test.junit5.InjectClusterClient;
+import org.apache.flink.test.junit5.InjectMiniCluster;
+import org.apache.flink.test.junit5.MiniClusterExtension;
+import org.apache.flink.testutils.junit.SharedObjectsExtension;
 import org.apache.flink.testutils.junit.SharedReference;
 import org.apache.flink.util.TestLogger;
+
+import org.apache.flink.shaded.guava31.com.google.common.collect.Lists;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -66,45 +76,50 @@ import org.apache.kafka.clients.admin.CreateTopicsResult;
 import org.apache.kafka.clients.admin.DeleteTopicsResult;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.junit.After;
-import org.junit.AfterClass;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.Network;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import javax.annotation.Nullable;
 
 import java.io.File;
-import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
-import java.util.stream.LongStream;
 
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for using KafkaSink writing to a Kafka cluster. */
+@Testcontainers
 public class KafkaSinkITCase extends TestLogger {
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaSinkITCase.class);
@@ -115,23 +130,27 @@ public class KafkaSinkITCase extends TestLogger {
     private static AdminClient admin;
 
     private String topic;
-    private SharedReference<AtomicLong> emittedRecordsCount;
-    private SharedReference<AtomicLong> emittedRecordsWithCheckpoint;
-    private SharedReference<AtomicBoolean> failed;
-    private SharedReference<AtomicLong> lastCheckpointedRecord;
 
-    @ClassRule
+    @RegisterExtension
+    public static final MiniClusterExtension MINI_CLUSTER_RESOURCE =
+            new MiniClusterExtension(
+                    new MiniClusterResourceConfiguration.Builder()
+                            .setNumberTaskManagers(2)
+                            .setNumberSlotsPerTaskManager(8)
+                            .setConfiguration(new Configuration())
+                            .build());
+
+    @Container
     public static final KafkaContainer KAFKA_CONTAINER =
             createKafkaContainer(KafkaSinkITCase.class)
                     .withEmbeddedZookeeper()
                     .withNetwork(NETWORK)
                     .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS);
 
-    @Rule public final SharedObjects sharedObjects = SharedObjects.create();
+    @RegisterExtension
+    public final SharedObjectsExtension sharedObjects = SharedObjectsExtension.create();
 
-    @Rule public final TemporaryFolder temp = new TemporaryFolder();
-
-    @BeforeClass
+    @BeforeAll
     public static void setupAdmin() {
         Map<String, Object> properties = new HashMap<>();
         properties.put(
@@ -140,34 +159,29 @@ public class KafkaSinkITCase extends TestLogger {
         admin = AdminClient.create(properties);
     }
 
-    @AfterClass
+    @AfterAll
     public static void teardownAdmin() {
         admin.close();
     }
 
-    @Before
-    public void setUp() throws ExecutionException, InterruptedException, TimeoutException {
-        emittedRecordsCount = sharedObjects.add(new AtomicLong());
-        emittedRecordsWithCheckpoint = sharedObjects.add(new AtomicLong());
-        failed = sharedObjects.add(new AtomicBoolean(false));
-        lastCheckpointedRecord = sharedObjects.add(new AtomicLong(0));
+    @BeforeEach
+    public void setUp() throws ExecutionException, InterruptedException {
         topic = UUID.randomUUID().toString();
         createTestTopic(topic, 1, TOPIC_REPLICATION_FACTOR);
     }
 
-    @After
+    @AfterEach
     public void tearDown() throws ExecutionException, InterruptedException, TimeoutException {
         checkProducerLeak();
         deleteTestTopic(topic);
     }
 
     /** Integration test based on connector testing framework. */
+    @SuppressWarnings("unused")
     @Nested
     class IntegrationTests extends SinkTestSuiteBase<String> {
         // Defines test environment on Flink MiniCluster
-        @SuppressWarnings("unused")
-        @TestEnv
-        MiniClusterTestEnvironment flink = new MiniClusterTestEnvironment();
+        @TestEnv MiniClusterTestEnvironment flink = new MiniClusterTestEnvironment();
 
         // Defines external system
         @TestExternalSystem
@@ -178,14 +192,12 @@ public class KafkaSinkITCase extends TestLogger {
                                         DockerImageName.parse(DockerImageVersions.KAFKA)))
                         .build();
 
-        @SuppressWarnings("unused")
         @TestSemantics
         CheckpointingMode[] semantics =
                 new CheckpointingMode[] {
                     CheckpointingMode.EXACTLY_ONCE, CheckpointingMode.AT_LEAST_ONCE
                 };
 
-        @SuppressWarnings("unused")
         @TestContext
         KafkaSinkExternalContextFactory sinkContext =
                 new KafkaSinkExternalContextFactory(kafka.getContainer(), Collections.emptyList());
@@ -193,97 +205,108 @@ public class KafkaSinkITCase extends TestLogger {
 
     @Test
     public void testWriteRecordsToKafkaWithAtLeastOnceGuarantee() throws Exception {
-        writeRecordsToKafka(DeliveryGuarantee.AT_LEAST_ONCE, emittedRecordsCount);
+        writeRecordsToKafka(DeliveryGuarantee.AT_LEAST_ONCE);
     }
 
     @Test
     public void testWriteRecordsToKafkaWithNoneGuarantee() throws Exception {
-        writeRecordsToKafka(DeliveryGuarantee.NONE, emittedRecordsCount);
+        writeRecordsToKafka(DeliveryGuarantee.NONE);
     }
 
-    @Test
-    public void testWriteRecordsToKafkaWithExactlyOnceGuarantee() throws Exception {
-        writeRecordsToKafka(DeliveryGuarantee.EXACTLY_ONCE, emittedRecordsWithCheckpoint);
+    @ParameterizedTest(name = "chained={0}")
+    @ValueSource(booleans = {true, false})
+    public void testWriteRecordsToKafkaWithExactlyOnceGuarantee(boolean chained) throws Exception {
+        writeRecordsToKafka(DeliveryGuarantee.EXACTLY_ONCE, chained);
     }
 
     @Test
     public void testRecoveryWithAtLeastOnceGuarantee() throws Exception {
-        testRecoveryWithAssertion(
-                DeliveryGuarantee.AT_LEAST_ONCE,
-                1,
-                (records) -> assertThat(records).contains(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L, 10L));
+        testRecoveryWithAssertion(DeliveryGuarantee.AT_LEAST_ONCE, 1);
     }
 
-    @Test
-    public void testRecoveryWithExactlyOnceGuarantee() throws Exception {
-        testRecoveryWithAssertion(
-                DeliveryGuarantee.EXACTLY_ONCE,
-                1,
-                (records) ->
-                        assertThat(records)
-                                .contains(
-                                        (LongStream.range(1, lastCheckpointedRecord.get().get() + 1)
-                                                .boxed()
-                                                .toArray(Long[]::new))));
+    @ParameterizedTest(name = "chained={0}")
+    @ValueSource(booleans = {true, false})
+    public void testRecoveryWithExactlyOnceGuarantee(boolean chained) throws Exception {
+        testRecoveryWithAssertion(DeliveryGuarantee.EXACTLY_ONCE, 1, chained);
     }
 
-    @Test
-    public void testRecoveryWithExactlyOnceGuaranteeAndConcurrentCheckpoints() throws Exception {
-        testRecoveryWithAssertion(
-                DeliveryGuarantee.EXACTLY_ONCE,
-                2,
-                (records) ->
-                        assertThat(records)
-                                .contains(
-                                        LongStream.range(1, lastCheckpointedRecord.get().get() + 1)
-                                                .boxed()
-                                                .toArray(Long[]::new)));
+    @ParameterizedTest(name = "chained={0}")
+    @ValueSource(booleans = {true, false})
+    public void testRecoveryWithExactlyOnceGuaranteeAndConcurrentCheckpoints(boolean chained)
+            throws Exception {
+        testRecoveryWithAssertion(DeliveryGuarantee.EXACTLY_ONCE, 2, chained);
     }
 
-    @Test
-    public void testAbortTransactionsOfPendingCheckpointsAfterFailure() throws Exception {
+    @ParameterizedTest(name = "chained={0}")
+    @ValueSource(booleans = {true, false})
+    public void testAbortTransactionsOfPendingCheckpointsAfterFailure(
+            boolean chained,
+            @TempDir File checkpointDir,
+            @InjectMiniCluster MiniCluster miniCluster,
+            @InjectClusterClient ClusterClient<?> clusterClient)
+            throws Exception {
         // Run a first job failing during the async phase of a checkpoint to leave some
         // lingering transactions
-        final Configuration config = new Configuration();
+        final Configuration config = createConfiguration(4);
         config.setString(StateBackendOptions.STATE_BACKEND, "filesystem");
-        final File checkpointDir = temp.newFolder();
         config.setString(
                 CheckpointingOptions.CHECKPOINTS_DIRECTORY, checkpointDir.toURI().toString());
         config.set(
                 ExecutionCheckpointingOptions.EXTERNALIZED_CHECKPOINT,
                 CheckpointConfig.ExternalizedCheckpointCleanup.RETAIN_ON_CANCELLATION);
         config.set(CheckpointingOptions.MAX_RETAINED_CHECKPOINTS, 2);
+        JobID firstJobId = null;
+        SharedReference<Collection<Long>> checkpointedRecords =
+                sharedObjects.add(new ConcurrentLinkedDeque<>());
         try {
-            executeWithMapper(new FailAsyncCheckpointMapper(1), config, "firstPrefix");
+            firstJobId =
+                    executeWithMapper(
+                            new FailAsyncCheckpointMapper(1),
+                            checkpointedRecords,
+                            config,
+                            chained,
+                            "firstPrefix",
+                            clusterClient);
         } catch (Exception e) {
-            assertThat(e.getCause().getCause().getMessage())
-                    .contains("Exceeded checkpoint tolerable failure");
+            assertThat(e).hasStackTraceContaining("Exceeded checkpoint tolerable failure");
         }
-        final File completedCheckpoint = TestUtils.getMostRecentCompletedCheckpoint(checkpointDir);
+        final Optional<String> completedCheckpoint =
+                CommonTestUtils.getLatestCompletedCheckpointPath(firstJobId, miniCluster);
 
-        config.set(SavepointConfigOptions.SAVEPOINT_PATH, completedCheckpoint.toURI().toString());
+        assertThat(completedCheckpoint).isPresent();
+        config.set(SavepointConfigOptions.SAVEPOINT_PATH, completedCheckpoint.get());
 
         // Run a second job which aborts all lingering transactions and new consumer should
         // immediately see the newly written records
-        failed.get().set(true);
+        SharedReference<AtomicBoolean> failed = sharedObjects.add(new AtomicBoolean(true));
         executeWithMapper(
-                new FailingCheckpointMapper(failed, lastCheckpointedRecord), config, "newPrefix");
-        final List<ConsumerRecord<byte[], byte[]>> collectedRecords =
-                drainAllRecordsFromTopic(topic, true);
-        assertThat(deserializeValues(collectedRecords))
-                .contains(
-                        LongStream.range(1, lastCheckpointedRecord.get().get() + 1)
-                                .boxed()
-                                .toArray(Long[]::new));
+                new FailingCheckpointMapper(failed),
+                checkpointedRecords,
+                config,
+                chained,
+                "newPrefix",
+                clusterClient);
+        final List<Long> committedRecords =
+                deserializeValues(drainAllRecordsFromTopic(topic, true));
+        assertThat(committedRecords).containsExactlyInAnyOrderElementsOf(checkpointedRecords.get());
     }
 
-    @Test
-    public void testAbortTransactionsAfterScaleInBeforeFirstCheckpoint() throws Exception {
+    @ParameterizedTest(name = "chained={0}")
+    @ValueSource(booleans = {true, false})
+    public void testAbortTransactionsAfterScaleInBeforeFirstCheckpoint(
+            boolean chained, @InjectClusterClient ClusterClient<?> clusterClient) throws Exception {
         // Run a first job opening 5 transactions one per subtask and fail in async checkpoint phase
-        final Configuration config = new Configuration();
-        config.set(CoreOptions.DEFAULT_PARALLELISM, 5);
         try {
-            executeWithMapper(new FailAsyncCheckpointMapper(0), config, null);
+            SharedReference<Collection<Long>> checkpointedRecords =
+                    sharedObjects.add(new ConcurrentLinkedDeque<>());
+            Configuration config = createConfiguration(5);
+            executeWithMapper(
+                    new FailAsyncCheckpointMapper(0),
+                    checkpointedRecords,
+                    config,
+                    chained,
+                    null,
+                    clusterClient);
         } catch (Exception e) {
             assertThat(e.getCause().getCause().getMessage())
                     .contains("Exceeded checkpoint tolerable failure");
@@ -291,29 +314,46 @@ public class KafkaSinkITCase extends TestLogger {
         assertThat(deserializeValues(drainAllRecordsFromTopic(topic, true))).isEmpty();
 
         // Second job aborts all transactions from previous runs with higher parallelism
-        config.set(CoreOptions.DEFAULT_PARALLELISM, 1);
-        failed.get().set(true);
+        SharedReference<AtomicBoolean> failed = sharedObjects.add(new AtomicBoolean(true));
+        SharedReference<Collection<Long>> checkpointedRecords =
+                sharedObjects.add(new ConcurrentLinkedDeque<>());
+        Configuration config = createConfiguration(1);
         executeWithMapper(
-                new FailingCheckpointMapper(failed, lastCheckpointedRecord), config, null);
-        final List<ConsumerRecord<byte[], byte[]>> collectedRecords =
-                drainAllRecordsFromTopic(topic, true);
-        assertThat(deserializeValues(collectedRecords))
-                .contains(
-                        LongStream.range(1, lastCheckpointedRecord.get().get() + 1)
-                                .boxed()
-                                .toArray(Long[]::new));
+                new FailingCheckpointMapper(failed),
+                checkpointedRecords,
+                config,
+                chained,
+                null,
+                clusterClient);
+        final List<Long> committedRecords =
+                deserializeValues(drainAllRecordsFromTopic(topic, true));
+        assertThat(committedRecords).containsExactlyInAnyOrderElementsOf(checkpointedRecords.get());
     }
 
-    private void executeWithMapper(
+    private static Configuration createConfiguration(int parallelism) {
+        final Configuration config = new Configuration();
+        config.set(CoreOptions.DEFAULT_PARALLELISM, parallelism);
+        return config;
+    }
+
+    private JobID executeWithMapper(
             MapFunction<Long, Long> mapper,
+            SharedReference<Collection<Long>> checkpointedRecords,
             Configuration config,
-            @Nullable String transactionalIdPrefix)
+            boolean chained,
+            @Nullable String transactionalIdPrefix,
+            @InjectClusterClient ClusterClient<?> clusterClient)
             throws Exception {
-        final StreamExecutionEnvironment env = new LocalStreamEnvironment(config);
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(config);
         env.enableCheckpointing(100L);
+        if (!chained) {
+            env.disableOperatorChaining();
+        }
         env.setRestartStrategy(RestartStrategies.noRestart());
         final DataStreamSource<Long> source = env.fromSequence(1, 10);
-        final DataStream<Long> stream = source.map(mapper);
+        final DataStream<Long> stream =
+                source.map(mapper).map(new RecordFetcher(checkpointedRecords));
         final KafkaSinkBuilder<Long> builder =
                 new KafkaSinkBuilder<Long>()
                         .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
@@ -328,20 +368,33 @@ public class KafkaSinkITCase extends TestLogger {
         }
         builder.setTransactionalIdPrefix(transactionalIdPrefix);
         stream.sinkTo(builder.build());
-        env.execute();
+        final JobGraph jobGraph = env.getStreamGraph().getJobGraph();
+        JobID jobID = clusterClient.submitJob(jobGraph).get();
+        clusterClient.requestJobResult(jobID).get();
+        return jobID;
     }
 
     private void testRecoveryWithAssertion(
-            DeliveryGuarantee guarantee,
-            int maxConcurrentCheckpoints,
-            java.util.function.Consumer<List<Long>> recordsAssertion)
+            DeliveryGuarantee guarantee, int maxConcurrentCheckpoints) throws Exception {
+        testRecoveryWithAssertion(guarantee, maxConcurrentCheckpoints, true);
+    }
+
+    private void testRecoveryWithAssertion(
+            DeliveryGuarantee guarantee, int maxConcurrentCheckpoints, boolean chained)
             throws Exception {
-        final StreamExecutionEnvironment env = new LocalStreamEnvironment();
+        final StreamExecutionEnvironment env =
+                StreamExecutionEnvironment.getExecutionEnvironment(createConfiguration(1));
+        if (!chained) {
+            env.disableOperatorChaining();
+        }
         env.enableCheckpointing(300L);
         env.getCheckpointConfig().setMaxConcurrentCheckpoints(maxConcurrentCheckpoints);
         DataStreamSource<Long> source = env.fromSequence(1, 10);
+        SharedReference<Collection<Long>> checkpointedRecords =
+                sharedObjects.add(new ConcurrentLinkedDeque<>());
         DataStream<Long> stream =
-                source.map(new FailingCheckpointMapper(failed, lastCheckpointedRecord));
+                source.map(new FailingCheckpointMapper(sharedObjects.add(new AtomicBoolean(false))))
+                        .map(new RecordFetcher(checkpointedRecords));
 
         stream.sinkTo(
                 new KafkaSinkBuilder<Long>()
@@ -356,42 +409,53 @@ public class KafkaSinkITCase extends TestLogger {
                         .build());
         env.execute();
 
-        final List<ConsumerRecord<byte[], byte[]>> collectedRecords =
-                drainAllRecordsFromTopic(topic, guarantee == DeliveryGuarantee.EXACTLY_ONCE);
-        recordsAssertion.accept(deserializeValues(collectedRecords));
-        checkProducerLeak();
+        List<Long> committedRecords =
+                deserializeValues(
+                        drainAllRecordsFromTopic(
+                                topic, guarantee == DeliveryGuarantee.EXACTLY_ONCE));
+
+        if (guarantee == DeliveryGuarantee.AT_LEAST_ONCE) {
+            assertThat(committedRecords).containsAll(checkpointedRecords.get());
+        } else if (guarantee == DeliveryGuarantee.EXACTLY_ONCE) {
+            assertThat(committedRecords)
+                    .containsExactlyInAnyOrderElementsOf(checkpointedRecords.get());
+        }
     }
 
-    private void writeRecordsToKafka(
-            DeliveryGuarantee deliveryGuarantee, SharedReference<AtomicLong> expectedRecords)
+    private void writeRecordsToKafka(DeliveryGuarantee deliveryGuarantee) throws Exception {
+        writeRecordsToKafka(deliveryGuarantee, true);
+    }
+
+    private void writeRecordsToKafka(DeliveryGuarantee deliveryGuarantee, boolean chained)
             throws Exception {
-        final StreamExecutionEnvironment env = new LocalStreamEnvironment();
+        final StreamExecutionEnvironment env =
+                StreamExecutionEnvironment.getExecutionEnvironment(createConfiguration(1));
+        if (!chained) {
+            env.disableOperatorChaining();
+        }
         env.enableCheckpointing(100L);
-        final DataStream<Long> source =
-                env.addSource(
-                        new InfiniteIntegerSource(
-                                emittedRecordsCount, emittedRecordsWithCheckpoint));
-        source.sinkTo(
-                new KafkaSinkBuilder<Long>()
-                        .setBootstrapServers(KAFKA_CONTAINER.getBootstrapServers())
-                        .setDeliveryGuarantee(deliveryGuarantee)
-                        .setRecordSerializer(
-                                KafkaRecordSerializationSchema.builder()
-                                        .setTopic(topic)
-                                        .setValueSerializationSchema(new RecordSerializer())
-                                        .build())
-                        .setTransactionalIdPrefix("kafka-sink")
-                        .build());
+        final DataStream<Long> source = env.addSource(new InfiniteIntegerSource());
+        SharedReference<Collection<Long>> checkpointedRecords =
+                sharedObjects.add(new ConcurrentLinkedDeque<>());
+        source.map(new RecordFetcher(checkpointedRecords))
+                .sinkTo(
+                        new KafkaSinkBuilder<Long>()
+                                .setBootstrapServers(KAFKA_CONTAINER.getBootstrapServers())
+                                .setDeliveryGuarantee(deliveryGuarantee)
+                                .setRecordSerializer(
+                                        KafkaRecordSerializationSchema.builder()
+                                                .setTopic(topic)
+                                                .setValueSerializationSchema(new RecordSerializer())
+                                                .build())
+                                .setTransactionalIdPrefix("kafka-sink")
+                                .build());
         env.execute();
 
-        final List<ConsumerRecord<byte[], byte[]>> collectedRecords =
-                drainAllRecordsFromTopic(
-                        topic, deliveryGuarantee == DeliveryGuarantee.EXACTLY_ONCE);
-        final long recordsCount = expectedRecords.get().get();
-        assertThat(recordsCount).isEqualTo(collectedRecords.size());
-        assertThat(deserializeValues(collectedRecords))
-                .contains(LongStream.range(1, recordsCount + 1).boxed().toArray(Long[]::new));
-        checkProducerLeak();
+        final List<Long> collectedRecords =
+                deserializeValues(
+                        drainAllRecordsFromTopic(
+                                topic, deliveryGuarantee == DeliveryGuarantee.EXACTLY_ONCE));
+        assertThat(collectedRecords).containsExactlyInAnyOrderElementsOf(checkpointedRecords.get());
     }
 
     private static List<Long> deserializeValues(List<ConsumerRecord<byte[], byte[]>> records) {
@@ -420,7 +484,7 @@ public class KafkaSinkITCase extends TestLogger {
     }
 
     private void createTestTopic(String topic, int numPartitions, short replicationFactor)
-            throws ExecutionException, InterruptedException, TimeoutException {
+            throws ExecutionException, InterruptedException {
         final CreateTopicsResult result =
                 admin.createTopics(
                         Collections.singletonList(
@@ -428,8 +492,7 @@ public class KafkaSinkITCase extends TestLogger {
         result.all().get();
     }
 
-    private void deleteTestTopic(String topic)
-            throws ExecutionException, InterruptedException, TimeoutException {
+    private void deleteTestTopic(String topic) throws ExecutionException, InterruptedException {
         final DeleteTopicsResult result = admin.deleteTopics(Collections.singletonList(topic));
         result.all().get();
     }
@@ -447,6 +510,44 @@ public class KafkaSinkITCase extends TestLogger {
             final ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES);
             buffer.putLong(element);
             return buffer.array();
+        }
+    }
+
+    private static class RecordFetcher
+            implements MapFunction<Long, Long>, CheckpointedFunction, CheckpointListener {
+        private final SharedReference<Collection<Long>> checkpointedRecords;
+        private List<Long> seenRecords = new ArrayList<>();
+        private static final ListStateDescriptor<Long> STATE_DESCRIPTOR =
+                new ListStateDescriptor<>("committed-records", BasicTypeInfo.LONG_TYPE_INFO);
+        private ListState<Long> snapshottedRecords;
+
+        private RecordFetcher(SharedReference<Collection<Long>> checkpointedRecords) {
+            this.checkpointedRecords = checkpointedRecords;
+        }
+
+        @Override
+        public Long map(Long value) {
+            seenRecords.add(value);
+            return value;
+        }
+
+        @Override
+        public void notifyCheckpointComplete(long checkpointId) throws Exception {
+            // sync with shared object, this guaranteed to sync because of final checkpoint
+            checkpointedRecords.get().clear();
+            checkpointedRecords.get().addAll(Lists.newArrayList(snapshottedRecords.get()));
+        }
+
+        @Override
+        public void snapshotState(FunctionSnapshotContext context) throws Exception {
+            LOG.info("snapshotState {} @ {}", seenRecords, context.getCheckpointId());
+            snapshottedRecords.addAll(seenRecords);
+            seenRecords.clear();
+        }
+
+        @Override
+        public void initializeState(FunctionInitializationContext context) throws Exception {
+            snapshottedRecords = context.getOperatorStateStore().getListState(STATE_DESCRIPTOR);
         }
     }
 
@@ -514,7 +615,7 @@ public class KafkaSinkITCase extends TestLogger {
         }
 
         @Override
-        public void serialize(Integer record, DataOutputView target) throws IOException {
+        public void serialize(Integer record, DataOutputView target) {
             if (record != -1) {
                 return;
             }
@@ -522,17 +623,17 @@ public class KafkaSinkITCase extends TestLogger {
         }
 
         @Override
-        public Integer deserialize(DataInputView source) throws IOException {
+        public Integer deserialize(DataInputView source) {
             return 1;
         }
 
         @Override
-        public Integer deserialize(Integer reuse, DataInputView source) throws IOException {
+        public Integer deserialize(Integer reuse, DataInputView source) {
             return 1;
         }
 
         @Override
-        public void copy(DataInputView source, DataOutputView target) throws IOException {}
+        public void copy(DataInputView source, DataOutputView target) {}
 
         @Override
         public TypeSerializerSnapshot<Integer> snapshotConfiguration() {
@@ -549,54 +650,33 @@ public class KafkaSinkITCase extends TestLogger {
 
     /** Fails after a checkpoint is taken and the next record was emitted. */
     private static class FailingCheckpointMapper
-            implements MapFunction<Long, Long>, CheckpointListener, CheckpointedFunction {
+            implements MapFunction<Long, Long>, CheckpointListener {
 
         private final SharedReference<AtomicBoolean> failed;
-        private final SharedReference<AtomicLong> lastCheckpointedRecord;
+        private long lastCheckpointId = 0;
+        private int emittedBetweenCheckpoint = 0;
 
-        private volatile long lastSeenRecord;
-        private volatile long checkpointedRecord;
-        private volatile long lastCheckpointId = 0;
-        private final AtomicInteger emittedBetweenCheckpoint = new AtomicInteger(0);
-
-        FailingCheckpointMapper(
-                SharedReference<AtomicBoolean> failed,
-                SharedReference<AtomicLong> lastCheckpointedRecord) {
+        FailingCheckpointMapper(SharedReference<AtomicBoolean> failed) {
             this.failed = failed;
-            this.lastCheckpointedRecord = lastCheckpointedRecord;
         }
 
         @Override
         public Long map(Long value) throws Exception {
-            lastSeenRecord = value;
-            if (lastCheckpointId >= 1
-                    && emittedBetweenCheckpoint.get() > 0
-                    && !failed.get().get()) {
+            if (lastCheckpointId >= 1 && emittedBetweenCheckpoint > 0 && !failed.get().get()) {
                 failed.get().set(true);
                 throw new RuntimeException("Planned exception.");
             }
             // Delay execution to ensure that at-least one checkpoint is triggered before finish
             Thread.sleep(50);
-            emittedBetweenCheckpoint.incrementAndGet();
+            emittedBetweenCheckpoint++;
             return value;
         }
 
         @Override
-        public void notifyCheckpointComplete(long checkpointId) throws Exception {
-            LOG.info("notifyCheckpointComplete {} @ {}", checkpointedRecord, checkpointId);
+        public void notifyCheckpointComplete(long checkpointId) {
             lastCheckpointId = checkpointId;
-            emittedBetweenCheckpoint.set(0);
-            lastCheckpointedRecord.get().set(checkpointedRecord);
+            emittedBetweenCheckpoint = 0;
         }
-
-        @Override
-        public void snapshotState(FunctionSnapshotContext context) throws Exception {
-            LOG.info("snapshotState {} @ {}", lastSeenRecord, context.getCheckpointId());
-            checkpointedRecord = lastSeenRecord;
-        }
-
-        @Override
-        public void initializeState(FunctionInitializationContext context) throws Exception {}
     }
 
     /**
@@ -604,31 +684,23 @@ public class KafkaSinkITCase extends TestLogger {
      * receiving the checkpoint completed event.
      */
     private static final class InfiniteIntegerSource
-            implements SourceFunction<Long>, CheckpointListener, CheckpointedFunction {
-
-        private final SharedReference<AtomicLong> emittedRecordsCount;
-        private final SharedReference<AtomicLong> emittedRecordsWithCheckpoint;
+            implements SourceFunction<Long>, CheckpointListener {
 
         private volatile boolean running = true;
-        private volatile long temp;
-        private Object lock;
+        private final AtomicInteger nextRecord = new AtomicInteger();
 
-        InfiniteIntegerSource(
-                SharedReference<AtomicLong> emittedRecordsCount,
-                SharedReference<AtomicLong> emittedRecordsWithCheckpoint) {
-            this.emittedRecordsCount = emittedRecordsCount;
-            this.emittedRecordsWithCheckpoint = emittedRecordsWithCheckpoint;
-        }
+        InfiniteIntegerSource() {}
 
         @Override
         public void run(SourceContext<Long> ctx) throws Exception {
-            lock = ctx.getCheckpointLock();
+            Object lock = ctx.getCheckpointLock();
             while (running) {
                 synchronized (lock) {
-                    ctx.collect(emittedRecordsCount.get().addAndGet(1));
+                    ctx.collect((long) nextRecord.getAndIncrement());
                     Thread.sleep(1);
                 }
             }
+            LOG.info("last emitted record {}", nextRecord.get() - 1);
         }
 
         @Override
@@ -637,22 +709,9 @@ public class KafkaSinkITCase extends TestLogger {
         }
 
         @Override
-        public void notifyCheckpointComplete(long checkpointId) throws Exception {
-            emittedRecordsWithCheckpoint.get().set(temp);
+        public void notifyCheckpointComplete(long checkpointId) {
             running = false;
             LOG.info("notifyCheckpointCompleted {}", checkpointId);
         }
-
-        @Override
-        public void snapshotState(FunctionSnapshotContext context) throws Exception {
-            temp = emittedRecordsCount.get().get();
-            LOG.info(
-                    "snapshotState, {}, {}",
-                    context.getCheckpointId(),
-                    emittedRecordsCount.get().get());
-        }
-
-        @Override
-        public void initializeState(FunctionInitializationContext context) throws Exception {}
     }
 }
