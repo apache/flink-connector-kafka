@@ -17,6 +17,8 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
+
 import javax.annotation.Nullable;
 
 import java.util.Objects;

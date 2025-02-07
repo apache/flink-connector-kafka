@@ -17,6 +17,7 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.flink.connector.kafka.sink.internal.TransactionalIdFactory;
 import org.apache.flink.util.TestLogger;
 
 import org.junit.Test;

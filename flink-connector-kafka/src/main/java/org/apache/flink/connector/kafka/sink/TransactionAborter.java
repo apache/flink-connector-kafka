@@ -17,6 +17,9 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
+import org.apache.flink.connector.kafka.sink.internal.TransactionalIdFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
