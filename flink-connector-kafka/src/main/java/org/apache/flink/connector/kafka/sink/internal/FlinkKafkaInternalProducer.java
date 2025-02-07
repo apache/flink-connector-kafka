@@ -162,20 +162,13 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         return (long) getField(producerIdAndEpoch, "producerId");
     }
 
-    public void initTransactionId(String transactionalId) {
-        if (!transactionalId.equals(this.transactionalId)) {
-            setTransactionId(transactionalId);
-            initTransactions();
-        }
-    }
-
     /**
      * Sets the transaction manager state to uninitialized.
      *
      * <p>Can only be called if the producer is in a transaction. Its main purpose is to resolve the
      * split brain scenario between writer and committer.
      */
-    public void transactionCompletedExternally() {
+    public void resetTransactionState() {
         checkState(inTransaction, "Not in transactional state");
         this.inTransaction = false;
         this.hasRecordsInTransaction = false;

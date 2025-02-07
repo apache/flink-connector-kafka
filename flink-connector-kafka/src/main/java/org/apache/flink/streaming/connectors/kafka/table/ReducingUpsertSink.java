@@ -20,6 +20,7 @@ package org.apache.flink.streaming.connectors.kafka.table;
 import org.apache.flink.api.connector.sink.Sink;
 import org.apache.flink.api.connector.sink.SinkWriter;
 import org.apache.flink.api.connector.sink2.Committer;
+import org.apache.flink.api.connector.sink2.CommitterInitContext;
 import org.apache.flink.connector.kafka.sink.TwoPhaseCommittingStatefulSink;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.table.data.RowData;
@@ -73,8 +74,8 @@ class ReducingUpsertSink<WriterState, Comm>
     }
 
     @Override
-    public Committer<Comm> createCommitter() throws IOException {
-        return wrappedSink.createCommitter();
+    public Committer<Comm> createCommitter(CommitterInitContext context) throws IOException {
+        return wrappedSink.createCommitter(context);
     }
 
     @Override

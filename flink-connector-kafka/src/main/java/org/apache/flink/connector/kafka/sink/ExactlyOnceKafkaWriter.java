@@ -21,7 +21,11 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.connector.sink2.Sink;
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.kafka.sink.internal.BackchannelFactory;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
+import org.apache.flink.connector.kafka.sink.internal.ProducerPool;
+import org.apache.flink.connector.kafka.sink.internal.ProducerPoolImpl;
+import org.apache.flink.connector.kafka.sink.internal.ReadableBackchannel;
 import org.apache.flink.connector.kafka.sink.internal.TransactionalIdFactory;
 import org.apache.flink.runtime.checkpoint.CheckpointIDCounter;
 import org.apache.flink.util.FlinkRuntimeException;
@@ -31,20 +35,16 @@ import org.apache.kafka.common.errors.ProducerFencedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.Closeable;
 import java.io.IOException;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 
 import static org.apache.flink.util.IOUtils.closeAll;
 import static org.apache.flink.util.Preconditions.checkNotNull;
-import static org.apache.flink.util.Preconditions.checkState;
 
 /**
  * Exactly-once Kafka writer that writes records to Kafka in transactions.
@@ -56,13 +56,21 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     private final String transactionalIdPrefix;
 
     private final KafkaWriterState kafkaWriterState;
-    // producer pool only used for exactly once
-    private final Deque<FlinkKafkaInternalProducer<byte[], byte[]>> producerPool =
-            new ArrayDeque<>();
     private final Collection<KafkaWriterState> recoveredStates;
-    private long lastCheckpointId;
+    private final long restoredCheckpointId;
 
-    private final Deque<Closeable> producerCloseables = new ArrayDeque<>();
+    /**
+     * The producer pool that manages all transactional producers. It keeps track of the producers
+     * that have been recycled as well as producers that are currently in use (potentially forwarded
+     * to committer).
+     */
+    private final ProducerPool producerPool;
+    /**
+     * Backchannel used to communicate committed transactions from the committer to this writer.
+     * Establishing the channel happens during recovery. Thus, it is only safe to poll in checkpoint
+     * related methods.
+     */
+    private final ReadableBackchannel<String> backchannel;
 
     /**
      * Constructor creating a kafka writer.
@@ -103,43 +111,64 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
         }
 
         this.kafkaWriterState = new KafkaWriterState(transactionalIdPrefix);
-        this.lastCheckpointId =
-                sinkInitContext
-                        .getRestoredCheckpointId()
-                        .orElse(CheckpointIDCounter.INITIAL_CHECKPOINT_ID - 1);
 
         this.recoveredStates = checkNotNull(recoveredStates, "recoveredStates");
         initFlinkMetrics();
+        restoredCheckpointId =
+                sinkInitContext
+                        .getRestoredCheckpointId()
+                        .orElse(CheckpointIDCounter.INITIAL_CHECKPOINT_ID - 1);
+        int subtaskId = sinkInitContext.getTaskInfo().getIndexOfThisSubtask();
+        this.producerPool = new ProducerPoolImpl(kafkaProducerConfig, this::initKafkaMetrics);
+        this.backchannel =
+                BackchannelFactory.getInstance()
+                        .getReadableBackchannel(
+                                subtaskId,
+                                sinkInitContext.getTaskInfo().getAttemptNumber(),
+                                transactionalIdPrefix);
     }
 
     @Override
     public void initialize() {
-        abortLingeringTransactions(recoveredStates, lastCheckpointId + 1);
-        this.currentProducer = getTransactionalProducer(lastCheckpointId + 1);
-        this.currentProducer.beginTransaction();
+        abortLingeringTransactions(
+                checkNotNull(recoveredStates, "recoveredStates"), restoredCheckpointId + 1);
+        this.currentProducer = startTransaction(restoredCheckpointId + 1);
+    }
+
+    private FlinkKafkaInternalProducer<byte[], byte[]> startTransaction(long checkpointId) {
+        FlinkKafkaInternalProducer<byte[], byte[]> producer =
+                producerPool.getTransactionalProducer(
+                        TransactionalIdFactory.buildTransactionalId(
+                                transactionalIdPrefix,
+                                kafkaSinkContext.getParallelInstanceId(),
+                                checkpointId),
+                        checkpointId);
+        producer.beginTransaction();
+        return producer;
     }
 
     @Override
     public Collection<KafkaCommittable> prepareCommit() {
         // only return a KafkaCommittable if the current transaction has been written some data
         if (currentProducer.hasRecordsInTransaction()) {
-            final List<KafkaCommittable> committables =
-                    Collections.singletonList(
-                            KafkaCommittable.of(currentProducer, producerPool::add));
-            LOG.debug("Committing {} committables.", committables);
-            return committables;
+            KafkaCommittable committable = KafkaCommittable.of(currentProducer);
+            LOG.debug("Prepare {}.", committable);
+            return Collections.singletonList(committable);
         }
 
-        // otherwise, we commit the empty transaction as is (no-op) and just recycle the producer
-        currentProducer.commitTransaction();
-        producerPool.add(currentProducer);
+        // otherwise, we recycle the producer (the pool will reset the transaction state)
+        producerPool.recycle(currentProducer);
         return Collections.emptyList();
     }
 
     @Override
     public List<KafkaWriterState> snapshotState(long checkpointId) throws IOException {
-        currentProducer = getTransactionalProducer(checkpointId + 1);
-        currentProducer.beginTransaction();
+        // recycle committed producers
+        String finishedTransactionalId;
+        while ((finishedTransactionalId = backchannel.poll()) != null) {
+            producerPool.recycleByTransactionId(finishedTransactionalId);
+        }
+        currentProducer = startTransaction(checkpointId + 1);
         return Collections.singletonList(kafkaWriterState);
     }
 
@@ -148,7 +177,7 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
         closeAll(
                 this::abortCurrentProducer,
                 () -> closeAll(producerPool),
-                () -> closeAll(producerCloseables),
+                backchannel,
                 super::close);
     }
 
@@ -166,8 +195,13 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     }
 
     @VisibleForTesting
-    Collection<FlinkKafkaInternalProducer<byte[], byte[]>> getProducerPool() {
+    ProducerPool getProducerPool() {
         return producerPool;
+    }
+
+    @VisibleForTesting
+    public String getTransactionalIdPrefix() {
+        return transactionalIdPrefix;
     }
 
     private void abortLingeringTransactions(
@@ -175,6 +209,9 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
         List<String> prefixesToAbort = new ArrayList<>();
         prefixesToAbort.add(transactionalIdPrefix);
 
+        LOG.info(
+                "Aborting lingering transactions from previous execution. Recovered states: {}.",
+                recoveredStates);
         final Optional<KafkaWriterState> lastStateOpt = recoveredStates.stream().findFirst();
         if (lastStateOpt.isPresent()) {
             KafkaWriterState lastState = lastStateOpt.get();
@@ -191,52 +228,9 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
                 new TransactionAborter(
                         kafkaSinkContext.getParallelInstanceId(),
                         kafkaSinkContext.getNumberOfParallelInstances(),
-                        this::getOrCreateTransactionalProducer,
-                        producerPool::add)) {
+                        id -> producerPool.getTransactionalProducer(id, startCheckpointId),
+                        producerPool::recycle)) {
             transactionAborter.abortLingeringTransactions(prefixesToAbort, startCheckpointId);
         }
-    }
-
-    /**
-     * For each checkpoint we create new {@link FlinkKafkaInternalProducer} so that new transactions
-     * will not clash with transactions created during previous checkpoints ({@code
-     * producer.initTransactions()} assures that we obtain new producerId and epoch counters).
-     *
-     * <p>Ensures that all transaction ids in between lastCheckpointId and checkpointId are
-     * initialized.
-     */
-    private FlinkKafkaInternalProducer<byte[], byte[]> getTransactionalProducer(long checkpointId) {
-        checkState(
-                checkpointId > lastCheckpointId,
-                "Expected %s > %s",
-                checkpointId,
-                lastCheckpointId);
-        FlinkKafkaInternalProducer<byte[], byte[]> producer = null;
-        // in case checkpoints have been aborted, Flink would create non-consecutive transaction ids
-        // this loop ensures that all gaps are filled with initialized (empty) transactions
-        for (long id = lastCheckpointId + 1; id <= checkpointId; id++) {
-            String transactionalId =
-                    TransactionalIdFactory.buildTransactionalId(
-                            transactionalIdPrefix, kafkaSinkContext.getParallelInstanceId(), id);
-            producer = getOrCreateTransactionalProducer(transactionalId);
-        }
-        this.lastCheckpointId = checkpointId;
-        assert producer != null;
-        LOG.info("Created new transactional producer {}", producer.getTransactionalId());
-        return producer;
-    }
-
-    private FlinkKafkaInternalProducer<byte[], byte[]> getOrCreateTransactionalProducer(
-            String transactionalId) {
-        FlinkKafkaInternalProducer<byte[], byte[]> producer = producerPool.poll();
-        if (producer == null) {
-            producer = new FlinkKafkaInternalProducer<>(kafkaProducerConfig, transactionalId);
-            producerCloseables.add(producer);
-            producer.initTransactions();
-            initKafkaMetrics(producer);
-        } else {
-            producer.initTransactionId(transactionalId);
-        }
-        return producer;
     }
 }

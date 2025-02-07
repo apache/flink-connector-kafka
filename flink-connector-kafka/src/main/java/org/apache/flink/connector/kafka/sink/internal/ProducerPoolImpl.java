@@ -157,7 +157,7 @@ public class ProducerPoolImpl implements ProducerPool {
         // transaction. In this case, we forcibly complete the transaction, such that we can
         // initialize it.
         if (producer.isInTransaction()) {
-            producer.transactionCompletedExternally();
+            producer.resetTransactionState();
         }
         producerPool.add(producer);
 

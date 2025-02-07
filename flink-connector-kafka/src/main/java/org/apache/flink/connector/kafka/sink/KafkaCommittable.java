@@ -17,44 +17,43 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
 
 import javax.annotation.Nullable;
 
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.Consumer;
 
 /**
  * This class holds the necessary information to construct a new {@link FlinkKafkaInternalProducer}
  * to commit transactions in {@link KafkaCommitter}.
  */
+@Internal
 class KafkaCommittable {
 
     private final long producerId;
     private final short epoch;
     private final String transactionalId;
-    @Nullable private Recyclable<? extends FlinkKafkaInternalProducer<?, ?>> producer;
+    @Nullable private FlinkKafkaInternalProducer<?, ?> producer;
 
     public KafkaCommittable(
             long producerId,
             short epoch,
             String transactionalId,
-            @Nullable Recyclable<? extends FlinkKafkaInternalProducer<?, ?>> producer) {
+            @Nullable FlinkKafkaInternalProducer<?, ?> producer) {
         this.producerId = producerId;
         this.epoch = epoch;
         this.transactionalId = transactionalId;
         this.producer = producer;
     }
 
-    public static <K, V> KafkaCommittable of(
-            FlinkKafkaInternalProducer<K, V> producer,
-            Consumer<FlinkKafkaInternalProducer<K, V>> recycler) {
+    public static <K, V> KafkaCommittable of(FlinkKafkaInternalProducer<K, V> producer) {
         return new KafkaCommittable(
                 producer.getProducerId(),
                 producer.getEpoch(),
                 producer.getTransactionalId(),
-                new Recyclable<>(producer, recycler));
+                producer);
     }
 
     public long getProducerId() {
@@ -69,7 +68,7 @@ class KafkaCommittable {
         return transactionalId;
     }
 
-    public Optional<Recyclable<? extends FlinkKafkaInternalProducer<?, ?>>> getProducer() {
+    public Optional<FlinkKafkaInternalProducer<?, ?>> getProducer() {
         return Optional.ofNullable(producer);
     }
 
@@ -80,8 +79,11 @@ class KafkaCommittable {
                 + producerId
                 + ", epoch="
                 + epoch
-                + ", transactionalId="
+                + ", transactionalId='"
                 + transactionalId
+                + '\''
+                + ", producer="
+                + producer
                 + '}';
     }
 

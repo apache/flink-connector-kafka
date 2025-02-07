@@ -19,6 +19,8 @@ package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
+import org.apache.flink.connector.kafka.sink.internal.ProducerPoolImpl;
+import org.apache.flink.connector.kafka.sink.internal.WritableBackchannel;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
 import org.apache.flink.util.TestLoggerExtension;
@@ -201,7 +203,7 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
             final KafkaCommittable committable = committables.stream().findFirst().get();
             assertThat(committable.getProducer().isPresent()).isTrue();
 
-            committable.getProducer().get().getObject().commitTransaction();
+            committable.getProducer().get().commitTransaction();
 
             List<ConsumerRecord<byte[], byte[]>> records =
                     drainAllRecordsFromTopic(topic, getKafkaClientConfiguration(), true);
@@ -216,7 +218,7 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
     void usePooledProducerForTransactional() throws Exception {
         try (final ExactlyOnceKafkaWriter<Integer> writer =
                 createWriter(DeliveryGuarantee.EXACTLY_ONCE)) {
-            assertThat(writer.getProducerPool()).hasSize(0);
+            assertThat(getProducers(writer)).hasSize(0);
 
             writer.write(1, SINK_WRITER_CONTEXT);
             writer.flush(false);
@@ -226,17 +228,17 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
             final KafkaCommittable committable = committables0.stream().findFirst().get();
             assertThat(committable.getProducer().isPresent()).isTrue();
 
-            FlinkKafkaInternalProducer<?, ?> firstProducer =
-                    committable.getProducer().get().getObject();
+            FlinkKafkaInternalProducer<?, ?> firstProducer = committable.getProducer().get();
             assertThat(firstProducer != writer.getCurrentProducer())
                     .as("Expected different producer")
                     .isTrue();
 
             // recycle first producer, KafkaCommitter would commit it and then return it
-            assertThat(writer.getProducerPool()).hasSize(0);
+            assertThat(getProducers(writer)).hasSize(0);
             firstProducer.commitTransaction();
-            committable.getProducer().get().close();
-            assertThat(writer.getProducerPool()).hasSize(1);
+            try (WritableBackchannel<String> backchannel = getBackchannel(writer)) {
+                backchannel.send(firstProducer.getTransactionalId());
+            }
 
             writer.write(1, SINK_WRITER_CONTEXT);
             writer.flush(false);
@@ -261,16 +263,16 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
     void prepareCommitForEmptyTransaction() throws Exception {
         try (final ExactlyOnceKafkaWriter<Integer> writer =
                 createWriter(DeliveryGuarantee.EXACTLY_ONCE)) {
-            assertThat(writer.getProducerPool()).hasSize(0);
+            assertThat(getProducers(writer)).hasSize(0);
 
             // no data written to current transaction
             writer.flush(false);
             Collection<KafkaCommittable> emptyCommittables = writer.prepareCommit();
 
             assertThat(emptyCommittables).hasSize(0);
-            assertThat(writer.getProducerPool()).hasSize(1);
+            assertThat(getProducers(writer)).hasSize(1);
             final FlinkKafkaInternalProducer<?, ?> recycledProducer =
-                    Iterables.getFirst(writer.getProducerPool(), null);
+                    Iterables.getFirst(getProducers(writer), null);
             assertThat(recycledProducer.isInTransaction()).isFalse();
         }
     }
@@ -305,5 +307,10 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
 
             assertThat(drainAllRecordsFromTopic(topic, properties, true)).hasSize(1);
         }
+    }
+
+    private static Collection<FlinkKafkaInternalProducer<byte[], byte[]>> getProducers(
+            ExactlyOnceKafkaWriter<Integer> writer) {
+        return ((ProducerPoolImpl) writer.getProducerPool()).getProducers();
     }
 }

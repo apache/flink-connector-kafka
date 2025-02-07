@@ -66,14 +66,15 @@ class FlinkKafkaInternalProducerITCase {
     }
 
     @Test
-    void testInitTransactionId() {
+    void testResetTransactional() {
         final String topic = "test-init-transactions";
         final String transactionIdPrefix = "testInitTransactionId-";
         try (FlinkKafkaInternalProducer<String, String> reuse =
                 new FlinkKafkaInternalProducer<>(getProperties(), "dummy")) {
             int numTransactions = 20;
             for (int i = 1; i <= numTransactions; i++) {
-                reuse.initTransactionId(transactionIdPrefix + i);
+                reuse.setTransactionId(transactionIdPrefix + i);
+                reuse.initTransactions();
                 reuse.beginTransaction();
                 reuse.send(new ProducerRecord<>(topic, "test-value-" + i));
                 if (i % 2 == 0) {
@@ -101,7 +102,7 @@ class FlinkKafkaInternalProducerITCase {
             producer.beginTransaction();
             producer.send(new ProducerRecord<>(topic, "test-value"));
             producer.flush();
-            snapshottedCommittable = KafkaCommittable.of(producer, ignored -> {});
+            snapshottedCommittable = KafkaCommittable.of(producer);
         }
 
         try (FlinkKafkaInternalProducer<String, String> resumedProducer =
@@ -122,7 +123,7 @@ class FlinkKafkaInternalProducerITCase {
                 new FlinkKafkaInternalProducer<>(getProperties(), "dummy")) {
             producer.initTransactions();
             producer.beginTransaction();
-            snapshottedCommittable = KafkaCommittable.of(producer, ignored -> {});
+            snapshottedCommittable = KafkaCommittable.of(producer);
         }
 
         try (FlinkKafkaInternalProducer<String, String> resumedProducer =
