@@ -21,12 +21,14 @@ package org.apache.flink.connector.kafka.sink.internal;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 
+import java.util.Collection;
+
 import static org.apache.flink.util.Preconditions.checkState;
 
 /** Implementation of {@link TransactionNamingStrategy}. */
 @Internal
 public enum TransactionNamingStrategyImpl {
-    INCREMENTING {
+    INCREMENTING(false) {
         /**
          * For each checkpoint we create new {@link FlinkKafkaInternalProducer} so that new
          * transactions will not clash with transactions created during previous checkpoints ({@code
@@ -55,7 +57,27 @@ public enum TransactionNamingStrategyImpl {
             }
             return context.getProducer(context.buildTransactionalId(expectedCheckpointId));
         }
+    },
+    POOLING(true) {
+        @Override
+        public FlinkKafkaInternalProducer<byte[], byte[]> getTransactionalProducer(
+                Context context) {
+            Collection<String> usedTransactionalIds = context.getOngoingTransactions();
+            for (int offset = 0; ; offset++) {
+                String transactionalIdCandidate = context.buildTransactionalId(offset);
+                if (usedTransactionalIds.contains(transactionalIdCandidate)) {
+                    continue;
+                }
+                return context.getProducer(transactionalIdCandidate);
+            }
+        }
     };
+
+    private final boolean requiresKnownTopics;
+
+    TransactionNamingStrategyImpl(boolean requiresKnownTopics) {
+        this.requiresKnownTopics = requiresKnownTopics;
+    }
 
     /**
      * Returns a {@link FlinkKafkaInternalProducer} that will not clash with any ongoing
@@ -64,11 +86,17 @@ public enum TransactionNamingStrategyImpl {
     public abstract FlinkKafkaInternalProducer<byte[], byte[]> getTransactionalProducer(
             Context context);
 
+    public boolean requiresKnownTopics() {
+        return requiresKnownTopics;
+    }
+
     /** Context for the transaction naming strategy. */
     public interface Context {
         String buildTransactionalId(long offset);
 
         long getNextCheckpointId();
+
+        Collection<String> getOngoingTransactions();
 
         long getLastCheckpointId();
 
