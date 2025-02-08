@@ -26,8 +26,11 @@ import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer
 import org.apache.flink.connector.kafka.sink.internal.ProducerPool;
 import org.apache.flink.connector.kafka.sink.internal.ProducerPoolImpl;
 import org.apache.flink.connector.kafka.sink.internal.ReadableBackchannel;
+import org.apache.flink.connector.kafka.sink.internal.TransactionAbortStrategyContextImpl;
+import org.apache.flink.connector.kafka.sink.internal.TransactionAbortStrategyImpl;
 import org.apache.flink.connector.kafka.sink.internal.TransactionFinished;
-import org.apache.flink.connector.kafka.sink.internal.TransactionalIdFactory;
+import org.apache.flink.connector.kafka.sink.internal.TransactionNamingStrategyContextImpl;
+import org.apache.flink.connector.kafka.sink.internal.TransactionNamingStrategyImpl;
 import org.apache.flink.runtime.checkpoint.CheckpointIDCounter;
 import org.apache.flink.util.FlinkRuntimeException;
 
@@ -54,7 +57,17 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  */
 class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     private static final Logger LOG = LoggerFactory.getLogger(ExactlyOnceKafkaWriter.class);
+    /**
+     * Prefix for the transactional id. Must be unique across all sinks writing to the same broker.
+     */
     private final String transactionalIdPrefix;
+    /**
+     * Strategy to abort lingering transactions from previous executions during writer
+     * initialization.
+     */
+    private final TransactionAbortStrategyImpl transactionAbortStrategy;
+    /** Strategy to name transactions. */
+    private final TransactionNamingStrategyImpl transactionNamingStrategy;
 
     private final KafkaWriterState kafkaWriterState;
     private final Collection<KafkaWriterState> recoveredStates;
@@ -72,6 +85,8 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
      * related methods.
      */
     private final ReadableBackchannel<TransactionFinished> backchannel;
+    /** The context used to name transactions. */
+    private final TransactionNamingStrategyContextImpl namingContext;
 
     /**
      * Constructor creating a kafka writer.
@@ -95,6 +110,8 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
             WriterInitContext sinkInitContext,
             KafkaRecordSerializationSchema<IN> recordSerializer,
             SerializationSchema.InitializationContext schemaContext,
+            TransactionAbortStrategyImpl transactionAbortStrategy,
+            TransactionNamingStrategyImpl transactionNamingStrategy,
             Collection<KafkaWriterState> recoveredStates) {
         super(
                 deliveryGuarantee,
@@ -104,6 +121,11 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
                 schemaContext);
         this.transactionalIdPrefix =
                 checkNotNull(transactionalIdPrefix, "transactionalIdPrefix must not be null");
+        this.transactionAbortStrategy =
+                checkNotNull(transactionAbortStrategy, "transactionAbortStrategy must not be null");
+        this.transactionNamingStrategy =
+                checkNotNull(
+                        transactionNamingStrategy, "transactionNamingStrategy must not be null");
 
         try {
             recordSerializer.open(schemaContext, kafkaSinkContext);
@@ -127,6 +149,9 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
                                 subtaskId,
                                 sinkInitContext.getTaskInfo().getAttemptNumber(),
                                 transactionalIdPrefix);
+        this.namingContext =
+                new TransactionNamingStrategyContextImpl(
+                        transactionalIdPrefix, subtaskId, restoredCheckpointId, producerPool);
     }
 
     @Override
@@ -147,13 +172,10 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     }
 
     private FlinkKafkaInternalProducer<byte[], byte[]> startTransaction(long checkpointId) {
+        namingContext.setNextCheckpointId(checkpointId);
         FlinkKafkaInternalProducer<byte[], byte[]> producer =
-                producerPool.getTransactionalProducer(
-                        TransactionalIdFactory.buildTransactionalId(
-                                transactionalIdPrefix,
-                                kafkaSinkContext.getParallelInstanceId(),
-                                checkpointId),
-                        checkpointId);
+                transactionNamingStrategy.getTransactionalProducer(namingContext);
+        namingContext.setLastCheckpointId(checkpointId);
         producer.beginTransaction();
         return producer;
     }
@@ -236,13 +258,34 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
             }
         }
 
-        try (TransactionAborter transactionAborter =
-                new TransactionAborter(
-                        kafkaSinkContext.getParallelInstanceId(),
-                        kafkaSinkContext.getNumberOfParallelInstances(),
-                        id -> producerPool.getTransactionalProducer(id, startCheckpointId),
-                        producerPool::recycle)) {
-            transactionAborter.abortLingeringTransactions(prefixesToAbort, startCheckpointId);
-        }
+        LOG.info(
+                "Aborting lingering transactions with prefixes {} using {}",
+                prefixesToAbort,
+                transactionAbortStrategy);
+        TransactionAbortStrategyContextImpl context =
+                getTransactionAbortStrategyContext(startCheckpointId, prefixesToAbort);
+        transactionAbortStrategy.abortTransactions(context);
+    }
+
+    private TransactionAbortStrategyContextImpl getTransactionAbortStrategyContext(
+            long startCheckpointId, List<String> prefixesToAbort) {
+        TransactionAbortStrategyImpl.TransactionAborter aborter =
+                transactionalId -> {
+                    // getTransactionalProducer already calls initTransactions, which cancels the
+                    // transaction
+                    FlinkKafkaInternalProducer<byte[], byte[]> producer =
+                            producerPool.getTransactionalProducer(transactionalId, 0);
+                    LOG.debug("Aborting transaction {}", transactionalId);
+                    producer.flush();
+                    short epoch = producer.getEpoch();
+                    producerPool.recycle(producer);
+                    return epoch;
+                };
+        return new TransactionAbortStrategyContextImpl(
+                kafkaSinkContext.getParallelInstanceId(),
+                kafkaSinkContext.getNumberOfParallelInstances(),
+                prefixesToAbort,
+                startCheckpointId,
+                aborter);
     }
 }

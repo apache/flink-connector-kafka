@@ -18,6 +18,8 @@
 
 package org.apache.flink.connector.kafka.sink.internal;
 
+import org.apache.flink.annotation.Internal;
+
 /**
  * The writable portion of a {@link Backchannel} for communication between the commiter -> writer.
  * It's used to signal that certain transactions have been committed and respective producers are
@@ -26,6 +28,7 @@ package org.apache.flink.connector.kafka.sink.internal;
  * <p>Messages can be sent before the backchannel is established. They will be consumed once the
  * backchannel is established.
  */
+@Internal
 public interface WritableBackchannel<T> extends Backchannel {
     /** Send a message to the backchannel. */
     void send(T message);
