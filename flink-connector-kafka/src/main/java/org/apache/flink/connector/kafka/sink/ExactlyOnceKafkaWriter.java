@@ -200,6 +200,10 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
 
     private FlinkKafkaInternalProducer<byte[], byte[]> startTransaction(long checkpointId) {
         namingContext.setNextCheckpointId(checkpointId);
+        namingContext.setOngoingTransactions(
+                producerPool.getOngoingTransactions().stream()
+                        .map(CheckpointTransaction::getTransactionalId)
+                        .collect(Collectors.toSet()));
         FlinkKafkaInternalProducer<byte[], byte[]> producer =
                 transactionNamingStrategy.getTransactionalProducer(namingContext);
         namingContext.setLastCheckpointId(checkpointId);

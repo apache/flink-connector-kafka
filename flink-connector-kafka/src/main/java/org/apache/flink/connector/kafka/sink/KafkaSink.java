@@ -115,6 +115,7 @@ public class KafkaSink<IN>
                 transactionalIdPrefix,
                 context.getTaskInfo().getIndexOfThisSubtask(),
                 context.getTaskInfo().getAttemptNumber(),
+                transactionNamingStrategy == TransactionNamingStrategy.POOLING,
                 FlinkKafkaInternalProducer::new);
     }
 
