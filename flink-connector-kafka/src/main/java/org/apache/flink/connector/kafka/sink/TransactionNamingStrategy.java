@@ -46,7 +46,8 @@ public enum TransactionNamingStrategy {
      */
     INCREMENTING(
             TransactionNamingStrategyImpl.INCREMENTING,
-            EnumSet.allOf(TransactionAbortStrategy.class));
+            EnumSet.allOf(TransactionAbortStrategy.class)),
+    POOLING(TransactionNamingStrategyImpl.POOLING, EnumSet.of(TransactionAbortStrategy.LISTING));
 
     /**
      * The default transaction naming strategy. Currently set to {@link #INCREMENTING}, which is the

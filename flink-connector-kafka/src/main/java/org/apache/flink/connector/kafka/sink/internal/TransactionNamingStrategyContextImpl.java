@@ -18,12 +18,15 @@
 
 package org.apache.flink.connector.kafka.sink.internal;
 
+import java.util.Collection;
+
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /** Implementation of {@link TransactionNamingStrategyImpl.Context}. */
 public class TransactionNamingStrategyContextImpl implements TransactionNamingStrategyImpl.Context {
     private final String transactionalIdPrefix;
     private final int subtaskId;
+    private Collection<String> ongoingTransactions;
     private final ProducerPool producerPool;
 
     private long lastCheckpointId;
@@ -59,6 +62,15 @@ public class TransactionNamingStrategyContextImpl implements TransactionNamingSt
 
     public void setLastCheckpointId(long lastCheckpointId) {
         this.lastCheckpointId = lastCheckpointId;
+    }
+
+    @Override
+    public Collection<String> getOngoingTransactions() {
+        return ongoingTransactions;
+    }
+
+    public void setOngoingTransactions(Collection<String> ongoingTransactions) {
+        this.ongoingTransactions = ongoingTransactions;
     }
 
     @Override
