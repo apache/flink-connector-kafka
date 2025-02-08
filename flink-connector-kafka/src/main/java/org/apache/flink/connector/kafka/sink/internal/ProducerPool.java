@@ -18,7 +18,10 @@
 
 package org.apache.flink.connector.kafka.sink.internal;
 
+import org.apache.flink.annotation.Internal;
+
 /** A pool of producers that can be recycled. */
+@Internal
 public interface ProducerPool extends AutoCloseable {
     /**
      * Notify the pool that a transaction has finished. The producer with the given transactional id
