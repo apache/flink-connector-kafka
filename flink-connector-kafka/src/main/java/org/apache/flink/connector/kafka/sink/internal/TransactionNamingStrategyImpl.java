@@ -18,11 +18,13 @@
 
 package org.apache.flink.connector.kafka.sink.internal;
 
-import org.apache.flink.connector.kafka.sink.KafkaSinkOptions.TransactionNamingStrategy;
+import org.apache.flink.connector.kafka.sink.KafkaSinkOptions;
+
+import java.util.Collection;
 
 import static org.apache.flink.util.Preconditions.checkState;
 
-/** Implementation of {@link TransactionNamingStrategy}. */
+/** Implementation of {@link KafkaSinkOptions.TransactionNamingStrategy}. */
 public enum TransactionNamingStrategyImpl {
     INCREMENTING {
         /**
@@ -53,6 +55,20 @@ public enum TransactionNamingStrategyImpl {
             }
             return context.getProducer(context.buildTransactionalId(expectedCheckpointId));
         }
+    },
+    POOLING {
+        @Override
+        public FlinkKafkaInternalProducer<byte[], byte[]> getTransactionalProducer(
+                Context context) {
+            Collection<String> usedTransactionalIds = context.getOngoingTransactions();
+            for (int offset = 0; ; offset++) {
+                String transactionalIdCandidate = context.buildTransactionalId(offset);
+                if (usedTransactionalIds.contains(transactionalIdCandidate)) {
+                    continue;
+                }
+                return context.getProducer(transactionalIdCandidate);
+            }
+        }
     };
 
     /**
@@ -67,6 +83,8 @@ public enum TransactionNamingStrategyImpl {
         String buildTransactionalId(long offset);
 
         long getNextCheckpointId();
+
+        Collection<String> getOngoingTransactions();
 
         long getLastCheckpointId();
 
