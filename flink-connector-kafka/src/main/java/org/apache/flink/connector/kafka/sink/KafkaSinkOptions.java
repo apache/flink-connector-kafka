@@ -72,7 +72,15 @@ public class KafkaSinkOptions {
          * <p>This is exactly the same behavior as in flink-connector-kafka 3.X.
          */
         INCREMENTING(
-                TransactionNamingStrategyImpl.INCREMENTING, TransactionAbortStrategyImpl.PROBING);
+                TransactionNamingStrategyImpl.INCREMENTING, TransactionAbortStrategyImpl.PROBING),
+        /**
+         * This strategy reuses transaction names. It is more resource-friendly than {@link
+         * #INCREMENTING} on the Kafka broker.
+         *
+         * <p>It's a new strategy introduced in flink-connector-kafka 4.X. It requires Kafka 3.0+
+         * and additional read permissions on the target topics.
+         */
+        POOLING(TransactionNamingStrategyImpl.POOLING, TransactionAbortStrategyImpl.LISTING);
 
         /**
          * The default transaction naming strategy. Currently set to {@link #INCREMENTING}, which is
@@ -95,6 +103,10 @@ public class KafkaSinkOptions {
                 TransactionNamingStrategyImpl impl, TransactionAbortStrategyImpl abortImpl) {
             this.impl = impl;
             this.abortImpl = abortImpl;
+        }
+
+        boolean requiresKnownTopics() {
+            return impl.requiresKnownTopics();
         }
 
         @Internal
