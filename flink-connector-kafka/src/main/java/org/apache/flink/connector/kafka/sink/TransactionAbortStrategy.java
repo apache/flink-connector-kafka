@@ -42,7 +42,8 @@ public enum TransactionAbortStrategy {
      *
      * <p>This is exactly the same behavior as in flink-connector-kafka 3.X.
      */
-    PROBING(TransactionAbortStrategyImpl.PROBING);
+    PROBING(TransactionAbortStrategyImpl.PROBING),
+    LISTING(TransactionAbortStrategyImpl.LISTING);
 
     /**
      * The default transaction abort strategy. Currently set to {@link #PROBING}, which is the same

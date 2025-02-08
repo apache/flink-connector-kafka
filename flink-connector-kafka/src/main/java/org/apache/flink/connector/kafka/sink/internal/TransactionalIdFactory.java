@@ -43,4 +43,17 @@ public class TransactionalIdFactory {
                 + TRANSACTIONAL_ID_DELIMITER
                 + checkpointOffset;
     }
+
+    public static long extractSubtaskId(String name) {
+        int lastSep = name.lastIndexOf("-");
+        int secondLastSep = name.lastIndexOf("-", lastSep - 1);
+        String subtaskString = name.substring(secondLastSep + 1, lastSep);
+        return Long.parseLong(subtaskString);
+    }
+
+    public static String extractPrefix(String name) {
+        int lastSep = name.lastIndexOf("-");
+        int secondLastSep = name.lastIndexOf("-", lastSep - 1);
+        return name.substring(0, secondLastSep);
+    }
 }

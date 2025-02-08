@@ -17,19 +17,32 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.flink.annotation.Internal;
+import org.apache.flink.connector.kafka.sink.internal.CheckpointTransaction;
+
+import java.util.Collection;
 import java.util.Objects;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
-class KafkaWriterState {
+/** The state of the Kafka writer. Used to capture information regarding transactions. */
+@Internal
+public class KafkaWriterState {
     private final String transactionalIdPrefix;
+    private final Collection<CheckpointTransaction> ongoingTransactions;
 
-    KafkaWriterState(String transactionalIdPrefix) {
+    KafkaWriterState(
+            String transactionalIdPrefix, Collection<CheckpointTransaction> ongoingTransactions) {
         this.transactionalIdPrefix = checkNotNull(transactionalIdPrefix, "transactionalIdPrefix");
+        this.ongoingTransactions = ongoingTransactions;
     }
 
     public String getTransactionalIdPrefix() {
         return transactionalIdPrefix;
+    }
+
+    public Collection<CheckpointTransaction> getOngoingTransactions() {
+        return ongoingTransactions;
     }
 
     @Override
@@ -41,20 +54,23 @@ class KafkaWriterState {
             return false;
         }
         KafkaWriterState that = (KafkaWriterState) o;
-        return transactionalIdPrefix.equals(that.transactionalIdPrefix);
+        return Objects.equals(transactionalIdPrefix, that.transactionalIdPrefix)
+                && Objects.equals(ongoingTransactions, that.ongoingTransactions);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(transactionalIdPrefix);
+        return Objects.hash(transactionalIdPrefix, ongoingTransactions);
     }
 
     @Override
     public String toString() {
         return "KafkaWriterState{"
-                + ", transactionalIdPrefix='"
+                + "transactionalIdPrefix='"
                 + transactionalIdPrefix
                 + '\''
+                + ", ongoingTransactions="
+                + ongoingTransactions
                 + '}';
     }
 }
