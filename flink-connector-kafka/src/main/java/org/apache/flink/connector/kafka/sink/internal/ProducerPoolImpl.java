@@ -27,6 +27,7 @@ import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.Deque;
@@ -98,22 +99,19 @@ public class ProducerPoolImpl implements ProducerPool {
     /** Creates a new {@link ProducerPoolImpl}. */
     public ProducerPoolImpl(
             Properties kafkaProducerConfig,
-            Consumer<FlinkKafkaInternalProducer<byte[], byte[]>> producerInit) {
+            Consumer<FlinkKafkaInternalProducer<byte[], byte[]>> producerInit,
+            Collection<CheckpointTransaction> ongoingTransactions) {
         this.kafkaProducerConfig =
                 checkNotNull(kafkaProducerConfig, "kafkaProducerConfig must not be null");
         this.producerInit = checkNotNull(producerInit, "producerInit must not be null");
+
+        initOngoingTransactions(ongoingTransactions);
     }
 
     @Override
     public void recycleByTransactionId(String transactionalId) {
         ProducerEntry producerEntry = producerByTransactionalId.remove(transactionalId);
         LOG.debug("Transaction {} finished, producer {}", transactionalId, producerEntry);
-        if (producerEntry == null) {
-            // during recovery, the committer may finish transactions that are not yet ongoing from
-            // the writer's perspective
-            return;
-        }
-
         transactionalIdsByCheckpoint.remove(producerEntry.getCheckpointedTransaction());
         recycleProducer(producerEntry.getProducer());
 
@@ -164,6 +162,17 @@ public class ProducerPoolImpl implements ProducerPool {
         LOG.debug("Recycling {}, new pool size {}", producer, producerPool.size());
     }
 
+    private void initOngoingTransactions(Collection<CheckpointTransaction> ongoingTransactions) {
+        for (CheckpointTransaction ongoingTransaction : ongoingTransactions) {
+            this.transactionalIdsByCheckpoint.put(
+                    ongoingTransaction, ongoingTransaction.getTransactionalId());
+            this.producerByTransactionalId.put(
+                    ongoingTransaction.getTransactionalId(),
+                    new ProducerEntry(null, ongoingTransaction));
+        }
+        LOG.debug("Initialized ongoing transactions from state {}", ongoingTransactions);
+    }
+
     @Override
     public FlinkKafkaInternalProducer<byte[], byte[]> getTransactionalProducer(
             String transactionalId, long checkpointId) {
@@ -195,6 +204,11 @@ public class ProducerPoolImpl implements ProducerPool {
         return producer;
     }
 
+    @Override
+    public Collection<CheckpointTransaction> getOngoingTransactions() {
+        return new ArrayList<>(transactionalIdsByCheckpoint.keySet());
+    }
+
     @VisibleForTesting
     public Collection<FlinkKafkaInternalProducer<byte[], byte[]>> getProducers() {
         return producerPool;
@@ -218,13 +232,13 @@ public class ProducerPoolImpl implements ProducerPool {
     }
 
     private static class ProducerEntry {
-        private final FlinkKafkaInternalProducer<byte[], byte[]> producer;
+        @Nullable private final FlinkKafkaInternalProducer<byte[], byte[]> producer;
         private final CheckpointTransaction checkpointedTransaction;
 
         private ProducerEntry(
-                FlinkKafkaInternalProducer<byte[], byte[]> producer,
+                @Nullable FlinkKafkaInternalProducer<byte[], byte[]> producer,
                 CheckpointTransaction checkpointedTransaction) {
-            this.producer = checkNotNull(producer, "producer must not be null");
+            this.producer = producer;
             this.checkpointedTransaction =
                     checkNotNull(
                             checkpointedTransaction, "checkpointedTransaction must not be null");
@@ -234,6 +248,7 @@ public class ProducerPoolImpl implements ProducerPool {
             return checkpointedTransaction;
         }
 
+        @Nullable
         public FlinkKafkaInternalProducer<byte[], byte[]> getProducer() {
             return producer;
         }
