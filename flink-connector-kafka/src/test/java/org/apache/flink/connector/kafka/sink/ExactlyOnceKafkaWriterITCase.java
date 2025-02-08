@@ -20,11 +20,13 @@ package org.apache.flink.connector.kafka.sink;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.kafka.sink.internal.CheckpointTransaction;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
 import org.apache.flink.connector.kafka.sink.internal.ProducerPoolImpl;
 import org.apache.flink.connector.kafka.sink.internal.TransactionFinished;
 import org.apache.flink.connector.kafka.sink.internal.TransactionOwnership;
 import org.apache.flink.connector.kafka.sink.internal.WritableBackchannel;
+import org.apache.flink.connector.kafka.util.AdminUtils;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
@@ -32,6 +34,7 @@ import org.apache.flink.test.junit5.MiniClusterExtension;
 import org.apache.flink.util.TestLoggerExtension;
 
 import com.google.common.collect.Iterables;
+import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.errors.ProducerFencedException;
@@ -42,11 +45,14 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
 import java.util.function.Consumer;
 
+import static org.apache.flink.connector.kafka.sink.internal.TransactionalIdFactory.buildTransactionalId;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.drainAllRecordsFromTopic;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
@@ -240,6 +246,38 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
         }
     }
 
+    /** Test that writer does not abort those transactions that are passed in as writer state. */
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2, 3})
+    void shouldNotAbortPrecommittedTransactions(int numCheckpointed) throws Exception {
+        try (final KafkaWriter<Integer> failedWriter =
+                createWriter(DeliveryGuarantee.EXACTLY_ONCE)) {
+
+            // create three precommitted transactions
+            List<KafkaWriterState> states =
+                    Arrays.asList(
+                            onCheckpointBarrier(failedWriter, 1).f0, // 1 transaction
+                            onCheckpointBarrier(failedWriter, 2).f0, // 2 transactions
+                            onCheckpointBarrier(failedWriter, 3).f0); // 3 transactions
+
+            // assume a varying number of states that have been checkpointed
+            try (final ExactlyOnceKafkaWriter<Integer> recoveredWriter =
+                    restoreWriter(
+                            this::withPooling,
+                            List.of(states.get(numCheckpointed - 1)),
+                            createInitContext())) {
+                // test abort of recoveredWriter; this should abort all transactions that have
+                // not been in the part of the checkpoint
+                try (AdminClient admin = AdminClient.create(getKafkaClientConfiguration())) {
+                    assertThat(
+                                    AdminUtils.getOpenTransactionsForTopics(
+                                            admin, Collections.singleton(topic)))
+                            .hasSize(numCheckpointed);
+                }
+            }
+        }
+    }
+
     /** Test that producers are reused when committed. */
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
@@ -339,9 +377,63 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
         }
     }
 
+    /** Test that producers are reused when committed. */
+    @Test
+    void shouldSkipIdsOfCommitterForPooledTransactions() throws Exception {
+        String prefix = getTransactionalPrefix();
+        CheckpointTransaction t1 = new CheckpointTransaction(buildTransactionalId(prefix, 0, 2), 2);
+        CheckpointTransaction t2 = new CheckpointTransaction(buildTransactionalId(prefix, 0, 4), 4);
+        final KafkaWriterState writerState =
+                new KafkaWriterState(
+                        prefix,
+                        0,
+                        1,
+                        TransactionOwnership.EXPLICIT_BY_WRITER_STATE,
+                        Arrays.asList(t1, t2));
+
+        SinkInitContext initContext = createInitContext();
+        int checkpointId = 9;
+        initContext.setRestoredCheckpointId(checkpointId);
+        try (final ExactlyOnceKafkaWriter<Integer> writer =
+                        restoreWriter(
+                                this::withPooling,
+                                Collections.singletonList(writerState),
+                                initContext);
+                WritableBackchannel<TransactionFinished> backchannel = getBackchannel(writer)) {
+            // offsets leave out the used 2 and 4
+            for (int expectedOffset : new int[] {0, 1, 3, 5, 6}) {
+                assertThat(writer.getCurrentProducer().getTransactionalId())
+                        .isEqualTo(buildTransactionalId(prefix, 0, expectedOffset));
+                writer.write(checkpointId, SINK_WRITER_CONTEXT);
+                writer.flush(false);
+                writer.prepareCommit();
+                writer.snapshotState(++checkpointId);
+            }
+
+            // free 4, which also frees 2; 2 is returned first and then 4
+            backchannel.send(new TransactionFinished(t2.getTransactionalId(), true));
+            writer.write(checkpointId, SINK_WRITER_CONTEXT);
+            writer.prepareCommit();
+            writer.snapshotState(++checkpointId);
+            assertThat(writer.getCurrentProducer().getTransactionalId())
+                    .isEqualTo(t1.getTransactionalId());
+
+            writer.write(checkpointId, SINK_WRITER_CONTEXT);
+            writer.prepareCommit();
+            writer.snapshotState(++checkpointId);
+            assertThat(writer.getCurrentProducer().getTransactionalId())
+                    .isEqualTo(t2.getTransactionalId());
+        }
+    }
+
     private static Collection<FlinkKafkaInternalProducer<byte[], byte[]>> getProducers(
             ExactlyOnceKafkaWriter<Integer> writer) {
         return ((ProducerPoolImpl) writer.getProducerPool()).getProducers();
+    }
+
+    private KafkaSinkBuilder<?> withPooling(KafkaSinkBuilder<?> builder) {
+        return builder.setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
+                .setTransactionNamingStrategy(TransactionNamingStrategy.POOLING);
     }
 
     private Tuple2<KafkaWriterState, KafkaCommittable> onCheckpointBarrier(

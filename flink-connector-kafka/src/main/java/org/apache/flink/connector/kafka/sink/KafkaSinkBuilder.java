@@ -21,6 +21,7 @@ import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.java.ClosureCleaner;
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacetProvider;
 
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
@@ -200,6 +201,12 @@ public class KafkaSinkBuilder<IN> {
             checkState(
                     transactionalIdPrefix != null,
                     "EXACTLY_ONCE delivery guarantee requires a transactionalIdPrefix to be set to provide unique transaction names across multiple KafkaSinks writing to the same Kafka cluster.");
+            if (transactionNamingStrategy.getImpl().requiresKnownTopics()) {
+                checkState(
+                        recordSerializer instanceof KafkaDatasetFacetProvider,
+                        "For %s naming strategy, the recordSerializer needs to expose the target topics though implementing KafkaDatasetFacetProvider.",
+                        transactionNamingStrategy);
+            }
         }
     }
 

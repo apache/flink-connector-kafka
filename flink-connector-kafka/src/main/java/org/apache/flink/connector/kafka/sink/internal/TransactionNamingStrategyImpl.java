@@ -21,12 +21,14 @@ package org.apache.flink.connector.kafka.sink.internal;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 
+import java.util.Set;
+
 import static org.apache.flink.util.Preconditions.checkState;
 
 /** Implementation of {@link TransactionNamingStrategy}. */
 @Internal
 public enum TransactionNamingStrategyImpl {
-    INCREMENTING(TransactionOwnership.IMPLICIT_BY_SUBTASK_ID) {
+    INCREMENTING(TransactionOwnership.IMPLICIT_BY_SUBTASK_ID, false) {
         /**
          * For each checkpoint we create new {@link FlinkKafkaInternalProducer} so that new
          * transactions will not clash with transactions created during previous checkpoints ({@code
@@ -55,12 +57,36 @@ public enum TransactionNamingStrategyImpl {
             }
             return context.getProducer(context.buildTransactionalId(expectedCheckpointId));
         }
+    },
+    POOLING(TransactionOwnership.EXPLICIT_BY_WRITER_STATE, true) {
+        @Override
+        public FlinkKafkaInternalProducer<byte[], byte[]> getTransactionalProducer(
+                Context context) {
+            Set<String> usedTransactionalIds = context.getOngoingTransactions();
+            for (int offset = 0; ; offset++) {
+                String transactionalIdCandidate = context.buildTransactionalId(offset);
+                if (usedTransactionalIds.contains(transactionalIdCandidate)) {
+                    continue;
+                }
+                return context.getProducer(transactionalIdCandidate);
+            }
+        }
     };
 
     private final TransactionOwnership ownership;
+    private final boolean requiresKnownTopics;
 
-    TransactionNamingStrategyImpl(TransactionOwnership ownership) {
+    TransactionNamingStrategyImpl(TransactionOwnership ownership, boolean requiresKnownTopics) {
         this.ownership = ownership;
+        this.requiresKnownTopics = requiresKnownTopics;
+    }
+
+    public boolean requiresKnownTopics() {
+        return requiresKnownTopics;
+    }
+
+    public TransactionOwnership getOwnership() {
+        return ownership;
     }
 
     /**
@@ -70,15 +96,13 @@ public enum TransactionNamingStrategyImpl {
     public abstract FlinkKafkaInternalProducer<byte[], byte[]> getTransactionalProducer(
             Context context);
 
-    public TransactionOwnership getOwnership() {
-        return ownership;
-    }
-
     /** Context for the transaction naming strategy. */
     public interface Context {
         String buildTransactionalId(long offset);
 
         long getNextCheckpointId();
+
+        Set<String> getOngoingTransactions();
 
         long getLastCheckpointId();
 
