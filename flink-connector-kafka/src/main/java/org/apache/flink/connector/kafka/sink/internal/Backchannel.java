@@ -18,6 +18,8 @@
 
 package org.apache.flink.connector.kafka.sink.internal;
 
+import org.apache.flink.annotation.Internal;
+
 import java.io.Closeable;
 
 /**
@@ -34,6 +36,7 @@ import java.io.Closeable;
  * both instances will run inside the same JVM and we can establish a backchannel between them. The
  * latter case requires some synchronization in the buffer.
  */
+@Internal
 public interface Backchannel extends Closeable {
     /** Check if the backchannel is fully established. */
     boolean isEstablished();

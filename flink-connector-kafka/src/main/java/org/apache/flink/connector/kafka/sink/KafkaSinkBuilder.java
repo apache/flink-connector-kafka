@@ -74,6 +74,7 @@ public class KafkaSinkBuilder<IN> {
 
     private final Properties kafkaProducerConfig;
     private KafkaRecordSerializationSchema<IN> recordSerializer;
+    private TransactionNamingStrategy transactionNamingStrategy = TransactionNamingStrategy.DEFAULT;
 
     KafkaSinkBuilder() {
         kafkaProducerConfig = new Properties();
@@ -126,6 +127,20 @@ public class KafkaSinkBuilder<IN> {
     }
 
     /**
+     * Sets the {@link TransactionNamingStrategy} that is used to name the transactions.
+     *
+     * <p>By default {@link TransactionNamingStrategy#DEFAULT} is used. It's recommended to change
+     * the strategy only if specific issues occur.
+     */
+    public KafkaSinkBuilder<IN> setTransactionNamingStrategy(
+            TransactionNamingStrategy transactionNamingStrategy) {
+        this.transactionNamingStrategy =
+                checkNotNull(
+                        transactionNamingStrategy, "transactionNamingStrategy must not be null");
+        return this;
+    }
+
+    /**
      * Sets the {@link KafkaRecordSerializationSchema} that transforms incoming records to {@link
      * org.apache.kafka.clients.producer.ProducerRecord}s.
      *
@@ -162,7 +177,7 @@ public class KafkaSinkBuilder<IN> {
         checkState(
                 transactionalIdPrefix.getBytes(StandardCharsets.UTF_8).length
                         <= MAXIMUM_PREFIX_BYTES,
-                "The configured prefix is too long and the resulting transactionalId might exceed Kafka's transactionalIds size.");
+                "The configured prefix is too long and the resulting transactionalIdPrefix might exceed Kafka's transactionalIdPrefix size.");
         return this;
     }
 
@@ -180,12 +195,12 @@ public class KafkaSinkBuilder<IN> {
         checkNotNull(
                 kafkaProducerConfig.getProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG),
                 "bootstrapServers");
+        checkNotNull(recordSerializer, "recordSerializer");
         if (deliveryGuarantee == DeliveryGuarantee.EXACTLY_ONCE) {
             checkState(
                     transactionalIdPrefix != null,
-                    "EXACTLY_ONCE delivery guarantee requires a transactionIdPrefix to be set to provide unique transaction names across multiple KafkaSinks writing to the same Kafka cluster.");
+                    "EXACTLY_ONCE delivery guarantee requires a transactionalIdPrefix to be set to provide unique transaction names across multiple KafkaSinks writing to the same Kafka cluster.");
         }
-        checkNotNull(recordSerializer, "recordSerializer");
     }
 
     /**
@@ -196,6 +211,10 @@ public class KafkaSinkBuilder<IN> {
     public KafkaSink<IN> build() {
         sanityCheck();
         return new KafkaSink<>(
-                deliveryGuarantee, kafkaProducerConfig, transactionalIdPrefix, recordSerializer);
+                deliveryGuarantee,
+                kafkaProducerConfig,
+                transactionalIdPrefix,
+                recordSerializer,
+                transactionNamingStrategy);
     }
 }
