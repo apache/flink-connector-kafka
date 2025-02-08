@@ -43,7 +43,12 @@ public class KafkaSinkTest {
                 new KafkaRecordSerializationSchemaWithoutKafkaDatasetProvider();
         KafkaSink<Object> sink =
                 new KafkaSink<>(
-                        DeliveryGuarantee.EXACTLY_ONCE, new Properties(), "", recordSerializer);
+                        DeliveryGuarantee.EXACTLY_ONCE,
+                        new Properties(),
+                        "",
+                        recordSerializer,
+                        TransactionNamingStrategy.DEFAULT,
+                        TransactionAbortStrategy.DEFAULT);
 
         assertThat(sink.getLineageVertex().datasets()).isEmpty();
     }
@@ -55,7 +60,12 @@ public class KafkaSinkTest {
 
         KafkaSink<Object> sink =
                 new KafkaSink<>(
-                        DeliveryGuarantee.EXACTLY_ONCE, new Properties(), "", recordSerializer);
+                        DeliveryGuarantee.EXACTLY_ONCE,
+                        new Properties(),
+                        "",
+                        recordSerializer,
+                        TransactionNamingStrategy.DEFAULT,
+                        TransactionAbortStrategy.DEFAULT);
 
         assertThat(sink.getLineageVertex().datasets()).isEmpty();
     }
@@ -67,7 +77,12 @@ public class KafkaSinkTest {
 
         KafkaSink<Object> sink =
                 new KafkaSink<>(
-                        DeliveryGuarantee.EXACTLY_ONCE, kafkaProperties, "", recordSerializer);
+                        DeliveryGuarantee.EXACTLY_ONCE,
+                        kafkaProperties,
+                        "",
+                        recordSerializer,
+                        TransactionNamingStrategy.DEFAULT,
+                        TransactionAbortStrategy.DEFAULT);
 
         LineageVertex lineageVertex = sink.getLineageVertex();
 
@@ -99,11 +114,12 @@ public class KafkaSinkTest {
     public void testCoLocation() {
         String colocationKey = "testCoLocation";
         KafkaSink<Object> sink =
-                new KafkaSink<>(
-                        DeliveryGuarantee.EXACTLY_ONCE,
-                        kafkaProperties,
-                        colocationKey,
-                        new TestingKafkaRecordSerializationSchema());
+                KafkaSink.builder()
+                        .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
+                        .setKafkaProducerConfig(kafkaProperties)
+                        .setTransactionalIdPrefix(colocationKey)
+                        .setRecordSerializer(new TestingKafkaRecordSerializationSchema())
+                        .build();
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
@@ -122,11 +138,12 @@ public class KafkaSinkTest {
         String colocationKey = "testPreserveCustomCoLocation";
         String customColocationKey = "customCoLocation";
         KafkaSink<Object> sink =
-                new KafkaSink<>(
-                        DeliveryGuarantee.EXACTLY_ONCE,
-                        kafkaProperties,
-                        colocationKey,
-                        new TestingKafkaRecordSerializationSchema());
+                KafkaSink.builder()
+                        .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
+                        .setKafkaProducerConfig(kafkaProperties)
+                        .setTransactionalIdPrefix(colocationKey)
+                        .setRecordSerializer(new TestingKafkaRecordSerializationSchema())
+                        .build();
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 

@@ -32,6 +32,7 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.Properties;
 
+import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.apache.flink.util.Preconditions.checkState;
 
@@ -74,6 +75,8 @@ public class KafkaSinkBuilder<IN> {
 
     private final Properties kafkaProducerConfig;
     private KafkaRecordSerializationSchema<IN> recordSerializer;
+    private TransactionNamingStrategy transactionNamingStrategy = TransactionNamingStrategy.DEFAULT;
+    private TransactionAbortStrategy transactionAbortStrategy = TransactionAbortStrategy.DEFAULT;
 
     KafkaSinkBuilder() {
         kafkaProducerConfig = new Properties();
@@ -139,6 +142,23 @@ public class KafkaSinkBuilder<IN> {
         return this;
     }
 
+    public KafkaSinkBuilder<IN> setTransactionStrategies(
+            TransactionNamingStrategy transactionNamingStrategy,
+            TransactionAbortStrategy transactionAbortStrategy) {
+        checkNotNull(transactionNamingStrategy, "transactionCreationStrategy must not be null");
+
+        checkNotNull(transactionAbortStrategy, "transactionAbortStrategy must not be null");
+        checkArgument(
+                transactionNamingStrategy
+                        .getSupportedAbortStrategies()
+                        .contains(transactionAbortStrategy),
+                "The provided transactionAbortStrategy is not supported by the transactionCreationStrategy. Supported strategies are: %s",
+                transactionNamingStrategy.getSupportedAbortStrategies());
+        this.transactionNamingStrategy = transactionNamingStrategy;
+        this.transactionAbortStrategy = transactionAbortStrategy;
+        return this;
+    }
+
     /**
      * Sets the {@link KafkaRecordSerializationSchema} that transforms incoming records to {@link
      * org.apache.kafka.clients.producer.ProducerRecord}s.
@@ -194,12 +214,12 @@ public class KafkaSinkBuilder<IN> {
         checkNotNull(
                 kafkaProducerConfig.getProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG),
                 "bootstrapServers");
+        checkNotNull(recordSerializer, "recordSerializer");
         if (deliveryGuarantee == DeliveryGuarantee.EXACTLY_ONCE) {
             checkState(
                     transactionalIdPrefix != null,
-                    "EXACTLY_ONCE delivery guarantee requires a transactionIdPrefix to be set to provide unique transaction names across multiple KafkaSinks writing to the same Kafka cluster.");
+                    "EXACTLY_ONCE delivery guarantee requires a transactionalIdPrefix to be set to provide unique transaction names across multiple KafkaSinks writing to the same Kafka cluster.");
         }
-        checkNotNull(recordSerializer, "recordSerializer");
     }
 
     /**
@@ -210,6 +230,11 @@ public class KafkaSinkBuilder<IN> {
     public KafkaSink<IN> build() {
         sanityCheck();
         return new KafkaSink<>(
-                deliveryGuarantee, kafkaProducerConfig, transactionalIdPrefix, recordSerializer);
+                deliveryGuarantee,
+                kafkaProducerConfig,
+                transactionalIdPrefix,
+                recordSerializer,
+                transactionNamingStrategy,
+                transactionAbortStrategy);
     }
 }
