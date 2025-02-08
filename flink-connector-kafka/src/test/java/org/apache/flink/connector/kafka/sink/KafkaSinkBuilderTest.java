@@ -89,7 +89,7 @@ public class KafkaSinkBuilderTest extends TestLogger {
     }
 
     @Test
-    void testTransactionIdSanityCheck() {
+    void testTransactionalIdSanityCheck() {
         assertThatThrownBy(
                         () ->
                                 getBasicBuilder()
@@ -97,7 +97,7 @@ public class KafkaSinkBuilderTest extends TestLogger {
                                         .build())
                 .isExactlyInstanceOf(IllegalStateException.class)
                 .hasMessageContaining(
-                        "EXACTLY_ONCE delivery guarantee requires a transactionIdPrefix to be set to provide unique transaction names across multiple KafkaSinks writing to the same Kafka cluster.");
+                        "EXACTLY_ONCE delivery guarantee requires a transactionalIdPrefix to be set to provide unique transaction names across multiple KafkaSinks writing to the same Kafka cluster.");
     }
 
     private void validateProducerConfig(

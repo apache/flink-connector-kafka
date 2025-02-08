@@ -18,6 +18,7 @@
 
 package org.apache.flink.connector.kafka.sink.internal;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.annotation.VisibleForTesting;
 
 import org.slf4j.Logger;
@@ -68,6 +69,7 @@ import static org.apache.flink.util.Preconditions.checkState;
  * it.
  */
 @NotThreadSafe
+@Internal
 public class ProducerPoolImpl implements ProducerPool {
     private static final Logger LOG = LoggerFactory.getLogger(ProducerPoolImpl.class);
 

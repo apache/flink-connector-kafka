@@ -18,6 +18,8 @@
 
 package org.apache.flink.connector.kafka.sink.internal;
 
+import org.apache.flink.annotation.Internal;
+
 import javax.annotation.Nullable;
 
 /**
@@ -25,6 +27,7 @@ import javax.annotation.Nullable;
  * to signal that certain transactions have been committed and respective producers are good to be
  * reused.
  */
+@Internal
 public interface ReadableBackchannel<T> extends Backchannel {
     /**
      * Poll the next message from the backchannel. This method is non-blocking and returns {@code
