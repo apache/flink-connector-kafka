@@ -46,6 +46,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.Network;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 import javax.annotation.Nullable;
 
@@ -66,6 +68,7 @@ import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaCo
 import static org.apache.kafka.clients.admin.AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG;
 
 /** Test base for KafkaWriter. */
+@Testcontainers
 public abstract class KafkaWriterTestBase {
 
     protected static final Logger LOG = LoggerFactory.getLogger(KafkaWriterTestBase.class);
@@ -80,7 +83,8 @@ public abstract class KafkaWriterTestBase {
     protected MetricListener metricListener;
     protected TriggerTimeService timeService;
 
-    protected static final KafkaContainer KAFKA_CONTAINER =
+    @Container
+    public static final KafkaContainer KAFKA_CONTAINER =
             createKafkaContainer(KafkaWriterTestBase.class)
                     .withEmbeddedZookeeper()
                     .withNetwork(NETWORK)
@@ -103,19 +107,20 @@ public abstract class KafkaWriterTestBase {
         checkProducerLeak();
     }
 
-    KafkaWriter<Integer> createWriter(DeliveryGuarantee guarantee) throws IOException {
+    <T extends KafkaWriter<?>> T createWriter(DeliveryGuarantee guarantee) throws IOException {
         return createWriter(guarantee, createInitContext());
     }
 
-    KafkaWriter<Integer> createWriter(DeliveryGuarantee guarantee, SinkInitContext sinkInitContext)
-            throws IOException {
+    <T extends KafkaWriter<?>> T createWriter(
+            DeliveryGuarantee guarantee, SinkInitContext sinkInitContext) throws IOException {
         return createWriter(builder -> builder.setDeliveryGuarantee(guarantee), sinkInitContext);
     }
 
-    KafkaWriter<Integer> createWriter(
+    @SuppressWarnings("unchecked")
+    <T extends KafkaWriter<?>> T createWriter(
             Consumer<KafkaSinkBuilder<?>> sinkBuilderAdjuster, SinkInitContext sinkInitContext)
             throws IOException {
-        return (KafkaWriter<Integer>) createSink(sinkBuilderAdjuster).createWriter(sinkInitContext);
+        return (T) createSink(sinkBuilderAdjuster).createWriter(sinkInitContext);
     }
 
     KafkaSink<Integer> createSink(Consumer<KafkaSinkBuilder<?>> sinkBuilderAdjuster) {
