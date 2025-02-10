@@ -23,11 +23,7 @@ import org.apache.flink.util.TestLoggerExtension;
 
 import org.apache.kafka.common.errors.NetworkException;
 import org.apache.kafka.common.errors.TimeoutException;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.Properties;
@@ -41,21 +37,6 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
     private static final String INIT_KAFKA_REQUEST_TIMEOUT_MS = "1000";
     private static final String INIT_KAFKA_MAX_BLOCK_MS = "1000";
     private static final String INIT_KAFKA_DELIVERY_TIMEOUT_MS = "1000";
-
-    @BeforeAll
-    public static void beforeAll() {
-        KAFKA_CONTAINER.start();
-    }
-
-    @AfterAll
-    public static void afterAll() {
-        KAFKA_CONTAINER.stop();
-    }
-
-    @BeforeEach
-    public void setUp(TestInfo testInfo) {
-        super.setUp(testInfo);
-    }
 
     @Test
     void testWriteExceptionWhenKafkaUnavailable() throws Exception {

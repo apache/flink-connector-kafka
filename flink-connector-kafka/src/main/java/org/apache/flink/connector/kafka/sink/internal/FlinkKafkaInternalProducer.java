@@ -60,16 +60,18 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
     private volatile boolean hasRecordsInTransaction;
     private volatile boolean closed;
 
-    public FlinkKafkaInternalProducer(Properties properties, @Nullable String transactionalId) {
-        super(withTransactionalId(properties, transactionalId));
-        this.transactionalId = transactionalId;
+    public FlinkKafkaInternalProducer(Properties properties) {
+        super(properties);
+        LOG.debug("Created non-transactional {}", this);
     }
 
-    private static Properties withTransactionalId(
-            Properties properties, @Nullable String transactionalId) {
-        if (transactionalId == null) {
-            return properties;
-        }
+    public FlinkKafkaInternalProducer(Properties properties, String transactionalId) {
+        super(withTransactionalId(properties, transactionalId));
+        this.transactionalId = transactionalId;
+        LOG.debug("Created transactional {}", this);
+    }
+
+    private static Properties withTransactionalId(Properties properties, String transactionalId) {
         Properties props = new Properties();
         props.putAll(properties);
         props.setProperty(ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
@@ -95,6 +97,7 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
     @Override
     public void beginTransaction() throws ProducerFencedException {
         super.beginTransaction();
+        LOG.debug("beginTransaction {}", transactionalId);
         inTransaction = true;
     }
 
@@ -126,23 +129,20 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
 
     @Override
     public void close() {
-        closed = true;
-        if (inTransaction) {
-            // This is state is most likely reached in case of a failure.
-            // If this producer is still in transaction, it should be committing.
-            // However, at this point, we cannot decide that and we shouldn't prolong cancellation.
-            // So hard kill this producer with all resources.
+        if (!closed) {
+            LOG.debug("Closing immediately {}", this);
             super.close(Duration.ZERO);
-        } else {
-            // If this is outside of a transaction, we should be able to cleanly shutdown.
-            super.close(Duration.ofHours(1));
+            closed = true;
         }
     }
 
     @Override
     public void close(Duration timeout) {
-        closed = true;
-        super.close(timeout);
+        if (!closed) {
+            LOG.debug("Closing with {} timeout {}", timeout, this);
+            super.close(timeout);
+            closed = true;
+        }
     }
 
     public boolean isClosed() {
@@ -395,13 +395,8 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
 
     @Override
     public String toString() {
-        return "FlinkKafkaInternalProducer{"
-                + "transactionalId='"
-                + transactionalId
-                + "', inTransaction="
-                + inTransaction
-                + ", closed="
-                + closed
-                + '}';
+        return String.format(
+                "FlinkKafkaInternalProducer@%d{transactionalId='%s', inTransaction=%s, closed=%s}",
+                System.identityHashCode(this), transactionalId, inTransaction, closed);
     }
 }

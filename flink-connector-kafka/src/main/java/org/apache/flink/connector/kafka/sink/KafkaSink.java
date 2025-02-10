@@ -110,28 +110,35 @@ public class KafkaSink<IN>
     @Internal
     @Override
     public KafkaWriter<IN> createWriter(InitContext context) throws IOException {
-        return new KafkaWriter<IN>(
-                deliveryGuarantee,
-                kafkaProducerConfig,
-                transactionalIdPrefix,
-                context,
-                recordSerializer,
-                context.asSerializationSchemaInitializationContext(),
-                Collections.emptyList());
+        return restoreWriter(context, Collections.emptyList());
     }
 
     @Internal
     @Override
     public KafkaWriter<IN> restoreWriter(
-            InitContext context, Collection<KafkaWriterState> recoveredState) throws IOException {
-        return new KafkaWriter<>(
-                deliveryGuarantee,
-                kafkaProducerConfig,
-                transactionalIdPrefix,
-                context,
-                recordSerializer,
-                context.asSerializationSchemaInitializationContext(),
-                recoveredState);
+            InitContext context, Collection<KafkaWriterState> recoveredState) {
+        KafkaWriter<IN> writer;
+        if (deliveryGuarantee == DeliveryGuarantee.EXACTLY_ONCE) {
+            writer =
+                    new ExactlyOnceKafkaWriter<>(
+                            deliveryGuarantee,
+                            kafkaProducerConfig,
+                            transactionalIdPrefix,
+                            context,
+                            recordSerializer,
+                            context.asSerializationSchemaInitializationContext(),
+                            recoveredState);
+        } else {
+            writer =
+                    new KafkaWriter<>(
+                            deliveryGuarantee,
+                            kafkaProducerConfig,
+                            context,
+                            recordSerializer,
+                            context.asSerializationSchemaInitializationContext());
+        }
+        writer.initialize();
+        return writer;
     }
 
     @Internal
