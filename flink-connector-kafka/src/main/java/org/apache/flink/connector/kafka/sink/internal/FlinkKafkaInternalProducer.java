@@ -18,8 +18,6 @@
 
 package org.apache.flink.connector.kafka.sink.internal;
 
-import org.apache.flink.annotation.Internal;
-
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -46,9 +44,7 @@ import static org.apache.flink.util.Preconditions.checkState;
 /**
  * A {@link KafkaProducer} that exposes private fields to allow resume producing from a given state.
  */
-@Internal
 public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
-
     private static final Logger LOG = LoggerFactory.getLogger(FlinkKafkaInternalProducer.class);
     private static final String TRANSACTION_MANAGER_FIELD_NAME = "transactionManager";
     private static final String TRANSACTION_MANAGER_STATE_ENUM =
@@ -173,28 +169,51 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         }
     }
 
+    /**
+     * Sets the transaction manager state to uninitialized.
+     *
+     * <p>Can only be called if the producer is in a transaction. Its main purpose is to resolve the
+     * split brain scenario between writer and committer.
+     */
+    public void transactionCompletedExternally() {
+        checkState(inTransaction, "Not in transactional state");
+        this.inTransaction = false;
+        this.hasRecordsInTransaction = false;
+        Object transactionManager = getTransactionManager();
+        synchronized (transactionManager) {
+            setField(transactionManager, "transactionalId", transactionalId);
+            setField(
+                    transactionManager,
+                    "currentState",
+                    getTransactionManagerState("UNINITIALIZED"));
+        }
+    }
+
+    /**
+     * Sets the transactional id and sets the transaction manager state to uninitialized.
+     *
+     * <p>Can only be called if the producer is not in a transaction.
+     */
     public void setTransactionId(String transactionalId) {
-        if (!transactionalId.equals(this.transactionalId)) {
-            checkState(
-                    !inTransaction,
-                    String.format("Another transaction %s is still open.", transactionalId));
-            LOG.debug("Change transaction id from {} to {}", this.transactionalId, transactionalId);
-            Object transactionManager = getTransactionManager();
-            synchronized (transactionManager) {
-                setField(transactionManager, "transactionalId", transactionalId);
-                setField(
-                        transactionManager,
-                        "currentState",
-                        getTransactionManagerState("UNINITIALIZED"));
-                this.transactionalId = transactionalId;
-            }
+        checkState(
+                !inTransaction,
+                String.format("Another transaction %s is still open.", transactionalId));
+        LOG.debug("Change transaction id from {} to {}", this.transactionalId, transactionalId);
+        this.transactionalId = transactionalId;
+        Object transactionManager = getTransactionManager();
+        synchronized (transactionManager) {
+            setField(transactionManager, "transactionalId", transactionalId);
+            setField(
+                    transactionManager,
+                    "currentState",
+                    getTransactionManagerState("UNINITIALIZED"));
         }
     }
 
     /**
      * Besides committing {@link org.apache.kafka.clients.producer.KafkaProducer#commitTransaction}
      * is also adding new partitions to the transaction. flushNewPartitions method is moving this
-     * logic to pre-commit/flush, to make resumeTransaction simpler. Otherwise resumeTransaction
+     * logic to pre-commit/flush, to make resumeTransaction simpler. Otherwise, resumeTransaction
      * would require to restore state of the not yet added/"in-flight" partitions.
      */
     private void flushNewPartitions() {
