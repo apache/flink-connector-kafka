@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.fail;
@@ -193,12 +194,17 @@ public class KafkaUtil {
                 .collect(Collectors.toSet());
     }
 
+    private static final Set<Long> KNOWN_LEAKS = new ConcurrentSkipListSet<>();
+
     public static void checkProducerLeak() {
         List<Map.Entry<Thread, StackTraceElement[]>> leaks = null;
         for (int tries = 0; tries < 10; tries++) {
             leaks =
                     Thread.getAllStackTraces().entrySet().stream()
                             .filter(KafkaUtil::findAliveKafkaThread)
+                            .filter(
+                                    threadEntry ->
+                                            !KNOWN_LEAKS.contains(threadEntry.getKey().getId()))
                             .collect(Collectors.toList());
             if (leaks.isEmpty()) {
                 return;
@@ -210,10 +216,10 @@ public class KafkaUtil {
         }
 
         for (Map.Entry<Thread, StackTraceElement[]> leak : leaks) {
-            leak.getKey().stop();
+            KNOWN_LEAKS.add(leak.getKey().getId());
         }
         fail(
-                "Detected producer leaks:\n"
+                "Detected new producer leaks:\n"
                         + leaks.stream()
                                 .map(KafkaUtil::format)
                                 .collect(Collectors.joining("\n\n")));
