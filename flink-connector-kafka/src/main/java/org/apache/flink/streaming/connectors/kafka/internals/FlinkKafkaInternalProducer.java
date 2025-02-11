@@ -37,6 +37,7 @@ import org.apache.kafka.common.MetricName;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.requests.FindCoordinatorRequest;
 import org.slf4j.Logger;
@@ -154,6 +155,11 @@ public class FlinkKafkaInternalProducer<K, V> implements Producer<K, V> {
     @Override
     public Map<MetricName, ? extends Metric> metrics() {
         return kafkaProducer.metrics();
+    }
+
+    @Override
+    public Uuid clientInstanceId(Duration timeout) {
+        return kafkaProducer.clientInstanceId(timeout);
     }
 
     @Override
