@@ -25,6 +25,7 @@ import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,6 +56,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -121,6 +123,19 @@ public class YamlFileMetadataService implements KafkaMetadataService {
     public Set<KafkaStream> getAllStreams() {
         refreshIfNeeded();
         return streamMetadata;
+    }
+
+    @Override
+    public Set<KafkaStream> getPatternStreams(Pattern streamPattern) {
+        refreshIfNeeded();
+        ImmutableSet.Builder<KafkaStream> builder = ImmutableSet.builder();
+        for (KafkaStream kafkaStream : streamMetadata) {
+            String streamId = kafkaStream.getStreamId();
+            if (streamPattern.matcher(streamId).find()) {
+                builder.add(kafkaStream);
+            }
+        }
+        return builder.build();
     }
 
     /** {@inheritDoc} */
