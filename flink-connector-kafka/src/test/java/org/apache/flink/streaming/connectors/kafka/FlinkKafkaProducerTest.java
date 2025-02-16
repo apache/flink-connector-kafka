@@ -26,6 +26,7 @@ import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartiti
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.junit.After;
 import org.junit.Test;
 
 import javax.annotation.Nullable;
@@ -33,28 +34,35 @@ import javax.annotation.Nullable;
 import java.util.Optional;
 import java.util.Properties;
 
+import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link FlinkKafkaProducer}. */
 public class FlinkKafkaProducerTest {
+    @After
+    public void checkLeaks() {
+        checkProducerLeak();
+    }
+
     @Test
     public void testOpenSerializationSchemaProducer() throws Exception {
         OpenTestingSerializationSchema schema = new OpenTestingSerializationSchema();
         FlinkKafkaProducer<Integer> kafkaProducer =
                 new FlinkKafkaProducer<>("localhost:9092", "test-topic", schema);
 
-        OneInputStreamOperatorTestHarness<Integer, Object> testHarness =
+        try (OneInputStreamOperatorTestHarness<Integer, Object> testHarness =
                 new OneInputStreamOperatorTestHarness<>(
                         new StreamSink<>(kafkaProducer),
                         1,
                         1,
                         0,
                         IntSerializer.INSTANCE,
-                        new OperatorID(1, 1));
+                        new OperatorID(1, 1))) {
 
-        testHarness.open();
+            testHarness.open();
 
-        assertThat(schema.openCalled).isTrue();
+            assertThat(schema.openCalled).isTrue();
+        }
     }
 
     @Test
@@ -69,18 +77,19 @@ public class FlinkKafkaProducerTest {
                         properties,
                         FlinkKafkaProducer.Semantic.AT_LEAST_ONCE);
 
-        OneInputStreamOperatorTestHarness<Integer, Object> testHarness =
+        try (OneInputStreamOperatorTestHarness<Integer, Object> testHarness =
                 new OneInputStreamOperatorTestHarness<>(
                         new StreamSink<>(kafkaProducer),
                         1,
                         1,
                         0,
                         IntSerializer.INSTANCE,
-                        new OperatorID(1, 1));
+                        new OperatorID(1, 1))) {
 
-        testHarness.open();
+            testHarness.open();
 
-        assertThat(schema.openCalled).isTrue();
+            assertThat(schema.openCalled).isTrue();
+        }
     }
 
     @Test
@@ -95,18 +104,19 @@ public class FlinkKafkaProducerTest {
                         properties,
                         Optional.of(partitioner));
 
-        OneInputStreamOperatorTestHarness<Integer, Object> testHarness =
+        try (OneInputStreamOperatorTestHarness<Integer, Object> testHarness =
                 new OneInputStreamOperatorTestHarness<>(
                         new StreamSink<>(kafkaProducer),
                         1,
                         1,
                         0,
                         IntSerializer.INSTANCE,
-                        new OperatorID(1, 1));
+                        new OperatorID(1, 1))) {
 
-        testHarness.open();
+            testHarness.open();
 
-        assertThat(partitioner.openCalled).isTrue();
+            assertThat(partitioner.openCalled).isTrue();
+        }
     }
 
     @Test(expected = NullPointerException.class)
