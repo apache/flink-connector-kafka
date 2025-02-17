@@ -34,7 +34,6 @@ import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.configuration.ExternalizedCheckpointRetention;
 import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.configuration.StateBackendOptions;
-import org.apache.flink.configuration.StateRecoveryOptions;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.testutils.KafkaSinkExternalContextFactory;
 import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
@@ -46,7 +45,6 @@ import org.apache.flink.connector.testframe.junit.annotations.TestEnv;
 import org.apache.flink.connector.testframe.junit.annotations.TestExternalSystem;
 import org.apache.flink.connector.testframe.junit.annotations.TestSemantics;
 import org.apache.flink.connector.testframe.testsuites.SinkTestSuiteBase;
-import org.apache.flink.core.execution.RecoveryClaimMode;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.runtime.jobgraph.JobGraph;
@@ -80,6 +78,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -180,6 +179,8 @@ public class KafkaSinkITCase extends TestLogger {
     /** Integration test based on connector testing framework. */
     @SuppressWarnings("unused")
     @Nested
+    @Disabled(
+            "FIXME: Skip this test temporarily until bumping a version that includes the fix of https://issues.apache.org/jira/browse/FLINK-36568")
     class IntegrationTests extends SinkTestSuiteBase<String> {
         // Defines test environment on Flink MiniCluster
         @TestEnv MiniClusterTestEnvironment flink = new MiniClusterTestEnvironment();
@@ -249,12 +250,11 @@ public class KafkaSinkITCase extends TestLogger {
         // Run a first job failing during the async phase of a checkpoint to leave some
         // lingering transactions
         final Configuration config = createConfiguration(4);
-        config.set(StateBackendOptions.STATE_BACKEND, "filesystem");
+        config.set(StateBackendOptions.STATE_BACKEND, "rocksdb");
         config.set(CheckpointingOptions.CHECKPOINTS_DIRECTORY, checkpointDir.toURI().toString());
         config.set(
                 CheckpointingOptions.EXTERNALIZED_CHECKPOINT_RETENTION,
                 ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION);
-        config.set(StateRecoveryOptions.RESTORE_MODE, RecoveryClaimMode.CLAIM);
         config.set(CheckpointingOptions.MAX_RETAINED_CHECKPOINTS, 2);
         JobID firstJobId = null;
         SharedReference<Set<Long>> checkpointedRecords =
@@ -346,14 +346,12 @@ public class KafkaSinkITCase extends TestLogger {
             @InjectClusterClient ClusterClient<?> clusterClient)
             throws Exception {
 
+        config.set(RestartStrategyOptions.RESTART_STRATEGY, "disable");
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(config);
         env.enableCheckpointing(100L);
         if (!chained) {
             env.disableOperatorChaining();
         }
-        Configuration configuration = new Configuration();
-        configuration.set(RestartStrategyOptions.RESTART_STRATEGY, "disable");
-        env.configure(configuration);
         final DataStreamSource<Long> source = env.fromSequence(1, 10);
         final DataStream<Long> stream =
                 source.map(mapper).map(new RecordFetcher(checkpointedRecords)).uid("fetcher");
