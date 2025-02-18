@@ -9,6 +9,10 @@ import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacetProvider;
 import org.apache.flink.connector.kafka.lineage.TypeDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.TypeDatasetFacetProvider;
+import org.apache.flink.streaming.api.datastream.DataStreamSink;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.graph.StreamGraph;
+import org.apache.flink.streaming.api.graph.StreamNode;
 import org.apache.flink.streaming.api.lineage.LineageVertex;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -35,10 +39,10 @@ public class KafkaSinkTest {
 
     @Test
     public void testGetLineageVertexWhenSerializerNotAnKafkaDatasetFacetProvider() {
-        KafkaRecordSerializationSchema recordSerializer =
+        KafkaRecordSerializationSchema<Object> recordSerializer =
                 new KafkaRecordSerializationSchemaWithoutKafkaDatasetProvider();
-        KafkaSink sink =
-                new KafkaSink(
+        KafkaSink<Object> sink =
+                new KafkaSink<>(
                         DeliveryGuarantee.EXACTLY_ONCE, new Properties(), "", recordSerializer);
 
         assertThat(sink.getLineageVertex().datasets()).isEmpty();
@@ -46,11 +50,11 @@ public class KafkaSinkTest {
 
     @Test
     public void testGetLineageVertexWhenNoKafkaDatasetFacetReturnedFromSerializer() {
-        KafkaRecordSerializationSchema recordSerializer =
+        KafkaRecordSerializationSchema<Object> recordSerializer =
                 new KafkaRecordSerializationSchemaWithEmptyKafkaDatasetProvider();
 
-        KafkaSink sink =
-                new KafkaSink(
+        KafkaSink<Object> sink =
+                new KafkaSink<>(
                         DeliveryGuarantee.EXACTLY_ONCE, new Properties(), "", recordSerializer);
 
         assertThat(sink.getLineageVertex().datasets()).isEmpty();
@@ -58,11 +62,11 @@ public class KafkaSinkTest {
 
     @Test
     public void testGetLineageVertex() {
-        KafkaRecordSerializationSchema recordSerializer =
+        KafkaRecordSerializationSchema<Object> recordSerializer =
                 new TestingKafkaRecordSerializationSchema();
 
-        KafkaSink sink =
-                new KafkaSink(
+        KafkaSink<Object> sink =
+                new KafkaSink<>(
                         DeliveryGuarantee.EXACTLY_ONCE, kafkaProperties, "", recordSerializer);
 
         LineageVertex lineageVertex = sink.getLineageVertex();
@@ -91,8 +95,54 @@ public class KafkaSinkTest {
                 .hasFieldOrPropertyWithValue("typeInformation", TypeInformation.of(String.class));
     }
 
-    private static class KafkaRecordSerializationSchemaWithoutKafkaDatasetProvider
-            implements KafkaRecordSerializationSchema {
+    @Test
+    public void testCoLocation() {
+        String colocationKey = "testCoLocation";
+        KafkaSink<Object> sink =
+                new KafkaSink<>(
+                        DeliveryGuarantee.EXACTLY_ONCE,
+                        kafkaProperties,
+                        colocationKey,
+                        new TestingKafkaRecordSerializationSchema());
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        env.<Object>fromData(1).sinkTo(sink);
+
+        StreamGraph streamGraph = env.getStreamGraph();
+        assertThat(streamGraph.getStreamNodes())
+                .filteredOn(node -> !node.getInEdges().isEmpty())
+                .hasSize(2) // writer and committer
+                .extracting(StreamNode::getCoLocationGroup)
+                .containsOnly(colocationKey);
+    }
+
+    @Test
+    public void testPreserveCustomCoLocation() {
+        String colocationKey = "testPreserveCustomCoLocation";
+        String customColocationKey = "customCoLocation";
+        KafkaSink<Object> sink =
+                new KafkaSink<>(
+                        DeliveryGuarantee.EXACTLY_ONCE,
+                        kafkaProperties,
+                        colocationKey,
+                        new TestingKafkaRecordSerializationSchema());
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        DataStreamSink<Object> stream = env.<Object>fromData(1).sinkTo(sink);
+        stream.getTransformation().setCoLocationGroupKey(customColocationKey);
+
+        StreamGraph streamGraph = env.getStreamGraph();
+        assertThat(streamGraph.getStreamNodes())
+                .filteredOn(node -> !node.getInEdges().isEmpty())
+                .hasSize(2) // writer and committer
+                .extracting(StreamNode::getCoLocationGroup)
+                .containsOnly(customColocationKey);
+    }
+
+    private static class KafkaRecordSerializationSchemaWithoutKafkaDatasetProvider<T>
+            implements KafkaRecordSerializationSchema<Object> {
         @Nullable
         @Override
         public ProducerRecord<byte[], byte[]> serialize(
@@ -102,7 +152,7 @@ public class KafkaSinkTest {
     }
 
     private static class KafkaRecordSerializationSchemaWithEmptyKafkaDatasetProvider
-            implements KafkaRecordSerializationSchema, KafkaDatasetFacetProvider {
+            implements KafkaRecordSerializationSchema<Object>, KafkaDatasetFacetProvider {
         @Nullable
         @Override
         public ProducerRecord<byte[], byte[]> serialize(
@@ -117,7 +167,7 @@ public class KafkaSinkTest {
     }
 
     private static class TestingKafkaRecordSerializationSchema
-            implements KafkaRecordSerializationSchema,
+            implements KafkaRecordSerializationSchema<Object>,
                     KafkaDatasetFacetProvider,
                     TypeDatasetFacetProvider {
 
