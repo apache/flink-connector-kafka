@@ -21,6 +21,7 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.sink2.Committer;
+import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacetProvider;
@@ -28,6 +29,10 @@ import org.apache.flink.connector.kafka.lineage.LineageUtil;
 import org.apache.flink.connector.kafka.lineage.TypeDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.TypeDatasetFacetProvider;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
+import org.apache.flink.streaming.api.connector.sink2.CommittableMessage;
+import org.apache.flink.streaming.api.connector.sink2.CommittableMessageTypeInfo;
+import org.apache.flink.streaming.api.connector.sink2.SupportsPostCommitTopology;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.lineage.LineageVertex;
 import org.apache.flink.streaming.api.lineage.LineageVertexProvider;
 
@@ -66,7 +71,8 @@ import java.util.Properties;
 @PublicEvolving
 public class KafkaSink<IN>
         implements LineageVertexProvider,
-                TwoPhaseCommittingStatefulSink<IN, KafkaWriterState, KafkaCommittable> {
+                TwoPhaseCommittingStatefulSink<IN, KafkaWriterState, KafkaCommittable>,
+                SupportsPostCommitTopology<KafkaCommittable> {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaSink.class);
     private final DeliveryGuarantee deliveryGuarantee;
 
@@ -145,6 +151,22 @@ public class KafkaSink<IN>
     @Override
     public SimpleVersionedSerializer<KafkaWriterState> getWriterStateSerializer() {
         return new KafkaWriterStateSerializer();
+    }
+
+    @Override
+    public void addPostCommitTopology(DataStream<CommittableMessage<KafkaCommittable>> committer) {
+        // this is a somewhat hacky way to ensure that the committer and writer are co-located
+        if (deliveryGuarantee == DeliveryGuarantee.EXACTLY_ONCE && transactionalIdPrefix != null) {
+            Transformation<?> transformation = committer.getTransformation();
+            // all sink transformations output CommittableMessage, so we can safely traverse the
+            // chain; custom colocation key is set before and should be preserved
+            while (transformation.getOutputType() instanceof CommittableMessageTypeInfo
+                    && transformation.getCoLocationGroupKey() == null) {
+                // colocate by transactionalIdPrefix, which should be unique
+                transformation.setCoLocationGroupKey(transactionalIdPrefix);
+                transformation = transformation.getInputs().get(0);
+            }
+        }
     }
 
     @VisibleForTesting
