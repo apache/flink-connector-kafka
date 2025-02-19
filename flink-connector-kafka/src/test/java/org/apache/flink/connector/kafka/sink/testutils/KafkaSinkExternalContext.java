@@ -25,7 +25,7 @@ import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.sink.KafkaSinkBuilder;
-import org.apache.flink.connector.kafka.sink.KafkaSinkOptions.TransactionNamingStrategy;
+import org.apache.flink.connector.kafka.sink.KafkaSinkOptions;
 import org.apache.flink.connector.testframe.external.ExternalSystemDataReader;
 import org.apache.flink.connector.testframe.external.sink.DataStreamSinkV2ExternalContext;
 import org.apache.flink.connector.testframe.external.sink.TestingSinkSettings;
@@ -77,7 +77,7 @@ public class KafkaSinkExternalContext implements DataStreamSinkV2ExternalContext
 
     private final List<ExternalSystemDataReader<String>> readers = new ArrayList<>();
 
-    private final TransactionNamingStrategy transactionNamingStrategy;
+    private final KafkaSinkOptions.TransactionNamingStrategy transactionNamingStrategy;
 
     protected int numSplits = 0;
 
@@ -88,7 +88,7 @@ public class KafkaSinkExternalContext implements DataStreamSinkV2ExternalContext
     public KafkaSinkExternalContext(
             String bootstrapServers,
             List<URL> connectorJarPaths,
-            TransactionNamingStrategy transactionNamingStrategy) {
+            KafkaSinkOptions.TransactionNamingStrategy transactionNamingStrategy) {
         this.bootstrapServers = bootstrapServers;
         this.connectorJarPaths = connectorJarPaths;
         this.transactionNamingStrategy = transactionNamingStrategy;
