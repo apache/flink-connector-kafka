@@ -19,6 +19,15 @@ package org.apache.flink.streaming.connectors.kafka.table;
 
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.serialization.SerializationSchema;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
+import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetFacet;
+import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetIdentifier;
+import org.apache.flink.connector.kafka.lineage.DefaultTypeDatasetFacet;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacet;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacetProvider;
+import org.apache.flink.connector.kafka.lineage.TypeDatasetFacet;
+import org.apache.flink.connector.kafka.lineage.TypeDatasetFacetProvider;
 import org.apache.flink.connector.kafka.sink.KafkaPartitioner;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
@@ -27,14 +36,17 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Preconditions;
 
+import com.google.common.reflect.TypeToken;
 import org.apache.kafka.clients.producer.ProducerRecord;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -42,7 +54,10 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /** SerializationSchema used by {@link KafkaDynamicSink} to configure a {@link KafkaSink}. */
 @Internal
-class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationSchema<RowData> {
+class DynamicKafkaRecordSerializationSchema
+        implements KafkaRecordSerializationSchema<RowData>,
+                KafkaDatasetFacetProvider,
+                TypeDatasetFacetProvider {
 
     private final Set<String> topics;
     private final Pattern topicPattern;
@@ -168,6 +183,41 @@ class DynamicKafkaRecordSerializationSchema implements KafkaRecordSerializationS
                     sinkContext.getNumberOfParallelInstances());
         }
         valueSerialization.open(context);
+    }
+
+    @Override
+    public Optional<KafkaDatasetFacet> getKafkaDatasetFacet() {
+        if (topics != null) {
+            return Optional.of(
+                    new DefaultKafkaDatasetFacet(
+                            DefaultKafkaDatasetIdentifier.ofTopics(new ArrayList<>(topics))));
+        }
+        if (topicPattern != null) {
+            return Optional.of(
+                    new DefaultKafkaDatasetFacet(
+                            DefaultKafkaDatasetIdentifier.ofPattern(topicPattern)));
+        }
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<TypeDatasetFacet> getTypeDatasetFacet() {
+        if (this.valueSerialization instanceof ResultTypeQueryable) {
+            return Optional.of(
+                    new DefaultTypeDatasetFacet(
+                            ((ResultTypeQueryable<?>) this.valueSerialization).getProducedType()));
+        } else {
+            // gets type information from serialize method signature
+            TypeToken serializationSchemaType = TypeToken.of(valueSerialization.getClass());
+            Class parameterType =
+                    serializationSchemaType
+                            .resolveType(SerializationSchema.class.getTypeParameters()[0])
+                            .getRawType();
+            if (parameterType != Object.class) {
+                return Optional.of(new DefaultTypeDatasetFacet(TypeInformation.of(parameterType)));
+            }
+        }
+        return Optional.empty();
     }
 
     private String getTargetTopic(RowData element) {
