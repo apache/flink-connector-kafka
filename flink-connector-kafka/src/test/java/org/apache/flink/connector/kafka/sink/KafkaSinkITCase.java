@@ -514,7 +514,8 @@ public class KafkaSinkITCase extends TestLogger {
                     .get()
                     .asInstanceOf(InstanceOfAssertFactories.THROWABLE)
                     .rootCause()
-                    .hasMessageContaining("Attempted to switch back to INCREMENTING");
+                    .hasMessageContaining(
+                            "Attempted to switch the transaction naming strategy back to INCREMENTING");
         }
     }
 

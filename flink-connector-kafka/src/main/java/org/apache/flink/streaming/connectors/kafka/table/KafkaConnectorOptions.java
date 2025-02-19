@@ -25,6 +25,7 @@ import org.apache.flink.configuration.DescribedEnum;
 import org.apache.flink.configuration.description.Description;
 import org.apache.flink.configuration.description.InlineElement;
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 import org.apache.flink.table.factories.FactoryUtil;
 
 import java.time.Duration;
@@ -271,6 +272,30 @@ public class KafkaConnectorOptions {
                             "If the delivery guarantee is configured as "
                                     + DeliveryGuarantee.EXACTLY_ONCE
                                     + " this value is used a prefix for the identifier of all opened Kafka transactions.");
+
+    /**
+     * The strategy to name transactions. Naming strategy has implications on the resource
+     * consumption on the broker because each unique transaction name requires the broker to keep
+     * some metadata in memory for 7 days.
+     *
+     * <p>All naming strategies use the format {@code transactionalIdPrefix-subtask-offset} where
+     * offset is calculated differently.
+     */
+    public static final ConfigOption<TransactionNamingStrategy> TRANSACTION_NAMING_STRATEGY =
+            ConfigOptions.key("sink.transaction-naming-strategy")
+                    .enumType(TransactionNamingStrategy.class)
+                    .defaultValue(TransactionNamingStrategy.DEFAULT)
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Advanced option to influence how transactions are named.")
+                                    .linebreak()
+                                    .text(
+                                            "INCREMENTING is the strategy used in flink-kafka-connector 3.X (DEFAULT). It wastes memory of the Kafka broker but works with older Kafka broker versions (Kafka 2.X).")
+                                    .linebreak()
+                                    .text(
+                                            "POOLING is a new strategy introduced in flink-kafka-connector 4.X. It is more resource-friendly than INCREMENTING but requires Kafka 3.0+. Switching to this strategy requires a checkpoint taken with flink-kafka-connector 4.X or a snapshot taken with earlier versions.")
+                                    .build());
 
     // --------------------------------------------------------------------------------------------
     // Enums

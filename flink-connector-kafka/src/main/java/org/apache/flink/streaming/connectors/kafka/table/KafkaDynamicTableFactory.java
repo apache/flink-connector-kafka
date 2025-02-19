@@ -27,6 +27,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaPartitioner;
+import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
@@ -84,6 +85,7 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC_PATTERN;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TRANSACTIONAL_ID_PREFIX;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TRANSACTION_NAMING_STRATEGY;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FIELDS_INCLUDE;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.PROPERTIES_PREFIX;
@@ -154,6 +156,7 @@ public class KafkaDynamicTableFactory
         options.add(SCAN_BOUNDED_SPECIFIC_OFFSETS);
         options.add(SCAN_BOUNDED_TIMESTAMP_MILLIS);
         options.add(SCAN_PARALLELISM);
+        options.add(TRANSACTION_NAMING_STRATEGY);
         return options;
     }
 
@@ -171,7 +174,8 @@ public class KafkaDynamicTableFactory
                         SCAN_PARALLELISM,
                         SINK_PARTITIONER,
                         SINK_PARALLELISM,
-                        TRANSACTIONAL_ID_PREFIX)
+                        TRANSACTIONAL_ID_PREFIX,
+                        TRANSACTION_NAMING_STRATEGY)
                 .collect(Collectors.toSet());
     }
 
@@ -290,7 +294,8 @@ public class KafkaDynamicTableFactory
                 getFlinkKafkaPartitioner(tableOptions, context.getClassLoader()).orElse(null),
                 deliveryGuarantee,
                 parallelism,
-                tableOptions.get(TRANSACTIONAL_ID_PREFIX));
+                tableOptions.get(TRANSACTIONAL_ID_PREFIX),
+                tableOptions.get(TRANSACTION_NAMING_STRATEGY));
     }
 
     // --------------------------------------------------------------------------------------------
@@ -438,7 +443,8 @@ public class KafkaDynamicTableFactory
             KafkaPartitioner<RowData> partitioner,
             DeliveryGuarantee deliveryGuarantee,
             Integer parallelism,
-            @Nullable String transactionalIdPrefix) {
+            @Nullable String transactionalIdPrefix,
+            TransactionNamingStrategy transactionNamingStrategy) {
         return new KafkaDynamicSink(
                 physicalDataType,
                 physicalDataType,
@@ -455,6 +461,7 @@ public class KafkaDynamicTableFactory
                 false,
                 SinkBufferFlushMode.DISABLED,
                 parallelism,
-                transactionalIdPrefix);
+                transactionalIdPrefix,
+                transactionNamingStrategy);
     }
 }
