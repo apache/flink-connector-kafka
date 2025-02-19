@@ -93,6 +93,8 @@ public class KafkaPartitionSplitReader
         Properties consumerProps = new Properties();
         consumerProps.putAll(props);
         consumerProps.setProperty(ConsumerConfig.CLIENT_ID_CONFIG, createConsumerClientId(props));
+        consumerProps.put(FlinkKafkaMetricReporter.METRIC_GROUP_CONFIG, context.metricGroup());
+        consumerProps.setProperty(ConsumerConfig.METRIC_REPORTER_CLASSES_CONFIG, FlinkKafkaMetricReporter.class.getName());
         setConsumerClientRack(consumerProps, rackIdSupplier);
         this.consumer = new KafkaConsumer<>(consumerProps);
         this.stoppingOffsets = new HashMap<>();
