@@ -17,21 +17,9 @@
 
 package org.apache.flink.streaming.connectors.kafka;
 
-import org.apache.flink.api.common.serialization.DeserializationSchema;
-import org.apache.flink.api.common.serialization.SerializationSchema;
-import org.apache.flink.connector.kafka.source.KafkaSourceBuilder;
-import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.DataStreamSink;
-import org.apache.flink.streaming.api.operators.StreamSink;
-import org.apache.flink.streaming.connectors.kafka.internals.KafkaDeserializationSchemaWrapper;
-import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
-import org.apache.flink.streaming.util.serialization.KeyedSerializationSchema;
-
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 
 import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
@@ -122,77 +110,8 @@ public abstract class KafkaTestEnvironment {
         return props;
     }
 
-    // -- consumer / producer instances:
-    public <T> FlinkKafkaConsumerBase<T> getConsumer(
-            List<String> topics, DeserializationSchema<T> deserializationSchema, Properties props) {
-        return getConsumer(
-                topics, new KafkaDeserializationSchemaWrapper<T>(deserializationSchema), props);
-    }
-
-    public <T> FlinkKafkaConsumerBase<T> getConsumer(
-            String topic, KafkaDeserializationSchema<T> readSchema, Properties props) {
-        return getConsumer(Collections.singletonList(topic), readSchema, props);
-    }
-
-    public <T> FlinkKafkaConsumerBase<T> getConsumer(
-            String topic, DeserializationSchema<T> deserializationSchema, Properties props) {
-        return getConsumer(Collections.singletonList(topic), deserializationSchema, props);
-    }
-
-    public abstract <T> FlinkKafkaConsumerBase<T> getConsumer(
-            List<String> topics, KafkaDeserializationSchema<T> readSchema, Properties props);
-
-    public <T> KafkaSourceBuilder<T> getSourceBuilder(
-            List<String> topics, DeserializationSchema<T> deserializationSchema, Properties props) {
-        return getSourceBuilder(
-                topics, new KafkaDeserializationSchemaWrapper<T>(deserializationSchema), props);
-    }
-
-    public <T> KafkaSourceBuilder<T> getSourceBuilder(
-            String topic, KafkaDeserializationSchema<T> readSchema, Properties props) {
-        return getSourceBuilder(Collections.singletonList(topic), readSchema, props);
-    }
-
-    public <T> KafkaSourceBuilder<T> getSourceBuilder(
-            String topic, DeserializationSchema<T> deserializationSchema, Properties props) {
-        return getSourceBuilder(Collections.singletonList(topic), deserializationSchema, props);
-    }
-
-    public abstract <T> KafkaSourceBuilder<T> getSourceBuilder(
-            List<String> topics, KafkaDeserializationSchema<T> readSchema, Properties props);
-
     public abstract <K, V> Collection<ConsumerRecord<K, V>> getAllRecordsFromTopic(
             Properties properties, String topic);
-
-    public abstract <T> StreamSink<T> getProducerSink(
-            String topic,
-            SerializationSchema<T> serSchema,
-            Properties props,
-            FlinkKafkaPartitioner<T> partitioner);
-
-    @Deprecated
-    public abstract <T> DataStreamSink<T> produceIntoKafka(
-            DataStream<T> stream,
-            String topic,
-            KeyedSerializationSchema<T> serSchema,
-            Properties props,
-            FlinkKafkaPartitioner<T> partitioner);
-
-    public abstract <T> DataStreamSink<T> produceIntoKafka(
-            DataStream<T> stream,
-            String topic,
-            SerializationSchema<T> serSchema,
-            Properties props,
-            FlinkKafkaPartitioner<T> partitioner);
-
-    public <T> DataStreamSink<T> produceIntoKafka(
-            DataStream<T> stream,
-            String topic,
-            KafkaSerializationSchema<T> serSchema,
-            Properties props) {
-        throw new RuntimeException(
-                "KafkaSerializationSchema is only supported on the modern Kafka Connector.");
-    }
 
     // -- offset handlers
 

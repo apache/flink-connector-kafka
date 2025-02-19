@@ -21,7 +21,7 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.operators.MailboxExecutor;
 import org.apache.flink.api.common.operators.ProcessingTimeService;
 import org.apache.flink.api.common.serialization.SerializationSchema;
-import org.apache.flink.api.connector.sink2.Sink;
+import org.apache.flink.api.connector.sink2.WriterInitContext;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.MetricUtil;
 import org.apache.flink.metrics.Counter;
@@ -127,7 +127,7 @@ class KafkaWriter<IN>
             DeliveryGuarantee deliveryGuarantee,
             Properties kafkaProducerConfig,
             String transactionalIdPrefix,
-            Sink.InitContext sinkInitContext,
+            WriterInitContext sinkInitContext,
             KafkaRecordSerializationSchema<IN> recordSerializer,
             SerializationSchema.InitializationContext schemaContext,
             Collection<KafkaWriterState> recoveredStates) {
@@ -154,8 +154,8 @@ class KafkaWriter<IN>
         this.numRecordsOutErrorsCounter = metricGroup.getNumRecordsOutErrorsCounter();
         this.kafkaSinkContext =
                 new DefaultKafkaSinkContext(
-                        sinkInitContext.getSubtaskId(),
-                        sinkInitContext.getNumberOfParallelSubtasks(),
+                        sinkInitContext.getTaskInfo().getIndexOfThisSubtask(),
+                        sinkInitContext.getTaskInfo().getNumberOfParallelSubtasks(),
                         kafkaProducerConfig);
         try {
             recordSerializer.open(schemaContext, kafkaSinkContext);

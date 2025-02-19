@@ -16,28 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.flink.streaming.connectors.kafka;
+package org.apache.flink.connector.kafka.testutils;
 
-import org.junit.BeforeClass;
+import org.apache.flink.util.Collector;
 
-/** IT cases for the {@link FlinkKafkaProducer}. */
-@SuppressWarnings("serial")
-public class KafkaProducerAtLeastOnceITCase extends KafkaProducerTestBase {
+import java.util.ArrayList;
+import java.util.List;
 
-    @BeforeClass
-    public static void prepare() throws Exception {
-        KafkaProducerTestBase.prepare();
-        ((KafkaTestEnvironmentImpl) kafkaServer)
-                .setProducerSemantic(FlinkKafkaProducer.Semantic.AT_LEAST_ONCE);
+/** A simple collector that collects the elements in a list. */
+public class SimpleCollector<T> implements Collector<T> {
+
+    private final List<T> list = new ArrayList<>();
+
+    public List<T> getList() {
+        return list;
     }
 
     @Override
-    public void testExactlyOnceRegularSink() throws Exception {
-        // disable test for at least once semantic
+    public void collect(T record) {
+        list.add(record);
     }
 
     @Override
-    public void testExactlyOnceCustomOperator() throws Exception {
-        // disable test for at least once semantic
+    public void close() {
+        // do nothing
     }
 }

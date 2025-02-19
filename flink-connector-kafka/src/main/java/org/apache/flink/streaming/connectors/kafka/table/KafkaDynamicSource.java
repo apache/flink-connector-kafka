@@ -31,10 +31,8 @@ import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDe
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
-import org.apache.flink.streaming.connectors.kafka.internals.KafkaTopicPartition;
 import org.apache.flink.streaming.connectors.kafka.table.DynamicKafkaDeserializationSchema.MetadataConverter;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.connector.ChangelogMode;
@@ -143,7 +141,7 @@ public class KafkaDynamicSource
      * Specific startup offsets; only relevant when startup mode is {@link
      * StartupMode#SPECIFIC_OFFSETS}.
      */
-    protected final Map<KafkaTopicPartition, Long> specificStartupOffsets;
+    protected final Map<TopicPartition, Long> specificStartupOffsets;
 
     /**
      * The start timestamp to locate partition offsets; only relevant when startup mode is {@link
@@ -158,7 +156,7 @@ public class KafkaDynamicSource
      * Specific end offsets; only relevant when bounded mode is {@link
      * BoundedMode#SPECIFIC_OFFSETS}.
      */
-    protected final Map<KafkaTopicPartition, Long> specificBoundedOffsets;
+    protected final Map<TopicPartition, Long> specificBoundedOffsets;
 
     /**
      * The bounded timestamp to locate partition offsets; only relevant when bounded mode is {@link
@@ -182,10 +180,10 @@ public class KafkaDynamicSource
             @Nullable Pattern topicPattern,
             Properties properties,
             StartupMode startupMode,
-            Map<KafkaTopicPartition, Long> specificStartupOffsets,
+            Map<TopicPartition, Long> specificStartupOffsets,
             long startupTimestampMillis,
             BoundedMode boundedMode,
-            Map<KafkaTopicPartition, Long> specificBoundedOffsets,
+            Map<TopicPartition, Long> specificBoundedOffsets,
             long boundedTimestampMillis,
             boolean upsertMode,
             String tableIdentifier) {
@@ -419,7 +417,7 @@ public class KafkaDynamicSource
             DeserializationSchema<RowData> valueDeserialization,
             TypeInformation<RowData> producedTypeInfo) {
 
-        final KafkaDeserializationSchema<RowData> kafkaDeserializer =
+        final KafkaRecordDeserializationSchema<RowData> kafkaDeserializer =
                 createKafkaDeserializationSchema(
                         keyDeserialization, valueDeserialization, producedTypeInfo);
 
@@ -452,8 +450,7 @@ public class KafkaDynamicSource
                 specificStartupOffsets.forEach(
                         (tp, offset) ->
                                 offsets.put(
-                                        new TopicPartition(tp.getTopic(), tp.getPartition()),
-                                        offset));
+                                        new TopicPartition(tp.topic(), tp.partition()), offset));
                 kafkaSourceBuilder.setStartingOffsets(OffsetsInitializer.offsets(offsets));
                 break;
             case TIMESTAMP:
@@ -477,8 +474,7 @@ public class KafkaDynamicSource
                 specificBoundedOffsets.forEach(
                         (tp, offset) ->
                                 offsets.put(
-                                        new TopicPartition(tp.getTopic(), tp.getPartition()),
-                                        offset));
+                                        new TopicPartition(tp.topic(), tp.partition()), offset));
                 kafkaSourceBuilder.setBounded(OffsetsInitializer.offsets(offsets));
                 break;
             case TIMESTAMP:
@@ -486,9 +482,7 @@ public class KafkaDynamicSource
                 break;
         }
 
-        kafkaSourceBuilder
-                .setProperties(properties)
-                .setDeserializer(KafkaRecordDeserializationSchema.of(kafkaDeserializer));
+        kafkaSourceBuilder.setProperties(properties).setDeserializer(kafkaDeserializer);
 
         return kafkaSourceBuilder.build();
     }
@@ -510,7 +504,7 @@ public class KafkaDynamicSource
                                                         .collect(Collectors.joining(",")))));
     }
 
-    private KafkaDeserializationSchema<RowData> createKafkaDeserializationSchema(
+    private KafkaRecordDeserializationSchema<RowData> createKafkaDeserializationSchema(
             DeserializationSchema<RowData> keyDeserialization,
             DeserializationSchema<RowData> valueDeserialization,
             TypeInformation<RowData> producedTypeInfo) {
