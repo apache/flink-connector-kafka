@@ -90,7 +90,7 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     private final ReadableBackchannel<String> backchannel;
     /** The context used to name transactions. */
     private final TransactionNamingStrategyContextImpl namingContext;
-    /** Lazily created admin client for {@link TransactionAbortStrategy}. */
+    /** Lazily created admin client for {@link TransactionAbortStrategyImpl}. */
     private AdminClient adminClient;
 
     /**
