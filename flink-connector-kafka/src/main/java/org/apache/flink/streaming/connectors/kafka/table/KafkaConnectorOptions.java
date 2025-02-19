@@ -25,6 +25,8 @@ import org.apache.flink.configuration.DescribedEnum;
 import org.apache.flink.configuration.description.Description;
 import org.apache.flink.configuration.description.InlineElement;
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.kafka.sink.TransactionAbortStrategy;
+import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 import org.apache.flink.table.factories.FactoryUtil;
 
 import java.time.Duration;
@@ -270,6 +272,38 @@ public class KafkaConnectorOptions {
                             "If the delivery guarantee is configured as "
                                     + DeliveryGuarantee.EXACTLY_ONCE
                                     + " this value is used a prefix for the identifier of all opened Kafka transactions.");
+
+    public static final ConfigOption<TransactionAbortStrategy> TRANSACTION_ABORT_STRATEGY =
+            ConfigOptions.key("sink.transaction-abort-strategy")
+                    .enumType(TransactionAbortStrategy.class)
+                    .defaultValue(TransactionAbortStrategy.DEFAULT)
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Advanced option to influence how transactions are aborted.")
+                                    .linebreak()
+                                    .text(
+                                            "PROBING is the strategy used in flink-kafka-connector 3.X (DEFAULT). It significantly slows down recovery in tight restart loops and wastes memory of the Kafka broker.")
+                                    .linebreak()
+                                    .text(
+                                            "LISTING is a new strategy introduced in flink-kafka-connector 4.X. It is faster and more efficient than PROBING but relies on ListTransaction API introduced in Kafka 3.0. It requires DESCRIBE permission on the transactionalId.")
+                                    .build());
+
+    public static final ConfigOption<TransactionNamingStrategy> TRANSACTION_NAMING_STRATEGY =
+            ConfigOptions.key("sink.transaction-naming-strategy")
+                    .enumType(TransactionNamingStrategy.class)
+                    .defaultValue(TransactionNamingStrategy.DEFAULT)
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Advanced option to influence how transactions are named.")
+                                    .linebreak()
+                                    .text(
+                                            "INCREMENTING is the strategy used in flink-kafka-connector 3.X (DEFAULT). It wastes memory of the Kafka broker but works with any sink.transaction-abort-strategy.")
+                                    .linebreak()
+                                    .text(
+                                            "POOLING is a new strategy introduced in flink-kafka-connector 4.X. It is more resource-friendly than INCREMENTING but requires LISTING transaction-abort-strategy. Switching to this strategy requires a checkpoint taken with flink-kafka-connector 4.X or a snapshot taken with earlier versions.")
+                                    .build());
 
     // --------------------------------------------------------------------------------------------
     // Enums

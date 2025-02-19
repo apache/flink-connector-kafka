@@ -73,7 +73,7 @@ public enum TransactionNamingStrategy {
         this.supportedAbortStrategies = Collections.unmodifiableSet(supportedAbortStrategies);
     }
 
-    Set<TransactionAbortStrategy> getSupportedAbortStrategies() {
+    public Set<TransactionAbortStrategy> getSupportedAbortStrategies() {
         return supportedAbortStrategies;
     }
 
