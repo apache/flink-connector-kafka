@@ -18,6 +18,8 @@
 
 package org.apache.flink.connector.kafka.sink.testutils;
 
+import org.apache.flink.connector.kafka.sink.TransactionAbortStrategy;
+import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 import org.apache.flink.connector.testframe.external.ExternalContextFactory;
 
 import org.testcontainers.containers.KafkaContainer;
@@ -32,10 +34,18 @@ public class KafkaSinkExternalContextFactory
 
     private final KafkaContainer kafkaContainer;
     private final List<URL> connectorJars;
+    private final TransactionNamingStrategy transactionNamingStrategy;
+    private final TransactionAbortStrategy transactionAbortStrategy;
 
-    public KafkaSinkExternalContextFactory(KafkaContainer kafkaContainer, List<URL> connectorJars) {
+    public KafkaSinkExternalContextFactory(
+            KafkaContainer kafkaContainer,
+            List<URL> connectorJars,
+            TransactionNamingStrategy transactionNamingStrategy,
+            TransactionAbortStrategy transactionAbortStrategy) {
         this.kafkaContainer = kafkaContainer;
         this.connectorJars = connectorJars;
+        this.transactionNamingStrategy = transactionNamingStrategy;
+        this.transactionAbortStrategy = transactionAbortStrategy;
     }
 
     private String getBootstrapServer() {
@@ -48,6 +58,10 @@ public class KafkaSinkExternalContextFactory
 
     @Override
     public KafkaSinkExternalContext createExternalContext(String testName) {
-        return new KafkaSinkExternalContext(getBootstrapServer(), connectorJars);
+        return new KafkaSinkExternalContext(
+                getBootstrapServer(),
+                connectorJars,
+                transactionNamingStrategy,
+                transactionAbortStrategy);
     }
 }

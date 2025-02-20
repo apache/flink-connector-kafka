@@ -23,6 +23,10 @@ import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.base.sink.writer.TestSinkInitContext;
+import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetFacet;
+import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetIdentifier;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacet;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacetProvider;
 import org.apache.flink.connector.kafka.sink.internal.BackchannelFactory;
 import org.apache.flink.connector.kafka.sink.internal.WritableBackchannel;
 import org.apache.flink.metrics.MetricGroup;
@@ -55,6 +59,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Map;
@@ -128,6 +133,19 @@ public abstract class KafkaWriterTestBase {
         return (T) createSink(sinkBuilderAdjuster).createWriter(sinkInitContext);
     }
 
+    @SuppressWarnings("unchecked")
+    <T extends KafkaWriter<?>> T restoreWriter(
+            Consumer<KafkaSinkBuilder<?>> sinkBuilderAdjuster,
+            Collection<KafkaWriterState> recoveredState,
+            SinkInitContext initContext)
+            throws IOException {
+        return (T) createSink(sinkBuilderAdjuster).restoreWriter(initContext, recoveredState);
+    }
+
+    public String getTransactionalPrefix() {
+        return TEST_PREFIX + writerIndex;
+    }
+
     KafkaSink<Integer> createSink(Consumer<KafkaSinkBuilder<?>> sinkBuilderAdjuster) {
         KafkaSinkBuilder<Integer> builder =
                 KafkaSink.<Integer>builder()
@@ -170,6 +188,7 @@ public abstract class KafkaWriterTestBase {
         protected final SinkWriterMetricGroup metricGroup;
         protected final ProcessingTimeService timeService;
         @Nullable protected final Consumer<RecordMetadata> metadataConsumer;
+        private Long checkpointId;
 
         SinkInitContext(
                 SinkWriterMetricGroup metricGroup,
@@ -211,11 +230,6 @@ public abstract class KafkaWriterTestBase {
         }
 
         @Override
-        public OptionalLong getRestoredCheckpointId() {
-            return OptionalLong.empty();
-        }
-
-        @Override
         public SerializationSchema.InitializationContext
                 asSerializationSchemaInitializationContext() {
             return null;
@@ -225,11 +239,20 @@ public abstract class KafkaWriterTestBase {
         public <MetaT> Optional<Consumer<MetaT>> metadataConsumer() {
             return Optional.ofNullable((Consumer<MetaT>) metadataConsumer);
         }
+
+        @Override
+        public OptionalLong getRestoredCheckpointId() {
+            return checkpointId == null ? OptionalLong.empty() : OptionalLong.of(checkpointId);
+        }
+
+        public void setRestoredCheckpointId(long checkpointId) {
+            this.checkpointId = checkpointId;
+        }
     }
 
     /** mock recordSerializer for KafkaSink. */
     protected static class DummyRecordSerializer
-            implements KafkaRecordSerializationSchema<Integer> {
+            implements KafkaRecordSerializationSchema<Integer>, KafkaDatasetFacetProvider {
         @Override
         public ProducerRecord<byte[], byte[]> serialize(
                 Integer element, KafkaSinkContext context, Long timestamp) {
@@ -238,6 +261,13 @@ public abstract class KafkaWriterTestBase {
                 return null;
             }
             return new ProducerRecord<>(topic, ByteBuffer.allocate(4).putInt(element).array());
+        }
+
+        @Override
+        public Optional<KafkaDatasetFacet> getKafkaDatasetFacet() {
+            return Optional.of(
+                    new DefaultKafkaDatasetFacet(
+                            DefaultKafkaDatasetIdentifier.ofTopics(Collections.singletonList(topic))));
         }
     }
 

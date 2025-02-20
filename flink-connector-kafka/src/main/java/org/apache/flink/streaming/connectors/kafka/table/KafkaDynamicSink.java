@@ -27,6 +27,8 @@ import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaPartitioner;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.sink.KafkaSinkBuilder;
+import org.apache.flink.connector.kafka.sink.TransactionAbortStrategy;
+import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.table.api.DataTypes;
@@ -139,6 +141,9 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
     /** Parallelism of the physical Kafka producer. * */
     protected final @Nullable Integer parallelism;
 
+    private final TransactionNamingStrategy transactionNamingStrategy;
+    private final TransactionAbortStrategy transactionAbortStrategy;
+
     public KafkaDynamicSink(
             DataType consumedDataType,
             DataType physicalDataType,
@@ -155,7 +160,9 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
             boolean upsertMode,
             SinkBufferFlushMode flushMode,
             @Nullable Integer parallelism,
-            @Nullable String transactionalIdPrefix) {
+            @Nullable String transactionalIdPrefix,
+            TransactionNamingStrategy transactionNamingStrategy,
+            TransactionAbortStrategy transactionAbortStrategy) {
         // Format attributes
         this.consumedDataType =
                 checkNotNull(consumedDataType, "Consumed data type must not be null.");
@@ -168,6 +175,8 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
         this.valueProjection = checkNotNull(valueProjection, "Value projection must not be null.");
         this.keyPrefix = keyPrefix;
         this.transactionalIdPrefix = transactionalIdPrefix;
+        this.transactionNamingStrategy = transactionNamingStrategy;
+        this.transactionAbortStrategy = transactionAbortStrategy;
         // Mutable attributes
         this.metadataKeys = Collections.emptyList();
         // Kafka-specific attributes
@@ -222,6 +231,8 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
                                         hasMetadata(),
                                         getMetadataPositions(physicalChildren),
                                         upsertMode))
+                        .setTransactionStrategies(
+                                transactionNamingStrategy, transactionAbortStrategy)
                         .build();
         if (flushMode.isEnabled() && upsertMode) {
             return new DataStreamSinkProvider() {
@@ -292,7 +303,9 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
                         upsertMode,
                         flushMode,
                         parallelism,
-                        transactionalIdPrefix);
+                        transactionalIdPrefix,
+                        transactionNamingStrategy,
+                        transactionAbortStrategy);
         copy.metadataKeys = metadataKeys;
         return copy;
     }

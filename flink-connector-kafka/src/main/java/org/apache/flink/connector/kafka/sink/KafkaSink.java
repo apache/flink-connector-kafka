@@ -80,16 +80,22 @@ public class KafkaSink<IN>
     private final KafkaRecordSerializationSchema<IN> recordSerializer;
     private final Properties kafkaProducerConfig;
     private final String transactionalIdPrefix;
+    private final TransactionNamingStrategy transactionNamingStrategy;
+    private final TransactionAbortStrategy transactionAbortStrategy;
 
     KafkaSink(
             DeliveryGuarantee deliveryGuarantee,
             Properties kafkaProducerConfig,
             String transactionalIdPrefix,
-            KafkaRecordSerializationSchema<IN> recordSerializer) {
+            KafkaRecordSerializationSchema<IN> recordSerializer,
+            TransactionNamingStrategy transactionNamingStrategy,
+            TransactionAbortStrategy transactionAbortStrategy) {
         this.deliveryGuarantee = deliveryGuarantee;
         this.kafkaProducerConfig = kafkaProducerConfig;
         this.transactionalIdPrefix = transactionalIdPrefix;
         this.recordSerializer = recordSerializer;
+        this.transactionNamingStrategy = transactionNamingStrategy;
+        this.transactionAbortStrategy = transactionAbortStrategy;
     }
 
     /**
@@ -137,6 +143,8 @@ public class KafkaSink<IN>
                             context,
                             recordSerializer,
                             context.asSerializationSchemaInitializationContext(),
+                            transactionAbortStrategy.getImpl(),
+                            transactionNamingStrategy.getImpl(),
                             recoveredState);
         } else {
             writer =

@@ -25,6 +25,8 @@ import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
+import org.apache.flink.connector.kafka.sink.TransactionAbortStrategy;
+import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.KafkaSourceTestUtils;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
@@ -234,7 +236,9 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         DeliveryGuarantee.EXACTLY_ONCE,
                         SinkBufferFlushMode.DISABLED,
                         null,
-                        "kafka-sink");
+                        "kafka-sink",
+                        TransactionNamingStrategy.DEFAULT,
+                        TransactionAbortStrategy.DEFAULT);
 
         // Test sink format.
         final KafkaDynamicSink actualUpsertKafkaSink = (KafkaDynamicSink) actualSink;
@@ -276,7 +280,9 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         DeliveryGuarantee.EXACTLY_ONCE,
                         SinkBufferFlushMode.DISABLED,
                         null,
-                        "kafka-sink");
+                        "kafka-sink",
+                        TransactionNamingStrategy.DEFAULT,
+                        TransactionAbortStrategy.DEFAULT);
 
         // Test sink format.
         final KafkaDynamicSink actualUpsertKafkaSink = (KafkaDynamicSink) actualSink;
@@ -321,7 +327,9 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         DeliveryGuarantee.EXACTLY_ONCE,
                         new SinkBufferFlushMode(100, 1000L),
                         null,
-                        "kafka-sink");
+                        "kafka-sink",
+                        TransactionNamingStrategy.DEFAULT,
+                        TransactionAbortStrategy.DEFAULT);
 
         // Test sink format.
         final KafkaDynamicSink actualUpsertKafkaSink = (KafkaDynamicSink) actualSink;
@@ -376,7 +384,9 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                         DeliveryGuarantee.EXACTLY_ONCE,
                         SinkBufferFlushMode.DISABLED,
                         100,
-                        "kafka-sink");
+                        "kafka-sink",
+                        TransactionNamingStrategy.DEFAULT,
+                        TransactionAbortStrategy.DEFAULT);
         assertThat(actualSink).isEqualTo(expectedSink);
 
         final DynamicTableSink.SinkRuntimeProvider provider =
@@ -385,6 +395,49 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
         final SinkV2Provider sinkProvider = (SinkV2Provider) provider;
         assertThat(sinkProvider.getParallelism()).isPresent();
         assertThat((long) sinkProvider.getParallelism().get()).isEqualTo(100);
+    }
+
+    @Test
+    public void testTableSinkStrategyTranslation() {
+        for (TransactionNamingStrategy namingStrategy : TransactionNamingStrategy.values()) {
+            for (TransactionAbortStrategy abortStrategy :
+                    namingStrategy.getSupportedAbortStrategies()) {
+                final EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat =
+                        new TestFormatFactory.EncodingFormatMock(",");
+                final Map<String, String> modifiedOptions =
+                        getModifiedOptions(
+                                getFullSinkOptions(),
+                                options -> {
+                                    options.put("sink.delivery-guarantee", "exactly-once");
+                                    options.put("sink.transactional-id-prefix", "kafka-sink");
+                                    options.put(
+                                            "sink.transaction-naming-strategy",
+                                            namingStrategy.name());
+                                    options.put(
+                                            "sink.transaction-abort-strategy",
+                                            abortStrategy.name());
+                                });
+                final DynamicTableSink actualSink = createTableSink(SINK_SCHEMA, modifiedOptions);
+                final DynamicTableSink expectedSink =
+                        createExpectedSink(
+                                SINK_SCHEMA.toPhysicalRowDataType(),
+                                keyEncodingFormat,
+                                valueEncodingFormat,
+                                SINK_KEY_FIELDS,
+                                SINK_VALUE_FIELDS,
+                                null,
+                                Collections.singletonList(SINK_TOPIC),
+                                null,
+                                UPSERT_KAFKA_SINK_PROPERTIES,
+                                DeliveryGuarantee.EXACTLY_ONCE,
+                                SinkBufferFlushMode.DISABLED,
+                                null,
+                                "kafka-sink",
+                                namingStrategy,
+                                abortStrategy);
+                assertThat(actualSink).isEqualTo(expectedSink);
+            }
+        }
     }
 
     @Test
@@ -885,7 +938,9 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
             DeliveryGuarantee deliveryGuarantee,
             SinkBufferFlushMode flushMode,
             Integer parallelism,
-            String transactionalIdPrefix) {
+            String transactionalIdPrefix,
+            TransactionNamingStrategy transactionNamingStrategy,
+            TransactionAbortStrategy transactionAbortStrategy) {
         return new KafkaDynamicSink(
                 consumedDataType,
                 consumedDataType,
@@ -902,7 +957,9 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                 true,
                 flushMode,
                 parallelism,
-                transactionalIdPrefix);
+                transactionalIdPrefix,
+                transactionNamingStrategy,
+                transactionAbortStrategy);
     }
 
     private KafkaSource<?> assertKafkaSource(ScanTableSource.ScanRuntimeProvider provider) {
