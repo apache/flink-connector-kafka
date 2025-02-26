@@ -25,6 +25,7 @@ import org.apache.kafka.common.TopicPartition;
 
 import java.io.Serializable;
 import java.util.List;
+import java.util.Properties;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -51,9 +52,11 @@ public interface KafkaSubscriber extends Serializable {
      * Get a set of subscribed {@link TopicPartition}s.
      *
      * @param adminClient The admin client used to retrieve subscribed topic partitions.
+     * @param properties The properties for the configuration.
      * @return A set of subscribed {@link TopicPartition}s
      */
-    Set<TopicPartition> getSubscribedTopicPartitions(AdminClient adminClient);
+    Set<TopicPartition> getSubscribedTopicPartitions(
+            AdminClient adminClient, Properties properties);
 
     // ----------------- factory methods --------------
 

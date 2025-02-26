@@ -58,6 +58,20 @@ public class KafkaSourceOptions {
                     .defaultValue(true)
                     .withDescription("Whether to commit consuming offset on checkpoint.");
 
+    public static final ConfigOption<Integer> TOPIC_METADATA_REQUEST_MAX_RETRY =
+            ConfigOptions.key("topic.metadata.max.retry")
+                    .intType()
+                    .defaultValue(0)
+                    .withDescription(
+                            "Max number of retries for topic metadata request before failing the source.");
+
+    public static final ConfigOption<Long> TOPIC_METADATA_REQUEST_RETRY_INTERVAL_MS =
+            ConfigOptions.key("topic.metadata.retry.interval.ms")
+                    .longType()
+                    .defaultValue(Duration.ofSeconds(30).toMillis())
+                    .withDescription(
+                            "The interval in milliseconds between retries for topic metadata request.");
+
     @SuppressWarnings("unchecked")
     public static <T> T getOption(
             Properties props, ConfigOption<?> configOption, Function<String, T> parser) {

@@ -230,7 +230,7 @@ public class KafkaSourceEnumerator
      * @return Set of subscribed {@link TopicPartition}s
      */
     private Set<TopicPartition> getSubscribedTopicPartitions() {
-        return subscriber.getSubscribedTopicPartitions(adminClient);
+        return subscriber.getSubscribedTopicPartitions(adminClient, properties);
     }
 
     /**

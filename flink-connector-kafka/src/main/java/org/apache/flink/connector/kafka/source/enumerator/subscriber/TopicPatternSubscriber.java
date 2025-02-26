@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -47,10 +48,11 @@ class TopicPatternSubscriber implements KafkaSubscriber, KafkaDatasetIdentifierP
     }
 
     @Override
-    public Set<TopicPartition> getSubscribedTopicPartitions(AdminClient adminClient) {
+    public Set<TopicPartition> getSubscribedTopicPartitions(
+            AdminClient adminClient, Properties properties) {
         LOG.debug("Fetching descriptions for {} topics on Kafka cluster", topicPattern.pattern());
         final Map<String, TopicDescription> matchedTopicMetadata =
-                getTopicMetadata(adminClient, topicPattern);
+                getTopicMetadata(adminClient, topicPattern, properties);
 
         Set<TopicPartition> subscribedTopicPartitions = new HashSet<>();
 
