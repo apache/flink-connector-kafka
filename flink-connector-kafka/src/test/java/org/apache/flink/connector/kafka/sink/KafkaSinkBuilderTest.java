@@ -18,6 +18,7 @@
 package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
+import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.util.TestLogger;
 
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -28,6 +29,7 @@ import java.util.Properties;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link KafkaSinkBuilder}. */
 public class KafkaSinkBuilderTest extends TestLogger {
@@ -41,7 +43,7 @@ public class KafkaSinkBuilderTest extends TestLogger {
             };
 
     @Test
-    public void testPropertyHandling() {
+    void testPropertyHandling() {
         validateProducerConfig(
                 getBasicBuilder(),
                 p -> {
@@ -77,13 +79,25 @@ public class KafkaSinkBuilderTest extends TestLogger {
     }
 
     @Test
-    public void testBootstrapServerSetting() {
+    void testBootstrapServerSetting() {
         Properties testConf1 = new Properties();
         testConf1.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "testServer");
 
         validateProducerConfig(
                 getNoServerBuilder().setKafkaProducerConfig(testConf1),
                 p -> assertThat(p).containsKeys(DEFAULT_KEYS));
+    }
+
+    @Test
+    void testTransactionIdSanityCheck() {
+        assertThatThrownBy(
+                        () ->
+                                getBasicBuilder()
+                                        .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
+                                        .build())
+                .isExactlyInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(
+                        "EXACTLY_ONCE delivery guarantee requires a transactionIdPrefix to be set to provide unique transaction names across multiple KafkaSinks writing to the same Kafka cluster.");
     }
 
     private void validateProducerConfig(

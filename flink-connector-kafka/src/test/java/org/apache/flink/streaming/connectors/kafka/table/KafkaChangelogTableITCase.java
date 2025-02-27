@@ -474,6 +474,7 @@ public class KafkaChangelogTableITCase extends KafkaTableTestBase {
                                         .setPartitioner(partitioner)
                                         .build())
                         .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
+                        .setTransactionalIdPrefix("kafka-sink")
                         .build());
         env.execute("Write sequence");
     }
