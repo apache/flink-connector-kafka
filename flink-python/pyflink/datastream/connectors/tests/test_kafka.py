@@ -472,6 +472,7 @@ class KafkaSinkTests(PyFlinkStreamingTestCase):
         sink = KafkaSink.builder() \
             .set_bootstrap_servers('localhost:9092') \
             .set_delivery_guarantee(DeliveryGuarantee.EXACTLY_ONCE) \
+            .set_transactional_id_prefix("kafka-sink") \
             .set_record_serializer(self._build_serialization_schema()) \
             .build()
         guarantee = get_field_value(sink.get_java_function(), 'deliveryGuarantee')
