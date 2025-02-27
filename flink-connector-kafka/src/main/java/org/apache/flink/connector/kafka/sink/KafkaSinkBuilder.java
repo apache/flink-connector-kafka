@@ -70,7 +70,7 @@ public class KafkaSinkBuilder<IN> {
     private static final int MAXIMUM_PREFIX_BYTES = 64000;
 
     private DeliveryGuarantee deliveryGuarantee = DeliveryGuarantee.NONE;
-    private String transactionalIdPrefix = "kafka-sink";
+    private String transactionalIdPrefix;
 
     private final Properties kafkaProducerConfig;
     private KafkaRecordSerializationSchema<IN> recordSerializer;
