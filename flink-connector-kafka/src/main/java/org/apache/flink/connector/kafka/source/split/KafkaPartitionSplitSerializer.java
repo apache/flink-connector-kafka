@@ -32,6 +32,16 @@ import java.io.IOException;
 /**
  * The {@link org.apache.flink.core.io.SimpleVersionedSerializer serializer} for {@link
  * KafkaPartitionSplit}.
+ *
+ * <p>The serializer has a version (returned by {@link #getVersion()}) which can be attached to the
+ * serialized data. When the serializer evolves, the version can be used to identify with which
+ * prior version the data was serialized. Currently, this serializer supported versions are:
+ *
+ * <ol>
+ *   <li>0
+ * </ol>
+ *
+ * <p>Other versions of the serialized data will fail to deserialize and throw an exception.
  */
 @Internal
 public class KafkaPartitionSplitSerializer
@@ -59,6 +69,15 @@ public class KafkaPartitionSplitSerializer
 
     @Override
     public KafkaPartitionSplit deserialize(int version, byte[] serialized) throws IOException {
+        switch (version) {
+            case 0:
+                return deserializeV0(serialized);
+            default:
+                throw new IOException("Unrecognized version or corrupt state: " + version);
+        }
+    }
+
+    private KafkaPartitionSplit deserializeV0(byte[] serialized) throws IOException {
         try (ByteArrayInputStream bais = new ByteArrayInputStream(serialized);
                 DataInputStream in = new DataInputStream(bais)) {
             String topic = in.readUTF();
