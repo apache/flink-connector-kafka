@@ -69,7 +69,7 @@ public class KafkaSourceReader<T>
             Configuration config,
             SourceReaderContext context,
             KafkaSourceReaderMetrics kafkaSourceReaderMetrics) {
-        super(elementsQueue, kafkaSourceFetcherManager, recordEmitter, config, context);
+        super(kafkaSourceFetcherManager, recordEmitter, config, context);
         this.offsetsToCommit = Collections.synchronizedSortedMap(new TreeMap<>());
         this.offsetsOfFinishedSplits = new ConcurrentHashMap<>();
         this.kafkaSourceReaderMetrics = kafkaSourceReaderMetrics;

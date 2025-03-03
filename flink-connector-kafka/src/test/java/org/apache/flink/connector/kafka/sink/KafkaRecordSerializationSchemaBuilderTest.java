@@ -29,7 +29,6 @@ import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifierProvider;
 import org.apache.flink.connector.kafka.lineage.TypeDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.TypeDatasetFacetProvider;
 import org.apache.flink.connector.testutils.formats.DummyInitializationContext;
-import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
 import org.apache.flink.util.TestLogger;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -150,8 +149,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
     public void testSerializeRecordWithPartitioner() throws Exception {
         AtomicBoolean opened = new AtomicBoolean(false);
         final int partition = 5;
-        final FlinkKafkaPartitioner<Object> partitioner =
-                new ConstantPartitioner<>(opened, partition);
+        final KafkaPartitioner<Object> partitioner = new ConstantPartitioner<>(opened, partition);
         final KafkaRecordSerializationSchema<String> schema =
                 KafkaRecordSerializationSchema.builder()
                         .setTopic(DEFAULT_TOPIC)
@@ -496,7 +494,7 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
         }
     }
 
-    private static class ConstantPartitioner<T> extends FlinkKafkaPartitioner<T> {
+    private static class ConstantPartitioner<T> implements KafkaPartitioner<T> {
 
         private final AtomicBoolean opened;
         private final int partition;

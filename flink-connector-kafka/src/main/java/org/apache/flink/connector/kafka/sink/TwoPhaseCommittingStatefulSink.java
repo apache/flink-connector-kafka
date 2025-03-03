@@ -1,14 +1,18 @@
 package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.api.connector.sink2.StatefulSink;
-import org.apache.flink.api.connector.sink2.TwoPhaseCommittingSink;
+import org.apache.flink.api.connector.sink2.CommittingSinkWriter;
+import org.apache.flink.api.connector.sink2.Sink;
+import org.apache.flink.api.connector.sink2.StatefulSinkWriter;
+import org.apache.flink.api.connector.sink2.SupportsCommitter;
+import org.apache.flink.api.connector.sink2.SupportsWriterState;
+import org.apache.flink.api.connector.sink2.WriterInitContext;
 
 import java.io.IOException;
 import java.util.Collection;
 
 /**
- * A combination of {@link TwoPhaseCommittingSink} and {@link StatefulSink}.
+ * A combination of {@link SupportsCommitter} and {@link SupportsWriterState}.
  *
  * <p>The purpose of this interface is to be able to pass an interface rather than a {@link
  * KafkaSink} implementation into the reducing sink which simplifies unit testing.
@@ -19,16 +23,15 @@ import java.util.Collection;
  */
 @Internal
 public interface TwoPhaseCommittingStatefulSink<InputT, WriterStateT, CommT>
-        extends TwoPhaseCommittingSink<InputT, CommT>, StatefulSink<InputT, WriterStateT> {
+        extends SupportsCommitter<CommT>, SupportsWriterState<InputT, WriterStateT>, Sink<InputT> {
 
-    PrecommittingStatefulSinkWriter<InputT, WriterStateT, CommT> createWriter(InitContext context)
-            throws IOException;
+    PrecommittingStatefulSinkWriter<InputT, WriterStateT, CommT> createWriter(
+            WriterInitContext context) throws IOException;
 
     PrecommittingStatefulSinkWriter<InputT, WriterStateT, CommT> restoreWriter(
-            InitContext context, Collection<WriterStateT> recoveredState) throws IOException;
+            WriterInitContext context, Collection<WriterStateT> recoveredState) throws IOException;
 
-    /** A combination of {@link PrecommittingSinkWriter} and {@link StatefulSinkWriter}. */
+    /** A combination of {@link StatefulSinkWriter}. */
     interface PrecommittingStatefulSinkWriter<InputT, WriterStateT, CommT>
-            extends PrecommittingSinkWriter<InputT, CommT>,
-                    StatefulSinkWriter<InputT, WriterStateT> {}
+            extends StatefulSinkWriter<InputT, WriterStateT>, CommittingSinkWriter<InputT, CommT> {}
 }
