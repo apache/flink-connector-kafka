@@ -23,6 +23,7 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.sink2.Committer;
 import org.apache.flink.api.connector.sink2.CommitterInitContext;
 import org.apache.flink.api.connector.sink2.WriterInitContext;
+import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacetProvider;
@@ -30,6 +31,10 @@ import org.apache.flink.connector.kafka.lineage.LineageUtil;
 import org.apache.flink.connector.kafka.lineage.TypeDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.TypeDatasetFacetProvider;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
+import org.apache.flink.streaming.api.connector.sink2.CommittableMessage;
+import org.apache.flink.streaming.api.connector.sink2.CommittableMessageTypeInfo;
+import org.apache.flink.streaming.api.connector.sink2.SupportsPostCommitTopology;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.lineage.LineageVertex;
 import org.apache.flink.streaming.api.lineage.LineageVertexProvider;
 
@@ -68,7 +73,7 @@ import java.util.Properties;
 @PublicEvolving
 public class KafkaSink<IN>
         implements LineageVertexProvider,
-                TwoPhaseCommittingStatefulSink<IN, KafkaWriterState, KafkaCommittable>,                SupportsPostCommitTopology<KafkaCommittable>  {
+                TwoPhaseCommittingStatefulSink<IN, KafkaWriterState, KafkaCommittable>, SupportsPostCommitTopology<KafkaCommittable> {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaSink.class);
     private final DeliveryGuarantee deliveryGuarantee;
 
@@ -115,7 +120,7 @@ public class KafkaSink<IN>
 
     @Internal
     @Override
-    public KafkaWriter<IN> createWriter(InitContext context) throws IOException {
+    public KafkaWriter<IN> createWriter(WriterInitContext context) throws IOException {
         return restoreWriter(context, Collections.emptyList());
     }
 

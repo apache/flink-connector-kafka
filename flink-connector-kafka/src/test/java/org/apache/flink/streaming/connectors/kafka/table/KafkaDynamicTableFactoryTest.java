@@ -230,9 +230,9 @@ public class KafkaDynamicTableFactoryTest {
         final DynamicTableSource actualSource = createTableSource(SCHEMA, modifiedOptions);
         final KafkaDynamicSource actualKafkaSource = (KafkaDynamicSource) actualSource;
 
-        final Map<KafkaTopicPartition, Long> specificOffsets = new HashMap<>();
-        specificOffsets.put(new KafkaTopicPartition(TOPIC, PARTITION_0), OFFSET_0);
-        specificOffsets.put(new KafkaTopicPartition(TOPIC, PARTITION_1), OFFSET_1);
+        final Map<TopicPartition, Long> specificOffsets = new HashMap<>();
+        specificOffsets.put(new TopicPartition(TOPIC, PARTITION_0), OFFSET_0);
+        specificOffsets.put(new TopicPartition(TOPIC, PARTITION_1), OFFSET_1);
 
         final DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat =
                 new DecodingFormatMock(",", true);

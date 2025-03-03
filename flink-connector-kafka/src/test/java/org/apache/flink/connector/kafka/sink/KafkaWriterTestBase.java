@@ -191,21 +191,6 @@ public abstract class KafkaWriterTestBase {
         }
 
         @Override
-        public int getSubtaskId() {
-            return SUB_ID;
-        }
-
-        @Override
-        public int getNumberOfParallelSubtasks() {
-            return 1;
-        }
-
-        @Override
-        public int getAttemptNumber() {
-            return ATTEMPT;
-        }
-
-        @Override
         public SinkWriterMetricGroup metricGroup() {
             return metricGroup;
         }
