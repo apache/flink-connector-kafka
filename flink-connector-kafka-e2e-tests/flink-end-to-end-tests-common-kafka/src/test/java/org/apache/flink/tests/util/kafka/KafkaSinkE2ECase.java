@@ -30,7 +30,6 @@ import org.apache.flink.connector.testframe.testsuites.SinkTestSuiteBase;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.test.resources.ResourceTestUtils;
 
-import org.junit.jupiter.api.Disabled;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.utility.DockerImageName;
 
@@ -38,8 +37,6 @@ import java.util.Arrays;
 
 /** Kafka sink E2E test based on connector testing framework. */
 @SuppressWarnings("unused")
-@Disabled(
-        "FIXME: Skip this test temporarily until bumping a version that includes the fix of https://issues.apache.org/jira/browse/FLINK-36568")
 public class KafkaSinkE2ECase extends SinkTestSuiteBase<String> {
     private static final String KAFKA_HOSTNAME = "kafka";
 

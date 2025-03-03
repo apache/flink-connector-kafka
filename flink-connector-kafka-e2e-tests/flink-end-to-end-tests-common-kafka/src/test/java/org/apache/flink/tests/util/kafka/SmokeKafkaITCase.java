@@ -42,7 +42,6 @@ import org.apache.kafka.common.serialization.VoidDeserializer;
 import org.apache.kafka.common.serialization.VoidSerializer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -68,8 +67,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** smoke test for the kafka connectors. */
 @ExtendWith({TestLoggerExtension.class})
 @Testcontainers
-@Disabled(
-        "FIXME: Skip this test temporarily until bumping a version that includes the fix of https://issues.apache.org/jira/browse/FLINK-36568")
 class SmokeKafkaITCase {
 
     private static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";

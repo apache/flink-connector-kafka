@@ -78,7 +78,6 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -179,9 +178,7 @@ public class KafkaSinkITCase extends TestLogger {
     /** Integration test based on connector testing framework. */
     @SuppressWarnings("unused")
     @Nested
-    @Disabled(
-            "FIXME: Skip this test temporarily until bumping a version that includes the fix of https://issues.apache.org/jira/browse/FLINK-36568")
-    class IntegrationTests extends SinkTestSuiteBase<String> {
+ class IntegrationTests extends SinkTestSuiteBase<String> {
         // Defines test environment on Flink MiniCluster
         @TestEnv MiniClusterTestEnvironment flink = new MiniClusterTestEnvironment();
 
