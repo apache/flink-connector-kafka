@@ -31,15 +31,6 @@ class KafkaSubscriberUtils {
 
     private KafkaSubscriberUtils() {}
 
-    static Map<String, TopicDescription> getAllTopicMetadata(AdminClient adminClient) {
-        try {
-            Set<String> allTopicNames = adminClient.listTopics().names().get();
-            return getTopicMetadata(adminClient, allTopicNames);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to get metadata for all topics.", e);
-        }
-    }
-
     static Map<String, TopicDescription> getTopicMetadata(
             AdminClient adminClient, Pattern topicPattern) {
         try {
