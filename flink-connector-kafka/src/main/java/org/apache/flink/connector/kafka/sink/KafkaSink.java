@@ -29,6 +29,7 @@ import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacetProvider;
 import org.apache.flink.connector.kafka.lineage.LineageUtil;
 import org.apache.flink.connector.kafka.lineage.TypeDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.TypeDatasetFacetProvider;
+import org.apache.flink.connector.kafka.sink.KafkaSinkOptions.TransactionNamingStrategy;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.streaming.api.connector.sink2.CommittableMessage;
 import org.apache.flink.streaming.api.connector.sink2.CommittableMessageTypeInfo;
@@ -80,16 +81,19 @@ public class KafkaSink<IN>
     private final KafkaRecordSerializationSchema<IN> recordSerializer;
     private final Properties kafkaProducerConfig;
     private final String transactionalIdPrefix;
+    private final TransactionNamingStrategy transactionNamingStrategy;
 
     KafkaSink(
             DeliveryGuarantee deliveryGuarantee,
             Properties kafkaProducerConfig,
             String transactionalIdPrefix,
-            KafkaRecordSerializationSchema<IN> recordSerializer) {
+            KafkaRecordSerializationSchema<IN> recordSerializer,
+            TransactionNamingStrategy transactionNamingStrategy) {
         this.deliveryGuarantee = deliveryGuarantee;
         this.kafkaProducerConfig = kafkaProducerConfig;
         this.transactionalIdPrefix = transactionalIdPrefix;
         this.recordSerializer = recordSerializer;
+        this.transactionNamingStrategy = transactionNamingStrategy;
     }
 
     /**
@@ -137,6 +141,8 @@ public class KafkaSink<IN>
                             context,
                             recordSerializer,
                             context.asSerializationSchemaInitializationContext(),
+                            transactionNamingStrategy.getAbortImpl(),
+                            transactionNamingStrategy.getImpl(),
                             recoveredState);
         } else {
             writer =

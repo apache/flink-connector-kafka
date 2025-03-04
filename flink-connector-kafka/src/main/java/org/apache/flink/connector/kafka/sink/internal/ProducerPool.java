@@ -18,6 +18,8 @@
 
 package org.apache.flink.connector.kafka.sink.internal;
 
+import java.util.Collection;
+
 /** A pool of producers that can be recycled. */
 public interface ProducerPool extends AutoCloseable {
     /**
@@ -34,6 +36,9 @@ public interface ProducerPool extends AutoCloseable {
      */
     FlinkKafkaInternalProducer<byte[], byte[]> getTransactionalProducer(
             String transactionalId, long checkpointId);
+
+    /** Returns a snapshot of all ongoing transactions. */
+    Collection<CheckpointTransaction> getOngoingTransactions();
 
     /**
      * Explicitly recycle a producer. This is useful when the producer has not been passed to the

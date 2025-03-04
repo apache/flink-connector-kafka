@@ -34,6 +34,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.configuration.StateBackendOptions;
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.kafka.sink.KafkaSinkOptions.TransactionNamingStrategy;
 import org.apache.flink.connector.kafka.sink.testutils.KafkaSinkExternalContextFactory;
 import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
 import org.apache.flink.connector.kafka.testutils.KafkaUtil;
@@ -85,7 +86,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.KafkaContainer;
@@ -99,6 +101,7 @@ import javax.annotation.Nullable;
 import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -113,6 +116,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
@@ -199,8 +203,18 @@ public class KafkaSinkITCase extends TestLogger {
                 };
 
         @TestContext
-        KafkaSinkExternalContextFactory sinkContext =
-                new KafkaSinkExternalContextFactory(kafka.getContainer(), Collections.emptyList());
+        KafkaSinkExternalContextFactory incrementing =
+                new KafkaSinkExternalContextFactory(
+                        kafka.getContainer(),
+                        Collections.emptyList(),
+                        TransactionNamingStrategy.INCREMENTING);
+
+        @TestContext
+        KafkaSinkExternalContextFactory pooling =
+                new KafkaSinkExternalContextFactory(
+                        kafka.getContainer(),
+                        Collections.emptyList(),
+                        TransactionNamingStrategy.POOLING);
     }
 
     @Test
@@ -213,10 +227,19 @@ public class KafkaSinkITCase extends TestLogger {
         writeRecordsToKafka(DeliveryGuarantee.NONE);
     }
 
-    @ParameterizedTest(name = "chained={0}")
-    @ValueSource(booleans = {true, false})
-    public void testWriteRecordsToKafkaWithExactlyOnceGuarantee(boolean chained) throws Exception {
-        writeRecordsToKafka(DeliveryGuarantee.EXACTLY_ONCE, chained);
+    @ParameterizedTest(name = "{0}/{1}, chained={2}")
+    @MethodSource("getEOSParameters")
+    public void testWriteRecordsToKafkaWithExactlyOnceGuarantee(
+            TransactionNamingStrategy namingStrategy, boolean chained) throws Exception {
+        writeRecordsToKafka(DeliveryGuarantee.EXACTLY_ONCE, namingStrategy, chained);
+    }
+
+    static Stream<Arguments> getEOSParameters() {
+        return Arrays.stream(TransactionNamingStrategy.values())
+                .flatMap(
+                        strategy ->
+                                Stream.of(true, false)
+                                        .map(chained -> Arguments.of(strategy, chained)));
     }
 
     @Test
@@ -224,22 +247,24 @@ public class KafkaSinkITCase extends TestLogger {
         testRecoveryWithAssertion(DeliveryGuarantee.AT_LEAST_ONCE, 1);
     }
 
-    @ParameterizedTest(name = "chained={0}")
-    @ValueSource(booleans = {true, false})
-    public void testRecoveryWithExactlyOnceGuarantee(boolean chained) throws Exception {
-        testRecoveryWithAssertion(DeliveryGuarantee.EXACTLY_ONCE, 1, chained);
+    @ParameterizedTest(name = "{0}/{1}, chained={2}")
+    @MethodSource("getEOSParameters")
+    public void testRecoveryWithExactlyOnceGuarantee(
+            TransactionNamingStrategy namingStrategy, boolean chained) throws Exception {
+        testRecoveryWithAssertion(DeliveryGuarantee.EXACTLY_ONCE, 1, namingStrategy, chained);
     }
 
-    @ParameterizedTest(name = "chained={0}")
-    @ValueSource(booleans = {true, false})
-    public void testRecoveryWithExactlyOnceGuaranteeAndConcurrentCheckpoints(boolean chained)
-            throws Exception {
-        testRecoveryWithAssertion(DeliveryGuarantee.EXACTLY_ONCE, 2, chained);
+    @ParameterizedTest(name = "{0}/{1}, chained={2}")
+    @MethodSource("getEOSParameters")
+    public void testRecoveryWithExactlyOnceGuaranteeAndConcurrentCheckpoints(
+            TransactionNamingStrategy namingStrategy, boolean chained) throws Exception {
+        testRecoveryWithAssertion(DeliveryGuarantee.EXACTLY_ONCE, 2, namingStrategy, chained);
     }
 
-    @ParameterizedTest(name = "chained={0}")
-    @ValueSource(booleans = {true, false})
+    @ParameterizedTest(name = "{0}/{1}, chained={2}")
+    @MethodSource("getEOSParameters")
     public void testAbortTransactionsOfPendingCheckpointsAfterFailure(
+            TransactionNamingStrategy namingStrategy,
             boolean chained,
             @TempDir File checkpointDir,
             @InjectMiniCluster MiniCluster miniCluster,
@@ -264,6 +289,7 @@ public class KafkaSinkITCase extends TestLogger {
                             new FailAsyncCheckpointMapper(1),
                             checkpointedRecords,
                             config,
+                            namingStrategy,
                             chained,
                             "firstPrefix",
                             clusterClient);
@@ -283,6 +309,7 @@ public class KafkaSinkITCase extends TestLogger {
                 new FailingCheckpointMapper(failed),
                 checkpointedRecords,
                 config,
+                namingStrategy,
                 chained,
                 "newPrefix",
                 clusterClient);
@@ -291,10 +318,13 @@ public class KafkaSinkITCase extends TestLogger {
         assertThat(committedRecords).containsExactlyInAnyOrderElementsOf(checkpointedRecords.get());
     }
 
-    @ParameterizedTest(name = "chained={0}")
-    @ValueSource(booleans = {true, false})
+    @ParameterizedTest(name = "{0}/{1}, chained={2}")
+    @MethodSource("getEOSParameters")
     public void testAbortTransactionsAfterScaleInBeforeFirstCheckpoint(
-            boolean chained, @InjectClusterClient ClusterClient<?> clusterClient) throws Exception {
+            TransactionNamingStrategy namingStrategy,
+            boolean chained,
+            @InjectClusterClient ClusterClient<?> clusterClient)
+            throws Exception {
         // Run a first job opening 5 transactions one per subtask and fail in async checkpoint phase
         try {
             SharedReference<Set<Long>> checkpointedRecords =
@@ -304,6 +334,7 @@ public class KafkaSinkITCase extends TestLogger {
                     new FailAsyncCheckpointMapper(0),
                     checkpointedRecords,
                     config,
+                    namingStrategy,
                     chained,
                     null,
                     clusterClient);
@@ -322,6 +353,7 @@ public class KafkaSinkITCase extends TestLogger {
                 new FailingCheckpointMapper(failed),
                 checkpointedRecords,
                 config,
+                namingStrategy,
                 chained,
                 null,
                 clusterClient);
@@ -340,6 +372,7 @@ public class KafkaSinkITCase extends TestLogger {
             MapFunction<Long, Long> mapper,
             SharedReference<Set<Long>> checkpointedRecords,
             Configuration config,
+            TransactionNamingStrategy namingStrategy,
             boolean chained,
             @Nullable String transactionalIdPrefix,
             @InjectClusterClient ClusterClient<?> clusterClient)
@@ -362,7 +395,8 @@ public class KafkaSinkITCase extends TestLogger {
                                 KafkaRecordSerializationSchema.builder()
                                         .setTopic(topic)
                                         .setValueSerializationSchema(new RecordSerializer())
-                                        .build());
+                                        .build())
+                        .setTransactionNamingStrategy(namingStrategy);
         if (transactionalIdPrefix == null) {
             transactionalIdPrefix = "kafka-sink";
         }
@@ -376,11 +410,15 @@ public class KafkaSinkITCase extends TestLogger {
 
     private void testRecoveryWithAssertion(
             DeliveryGuarantee guarantee, int maxConcurrentCheckpoints) throws Exception {
-        testRecoveryWithAssertion(guarantee, maxConcurrentCheckpoints, true);
+        testRecoveryWithAssertion(
+                guarantee, maxConcurrentCheckpoints, TransactionNamingStrategy.DEFAULT, true);
     }
 
     private void testRecoveryWithAssertion(
-            DeliveryGuarantee guarantee, int maxConcurrentCheckpoints, boolean chained)
+            DeliveryGuarantee guarantee,
+            int maxConcurrentCheckpoints,
+            TransactionNamingStrategy namingStrategy,
+            boolean chained)
             throws Exception {
         final StreamExecutionEnvironment env =
                 StreamExecutionEnvironment.getExecutionEnvironment(createConfiguration(1));
@@ -406,6 +444,7 @@ public class KafkaSinkITCase extends TestLogger {
                                         .setValueSerializationSchema(new RecordSerializer())
                                         .build())
                         .setTransactionalIdPrefix("kafka-sink")
+                        .setTransactionNamingStrategy(namingStrategy)
                         .build());
         env.execute();
 
@@ -423,10 +462,13 @@ public class KafkaSinkITCase extends TestLogger {
     }
 
     private void writeRecordsToKafka(DeliveryGuarantee deliveryGuarantee) throws Exception {
-        writeRecordsToKafka(deliveryGuarantee, true);
+        writeRecordsToKafka(deliveryGuarantee, TransactionNamingStrategy.DEFAULT, true);
     }
 
-    private void writeRecordsToKafka(DeliveryGuarantee deliveryGuarantee, boolean chained)
+    private void writeRecordsToKafka(
+            DeliveryGuarantee deliveryGuarantee,
+            TransactionNamingStrategy namingStrategy,
+            boolean chained)
             throws Exception {
         final StreamExecutionEnvironment env =
                 StreamExecutionEnvironment.getExecutionEnvironment(createConfiguration(1));
@@ -448,6 +490,7 @@ public class KafkaSinkITCase extends TestLogger {
                                                 .setValueSerializationSchema(new RecordSerializer())
                                                 .build())
                                 .setTransactionalIdPrefix("kafka-sink")
+                                .setTransactionNamingStrategy(namingStrategy)
                                 .build());
         env.execute();
 
