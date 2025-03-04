@@ -105,6 +105,10 @@ public class KafkaSinkOptions {
             this.abortImpl = abortImpl;
         }
 
+        boolean requiresKnownTopics() {
+            return impl.requiresKnownTopics();
+        }
+
         @Internal
         TransactionAbortStrategyImpl getAbortImpl() {
             return abortImpl;

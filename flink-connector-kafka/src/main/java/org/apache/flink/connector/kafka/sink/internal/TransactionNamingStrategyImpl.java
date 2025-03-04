@@ -26,7 +26,7 @@ import static org.apache.flink.util.Preconditions.checkState;
 
 /** Implementation of {@link KafkaSinkOptions.TransactionNamingStrategy}. */
 public enum TransactionNamingStrategyImpl {
-    INCREMENTING {
+    INCREMENTING(false) {
         /**
          * For each checkpoint we create new {@link FlinkKafkaInternalProducer} so that new
          * transactions will not clash with transactions created during previous checkpoints ({@code
@@ -56,7 +56,7 @@ public enum TransactionNamingStrategyImpl {
             return context.getProducer(context.buildTransactionalId(expectedCheckpointId));
         }
     },
-    POOLING {
+    POOLING(true) {
         @Override
         public FlinkKafkaInternalProducer<byte[], byte[]> getTransactionalProducer(
                 Context context) {
@@ -71,12 +71,22 @@ public enum TransactionNamingStrategyImpl {
         }
     };
 
+    private final boolean requiresKnownTopics;
+
+    TransactionNamingStrategyImpl(boolean requiresKnownTopics) {
+        this.requiresKnownTopics = requiresKnownTopics;
+    }
+
     /**
      * Returns a {@link FlinkKafkaInternalProducer} that will not clash with any ongoing
      * transactions.
      */
     public abstract FlinkKafkaInternalProducer<byte[], byte[]> getTransactionalProducer(
             Context context);
+
+    public boolean requiresKnownTopics() {
+        return requiresKnownTopics;
+    }
 
     /** Context for the transaction naming strategy. */
     public interface Context {
