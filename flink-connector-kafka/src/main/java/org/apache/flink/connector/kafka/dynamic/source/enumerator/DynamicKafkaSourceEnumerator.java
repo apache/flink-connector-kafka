@@ -347,7 +347,7 @@ public class DynamicKafkaSourceEnumerator
     private void sendMetadataUpdateEventToAvailableReaders() {
         for (int readerId : enumContext.registeredReaders().keySet()) {
             MetadataUpdateEvent metadataUpdateEvent = new MetadataUpdateEvent(latestKafkaStreams);
-            logger.info("sending metadata update to reader {}: {}", readerId, metadataUpdateEvent);
+            logger.debug("sending metadata update to reader {}: {}", readerId, metadataUpdateEvent);
             enumContext.sendEventToSourceReader(readerId, metadataUpdateEvent);
         }
     }
@@ -517,7 +517,8 @@ public class DynamicKafkaSourceEnumerator
 
         if (enumContext.registeredReaders().containsKey(subtaskId)) {
             MetadataUpdateEvent metadataUpdateEvent = new MetadataUpdateEvent(latestKafkaStreams);
-            logger.info("sending metadata update to reader {}: {}", subtaskId, metadataUpdateEvent);
+            logger.debug(
+                    "sending metadata update to reader {}: {}", subtaskId, metadataUpdateEvent);
             enumContext.sendEventToSourceReader(subtaskId, metadataUpdateEvent);
         } else {
             logger.warn("Got get metadata update but subtask was unavailable");
