@@ -38,6 +38,7 @@ import org.apache.flink.runtime.metrics.groups.UnregisteredMetricGroups;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
@@ -435,7 +436,8 @@ public class KafkaPartitionSplitReaderTest {
                 props,
                 new TestingReaderContext(new Configuration(), sourceReaderMetricGroup),
                 kafkaSourceReaderMetrics,
-                rackId);
+                rackId,
+                KafkaConsumer::new);
     }
 
     private Map<String, KafkaPartitionSplit> assignSplits(
