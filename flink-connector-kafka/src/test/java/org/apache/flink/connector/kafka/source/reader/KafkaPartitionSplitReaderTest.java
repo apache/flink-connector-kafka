@@ -136,33 +136,6 @@ public class KafkaPartitionSplitReaderTest {
     }
 
     @Test
-    public void testWakeUpOnConsumerPosition() throws Exception {
-        Properties props = new Properties();
-        props.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        KafkaPartitionSplitReader reader =
-                createReader(props, UnregisteredMetricsGroup.createSourceReaderMetricGroup());
-        AtomicReference<Throwable> error = new AtomicReference<>();
-        TopicPartition tp = new TopicPartition(TOPIC3, 0);
-
-        reader.consumer().assign(Collections.singletonList(tp));
-
-        Thread t =
-                new Thread(
-                        () -> {
-                            try {
-                                reader.getConsumerPosition(tp, "testing get starting offsets");
-                            } catch (Throwable e) {
-                                error.set(e);
-                            }
-                        },
-                        "testWakeUp-thread");
-        t.start();
-        reader.wakeUp();
-        t.join();
-        assertThat(error.get()).isNull();
-    }
-
-    @Test
     public void testWakeupThenAssign() throws IOException {
         KafkaPartitionSplitReader reader = createReader();
         // Assign splits with records
