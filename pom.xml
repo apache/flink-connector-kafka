@@ -51,7 +51,7 @@ under the License.
 
     <properties>
         <flink.version>1.20.0</flink.version>
-        <kafka.version>3.4.0</kafka.version>
+        <kafka.version>3.7.1</kafka.version>
         <confluent.version>7.4.4</confluent.version>
 
         <jackson-bom.version>2.15.2</jackson-bom.version>
