@@ -32,6 +32,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.Set;
 
 import static org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriberUtils.getTopicMetadata;
@@ -50,10 +51,11 @@ class TopicListSubscriber implements KafkaSubscriber, KafkaDatasetIdentifierProv
     }
 
     @Override
-    public Set<TopicPartition> getSubscribedTopicPartitions(AdminClient adminClient) {
+    public Set<TopicPartition> getSubscribedTopicPartitions(
+            AdminClient adminClient, Properties properties) {
         LOG.debug("Fetching descriptions for topics: {}", topics);
         final Map<String, TopicDescription> topicMetadata =
-                getTopicMetadata(adminClient, new HashSet<>(topics));
+                getTopicMetadata(adminClient, new HashSet<>(topics), properties);
 
         Set<TopicPartition> subscribedPartitions = new HashSet<>();
         for (TopicDescription topic : topicMetadata.values()) {
