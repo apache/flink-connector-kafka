@@ -17,15 +17,19 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
 import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
+import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
+import org.apache.flink.test.junit5.MiniClusterExtension;
 import org.apache.flink.util.TestLoggerExtension;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
@@ -42,6 +46,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests for the standalone KafkaWriter. */
 @ExtendWith(TestLoggerExtension.class)
 public class KafkaWriterITCase extends KafkaWriterTestBase {
+
+    @RegisterExtension
+    public static final MiniClusterExtension MINI_CLUSTER_RESOURCE =
+            new MiniClusterExtension(
+                    new MiniClusterResourceConfiguration.Builder()
+                            .setNumberTaskManagers(2)
+                            .setNumberSlotsPerTaskManager(8)
+                            .setConfiguration(new Configuration())
+                            .build());
+
     @ParameterizedTest
     @EnumSource(DeliveryGuarantee.class)
     public void testRegisterMetrics(DeliveryGuarantee guarantee) throws Exception {

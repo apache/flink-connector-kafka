@@ -19,8 +19,8 @@
 package org.apache.flink.connector.kafka.dynamic.source;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
@@ -39,11 +39,11 @@ import org.apache.flink.connector.testframe.junit.annotations.TestEnv;
 import org.apache.flink.connector.testframe.junit.annotations.TestExternalSystem;
 import org.apache.flink.connector.testframe.junit.annotations.TestSemantics;
 import org.apache.flink.connector.testframe.testsuites.SourceTestSuiteBase;
+import org.apache.flink.core.execution.CheckpointingMode;
 import org.apache.flink.core.testutils.CommonTestUtils;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.testutils.InMemoryReporter;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
-import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.connectors.kafka.DynamicKafkaSourceTestHelper;
@@ -257,8 +257,10 @@ public class DynamicKafkaSourceITTest extends TestLogger {
             DynamicKafkaSourceTestHelper.createTopic(fixedTopic, NUM_PARTITIONS);
 
             // Flink job config and env
-            StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-            env.setRestartStrategy(RestartStrategies.noRestart());
+            Configuration configuration = new Configuration();
+            configuration.set(RestartStrategyOptions.RESTART_STRATEGY, "disable");
+            StreamExecutionEnvironment env =
+                    StreamExecutionEnvironment.getExecutionEnvironment(configuration);
             env.setParallelism(2);
             Properties properties = new Properties();
             properties.setProperty(
@@ -383,8 +385,10 @@ public class DynamicKafkaSourceITTest extends TestLogger {
             DynamicKafkaSourceTestHelper.createTopic(kafkaClusterIdx, topic2, NUM_PARTITIONS);
 
             // Flink job config and env
-            StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-            env.setRestartStrategy(RestartStrategies.noRestart());
+            Configuration configuration = new Configuration();
+            configuration.set(RestartStrategyOptions.RESTART_STRATEGY, "disable");
+            StreamExecutionEnvironment env =
+                    StreamExecutionEnvironment.getExecutionEnvironment(configuration);
             env.setParallelism(2);
             Properties properties = new Properties();
             properties.setProperty(
@@ -608,9 +612,11 @@ public class DynamicKafkaSourceITTest extends TestLogger {
             DynamicKafkaSourceTestHelper.createTopic(fixedTopic, NUM_PARTITIONS);
 
             // Flink job config and env
-            StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+            Configuration configuration = new Configuration();
+            configuration.set(RestartStrategyOptions.RESTART_STRATEGY, "disable");
+            StreamExecutionEnvironment env =
+                    StreamExecutionEnvironment.getExecutionEnvironment(configuration);
             env.setParallelism(2);
-            env.setRestartStrategy(RestartStrategies.noRestart());
             Properties properties = new Properties();
             properties.setProperty(
                     KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "1000");

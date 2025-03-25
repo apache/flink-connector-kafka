@@ -17,6 +17,7 @@
 
 package org.apache.flink.streaming.connectors.kafka;
 
+import org.apache.flink.connector.kafka.testutils.SimpleCollector;
 import org.apache.flink.connector.kafka.util.JacksonMapperFactory;
 import org.apache.flink.connector.testutils.formats.DummyInitializationContext;
 import org.apache.flink.streaming.util.serialization.JSONKeyValueDeserializationSchema;
@@ -45,8 +46,10 @@ public class JSONKeyValueDeserializationSchemaTest {
 
         JSONKeyValueDeserializationSchema schema = new JSONKeyValueDeserializationSchema(false);
         schema.open(new DummyInitializationContext());
-        ObjectNode deserializedValue =
-                schema.deserialize(newConsumerRecord(serializedKey, serializedValue));
+        SimpleCollector<ObjectNode> collector = new SimpleCollector<>();
+        schema.deserialize(newConsumerRecord(serializedKey, serializedValue), collector);
+        assertThat(collector.getList()).hasSize(1);
+        ObjectNode deserializedValue = collector.getList().get(0);
 
         assertThat(deserializedValue.get("metadata")).isNull();
         assertThat(deserializedValue.get("key").get("index").asInt()).isEqualTo(4);
@@ -63,8 +66,10 @@ public class JSONKeyValueDeserializationSchemaTest {
 
         JSONKeyValueDeserializationSchema schema = new JSONKeyValueDeserializationSchema(false);
         schema.open(new DummyInitializationContext());
-        ObjectNode deserializedValue =
-                schema.deserialize(newConsumerRecord(serializedKey, serializedValue));
+        SimpleCollector<ObjectNode> collector = new SimpleCollector<>();
+        schema.deserialize(newConsumerRecord(serializedKey, serializedValue), collector);
+        assertThat(collector.getList()).hasSize(1);
+        ObjectNode deserializedValue = collector.getList().get(0);
 
         assertThat(deserializedValue.get("metadata")).isNull();
         assertThat(deserializedValue.get("key")).isNull();
@@ -96,8 +101,10 @@ public class JSONKeyValueDeserializationSchemaTest {
 
         JSONKeyValueDeserializationSchema schema = new JSONKeyValueDeserializationSchema(false);
         schema.open(new DummyInitializationContext());
-        ObjectNode deserializedValue =
-                schema.deserialize(newConsumerRecord(serializedKey, serializedValue));
+        SimpleCollector<ObjectNode> collector = new SimpleCollector<>();
+        schema.deserialize(newConsumerRecord(serializedKey, serializedValue), collector);
+        assertThat(collector.getList()).hasSize(1);
+        ObjectNode deserializedValue = collector.getList().get(0);
 
         assertThat(deserializedValue.get("metadata")).isNull();
         assertThat(deserializedValue.get("key").get("index").asInt()).isEqualTo(4);
@@ -118,7 +125,11 @@ public class JSONKeyValueDeserializationSchemaTest {
         schema.open(new DummyInitializationContext());
         final ConsumerRecord<byte[], byte[]> consumerRecord =
                 newConsumerRecord("topic#1", 3, 4L, serializedKey, serializedValue);
-        ObjectNode deserializedValue = schema.deserialize(consumerRecord);
+
+        SimpleCollector<ObjectNode> collector = new SimpleCollector<>();
+        schema.deserialize(consumerRecord, collector);
+        assertThat(collector.getList()).hasSize(1);
+        ObjectNode deserializedValue = collector.getList().get(0);
 
         assertThat(deserializedValue.get("key").get("index").asInt()).isEqualTo(4);
         assertThat(deserializedValue.get("value").get("word").asText()).isEqualTo("world");

@@ -69,7 +69,7 @@ public class KafkaSourceFetcherManager
             Supplier<SplitReader<ConsumerRecord<byte[], byte[]>, KafkaPartitionSplit>>
                     splitReaderSupplier,
             Consumer<Collection<String>> splitFinishedHook) {
-        super(elementsQueue, splitReaderSupplier, new Configuration(), splitFinishedHook);
+        super(splitReaderSupplier, new Configuration(), splitFinishedHook);
     }
 
     public void commitOffsets(

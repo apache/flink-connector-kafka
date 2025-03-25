@@ -17,7 +17,10 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.sink.KafkaTransactionLog.TransactionRecord;
+import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
+import org.apache.flink.test.junit5.MiniClusterExtension;
 import org.apache.flink.util.TestLogger;
 
 import org.apache.kafka.clients.producer.KafkaProducer;
@@ -29,6 +32,7 @@ import org.apache.kafka.common.serialization.IntegerSerializer;
 import org.junit.After;
 import org.junit.ClassRule;
 import org.junit.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.testcontainers.containers.KafkaContainer;
 
 import java.util.ArrayList;
@@ -51,6 +55,15 @@ public class KafkaTransactionLogITCase extends TestLogger {
 
     private static final String TOPIC_NAME = "kafkaTransactionLogTest";
     private static final String TRANSACTIONAL_ID_PREFIX = "kafka-log";
+
+    @RegisterExtension
+    public static final MiniClusterExtension MINI_CLUSTER_RESOURCE =
+            new MiniClusterExtension(
+                    new MiniClusterResourceConfiguration.Builder()
+                            .setNumberTaskManagers(2)
+                            .setNumberSlotsPerTaskManager(8)
+                            .setConfiguration(new Configuration())
+                            .build());
 
     @ClassRule
     public static final KafkaContainer KAFKA_CONTAINER =

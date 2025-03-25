@@ -18,12 +18,12 @@
 
 package org.apache.flink.connector.kafka.source.reader.deserializer;
 
+import org.apache.flink.connector.kafka.testutils.SimpleCollector;
 import org.apache.flink.connector.kafka.util.JacksonMapperFactory;
 import org.apache.flink.connector.testutils.formats.DummyInitializationContext;
 import org.apache.flink.connector.testutils.source.deserialization.TestingDeserializationContext;
 import org.apache.flink.formats.json.JsonDeserializationSchema;
 import org.apache.flink.streaming.util.serialization.JSONKeyValueDeserializationSchema;
-import org.apache.flink.util.Collector;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,10 +35,8 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -63,13 +61,13 @@ public class KafkaRecordDeserializationSchemaTest {
     public void testKafkaDeserializationSchemaWrapper() throws Exception {
         final ConsumerRecord<byte[], byte[]> consumerRecord = getConsumerRecord();
         KafkaRecordDeserializationSchema<ObjectNode> schema =
-                KafkaRecordDeserializationSchema.of(new JSONKeyValueDeserializationSchema(true));
+                new JSONKeyValueDeserializationSchema(true);
         schema.open(new DummyInitializationContext());
         SimpleCollector<ObjectNode> collector = new SimpleCollector<>();
         schema.deserialize(consumerRecord, collector);
 
-        assertThat(collector.list).hasSize(1);
-        ObjectNode deserializedValue = collector.list.get(0);
+        assertThat(collector.getList()).hasSize(1);
+        ObjectNode deserializedValue = collector.getList().get(0);
 
         assertThat(deserializedValue.get("key").get("index").asInt()).isEqualTo(4);
         assertThat(deserializedValue.get("value").get("word").asText()).isEqualTo("world");
@@ -96,9 +94,9 @@ public class KafkaRecordDeserializationSchemaTest {
                 collector = new SimpleCollector<>();
         schema.deserialize(consumerRecord, collector);
 
-        assertThat(collector.list).hasSize(1);
+        assertThat(collector.getList()).hasSize(1);
         org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ObjectNode
-                deserializedValue = collector.list.get(0);
+                deserializedValue = collector.getList().get(0);
         assertThat(deserializedValue.get("word").asText()).isEqualTo("world");
         assertThat(deserializedValue.get("key")).isNull();
         assertThat(deserializedValue.get("metadata")).isNull();
@@ -117,8 +115,8 @@ public class KafkaRecordDeserializationSchemaTest {
         SimpleCollector<String> collector = new SimpleCollector<>();
         schema.deserialize(consumerRecord, collector);
 
-        assertThat(collector.list).hasSize(1);
-        assertThat(collector.list.get(0)).isEqualTo("world");
+        assertThat(collector.getList()).hasSize(1);
+        assertThat(collector.getList().get(0)).isEqualTo("world");
     }
 
     @Test
@@ -154,21 +152,6 @@ public class KafkaRecordDeserializationSchemaTest {
         byte[] serializedValue = OBJECT_MAPPER.writeValueAsBytes(initialValue);
 
         return new ConsumerRecord<>("topic#1", 3, 4L, serializedKey, serializedValue);
-    }
-
-    private static class SimpleCollector<T> implements Collector<T> {
-
-        private final List<T> list = new ArrayList<>();
-
-        @Override
-        public void collect(T record) {
-            list.add(record);
-        }
-
-        @Override
-        public void close() {
-            // do nothing
-        }
     }
 
     /**

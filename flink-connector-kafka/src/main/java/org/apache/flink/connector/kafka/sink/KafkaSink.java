@@ -22,6 +22,7 @@ import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.sink2.Committer;
 import org.apache.flink.api.connector.sink2.CommitterInitContext;
+import org.apache.flink.api.connector.sink2.WriterInitContext;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacet;
@@ -102,6 +103,7 @@ public class KafkaSink<IN>
         return new KafkaSinkBuilder<>();
     }
 
+    @Internal
     @Override
     public Committer<KafkaCommittable> createCommitter(CommitterInitContext context) {
         return new KafkaCommitter(
@@ -119,14 +121,14 @@ public class KafkaSink<IN>
 
     @Internal
     @Override
-    public KafkaWriter<IN> createWriter(InitContext context) throws IOException {
+    public KafkaWriter<IN> createWriter(WriterInitContext context) throws IOException {
         return restoreWriter(context, Collections.emptyList());
     }
 
     @Internal
     @Override
     public KafkaWriter<IN> restoreWriter(
-            InitContext context, Collection<KafkaWriterState> recoveredState) {
+            WriterInitContext context, Collection<KafkaWriterState> recoveredState) {
         KafkaWriter<IN> writer;
         if (deliveryGuarantee == DeliveryGuarantee.EXACTLY_ONCE) {
             writer =

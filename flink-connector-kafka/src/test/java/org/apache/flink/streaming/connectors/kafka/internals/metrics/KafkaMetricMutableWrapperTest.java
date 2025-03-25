@@ -61,11 +61,6 @@ class KafkaMetricMutableWrapperTest {
         testOnlyMeasurableMetricsAreRegistered(KafkaMetricMutableWrapper::new);
     }
 
-    @Test
-    void testOnlyMeasurableMetricsAreRegistered() {
-        testOnlyMeasurableMetricsAreRegistered(KafkaMetricWrapper::new);
-    }
-
     private static void testOnlyMeasurableMetricsAreRegistered(
             Function<Metric, Gauge<Double>> wrapperFactory) {
         final Collection<Gauge<Double>> metricWrappers = new ArrayList<>();
