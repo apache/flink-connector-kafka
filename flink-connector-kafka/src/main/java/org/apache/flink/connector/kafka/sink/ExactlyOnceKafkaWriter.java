@@ -19,7 +19,7 @@ package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.SerializationSchema;
-import org.apache.flink.api.connector.sink2.Sink;
+import org.apache.flink.api.connector.sink2.WriterInitContext;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.internal.BackchannelFactory;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
@@ -91,7 +91,7 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
             DeliveryGuarantee deliveryGuarantee,
             Properties kafkaProducerConfig,
             String transactionalIdPrefix,
-            Sink.InitContext sinkInitContext,
+            WriterInitContext sinkInitContext,
             KafkaRecordSerializationSchema<IN> recordSerializer,
             SerializationSchema.InitializationContext schemaContext,
             Collection<KafkaWriterState> recoveredStates) {

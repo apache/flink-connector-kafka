@@ -17,9 +17,12 @@
 
 package org.apache.flink.streaming.kafka.test.base;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
-import org.apache.flink.api.java.utils.ParameterTool;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.util.ParameterTool;
+
+import java.time.Duration;
 
 /** The util class for kafka example. */
 public class KafkaExampleUtil {
@@ -40,8 +43,14 @@ public class KafkaExampleUtil {
                             + "--group.id <some id>");
         }
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.getConfig().setRestartStrategy(RestartStrategies.fixedDelayRestart(4, 10000));
+        Configuration configuration = new Configuration();
+        configuration.set(RestartStrategyOptions.RESTART_STRATEGY, "fixed-delay");
+        configuration.set(RestartStrategyOptions.RESTART_STRATEGY_FIXED_DELAY_ATTEMPTS, 4);
+        configuration.set(
+                RestartStrategyOptions.RESTART_STRATEGY_FIXED_DELAY_DELAY,
+                Duration.ofMillis(10000));
+        StreamExecutionEnvironment env =
+                StreamExecutionEnvironment.getExecutionEnvironment(configuration);
         env.enableCheckpointing(5000); // create a checkpoint every 5 seconds
         env.getConfig()
                 .setGlobalJobParameters(

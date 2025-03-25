@@ -25,8 +25,8 @@ import org.apache.flink.api.common.eventtime.WatermarkGenerator;
 import org.apache.flink.api.common.eventtime.WatermarkOutput;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
@@ -43,8 +43,8 @@ import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
-import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
-import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
+import org.apache.flink.streaming.api.functions.sink.legacy.RichSinkFunction;
+import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.apache.flink.streaming.api.operators.StreamMap;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.util.CloseableIterator;
@@ -139,7 +139,7 @@ public class KafkaSourceITCase {
                     "timestampVerifier",
                     TypeInformation.of(PartitionAndValue.class),
                     new WatermarkVerifyingOperator(v -> v));
-            stream.addSink(new DiscardingSink<>());
+            stream.sinkTo(new DiscardingSink<>());
             JobExecutionResult result = env.execute();
 
             assertThat(result.<List<Long>>getAccumulatorResult("timestamp"))
@@ -519,7 +519,7 @@ public class KafkaSourceITCase {
         stream.addSink(
                 new RichSinkFunction<PartitionAndValue>() {
                     @Override
-                    public void open(Configuration parameters) {
+                    public void open(OpenContext openContext) {
                         getRuntimeContext()
                                 .addAccumulator("result", new ListAccumulator<PartitionAndValue>());
                     }

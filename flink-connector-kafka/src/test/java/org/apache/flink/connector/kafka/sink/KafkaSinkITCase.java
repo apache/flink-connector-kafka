@@ -19,7 +19,6 @@ package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.functions.MapFunction;
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.common.state.CheckpointListener;
 import org.apache.flink.api.common.state.ListState;
@@ -32,6 +31,8 @@ import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
+import org.apache.flink.configuration.ExternalizedCheckpointRetention;
+import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.configuration.StateBackendOptions;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.testutils.KafkaSinkExternalContextFactory;
@@ -47,7 +48,6 @@ import org.apache.flink.connector.testframe.testsuites.SinkTestSuiteBase;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.runtime.jobgraph.JobGraph;
-import org.apache.flink.runtime.jobgraph.SavepointConfigOptions;
 import org.apache.flink.runtime.minicluster.MiniCluster;
 import org.apache.flink.runtime.state.FunctionInitializationContext;
 import org.apache.flink.runtime.state.FunctionSnapshotContext;
@@ -57,10 +57,8 @@ import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
-import org.apache.flink.streaming.api.environment.CheckpointConfig;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.source.SourceFunction;
+import org.apache.flink.streaming.api.functions.source.legacy.SourceFunction;
 import org.apache.flink.test.junit5.InjectClusterClient;
 import org.apache.flink.test.junit5.InjectMiniCluster;
 import org.apache.flink.test.junit5.MiniClusterExtension;
@@ -68,7 +66,7 @@ import org.apache.flink.testutils.junit.SharedObjectsExtension;
 import org.apache.flink.testutils.junit.SharedReference;
 import org.apache.flink.util.TestLogger;
 
-import org.apache.flink.shaded.guava31.com.google.common.collect.Lists;
+import org.apache.flink.shaded.guava32.com.google.common.collect.Lists;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -114,6 +112,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.configuration.StateRecoveryOptions.SAVEPOINT_PATH;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -248,12 +247,11 @@ public class KafkaSinkITCase extends TestLogger {
         // Run a first job failing during the async phase of a checkpoint to leave some
         // lingering transactions
         final Configuration config = createConfiguration(4);
-        config.setString(StateBackendOptions.STATE_BACKEND, "filesystem");
-        config.setString(
-                CheckpointingOptions.CHECKPOINTS_DIRECTORY, checkpointDir.toURI().toString());
+        config.set(StateBackendOptions.STATE_BACKEND, "rocksdb");
+        config.set(CheckpointingOptions.CHECKPOINTS_DIRECTORY, checkpointDir.toURI().toString());
         config.set(
-                ExecutionCheckpointingOptions.EXTERNALIZED_CHECKPOINT,
-                CheckpointConfig.ExternalizedCheckpointCleanup.RETAIN_ON_CANCELLATION);
+                CheckpointingOptions.EXTERNALIZED_CHECKPOINT_RETENTION,
+                ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION);
         config.set(CheckpointingOptions.MAX_RETAINED_CHECKPOINTS, 2);
         JobID firstJobId = null;
         SharedReference<Set<Long>> checkpointedRecords =
@@ -274,7 +272,7 @@ public class KafkaSinkITCase extends TestLogger {
                 CommonTestUtils.getLatestCompletedCheckpointPath(firstJobId, miniCluster);
 
         assertThat(completedCheckpoint).isPresent();
-        config.set(SavepointConfigOptions.SAVEPOINT_PATH, completedCheckpoint.get());
+        config.set(SAVEPOINT_PATH, completedCheckpoint.get());
 
         // Run a second job which aborts all lingering transactions and new consumer should
         // immediately see the newly written records
@@ -345,12 +343,12 @@ public class KafkaSinkITCase extends TestLogger {
             @InjectClusterClient ClusterClient<?> clusterClient)
             throws Exception {
 
+        config.set(RestartStrategyOptions.RESTART_STRATEGY, "disable");
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(config);
         env.enableCheckpointing(100L);
         if (!chained) {
             env.disableOperatorChaining();
         }
-        env.setRestartStrategy(RestartStrategies.noRestart());
         final DataStreamSource<Long> source = env.fromSequence(1, 10);
         final DataStream<Long> stream =
                 source.map(mapper).map(new RecordFetcher(checkpointedRecords)).uid("fetcher");

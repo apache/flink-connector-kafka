@@ -21,7 +21,6 @@ package org.apache.flink.connector.kafka.source.reader.deserializer;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
-import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 import org.apache.flink.util.Collector;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -59,25 +58,6 @@ public interface KafkaRecordDeserializationSchema<T> extends Serializable, Resul
      * @param out The collector to put the resulting messages.
      */
     void deserialize(ConsumerRecord<byte[], byte[]> record, Collector<T> out) throws IOException;
-
-    /**
-     * Wraps a legacy {@link KafkaDeserializationSchema} as the deserializer of the {@link
-     * ConsumerRecord ConsumerRecords}.
-     *
-     * <p>Note that the {@link KafkaDeserializationSchema#isEndOfStream(Object)} method will no
-     * longer be used to determine the end of the stream.
-     *
-     * @param kafkaDeserializationSchema the legacy {@link KafkaDeserializationSchema} to use.
-     * @param <V> the return type of the deserialized record.
-     * @return A {@link KafkaRecordDeserializationSchema} that uses the given {@link
-     *     KafkaDeserializationSchema} to deserialize the {@link ConsumerRecord ConsumerRecords}.
-     * @deprecated Will be removed with {@link KafkaDeserializationSchema}.
-     */
-    @Deprecated
-    static <V> KafkaRecordDeserializationSchema<V> of(
-            KafkaDeserializationSchema<V> kafkaDeserializationSchema) {
-        return new KafkaDeserializationSchemaWrapper<>(kafkaDeserializationSchema);
-    }
 
     /**
      * Wraps a {@link DeserializationSchema} as the value deserialization schema of the {@link

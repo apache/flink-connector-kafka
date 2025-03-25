@@ -20,7 +20,8 @@ package org.apache.flink.streaming.connectors.kafka.testutils;
 
 import org.apache.flink.api.common.state.CheckpointListener;
 import org.apache.flink.streaming.api.checkpoint.ListCheckpointed;
-import org.apache.flink.streaming.api.functions.source.RichParallelSourceFunction;
+import org.apache.flink.streaming.api.functions.source.legacy.RichParallelSourceFunction;
+import org.apache.flink.streaming.api.functions.source.legacy.SourceFunction;
 import org.apache.flink.util.SerializableObject;
 
 import java.util.Collections;
@@ -58,14 +59,14 @@ public class IntegerSource extends RichParallelSourceFunction<Integer>
     }
 
     @Override
-    public void run(SourceContext<Integer> ctx) throws Exception {
+    public void run(SourceFunction.SourceContext<Integer> ctx) throws Exception {
 
         // each source subtask emits only the numbers where (num % parallelism == subtask_index)
-        final int stepSize = getRuntimeContext().getNumberOfParallelSubtasks();
+        final int stepSize = getRuntimeContext().getTaskInfo().getNumberOfParallelSubtasks();
         int current =
                 this.currentPosition >= 0
                         ? this.currentPosition
-                        : getRuntimeContext().getIndexOfThisSubtask();
+                        : getRuntimeContext().getTaskInfo().getIndexOfThisSubtask();
 
         while (this.running && current < this.numEventsTotal) {
             // emit the next element

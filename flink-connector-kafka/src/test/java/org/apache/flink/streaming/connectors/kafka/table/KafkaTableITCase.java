@@ -18,17 +18,17 @@
 
 package org.apache.flink.streaming.connectors.kafka.table;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
+import org.apache.flink.configuration.RestartStrategyOptions;
+import org.apache.flink.configuration.StateRecoveryOptions;
 import org.apache.flink.connector.kafka.sink.KafkaPartitioner;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.execution.SavepointFormatType;
-import org.apache.flink.runtime.jobgraph.SavepointConfigOptions;
 import org.apache.flink.runtime.messages.FlinkJobTerminatedWithoutCancellationException;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.sink.SinkFunction;
+import org.apache.flink.streaming.api.functions.sink.legacy.SinkFunction;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.api.config.TableConfigOptions;
@@ -1251,12 +1251,12 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         // ---------- Resume the consume job from savepoint  -------------------
 
         Configuration configuration = new Configuration();
-        configuration.set(SavepointConfigOptions.SAVEPOINT_PATH, savepointPath);
+        configuration.set(StateRecoveryOptions.SAVEPOINT_PATH, savepointPath);
+        configuration.set(RestartStrategyOptions.RESTART_STRATEGY, "disable");
         configuration.set(CoreOptions.DEFAULT_PARALLELISM, 1);
         StreamExecutionEnvironment env =
                 StreamExecutionEnvironment.getExecutionEnvironment(configuration);
         StreamTableEnvironment tEnv = StreamTableEnvironment.create(env);
-        env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
 
         tEnv.executeSql(createTable);
         tEnv.executeSql(createSink);

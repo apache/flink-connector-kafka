@@ -18,10 +18,15 @@
 
 package org.apache.flink.connector.kafka.sink.internal;
 
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
+import org.apache.flink.test.junit5.MiniClusterExtension;
+
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -35,6 +40,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @Testcontainers
 class ProducerPoolImplITCase {
+
+    @RegisterExtension
+    public static final MiniClusterExtension MINI_CLUSTER_RESOURCE =
+            new MiniClusterExtension(
+                    new MiniClusterResourceConfiguration.Builder()
+                            .setNumberTaskManagers(2)
+                            .setNumberSlotsPerTaskManager(8)
+                            .setConfiguration(new Configuration())
+                            .build());
 
     public static final Consumer<FlinkKafkaInternalProducer<byte[], byte[]>> INIT = p -> {};
     public static final String TRANSACTIONAL_ID = "test-transactional-id";

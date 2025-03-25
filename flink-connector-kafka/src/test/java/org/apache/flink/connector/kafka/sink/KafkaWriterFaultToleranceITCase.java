@@ -17,14 +17,18 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
+import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
+import org.apache.flink.test.junit5.MiniClusterExtension;
 import org.apache.flink.util.TestLoggerExtension;
 
 import org.apache.kafka.common.errors.NetworkException;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
 import java.util.Properties;
 
@@ -37,6 +41,15 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
     private static final String INIT_KAFKA_REQUEST_TIMEOUT_MS = "1000";
     private static final String INIT_KAFKA_MAX_BLOCK_MS = "1000";
     private static final String INIT_KAFKA_DELIVERY_TIMEOUT_MS = "1000";
+
+    @RegisterExtension
+    public static final MiniClusterExtension MINI_CLUSTER_RESOURCE =
+            new MiniClusterExtension(
+                    new MiniClusterResourceConfiguration.Builder()
+                            .setNumberTaskManagers(2)
+                            .setNumberSlotsPerTaskManager(8)
+                            .setConfiguration(new Configuration())
+                            .build());
 
     @Test
     void testWriteExceptionWhenKafkaUnavailable() throws Exception {

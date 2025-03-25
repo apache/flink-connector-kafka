@@ -20,13 +20,16 @@ package org.apache.flink.streaming.util.serialization;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.connector.kafka.util.JacksonMapperFactory;
-import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
+import org.apache.flink.util.Collector;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+
+import java.io.IOException;
 
 import static org.apache.flink.api.java.typeutils.TypeExtractor.getForClass;
 
@@ -42,8 +45,8 @@ import static org.apache.flink.api.java.typeutils.TypeExtractor.getForClass;
  * (String) and "partition" (int).
  */
 @PublicEvolving
-@Deprecated
-public class JSONKeyValueDeserializationSchema implements KafkaDeserializationSchema<ObjectNode> {
+public class JSONKeyValueDeserializationSchema
+        implements KafkaRecordDeserializationSchema<ObjectNode> {
 
     private static final long serialVersionUID = 1509391548173891955L;
 
@@ -60,7 +63,8 @@ public class JSONKeyValueDeserializationSchema implements KafkaDeserializationSc
     }
 
     @Override
-    public ObjectNode deserialize(ConsumerRecord<byte[], byte[]> record) throws Exception {
+    public void deserialize(ConsumerRecord<byte[], byte[]> record, Collector<ObjectNode> out)
+            throws IOException {
         ObjectNode node = mapper.createObjectNode();
         if (record.key() != null) {
             node.set("key", mapper.readValue(record.key(), JsonNode.class));
@@ -74,12 +78,7 @@ public class JSONKeyValueDeserializationSchema implements KafkaDeserializationSc
                     .put("topic", record.topic())
                     .put("partition", record.partition());
         }
-        return node;
-    }
-
-    @Override
-    public boolean isEndOfStream(ObjectNode nextElement) {
-        return false;
+        out.collect(node);
     }
 
     @Override
