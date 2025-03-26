@@ -105,7 +105,7 @@ public class ProducerPoolImpl implements ProducerPool {
     }
 
     @Override
-    public void recycleByTransactionId(String transactionalId) {
+    public void recycleByTransactionId(String transactionalId, boolean success) {
         ProducerEntry producerEntry = producerByTransactionalId.remove(transactionalId);
         LOG.debug("Transaction {} finished, producer {}", transactionalId, producerEntry);
         if (producerEntry == null) {
@@ -115,7 +115,7 @@ public class ProducerPoolImpl implements ProducerPool {
         }
 
         transactionalIdsByCheckpoint.remove(producerEntry.getCheckpointedTransaction());
-        recycleProducer(producerEntry.getProducer());
+        recycleProducer(producerEntry.getProducer(), success);
 
         // In rare cases (only for non-chained committer), some transactions may not be detected to
         // be finished.
@@ -131,7 +131,7 @@ public class ProducerPoolImpl implements ProducerPool {
         if (!earlierTransactions.isEmpty()) {
             for (String id : earlierTransactions.values()) {
                 ProducerEntry entry = producerByTransactionalId.remove(id);
-                recycleProducer(entry.getProducer());
+                recycleProducer(entry.getProducer(), false);
             }
             earlierTransactions.clear();
         }
@@ -139,18 +139,25 @@ public class ProducerPoolImpl implements ProducerPool {
 
     @Override
     public void recycle(FlinkKafkaInternalProducer<byte[], byte[]> producer) {
-        recycleProducer(producer);
+        recycleProducer(producer, true);
         ProducerEntry producerEntry =
                 producerByTransactionalId.remove(producer.getTransactionalId());
         transactionalIdsByCheckpoint.remove(producerEntry.getCheckpointedTransaction());
     }
 
-    private void recycleProducer(@Nullable FlinkKafkaInternalProducer<byte[], byte[]> producer) {
+    private void recycleProducer(
+            @Nullable FlinkKafkaInternalProducer<byte[], byte[]> producer, boolean reuse) {
         // In case of recovery, we don't create a producer for the ongoing transactions.
         // The producer is just initialized on committer side.
         if (producer == null) {
             return;
         }
+
+        if (!reuse) {
+            producer.close();
+            return;
+        }
+
         // For non-chained committer, we have a split brain scenario:
         // Both the writer and the committer have a producer representing the same transaction.
         // The committer producer has finished the transaction while the writer producer is still in

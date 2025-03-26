@@ -21,6 +21,7 @@ import org.apache.flink.api.connector.sink2.mocks.MockCommitRequest;
 import org.apache.flink.connector.kafka.sink.internal.BackchannelFactory;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
 import org.apache.flink.connector.kafka.sink.internal.ReadableBackchannel;
+import org.apache.flink.connector.kafka.sink.internal.TransactionFinished;
 import org.apache.flink.util.TestLoggerExtension;
 
 import org.apache.kafka.clients.CommonClientConfigs;
@@ -31,10 +32,14 @@ import org.assertj.core.api.Condition;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiFunction;
 
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -48,6 +53,8 @@ class KafkaCommitterTest {
     private static final String TRANS_ID = "transactionalId";
     public static final int ATTEMPT = 2;
     public static final int SUB_ID = 1;
+    private static final BiFunction<Properties, String, FlinkKafkaInternalProducer<?, ?>>
+            MOCK_FACTORY = (properties, transactionalId) -> new MockProducer(properties, null);
 
     @AfterEach
     public void check() {
@@ -59,10 +66,10 @@ class KafkaCommitterTest {
     public void testRetryCommittableOnRetriableError() throws IOException, InterruptedException {
         Properties properties = getProperties();
         try (final KafkaCommitter committer =
-                        new KafkaCommitter(properties, TRANS_ID, SUB_ID, ATTEMPT);
+                        new KafkaCommitter(properties, TRANS_ID, SUB_ID, ATTEMPT, MOCK_FACTORY);
                 FlinkKafkaInternalProducer<Object, Object> producer =
                         new FlinkKafkaInternalProducer<>(properties, TRANS_ID);
-                ReadableBackchannel<?> backchannel =
+                ReadableBackchannel<TransactionFinished> backchannel =
                         BackchannelFactory.getInstance()
                                 .getReadableBackchannel(SUB_ID, ATTEMPT, TRANS_ID)) {
             final MockCommitRequest<KafkaCommittable> request =
@@ -72,7 +79,7 @@ class KafkaCommitterTest {
             committer.commit(Collections.singletonList(request));
 
             assertThat(request.getNumberOfRetries()).isEqualTo(1);
-            assertThat(backchannel).doesNotHave(recycledProducer());
+            assertThat(backchannel).doesNotHave(transactionFinished(true));
         }
     }
 
@@ -80,10 +87,10 @@ class KafkaCommitterTest {
     public void testFailJobOnUnknownFatalError() throws IOException, InterruptedException {
         Properties properties = getProperties();
         try (final KafkaCommitter committer =
-                        new KafkaCommitter(properties, TRANS_ID, SUB_ID, ATTEMPT);
+                        new KafkaCommitter(properties, TRANS_ID, SUB_ID, ATTEMPT, MOCK_FACTORY);
                 FlinkKafkaInternalProducer<Object, Object> producer =
                         new FlinkKafkaInternalProducer<>(properties, TRANS_ID);
-                ReadableBackchannel<?> backchannel =
+                ReadableBackchannel<TransactionFinished> backchannel =
                         BackchannelFactory.getInstance()
                                 .getReadableBackchannel(SUB_ID, ATTEMPT, TRANS_ID)) {
             // will fail because transaction not started
@@ -94,7 +101,9 @@ class KafkaCommitterTest {
                     .isInstanceOf(IllegalStateException.class);
             assertThat(request.getFailedWithUnknownReason().getMessage())
                     .contains("Transaction was not started");
-            assertThat(backchannel).doesNotHave(recycledProducer());
+            // do not recycle if a fail-over is triggered;
+            // else there may be a race-condition in creating a new transaction with the same name
+            assertThat(backchannel).doesNotHave(transactionFinished(false));
         }
     }
 
@@ -102,42 +111,83 @@ class KafkaCommitterTest {
     public void testFailJobOnKnownFatalError() throws IOException, InterruptedException {
         Properties properties = getProperties();
         try (final KafkaCommitter committer =
-                        new KafkaCommitter(properties, TRANS_ID, SUB_ID, ATTEMPT);
+                        new KafkaCommitter(properties, TRANS_ID, SUB_ID, ATTEMPT, MOCK_FACTORY);
                 FlinkKafkaInternalProducer<?, ?> producer =
                         new MockProducer(properties, new ProducerFencedException("test"));
-                ReadableBackchannel<?> backchannel =
+                ReadableBackchannel<TransactionFinished> backchannel =
                         BackchannelFactory.getInstance()
                                 .getReadableBackchannel(SUB_ID, ATTEMPT, TRANS_ID)) {
             // will fail because transaction not started
             final MockCommitRequest<KafkaCommittable> request =
                     new MockCommitRequest<>(KafkaCommittable.of(producer));
             committer.commit(Collections.singletonList(request));
-            // do not recycle if a fail-over is triggered;
-            // else there may be a race-condition in creating a new transaction with the same name
-            assertThat(backchannel).has(recycledProducer());
+            assertThat(backchannel).has(transactionFinished(false));
         }
     }
 
     @Test
-    public void testKafkaCommitterRecyclesProducer() throws IOException, InterruptedException {
+    public void testCommitterProducerClosedOnError() throws IOException, InterruptedException {
+        Properties properties = getProperties();
+        AtomicInteger creationCounter = new AtomicInteger();
+        BiFunction<Properties, String, FlinkKafkaInternalProducer<?, ?>> failingFactory =
+                (props, transactionalId) -> {
+                    creationCounter.incrementAndGet();
+                    return new MockProducer(props, new ProducerFencedException("test"));
+                };
+        try (final KafkaCommitter committer =
+                        new KafkaCommitter(properties, TRANS_ID, SUB_ID, ATTEMPT, failingFactory);
+                ReadableBackchannel<TransactionFinished> backchannel =
+                        BackchannelFactory.getInstance()
+                                .getReadableBackchannel(SUB_ID, ATTEMPT, TRANS_ID)) {
+            final MockCommitRequest<KafkaCommittable> request =
+                    new MockCommitRequest<>(new KafkaCommittable(0, (short) 0, TRANS_ID, null));
+            committer.commit(Collections.singletonList(request));
+
+            // will not reuse the producer in case of error
+            assertThat(backchannel).has(transactionFinished(false));
+            assertThat(committer.getCommittingProducer()).isNull();
+            assertThat(creationCounter.get()).isEqualTo(1);
+
+            // create a second producer
+            committer.commit(Collections.singletonList(request));
+
+            assertThat(backchannel).has(transactionFinished(false));
+            assertThat(committer.getCommittingProducer()).isNull();
+            assertThat(creationCounter.get()).isEqualTo(2);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testKafkaCommitterRecyclesTransactionalId(boolean hasProducer)
+            throws IOException, InterruptedException {
         Properties properties = getProperties();
         try (FlinkKafkaInternalProducer<?, ?> producer = new MockProducer(properties, null);
                 final KafkaCommitter committer =
-                        new KafkaCommitter(properties, TRANS_ID, SUB_ID, ATTEMPT);
-                ReadableBackchannel<?> backchannel =
+                        new KafkaCommitter(properties, TRANS_ID, SUB_ID, ATTEMPT, MOCK_FACTORY);
+                ReadableBackchannel<TransactionFinished> backchannel =
                         BackchannelFactory.getInstance()
                                 .getReadableBackchannel(SUB_ID, ATTEMPT, TRANS_ID)) {
             final MockCommitRequest<KafkaCommittable> request =
                     new MockCommitRequest<>(
-                            new KafkaCommittable(PRODUCER_ID, EPOCH, TRANS_ID, producer));
+                            new KafkaCommittable(
+                                    PRODUCER_ID, EPOCH, TRANS_ID, hasProducer ? producer : null));
 
             committer.commit(Collections.singletonList(request));
-            assertThat(backchannel).has(recycledProducer());
+            assertThat(backchannel).has(transactionFinished(true));
+            // will reuse the committer producer if no producer is passed
+            assertThat(committer.getCommittingProducer() == null).isEqualTo(hasProducer);
         }
     }
 
-    private Condition<? super ReadableBackchannel<?>> recycledProducer() {
-        return new Condition<>(backchannel -> backchannel.poll() != null, "recycled producer");
+    private Condition<? super ReadableBackchannel<TransactionFinished>> transactionFinished(
+            boolean success) {
+        return new Condition<>(
+                backchannel -> {
+                    TransactionFinished polled = backchannel.poll();
+                    return polled != null && polled.isSuccess() == success;
+                },
+                "recycled producer");
     }
 
     Properties getProperties() {
