@@ -21,6 +21,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
 import org.apache.flink.connector.kafka.sink.internal.ProducerPoolImpl;
+import org.apache.flink.connector.kafka.sink.internal.TransactionFinished;
 import org.apache.flink.connector.kafka.sink.internal.WritableBackchannel;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
@@ -35,6 +36,8 @@ import org.apache.kafka.common.errors.ProducerFencedException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.Collection;
@@ -227,8 +230,9 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
     }
 
     /** Test that producers are reused when committed. */
-    @Test
-    void usePooledProducerForTransactional() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void usePooledProducerForTransactional(boolean successfulTransaction) throws Exception {
         try (final ExactlyOnceKafkaWriter<Integer> writer =
                 createWriter(DeliveryGuarantee.EXACTLY_ONCE)) {
             assertThat(getProducers(writer)).hasSize(0);
@@ -249,8 +253,10 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
             // recycle first producer, KafkaCommitter would commit it and then return it
             assertThat(getProducers(writer)).hasSize(0);
             firstProducer.commitTransaction();
-            try (WritableBackchannel<String> backchannel = getBackchannel(writer)) {
-                backchannel.send(firstProducer.getTransactionalId());
+            try (WritableBackchannel<TransactionFinished> backchannel = getBackchannel(writer)) {
+                backchannel.send(
+                        new TransactionFinished(
+                                firstProducer.getTransactionalId(), successfulTransaction));
             }
 
             writer.write(1, SINK_WRITER_CONTEXT);
@@ -263,7 +269,7 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
 
             assertThat(firstProducer == writer.getCurrentProducer())
                     .as("Expected recycled producer")
-                    .isTrue();
+                    .isEqualTo(successfulTransaction);
         }
     }
 

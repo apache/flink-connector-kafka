@@ -32,6 +32,7 @@ import java.util.Comparator;
 import java.util.Deque;
 import java.util.Map;
 import java.util.NavigableMap;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.TreeMap;
 import java.util.function.Consumer;
@@ -105,17 +106,22 @@ public class ProducerPoolImpl implements ProducerPool {
     }
 
     @Override
-    public void recycleByTransactionId(String transactionalId) {
+    public void recycleByTransactionId(String transactionalId, boolean success) {
         ProducerEntry producerEntry = producerByTransactionalId.remove(transactionalId);
         LOG.debug("Transaction {} finished, producer {}", transactionalId, producerEntry);
         if (producerEntry == null) {
             // during recovery, the committer may finish transactions that are not yet ongoing from
             // the writer's perspective
+            // these transaction will be closed by the second half of this method eventually
             return;
         }
 
         transactionalIdsByCheckpoint.remove(producerEntry.getCheckpointedTransaction());
-        recycleProducer(producerEntry.getProducer());
+        if (success) {
+            recycleProducer(producerEntry.getProducer());
+        } else {
+            closeProducer(producerEntry.getProducer());
+        }
 
         // In rare cases (only for non-chained committer), some transactions may not be detected to
         // be finished.
@@ -131,9 +137,15 @@ public class ProducerPoolImpl implements ProducerPool {
         if (!earlierTransactions.isEmpty()) {
             for (String id : earlierTransactions.values()) {
                 ProducerEntry entry = producerByTransactionalId.remove(id);
-                recycleProducer(entry.getProducer());
+                closeProducer(entry.getProducer());
             }
             earlierTransactions.clear();
+        }
+    }
+
+    private void closeProducer(@Nullable FlinkKafkaInternalProducer<byte[], byte[]> producer) {
+        if (producer != null) {
+            producer.close();
         }
     }
 
@@ -151,6 +163,7 @@ public class ProducerPoolImpl implements ProducerPool {
         if (producer == null) {
             return;
         }
+
         // For non-chained committer, we have a split brain scenario:
         // Both the writer and the committer have a producer representing the same transaction.
         // The committer producer has finished the transaction while the writer producer is still in
@@ -212,6 +225,7 @@ public class ProducerPoolImpl implements ProducerPool {
                         closeAll(
                                 producerByTransactionalId.values().stream()
                                         .map(ProducerEntry::getProducer)
+                                        .filter(Objects::nonNull)
                                         .collect(Collectors.toList())),
                 producerPool::clear,
                 producerByTransactionalId::clear);

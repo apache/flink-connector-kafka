@@ -24,13 +24,13 @@ public interface ProducerPool extends AutoCloseable {
      * Notify the pool that a transaction has finished. The producer with the given transactional id
      * can be recycled.
      */
-    void recycleByTransactionId(String transactionalId);
+    void recycleByTransactionId(String transactionalId, boolean success);
 
     /**
      * Get a producer for the given transactional id and checkpoint id. The producer is not recycled
      * until it is passed to the committer, the committer commits the transaction, and {@link
-     * #recycleByTransactionId(String)} is called. Alternatively, the producer can be recycled by
-     * {@link #recycle(FlinkKafkaInternalProducer)}.
+     * #recycleByTransactionId(String, boolean)} is called. Alternatively, the producer can be
+     * recycled by {@link #recycle(FlinkKafkaInternalProducer)}.
      */
     FlinkKafkaInternalProducer<byte[], byte[]> getTransactionalProducer(
             String transactionalId, long checkpointId);

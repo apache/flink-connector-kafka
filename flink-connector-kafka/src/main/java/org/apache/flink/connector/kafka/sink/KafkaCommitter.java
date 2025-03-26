@@ -21,6 +21,7 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.sink2.Committer;
 import org.apache.flink.connector.kafka.sink.internal.BackchannelFactory;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
+import org.apache.flink.connector.kafka.sink.internal.TransactionFinished;
 import org.apache.flink.connector.kafka.sink.internal.WritableBackchannel;
 import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.IOUtils;
@@ -40,6 +41,7 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.function.BiFunction;
 
 /**
  * Committer implementation for {@link KafkaSink}
@@ -54,23 +56,32 @@ class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
                     + "To avoid data loss, the application will restart.";
 
     private final Properties kafkaProducerConfig;
-    private final WritableBackchannel<String> backchannel;
+    private final BiFunction<Properties, String, FlinkKafkaInternalProducer<?, ?>> producerFactory;
+    private final WritableBackchannel<TransactionFinished> backchannel;
     @Nullable private FlinkKafkaInternalProducer<?, ?> committingProducer;
 
     KafkaCommitter(
             Properties kafkaProducerConfig,
             String transactionalIdPrefix,
             int subtaskId,
-            int attemptNumber) {
+            int attemptNumber,
+            BiFunction<Properties, String, FlinkKafkaInternalProducer<?, ?>> producerFactory) {
         this.kafkaProducerConfig = kafkaProducerConfig;
+        this.producerFactory = producerFactory;
         backchannel =
                 BackchannelFactory.getInstance()
                         .getWritableBackchannel(subtaskId, attemptNumber, transactionalIdPrefix);
     }
 
     @VisibleForTesting
-    public WritableBackchannel<String> getBackchannel() {
+    public WritableBackchannel<TransactionFinished> getBackchannel() {
         return backchannel;
+    }
+
+    @Nullable
+    @VisibleForTesting
+    FlinkKafkaInternalProducer<?, ?> getCommittingProducer() {
+        return committingProducer;
     }
 
     @Override
@@ -81,11 +92,11 @@ class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
             final String transactionalId = committable.getTransactionalId();
             LOG.debug("Committing Kafka transaction {}", transactionalId);
             Optional<FlinkKafkaInternalProducer<?, ?>> writerProducer = committable.getProducer();
-            FlinkKafkaInternalProducer<?, ?> producer;
+            FlinkKafkaInternalProducer<?, ?> producer = null;
             try {
                 producer = writerProducer.orElseGet(() -> getProducer(committable));
                 producer.commitTransaction();
-                backchannel.send(committable.getTransactionalId());
+                backchannel.send(TransactionFinished.successful(committable.getTransactionalId()));
             } catch (RetriableException e) {
                 LOG.warn(
                         "Encountered retriable exception while committing {}.", transactionalId, e);
@@ -104,7 +115,7 @@ class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
                         ProducerConfig.TRANSACTION_TIMEOUT_CONFIG,
                         kafkaProducerConfig.getProperty(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG),
                         e);
-                backchannel.send(committable.getTransactionalId());
+                handleFailedTransaction(producer);
                 request.signalFailedWithKnownReason(e);
             } catch (InvalidTxnStateException e) {
                 // This exception only occurs when aborting after a commit or vice versa.
@@ -114,14 +125,14 @@ class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
                                 + "Most likely the transaction has been aborted for some reason. Please check the Kafka logs for more details.",
                         request,
                         e);
-                backchannel.send(committable.getTransactionalId());
+                handleFailedTransaction(producer);
                 request.signalFailedWithKnownReason(e);
             } catch (UnknownProducerIdException e) {
                 LOG.error(
                         "Unable to commit transaction ({}) " + UNKNOWN_PRODUCER_ID_ERROR_MESSAGE,
                         request,
                         e);
-                backchannel.send(committable.getTransactionalId());
+                handleFailedTransaction(producer);
                 request.signalFailedWithKnownReason(e);
             } catch (Exception e) {
                 LOG.error(
@@ -131,6 +142,17 @@ class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
                 // cause failover
                 request.signalFailedWithUnknownReason(e);
             }
+        }
+    }
+
+    private void handleFailedTransaction(FlinkKafkaInternalProducer<?, ?> producer) {
+        if (producer == null) {
+            return;
+        }
+        backchannel.send(TransactionFinished.erroneously(producer.getTransactionalId()));
+        if (producer == this.committingProducer) {
+            this.committingProducer.close();
+            this.committingProducer = null;
         }
     }
 
@@ -150,8 +172,7 @@ class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
     private FlinkKafkaInternalProducer<?, ?> getProducer(KafkaCommittable committable) {
         if (committingProducer == null) {
             committingProducer =
-                    new FlinkKafkaInternalProducer<>(
-                            kafkaProducerConfig, committable.getTransactionalId());
+                    producerFactory.apply(kafkaProducerConfig, committable.getTransactionalId());
         } else {
             committingProducer.setTransactionId(committable.getTransactionalId());
         }

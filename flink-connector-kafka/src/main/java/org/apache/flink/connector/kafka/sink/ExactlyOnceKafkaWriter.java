@@ -26,6 +26,7 @@ import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer
 import org.apache.flink.connector.kafka.sink.internal.ProducerPool;
 import org.apache.flink.connector.kafka.sink.internal.ProducerPoolImpl;
 import org.apache.flink.connector.kafka.sink.internal.ReadableBackchannel;
+import org.apache.flink.connector.kafka.sink.internal.TransactionFinished;
 import org.apache.flink.connector.kafka.sink.internal.TransactionalIdFactory;
 import org.apache.flink.runtime.checkpoint.CheckpointIDCounter;
 import org.apache.flink.util.FlinkRuntimeException;
@@ -70,7 +71,7 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
      * Establishing the channel happens during recovery. Thus, it is only safe to poll in checkpoint
      * related methods.
      */
-    private final ReadableBackchannel<String> backchannel;
+    private final ReadableBackchannel<TransactionFinished> backchannel;
 
     /**
      * Constructor creating a kafka writer.
@@ -164,9 +165,10 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     @Override
     public List<KafkaWriterState> snapshotState(long checkpointId) throws IOException {
         // recycle committed producers
-        String finishedTransactionalId;
-        while ((finishedTransactionalId = backchannel.poll()) != null) {
-            producerPool.recycleByTransactionId(finishedTransactionalId);
+        TransactionFinished finishedTransaction;
+        while ((finishedTransaction = backchannel.poll()) != null) {
+            producerPool.recycleByTransactionId(
+                    finishedTransaction.getTransactionId(), finishedTransaction.isSuccess());
         }
         currentProducer = startTransaction(checkpointId + 1);
         return Collections.singletonList(kafkaWriterState);
