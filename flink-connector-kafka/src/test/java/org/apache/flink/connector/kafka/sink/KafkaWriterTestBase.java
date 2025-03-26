@@ -24,6 +24,7 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.base.sink.writer.TestSinkInitContext;
 import org.apache.flink.connector.kafka.sink.internal.BackchannelFactory;
+import org.apache.flink.connector.kafka.sink.internal.TransactionFinished;
 import org.apache.flink.connector.kafka.sink.internal.WritableBackchannel;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.OperatorIOMetricGroup;
@@ -142,7 +143,7 @@ public abstract class KafkaWriterTestBase {
         return new SinkInitContext(createSinkWriterMetricGroup(), timeService, null);
     }
 
-    WritableBackchannel<String> getBackchannel(ExactlyOnceKafkaWriter<?> writer) {
+    WritableBackchannel<TransactionFinished> getBackchannel(ExactlyOnceKafkaWriter<?> writer) {
         return BackchannelFactory.getInstance()
                 .getWritableBackchannel(SUB_ID, ATTEMPT, writer.getTransactionalIdPrefix());
     }

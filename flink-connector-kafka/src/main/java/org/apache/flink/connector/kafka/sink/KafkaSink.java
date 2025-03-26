@@ -30,6 +30,7 @@ import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacetProvider;
 import org.apache.flink.connector.kafka.lineage.LineageUtil;
 import org.apache.flink.connector.kafka.lineage.TypeDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.TypeDatasetFacetProvider;
+import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.streaming.api.connector.sink2.CommittableMessage;
 import org.apache.flink.streaming.api.connector.sink2.CommittableMessageTypeInfo;
@@ -110,7 +111,8 @@ public class KafkaSink<IN>
                 kafkaProducerConfig,
                 transactionalIdPrefix,
                 context.getTaskInfo().getIndexOfThisSubtask(),
-                context.getTaskInfo().getAttemptNumber());
+                context.getTaskInfo().getAttemptNumber(),
+                FlinkKafkaInternalProducer::new);
     }
 
     @Internal
