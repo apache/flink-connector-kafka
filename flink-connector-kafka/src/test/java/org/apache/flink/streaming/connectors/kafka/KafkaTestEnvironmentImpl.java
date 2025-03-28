@@ -282,8 +282,13 @@ public class KafkaTestEnvironmentImpl extends KafkaTestEnvironment {
 
         @Override
         public Long getCommittedOffset(String topicName, int partition) {
-            OffsetAndMetadata committed =
-                    offsetClient.committed(new TopicPartition(topicName, partition));
+            TopicPartition topicPartition = new TopicPartition(topicName, partition);
+            Map<TopicPartition, OffsetAndMetadata> committedMap =
+                    offsetClient.committed(Collections.singleton(topicPartition));
+            if (committedMap == null) {
+                return null;
+            }
+            OffsetAndMetadata committed = committedMap.get(topicPartition);
             return (committed != null) ? committed.offset() : null;
         }
 

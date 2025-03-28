@@ -22,7 +22,7 @@ import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.streaming.connectors.kafka.KafkaTestBase;
 
 import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsOptions;
+import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsSpec;
 import org.apache.kafka.clients.admin.RecordsToDelete;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -36,6 +36,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -238,10 +239,10 @@ public class KafkaSourceTestEnv extends KafkaTestBase {
         Map<TopicPartition, OffsetAndMetadata> toVerify =
                 adminClient
                         .listConsumerGroupOffsets(
-                                GROUP_ID,
-                                new ListConsumerGroupOffsetsOptions()
-                                        .topicPartitions(
-                                                new ArrayList<>(committedOffsets.keySet())))
+                                Collections.singletonMap(
+                                        GROUP_ID,
+                                        new ListConsumerGroupOffsetsSpec()
+                                                .topicPartitions(committedOffsets.keySet())))
                         .partitionsToOffsetAndMetadata()
                         .get();
         assertThat(toVerify).as("The offsets are not committed").isEqualTo(committedOffsets);
