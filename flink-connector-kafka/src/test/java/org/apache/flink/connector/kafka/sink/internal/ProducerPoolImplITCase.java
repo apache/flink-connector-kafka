@@ -31,6 +31,7 @@ import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.Collections;
 import java.util.Properties;
 import java.util.function.Consumer;
 
@@ -64,7 +65,8 @@ class ProducerPoolImplITCase {
 
     @Test
     void testGetTransactionalProducer() throws Exception {
-        try (ProducerPoolImpl producerPool = new ProducerPoolImpl(getProducerConfig(), INIT)) {
+        try (ProducerPoolImpl producerPool =
+                new ProducerPoolImpl(getProducerConfig(), INIT, Collections.emptyList())) {
 
             FlinkKafkaInternalProducer<byte[], byte[]> producer =
                     producerPool.getTransactionalProducer(TRANSACTIONAL_ID, 1L);
@@ -80,7 +82,8 @@ class ProducerPoolImplITCase {
     /** Tests direct recycling as used during abortion of transactions. */
     @Test
     void testRecycleProducer() throws Exception {
-        try (ProducerPoolImpl producerPool = new ProducerPoolImpl(getProducerConfig(), INIT)) {
+        try (ProducerPoolImpl producerPool =
+                new ProducerPoolImpl(getProducerConfig(), INIT, Collections.emptyList())) {
             FlinkKafkaInternalProducer<byte[], byte[]> producer =
                     producerPool.getTransactionalProducer(TRANSACTIONAL_ID, 1L);
 
@@ -97,7 +100,8 @@ class ProducerPoolImplITCase {
     /** Tests indirect recycling triggered through the backchannel. */
     @Test
     void testRecycleByTransactionId() throws Exception {
-        try (ProducerPoolImpl producerPool = new ProducerPoolImpl(getProducerConfig(), INIT)) {
+        try (ProducerPoolImpl producerPool =
+                new ProducerPoolImpl(getProducerConfig(), INIT, Collections.emptyList())) {
             FlinkKafkaInternalProducer<byte[], byte[]> producer =
                     producerPool.getTransactionalProducer(TRANSACTIONAL_ID, 1L);
 

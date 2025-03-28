@@ -34,7 +34,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-import static org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriberUtils.getTopicMetadata;
+import static org.apache.flink.connector.kafka.util.AdminUtils.getTopicMetadata;
 
 /**
  * A subscriber to a fixed list of topics. The subscribed topics must have existed in the Kafka

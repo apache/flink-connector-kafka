@@ -54,6 +54,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.flink.connector.kafka.sink.KafkaSinkOptions.TRANSACTION_NAMING_STRATEGY;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.DELIVERY_GUARANTEE;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.KEY_FIELDS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.KEY_FIELDS_PREFIX;
@@ -117,12 +118,14 @@ public class UpsertKafkaDynamicTableFactory
         options.add(DELIVERY_GUARANTEE);
         options.add(TRANSACTIONAL_ID_PREFIX);
         options.add(SCAN_PARALLELISM);
+        options.add(TRANSACTION_NAMING_STRATEGY);
         return options;
     }
 
     @Override
     public Set<ConfigOption<?>> forwardOptions() {
-        return Stream.of(DELIVERY_GUARANTEE, TRANSACTIONAL_ID_PREFIX).collect(Collectors.toSet());
+        return Stream.of(DELIVERY_GUARANTEE, TRANSACTIONAL_ID_PREFIX, TRANSACTION_NAMING_STRATEGY)
+                .collect(Collectors.toSet());
     }
 
     @Override
@@ -227,7 +230,8 @@ public class UpsertKafkaDynamicTableFactory
                 true,
                 flushMode,
                 parallelism,
-                tableOptions.get(TRANSACTIONAL_ID_PREFIX));
+                tableOptions.get(TRANSACTIONAL_ID_PREFIX),
+                tableOptions.get(TRANSACTION_NAMING_STRATEGY));
     }
 
     private Tuple2<int[], int[]> createKeyValueProjections(ResolvedCatalogTable catalogTable) {

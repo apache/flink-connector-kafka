@@ -18,6 +18,8 @@
 
 package org.apache.flink.connector.kafka.sink.internal;
 
+import org.apache.flink.annotation.Internal;
+
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -44,6 +46,7 @@ import static org.apache.flink.util.Preconditions.checkState;
 /**
  * A {@link KafkaProducer} that exposes private fields to allow resume producing from a given state.
  */
+@Internal
 public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
     private static final Logger LOG = LoggerFactory.getLogger(FlinkKafkaInternalProducer.class);
     private static final String TRANSACTION_MANAGER_FIELD_NAME = "transactionManager";
