@@ -1,1 +1,0 @@
-Method <org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer.getTransactionCoordinatorId()> calls method <org.apache.flink.streaming.connectors.kafka.internals.FlinkKafkaInternalProducer.getTransactionCoordinatorId()> in (FlinkKafkaProducer.java:1320)
