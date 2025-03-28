@@ -40,7 +40,7 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
     private static final String INIT_KAFKA_RETRIES = "0";
     private static final String INIT_KAFKA_REQUEST_TIMEOUT_MS = "1000";
     private static final String INIT_KAFKA_MAX_BLOCK_MS = "1000";
-    private static final String INIT_KAFKA_DELIVERY_TIMEOUT_MS = "1000";
+    private static final String INIT_KAFKA_DELIVERY_TIMEOUT_MS = "1500";
 
     @RegisterExtension
     public static final MiniClusterExtension MINI_CLUSTER_RESOURCE =
