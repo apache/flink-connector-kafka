@@ -33,7 +33,7 @@ Flink 提供了 [Apache Kafka](https://kafka.apache.org) 连接器使用精确�
 
 Apache Flink 集成了通用的 Kafka 连接器，它会尽力与 Kafka client 的最新版本保持同步。
 该连接器使用的 Kafka client 版本可能会在 Flink 版本之间发生变化。
-当前 Kafka client 向后兼容 0.10.0 或更高版本的 Kafka broker。
+当前 Kafka client 向后兼容 2.1.0 或更高版本的 Kafka broker。
 有关 Kafka 兼容性的更多细节，请参考 [Kafka 官方文档](https://kafka.apache.org/protocol.html#protocol_compatibility)。
 
 {{< connector_artifact flink-connector-kafka kafka >}}
