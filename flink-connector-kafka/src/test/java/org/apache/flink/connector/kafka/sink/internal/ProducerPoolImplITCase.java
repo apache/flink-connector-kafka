@@ -103,7 +103,7 @@ class ProducerPoolImplITCase {
 
             assertThat(producerPool.getProducers()).isEmpty();
             producer.beginTransaction();
-            producerPool.recycleByTransactionId(TRANSACTIONAL_ID);
+            producerPool.recycleByTransactionId(TRANSACTIONAL_ID, true);
             assertThat(producerPool.getProducers()).contains(producer);
             // forcefully reset transaction state for split brain scenarios
             assertThat(producer.isInTransaction()).isFalse();
@@ -111,6 +111,26 @@ class ProducerPoolImplITCase {
             FlinkKafkaInternalProducer<byte[], byte[]> newProducer =
                     producerPool.getTransactionalProducer(TRANSACTIONAL_ID, 1L);
             assertThat(newProducer).isSameAs(producer);
+        }
+    }
+
+    /** Tests indirect recycling triggered through the backchannel. */
+    @Test
+    void testCloseByTransactionId() throws Exception {
+        try (ProducerPoolImpl producerPool = new ProducerPoolImpl(getProducerConfig(), INIT)) {
+            FlinkKafkaInternalProducer<byte[], byte[]> producer =
+                    producerPool.getTransactionalProducer(TRANSACTIONAL_ID, 1L);
+
+            assertThat(producerPool.getProducers()).isEmpty();
+            producer.beginTransaction();
+            producerPool.recycleByTransactionId(TRANSACTIONAL_ID, false);
+            assertThat(producerPool.getProducers()).doesNotContain(producer);
+            // forcefully reset transaction state for split brain scenarios
+            assertThat(producer.isClosed()).isTrue();
+
+            FlinkKafkaInternalProducer<byte[], byte[]> newProducer =
+                    producerPool.getTransactionalProducer(TRANSACTIONAL_ID, 1L);
+            assertThat(newProducer).isNotSameAs(producer);
         }
     }
 
