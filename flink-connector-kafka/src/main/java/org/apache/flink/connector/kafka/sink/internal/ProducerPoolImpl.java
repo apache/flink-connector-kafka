@@ -167,10 +167,11 @@ public class ProducerPoolImpl implements ProducerPool {
         // For non-chained committer, we have a split brain scenario:
         // Both the writer and the committer have a producer representing the same transaction.
         // The committer producer has finished the transaction while the writer producer is still in
-        // transaction. In this case, we forcibly complete the transaction, such that we can
-        // initialize it.
+        // transaction.
         if (producer.isInTransaction()) {
-            producer.resetTransactionState();
+            // Here we just double-commit the same transaction which succeeds in all cases
+            // because the producer shares the same epoch as the committer's producer
+            producer.commitTransaction();
         }
         producerPool.add(producer);
 
