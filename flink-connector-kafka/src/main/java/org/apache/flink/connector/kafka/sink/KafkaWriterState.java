@@ -29,38 +29,59 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 @Internal
 public class KafkaWriterState {
     private final String transactionalIdPrefix;
-    private final Collection<CheckpointTransaction> ongoingTransactions;
+    private final int ownedSubtaskId;
+    private final int maxParallelism;
+    private final Collection<CheckpointTransaction> precommittedTransactionalIds;
 
     KafkaWriterState(
-            String transactionalIdPrefix, Collection<CheckpointTransaction> ongoingTransactions) {
+            String transactionalIdPrefix,
+            int ownedSubtaskId,
+            int maxParallelism,
+            Collection<CheckpointTransaction> precommittedTransactionalIds) {
         this.transactionalIdPrefix = checkNotNull(transactionalIdPrefix, "transactionalIdPrefix");
-        this.ongoingTransactions = ongoingTransactions;
+        this.ownedSubtaskId = ownedSubtaskId;
+        this.maxParallelism = maxParallelism;
+        this.precommittedTransactionalIds = precommittedTransactionalIds;
     }
 
     public String getTransactionalIdPrefix() {
         return transactionalIdPrefix;
     }
 
-    public Collection<CheckpointTransaction> getOngoingTransactions() {
-        return ongoingTransactions;
+    public int getOwnedSubtaskId() {
+        return ownedSubtaskId;
+    }
+
+    public int getMaxParallelism() {
+        return maxParallelism;
+    }
+
+    public Collection<CheckpointTransaction> getPrecommittedTransactionalIds() {
+        return precommittedTransactionalIds;
     }
 
     @Override
-    public boolean equals(Object o) {
-        if (this == o) {
+    public boolean equals(Object object) {
+        if (this == object) {
             return true;
         }
-        if (o == null || getClass() != o.getClass()) {
+        if (object == null || getClass() != object.getClass()) {
             return false;
         }
-        KafkaWriterState that = (KafkaWriterState) o;
-        return Objects.equals(transactionalIdPrefix, that.transactionalIdPrefix)
-                && Objects.equals(ongoingTransactions, that.ongoingTransactions);
+        KafkaWriterState that = (KafkaWriterState) object;
+        return ownedSubtaskId == that.ownedSubtaskId
+                && maxParallelism == that.maxParallelism
+                && Objects.equals(transactionalIdPrefix, that.transactionalIdPrefix)
+                && Objects.equals(precommittedTransactionalIds, that.precommittedTransactionalIds);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(transactionalIdPrefix, ongoingTransactions);
+        return Objects.hash(
+                transactionalIdPrefix,
+                ownedSubtaskId,
+                maxParallelism,
+                precommittedTransactionalIds);
     }
 
     @Override
@@ -69,8 +90,12 @@ public class KafkaWriterState {
                 + "transactionalIdPrefix='"
                 + transactionalIdPrefix
                 + '\''
-                + ", ongoingTransactions="
-                + ongoingTransactions
+                + ", ownedSubtaskId="
+                + ownedSubtaskId
+                + ", maxParallelism="
+                + maxParallelism
+                + ", precommittedTransactionalIds="
+                + precommittedTransactionalIds
                 + '}';
     }
 }

@@ -39,6 +39,9 @@ public enum TransactionNamingStrategy {
      * on the broker.
      *
      * <p>This is exactly the same behavior as in flink-connector-kafka 3.X.
+     *
+     * <p>Switching to this strategy from {@link #POOLING} may leave transactions open unless a
+     * savepoint is used.
      */
     INCREMENTING(TransactionNamingStrategyImpl.INCREMENTING, TransactionAbortStrategyImpl.PROBING),
 
@@ -48,6 +51,11 @@ public enum TransactionNamingStrategy {
      *
      * <p>It's a new strategy introduced in flink-connector-kafka 4.X. It requires Kafka 3.0+ and
      * additional read permissions on the target topics.
+     *
+     * <p>The recommended way to switch to this strategy is to first take a checkpoint with
+     * flink-connector-kafka 4.X and then switch to this strategy. This will ensure that no
+     * transactions are left open from the previous run. Alternatively, you can use a savepoint from
+     * any version.
      */
     POOLING(TransactionNamingStrategyImpl.POOLING, TransactionAbortStrategyImpl.LISTING);
 

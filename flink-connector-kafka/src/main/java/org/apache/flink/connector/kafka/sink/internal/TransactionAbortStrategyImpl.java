@@ -19,10 +19,7 @@
 package org.apache.flink.connector.kafka.sink.internal;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.connector.kafka.util.AdminUtils;
 
-import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.TransactionListing;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,8 +27,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
-
-import static org.apache.flink.connector.kafka.sink.internal.TransactionalIdFactory.extractSubtaskId;
 
 /** Implementations of an abort strategy for transactions left over from previous runs. */
 @Internal
@@ -48,6 +43,9 @@ public enum TransactionAbortStrategyImpl {
      * attempts).
      *
      * <p>This is exactly the same behavior as in flink-connector-kafka 3.X.
+     *
+     * <p>Note that this strategy is not abiding by the strict ownership model introduced with
+     * {@link #LISTING} but it also doesn't need to for it to work.
      */
     PROBING {
         @Override
@@ -68,7 +66,9 @@ public enum TransactionAbortStrategyImpl {
          * then subtask 0 is responsible for all even and subtask 1 for all odd subtasks.
          */
         private void abortTransactionsWithPrefix(String prefix, Context context) {
-            for (int subtaskId = context.getSubtaskId(); ; subtaskId += context.getParallelism()) {
+            for (int subtaskId = context.getCurrentSubtaskId();
+                    ;
+                    subtaskId += context.getCurrentParallelism()) {
                 if (abortTransactionOfSubtask(prefix, subtaskId, context) == 0) {
                     // If Flink didn't abort any transaction for current subtask, then we assume
                     // that no
@@ -122,49 +122,30 @@ public enum TransactionAbortStrategyImpl {
     LISTING {
         @Override
         public void abortTransactions(Context context) {
+            Collection<String> openTransactionsForTopics = context.getOpenTransactionsForTopics();
 
-            Collection<TransactionListing> openTransactionsForTopics =
-                    AdminUtils.getOpenTransactionsForTopics(
-                            context.getAdminClient(), context.getTopicNames());
-
-            // This list could be huge if TransactionNamingStrategy#INCREMENTING is used, so cap it
-            if (LOG.isWarnEnabled()) {
-                LOG.warn(
-                        "Found {} open transactions for topic: {} (capped at 100)",
-                        openTransactionsForTopics.size(),
-                        openTransactionsForTopics.stream()
-                                .map(TransactionListing::transactionalId)
-                                .limit(100)
-                                .collect(Collectors.toList()));
+            if (openTransactionsForTopics.isEmpty()) {
+                return;
             }
 
             List<String> openTransactionsForSubtask =
                     openTransactionsForTopics.stream()
-                            .map(TransactionListing::transactionalId)
-                            //  look only at transactions from this subtask
-                            .filter(
-                                    name ->
-                                            extractSubtaskId(name) % context.getParallelism()
-                                                    == context.getSubtaskId())
+                            // ignore transactions from other applications
+                            .filter(name -> hasKnownPrefix(name, context))
+                            //  look only at transactions owned by this subtask
+                            .filter(context::ownsTransactionalId)
                             .collect(Collectors.toList());
 
-            LOG.debug(
+            LOG.warn(
                     "Found {} open transactions for subtask {}: {}",
                     openTransactionsForSubtask.size(),
-                    context.getSubtaskId(),
+                    context.getCurrentSubtaskId(),
                     openTransactionsForSubtask);
             // look only at transactions coming from this application
             // remove transactions that are owned by the committer
             TransactionAborter transactionAborter = context.getTransactionAborter();
             for (String name : openTransactionsForSubtask) {
-                if (context.getPrefixesToAbort().stream().noneMatch(name::startsWith)) {
-                    LOG.debug(
-                            "Skipping transaction {} because it's not belonging to the known prefixes {}",
-                            name,
-                            context.getPrefixesToAbort());
-                    continue;
-                }
-                if (context.getOngoingTransactionIds().contains(name)) {
+                if (context.getPrecommittedTransactionalIds().contains(name)) {
                     LOG.debug(
                             "Skipping transaction {} because it's in the list of transactions to be committed",
                             name);
@@ -172,6 +153,10 @@ public enum TransactionAbortStrategyImpl {
                 }
                 transactionAborter.abortTransaction(name);
             }
+        }
+
+        private boolean hasKnownPrefix(String name, Context context) {
+            return context.getPrefixesToAbort().stream().anyMatch(name::startsWith);
         }
     };
 
@@ -187,20 +172,44 @@ public enum TransactionAbortStrategyImpl {
 
     /** Context for the {@link TransactionAbortStrategyImpl}. */
     public interface Context {
-        AdminClient getAdminClient();
+        int getCurrentSubtaskId();
 
-        Collection<String> getTopicNames();
+        /**
+         * Subtask must abort transactions that they own and must not abort any transaction that
+         * they don't own. Ownership is defined as follows:
+         *
+         * <ul>
+         *   <li>Writer states contains the old subtask id and the max parallelism when it was
+         *       snapshotted.
+         *   <li>On recovery, the state is reassigned somewhere. The new assignee takes the
+         *       ownership.
+         *   <li>If there was a downscale, one subtask may own several old subtask ids.
+         *   <li>If there was an upscale, the ids usually remain stable but that isn't necessary for
+         *       the abortion to work.
+         *   <li>Any number of intermediate attempts between the recovered checkpoint and the
+         *       current attempt may produce transactions > then the current parallelism. In that
+         *       case, subtask ids are distributed in a round robin fashion using modulo.
+         * </ul>
+         */
+        boolean ownsTransactionalId(String transactionalId);
 
-        int getSubtaskId();
+        int getCurrentParallelism();
 
-        int getParallelism();
+        Collection<String> getPrefixesToAbort();
 
-        List<String> getPrefixesToAbort();
-
-        Set<String> getOngoingTransactionIds();
+        /**
+         * Returns a list of transactional ids that shouldn't be aborted because they are part of
+         * the committer state.
+         */
+        Set<String> getPrecommittedTransactionalIds();
 
         long getStartCheckpointId();
 
         TransactionAborter getTransactionAborter();
+
+        /**
+         * Returns the list of all open transactions for the topics retrieved through introspection.
+         */
+        Collection<String> getOpenTransactionsForTopics();
     }
 }

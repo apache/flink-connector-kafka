@@ -40,6 +40,8 @@ public class KafkaWriterStateSerializerTest extends TestLogger {
         final KafkaWriterState state =
                 new KafkaWriterState(
                         "idPrefix",
+                        0,
+                        1,
                         Arrays.asList(
                                 new CheckpointTransaction("id1", 5L),
                                 new CheckpointTransaction("id2", 6L)));

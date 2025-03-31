@@ -18,6 +18,7 @@
 package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.api.common.TaskInfo;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.connector.sink2.WriterInitContext;
 import org.apache.flink.connector.base.DeliveryGuarantee;
@@ -57,6 +58,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.flink.util.IOUtils.closeAll;
 import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.util.Preconditions.checkState;
 
 /**
  * Exactly-once Kafka writer that writes records to Kafka in transactions.
@@ -94,7 +96,10 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     private final ReadableBackchannel<TransactionFinished> backchannel;
     /** The context used to name transactions. */
     private final TransactionNamingStrategyContextImpl namingContext;
-    /** Lazily created admin client for {@link TransactionAbortStrategy}. */
+
+    private final int maxParallellism;
+    private final List<Integer> ownedSubtaskIds;
+    /** Lazily created admin client for {@link TransactionAbortStrategyImpl}. */
     private AdminClient adminClient;
 
     /**
@@ -143,28 +148,53 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
         }
 
         this.recoveredStates = checkNotNull(recoveredStates, "recoveredStates");
+        TaskInfo taskInfo = sinkInitContext.getTaskInfo();
+        if (recoveredStates.isEmpty()) {
+            this.maxParallellism = taskInfo.getNumberOfParallelSubtasks();
+            this.ownedSubtaskIds = List.of(taskInfo.getIndexOfThisSubtask());
+        } else {
+            int maxParallelism = recoveredStates.iterator().next().getMaxParallelism();
+            // Assumption of the ownership model: state is distributed consecutively across the
+            // subtasks starting with subtask 0
+            checkState(
+                    taskInfo.getIndexOfThisSubtask() < maxParallelism,
+                    "State not consecutively assigned");
+
+            this.ownedSubtaskIds =
+                    recoveredStates.stream()
+                            .map(KafkaWriterState::getOwnedSubtaskId)
+                            .sorted()
+                            .collect(Collectors.toList());
+            int currentParallelism = taskInfo.getNumberOfParallelSubtasks();
+            if (currentParallelism >= maxParallelism) {
+                // Second part of above assumption: ensure that in upscaling, all
+                checkState(this.ownedSubtaskIds.size() == 1, "Not uniformly assigned");
+            }
+            this.maxParallellism = Math.max(maxParallelism, currentParallelism);
+        }
         initFlinkMetrics();
         restoredCheckpointId =
                 sinkInitContext
                         .getRestoredCheckpointId()
                         .orElse(CheckpointIDCounter.INITIAL_CHECKPOINT_ID - 1);
-        int subtaskId = sinkInitContext.getTaskInfo().getIndexOfThisSubtask();
+        int subtaskId = taskInfo.getIndexOfThisSubtask();
         this.producerPool =
                 new ProducerPoolImpl(
                         kafkaProducerConfig,
                         this::initKafkaMetrics,
                         recoveredStates.stream()
-                                .flatMap(r -> r.getOngoingTransactions().stream())
+                                .flatMap(r -> r.getPrecommittedTransactionalIds().stream())
                                 .collect(Collectors.toList()));
         this.backchannel =
                 BackchannelFactory.getInstance()
                         .getReadableBackchannel(
-                                subtaskId,
-                                sinkInitContext.getTaskInfo().getAttemptNumber(),
-                                transactionalIdPrefix);
+                                subtaskId, taskInfo.getAttemptNumber(), transactionalIdPrefix);
         this.namingContext =
                 new TransactionNamingStrategyContextImpl(
-                        transactionalIdPrefix, subtaskId, restoredCheckpointId, producerPool);
+                        transactionalIdPrefix,
+                        this.ownedSubtaskIds.get(0),
+                        restoredCheckpointId,
+                        producerPool);
     }
 
     @Override
@@ -223,9 +253,25 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
         Collection<CheckpointTransaction> ongoingTransactions =
                 producerPool.getOngoingTransactions();
         currentProducer = startTransaction(checkpointId + 1);
-        KafkaWriterState state = new KafkaWriterState(transactionalIdPrefix, ongoingTransactions);
-        LOG.debug("Snapshotting state {}", state);
-        return Collections.singletonList(state);
+        return createSnapshots(ongoingTransactions);
+    }
+
+    private List<KafkaWriterState> createSnapshots(
+            Collection<CheckpointTransaction> ongoingTransactions) {
+        List<KafkaWriterState> states = new ArrayList<>();
+        List<Integer> subtaskIds = this.ownedSubtaskIds;
+        for (int index = 0; index < subtaskIds.size(); index++) {
+            Integer ownedSubtask = subtaskIds.get(index);
+            states.add(
+                    new KafkaWriterState(
+                            transactionalIdPrefix,
+                            ownedSubtask,
+                            maxParallellism,
+                            // new transactions are only created with the first owned subtask id
+                            index == 0 ? ongoingTransactions : List.of()));
+        }
+        LOG.debug("Snapshotting state {}", states);
+        return states;
     }
 
     @Override
@@ -303,22 +349,24 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
                     producerPool.recycle(producer);
                     return epoch;
                 };
-        Set<String> ongoingTransactionIds =
+        Set<String> precommittedTransactionalIds =
                 recoveredStates.stream()
                         .flatMap(
                                 s ->
-                                        s.getOngoingTransactions().stream()
+                                        s.getPrecommittedTransactionalIds().stream()
                                                 .map(CheckpointTransaction::getTransactionalId))
                         .collect(Collectors.toSet());
         return new TransactionAbortStrategyContextImpl(
                 this::getTopicNames,
                 kafkaSinkContext.getParallelInstanceId(),
                 kafkaSinkContext.getNumberOfParallelInstances(),
+                ownedSubtaskIds,
+                maxParallellism,
                 prefixesToAbort,
                 startCheckpointId,
                 aborter,
                 this::getAdminClient,
-                ongoingTransactionIds);
+                precommittedTransactionalIds);
     }
 
     private Collection<String> getTopicNames() {

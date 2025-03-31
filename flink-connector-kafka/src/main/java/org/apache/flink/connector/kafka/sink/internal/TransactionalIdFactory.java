@@ -44,11 +44,11 @@ public class TransactionalIdFactory {
                 + checkpointOffset;
     }
 
-    public static long extractSubtaskId(String name) {
+    public static int extractSubtaskId(String name) {
         int lastSep = name.lastIndexOf("-");
         int secondLastSep = name.lastIndexOf("-", lastSep - 1);
         String subtaskString = name.substring(secondLastSep + 1, lastSep);
-        return Long.parseLong(subtaskString);
+        return Integer.parseInt(subtaskString);
     }
 
     public static String extractPrefix(String name) {

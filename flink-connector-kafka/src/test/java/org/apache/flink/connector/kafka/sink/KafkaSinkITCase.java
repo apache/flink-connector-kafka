@@ -18,6 +18,7 @@
 package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.api.common.JobID;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.common.state.CheckpointListener;
@@ -27,6 +28,8 @@ import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeutils.SimpleTypeSerializerSnapshot;
 import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
 import org.apache.flink.api.common.typeutils.base.TypeSerializerSingleton;
+import org.apache.flink.api.connector.source.util.ratelimit.RateLimiter;
+import org.apache.flink.api.connector.source.util.ratelimit.RateLimiterStrategy;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.configuration.Configuration;
@@ -35,6 +38,7 @@ import org.apache.flink.configuration.ExternalizedCheckpointRetention;
 import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.configuration.StateBackendOptions;
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.datagen.source.DataGeneratorSource;
 import org.apache.flink.connector.kafka.sink.testutils.KafkaSinkExternalContextFactory;
 import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
 import org.apache.flink.connector.kafka.testutils.KafkaUtil;
@@ -56,9 +60,7 @@ import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.source.legacy.SourceFunction;
 import org.apache.flink.test.junit5.InjectClusterClient;
 import org.apache.flink.test.junit5.InjectMiniCluster;
 import org.apache.flink.test.junit5.MiniClusterExtension;
@@ -82,6 +84,7 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -105,11 +108,12 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -357,6 +361,89 @@ public class KafkaSinkITCase extends TestLogger {
         assertThat(committedRecords).containsExactlyInAnyOrderElementsOf(checkpointedRecords.get());
     }
 
+    @ParameterizedTest(name = "{0}->{1}")
+    @CsvSource({
+        "1,2", "2,3", "2,5", "6,5", "5,2", "5,3", "3,2", "2,1"
+    }) // "3,5", "5,6",  result in FLINK-37605
+    public void rescaleListing(
+            int oldParallelism,
+            int newParallelsm,
+            @TempDir File checkpointDir,
+            @InjectMiniCluster MiniCluster miniCluster,
+            @InjectClusterClient ClusterClient<?> clusterClient)
+            throws Exception {
+        // Run a first job failing during the async phase of a checkpoint to leave some
+        // lingering transactions
+        final Configuration config = createConfiguration(oldParallelism);
+        config.set(StateBackendOptions.STATE_BACKEND, "rocksdb");
+        config.set(CheckpointingOptions.CHECKPOINTS_DIRECTORY, checkpointDir.toURI().toString());
+        config.set(
+                CheckpointingOptions.EXTERNALIZED_CHECKPOINT_RETENTION,
+                ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION);
+        config.set(CheckpointingOptions.MAX_RETAINED_CHECKPOINTS, 2);
+        SharedReference<Set<Long>> checkpointedRecords =
+                sharedObjects.add(new ConcurrentSkipListSet<>());
+
+        JobID firstJobId = null;
+        try {
+            firstJobId =
+                    executeWithMapper(
+                            new FailAsyncCheckpointMapper(1),
+                            checkpointedRecords,
+                            config,
+                            TransactionNamingStrategy.POOLING,
+                            false,
+                            "firstPrefix",
+                            clusterClient);
+        } catch (Exception e) {
+            assertThat(e).hasStackTraceContaining("Exceeded checkpoint tolerable failure");
+        }
+
+        final Optional<String> completedCheckpoint =
+                CommonTestUtils.getLatestCompletedCheckpointPath(firstJobId, miniCluster);
+        assertThat(completedCheckpoint).isPresent();
+        config.set(SAVEPOINT_PATH, completedCheckpoint.get());
+        config.set(CoreOptions.DEFAULT_PARALLELISM, newParallelsm);
+
+        // Run a second job which aborts all lingering transactions and new consumer should
+        // immediately see the newly written records
+        JobID secondJobId = null;
+        try {
+            secondJobId =
+                    executeWithMapper(
+                            new FailAsyncCheckpointMapper(1),
+                            checkpointedRecords,
+                            config,
+                            TransactionNamingStrategy.POOLING,
+                            false,
+                            "secondPrefix",
+                            clusterClient);
+        } catch (Exception e) {
+            assertThat(e).hasStackTraceContaining("Exceeded checkpoint tolerable failure");
+        }
+
+        final Optional<String> completedCheckpoint2 =
+                CommonTestUtils.getLatestCompletedCheckpointPath(secondJobId, miniCluster);
+
+        assertThat(completedCheckpoint2).isPresent();
+        config.set(SAVEPOINT_PATH, completedCheckpoint2.get());
+        config.set(CoreOptions.DEFAULT_PARALLELISM, oldParallelism);
+
+        SharedReference<AtomicBoolean> failed = sharedObjects.add(new AtomicBoolean(true));
+        executeWithMapper(
+                new FailingCheckpointMapper(failed),
+                checkpointedRecords,
+                config,
+                TransactionNamingStrategy.POOLING,
+                false,
+                "thirdPrefix",
+                clusterClient);
+
+        final List<Long> committedRecords =
+                deserializeValues(drainAllRecordsFromTopic(topic, true));
+        assertThat(committedRecords).containsExactlyInAnyOrderElementsOf(checkpointedRecords.get());
+    }
+
     private static Configuration createConfiguration(int parallelism) {
         final Configuration config = new Configuration();
         config.set(CoreOptions.DEFAULT_PARALLELISM, parallelism);
@@ -379,7 +466,7 @@ public class KafkaSinkITCase extends TestLogger {
         if (!chained) {
             env.disableOperatorChaining();
         }
-        final DataStreamSource<Long> source = env.fromSequence(1, 10);
+        final DataStream<Long> source = createThrottlingSource(env);
         final DataStream<Long> stream =
                 source.map(mapper).map(new RecordFetcher(checkpointedRecords)).uid("fetcher");
         final KafkaSinkBuilder<Long> builder =
@@ -422,7 +509,7 @@ public class KafkaSinkITCase extends TestLogger {
         }
         env.enableCheckpointing(300L);
         env.getCheckpointConfig().setMaxConcurrentCheckpoints(maxConcurrentCheckpoints);
-        DataStreamSource<Long> source = env.fromSequence(1, 10);
+        final DataStream<Long> source = createThrottlingSource(env);
         SharedReference<Set<Long>> checkpointedRecords =
                 sharedObjects.add(new ConcurrentSkipListSet<>());
         DataStream<Long> stream =
@@ -471,7 +558,7 @@ public class KafkaSinkITCase extends TestLogger {
             env.disableOperatorChaining();
         }
         env.enableCheckpointing(100L);
-        final DataStream<Long> source = env.addSource(new InfiniteIntegerSource());
+        final DataStream<Long> source = createThrottlingSource(env);
         SharedReference<Set<Long>> checkpointedRecords =
                 sharedObjects.add(new ConcurrentSkipListSet<>());
         source.map(new RecordFetcher(checkpointedRecords))
@@ -494,6 +581,17 @@ public class KafkaSinkITCase extends TestLogger {
                         drainAllRecordsFromTopic(
                                 topic, deliveryGuarantee == DeliveryGuarantee.EXACTLY_ONCE));
         assertThat(collectedRecords).containsExactlyInAnyOrderElementsOf(checkpointedRecords.get());
+    }
+
+    private DataStream<Long> createThrottlingSource(StreamExecutionEnvironment env) {
+        return env.fromSource(
+                new DataGeneratorSource<>(
+                        value -> value,
+                        100,
+                        new ThrottleUntilFirstCheckpointStrategy(),
+                        BasicTypeInfo.LONG_TYPE_INFO),
+                WatermarkStrategy.noWatermarks(),
+                "Generator Source");
     }
 
     private static List<Long> deserializeValues(List<ConsumerRecord<byte[], byte[]>> records) {
@@ -624,7 +722,6 @@ public class KafkaSinkITCase extends TestLogger {
 
         @Override
         public Long map(Long value) throws Exception {
-            Thread.sleep(100);
             return value;
         }
 
@@ -725,8 +822,6 @@ public class KafkaSinkITCase extends TestLogger {
                 failed.get().set(true);
                 throw new RuntimeException("Planned exception.");
             }
-            // Delay execution to ensure that at-least one checkpoint is triggered before finish
-            Thread.sleep(50);
             emittedBetweenCheckpoint++;
             return value;
         }
@@ -738,39 +833,30 @@ public class KafkaSinkITCase extends TestLogger {
         }
     }
 
-    /**
-     * Exposes information about how man records have been emitted overall and finishes after
-     * receiving the checkpoint completed event.
-     */
-    private static final class InfiniteIntegerSource
-            implements SourceFunction<Long>, CheckpointListener {
-
-        private volatile boolean running = true;
-        private final AtomicInteger nextRecord = new AtomicInteger();
-
-        InfiniteIntegerSource() {}
+    private static class ThrottleUntilFirstCheckpointStrategy implements RateLimiterStrategy {
+        private final RateLimiterStrategy baseStrategy = RateLimiterStrategy.perCheckpoint(10);
 
         @Override
-        public void run(SourceContext<Long> ctx) throws Exception {
-            Object lock = ctx.getCheckpointLock();
-            while (running) {
-                synchronized (lock) {
-                    ctx.collect((long) nextRecord.getAndIncrement());
-                    Thread.sleep(1);
+        public RateLimiter createRateLimiter(int parallelism) {
+            RateLimiter baseLimiter = baseStrategy.createRateLimiter(parallelism);
+
+            return new RateLimiter() {
+                boolean checkpointed = false;
+
+                @Override
+                public CompletionStage<Void> acquire() {
+                    if (checkpointed) {
+                        return CompletableFuture.completedFuture(null);
+                    }
+                    return baseLimiter.acquire();
                 }
-            }
-            LOG.info("last emitted record {}", nextRecord.get() - 1);
-        }
 
-        @Override
-        public void cancel() {
-            running = false;
-        }
-
-        @Override
-        public void notifyCheckpointComplete(long checkpointId) {
-            running = false;
-            LOG.info("notifyCheckpointCompleted {}", checkpointId);
+                @Override
+                public void notifyCheckpointComplete(long checkpointId) {
+                    baseLimiter.notifyCheckpointComplete(checkpointId);
+                    checkpointed = true;
+                }
+            };
         }
     }
 }

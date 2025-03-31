@@ -61,13 +61,13 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
 
     public FlinkKafkaInternalProducer(Properties properties) {
         super(properties);
-        LOG.debug("Created non-transactional {}", this);
+        LOG.info("Created non-transactional {}", this);
     }
 
     public FlinkKafkaInternalProducer(Properties properties, String transactionalId) {
         super(withTransactionalId(properties, transactionalId));
         this.transactionalId = transactionalId;
-        LOG.debug("Created transactional {}", this);
+        LOG.info("Created transactional {}", this);
     }
 
     private static Properties withTransactionalId(Properties properties, String transactionalId) {

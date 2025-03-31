@@ -21,7 +21,7 @@ package org.apache.flink.connector.kafka.sink.internal;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 
-import java.util.Collection;
+import java.util.Set;
 
 import static org.apache.flink.util.Preconditions.checkState;
 
@@ -62,7 +62,7 @@ public enum TransactionNamingStrategyImpl {
         @Override
         public FlinkKafkaInternalProducer<byte[], byte[]> getTransactionalProducer(
                 Context context) {
-            Collection<String> usedTransactionalIds = context.getOngoingTransactions();
+            Set<String> usedTransactionalIds = context.getOngoingTransactions();
             for (int offset = 0; ; offset++) {
                 String transactionalIdCandidate = context.buildTransactionalId(offset);
                 if (usedTransactionalIds.contains(transactionalIdCandidate)) {
@@ -96,7 +96,7 @@ public enum TransactionNamingStrategyImpl {
 
         long getNextCheckpointId();
 
-        Collection<String> getOngoingTransactions();
+        Set<String> getOngoingTransactions();
 
         long getLastCheckpointId();
 

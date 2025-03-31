@@ -20,7 +20,7 @@ package org.apache.flink.connector.kafka.util;
 
 import org.apache.flink.annotation.Internal;
 
-import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.DescribeProducersResult;
 import org.apache.kafka.clients.admin.ListTransactionsOptions;
 import org.apache.kafka.clients.admin.ProducerState;
@@ -42,21 +42,11 @@ public class AdminUtils {
 
     private AdminUtils() {}
 
-    public static Map<String, TopicDescription> getAllTopicMetadata(AdminClient adminClient) {
-        try {
-            Set<String> allTopicNames = adminClient.listTopics().names().get();
-            return getTopicMetadata(adminClient, allTopicNames);
-        } catch (Exception e) {
-            checkIfInterrupted(e);
-            throw new RuntimeException("Failed to get metadata for all topics.", e);
-        }
-    }
-
     public static Map<String, TopicDescription> getTopicMetadata(
-            AdminClient adminClient, Pattern topicPattern) {
+            Admin admin, Pattern topicPattern) {
         try {
-            Set<String> matchedTopicNames = getTopicsByPattern(adminClient, topicPattern);
-            return getTopicMetadata(adminClient, matchedTopicNames);
+            Set<String> matchedTopicNames = getTopicsByPattern(admin, topicPattern);
+            return getTopicMetadata(admin, matchedTopicNames);
         } catch (Exception e) {
             checkIfInterrupted(e);
             throw new RuntimeException(
@@ -65,9 +55,9 @@ public class AdminUtils {
         }
     }
 
-    public static Set<String> getTopicsByPattern(AdminClient adminClient, Pattern topicPattern) {
+    public static Set<String> getTopicsByPattern(Admin admin, Pattern topicPattern) {
         try {
-            Set<String> allTopicNames = adminClient.listTopics().names().get();
+            Set<String> allTopicNames = admin.listTopics().names().get();
             return allTopicNames.stream()
                     .filter(name -> topicPattern.matcher(name).matches())
                     .collect(Collectors.toSet());
@@ -80,9 +70,9 @@ public class AdminUtils {
     }
 
     public static Map<String, TopicDescription> getTopicMetadata(
-            AdminClient adminClient, Collection<String> topicNames) {
+            Admin admin, Collection<String> topicNames) {
         try {
-            return adminClient.describeTopics(topicNames).allTopicNames().get();
+            return admin.describeTopics(topicNames).allTopicNames().get();
         } catch (Exception e) {
             checkIfInterrupted(e);
             throw new RuntimeException(
@@ -91,12 +81,9 @@ public class AdminUtils {
     }
 
     public static Map<TopicPartition, DescribeProducersResult.PartitionProducerState>
-            getProducerStates(AdminClient adminClient, Collection<String> topicNames) {
+            getProducerStates(Admin admin, Collection<String> topicNames) {
         try {
-            return adminClient
-                    .describeProducers(getTopicPartitions(adminClient, topicNames))
-                    .all()
-                    .get();
+            return admin.describeProducers(getTopicPartitions(admin, topicNames)).all().get();
         } catch (Exception e) {
             checkIfInterrupted(e);
             throw new RuntimeException(
@@ -104,9 +91,8 @@ public class AdminUtils {
         }
     }
 
-    public static Collection<Long> getProducerIds(
-            AdminClient adminClient, Collection<String> topicNames) {
-        return getProducerStates(adminClient, topicNames).values().stream()
+    public static Collection<Long> getProducerIds(Admin admin, Collection<String> topicNames) {
+        return getProducerStates(admin, topicNames).values().stream()
                 .flatMap(
                         producerState ->
                                 producerState.activeProducers().stream()
@@ -115,12 +101,11 @@ public class AdminUtils {
     }
 
     public static Collection<TransactionListing> getOpenTransactionsForTopics(
-            AdminClient adminClient, Collection<String> topicNames) {
+            Admin admin, Collection<String> topicNames) {
         try {
-            return adminClient
-                    .listTransactions(
+            return admin.listTransactions(
                             new ListTransactionsOptions()
-                                    .filterProducerIds(getProducerIds(adminClient, topicNames))
+                                    .filterProducerIds(getProducerIds(admin, topicNames))
                                     .filterStates(List.of(TransactionState.ONGOING)))
                     .all()
                     .get();
@@ -138,8 +123,8 @@ public class AdminUtils {
     }
 
     public static List<TopicPartition> getTopicPartitions(
-            AdminClient adminClient, Collection<String> topicNames) {
-        return getTopicMetadata(adminClient, topicNames).values().stream()
+            Admin admin, Collection<String> topicNames) {
+        return getTopicMetadata(admin, topicNames).values().stream()
                 .flatMap(
                         t ->
                                 t.partitions().stream()

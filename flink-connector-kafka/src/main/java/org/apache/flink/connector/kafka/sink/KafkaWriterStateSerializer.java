@@ -40,8 +40,10 @@ class KafkaWriterStateSerializer implements SimpleVersionedSerializer<KafkaWrite
         try (final ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 final DataOutputStream out = new DataOutputStream(baos)) {
             out.writeUTF(state.getTransactionalIdPrefix());
-            out.writeInt(state.getOngoingTransactions().size());
-            for (CheckpointTransaction transaction : state.getOngoingTransactions()) {
+            out.writeInt(state.getOwnedSubtaskId());
+            out.writeInt(state.getMaxParallelism());
+            out.writeInt(state.getPrecommittedTransactionalIds().size());
+            for (CheckpointTransaction transaction : state.getPrecommittedTransactionalIds()) {
                 out.writeUTF(transaction.getTransactionalId());
                 out.writeLong(transaction.getCheckpointId());
             }
@@ -59,14 +61,20 @@ class KafkaWriterStateSerializer implements SimpleVersionedSerializer<KafkaWrite
         try (final ByteArrayInputStream bais = new ByteArrayInputStream(serialized);
                 final DataInputStream in = new DataInputStream(bais)) {
             final String transactionalIdPrefix = in.readUTF();
+            int subtaskId = 0;
+            int parallelism = 1;
             final Collection<CheckpointTransaction> ongoingTransactions = new ArrayList<>();
             if (version == 2) {
+                subtaskId = in.readInt();
+                parallelism = in.readInt();
+
                 final int usedTransactionIdsSize = in.readInt();
                 for (int i = 0; i < usedTransactionIdsSize; i++) {
                     ongoingTransactions.add(new CheckpointTransaction(in.readUTF(), in.readLong()));
                 }
             }
-            return new KafkaWriterState(transactionalIdPrefix, ongoingTransactions);
+            return new KafkaWriterState(
+                    transactionalIdPrefix, subtaskId, parallelism, ongoingTransactions);
         }
     }
 }
