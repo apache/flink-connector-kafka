@@ -17,11 +17,14 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.flink.connector.kafka.sink.internal.CheckpointTransaction;
+import org.apache.flink.connector.kafka.sink.internal.TransactionOwnership;
 import org.apache.flink.util.TestLogger;
 
 import org.junit.Test;
 
 import java.io.IOException;
+import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -35,8 +38,16 @@ public class KafkaWriterStateSerializerTest extends TestLogger {
 
     @Test
     public void testStateSerDe() throws IOException {
-        final KafkaWriterState state = new KafkaWriterState("idPrefix");
+        final KafkaWriterState state =
+                new KafkaWriterState(
+                        "idPrefix",
+                        0,
+                        1,
+                        TransactionOwnership.IMPLICIT_BY_SUBTASK_ID,
+                        Arrays.asList(
+                                new CheckpointTransaction("id1", 5L),
+                                new CheckpointTransaction("id2", 6L)));
         final byte[] serialized = SERIALIZER.serialize(state);
-        assertThat(SERIALIZER.deserialize(1, serialized)).isEqualTo(state);
+        assertThat(SERIALIZER.deserialize(2, serialized)).isEqualTo(state);
     }
 }

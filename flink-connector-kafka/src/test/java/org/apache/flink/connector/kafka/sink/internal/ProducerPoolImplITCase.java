@@ -27,10 +27,15 @@ import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.Properties;
 import java.util.function.Consumer;
 
@@ -64,7 +69,8 @@ class ProducerPoolImplITCase {
 
     @Test
     void testGetTransactionalProducer() throws Exception {
-        try (ProducerPoolImpl producerPool = new ProducerPoolImpl(getProducerConfig(), INIT)) {
+        try (ProducerPoolImpl producerPool =
+                new ProducerPoolImpl(getProducerConfig(), INIT, Collections.emptyList())) {
 
             FlinkKafkaInternalProducer<byte[], byte[]> producer =
                     producerPool.getTransactionalProducer(TRANSACTIONAL_ID, 1L);
@@ -80,7 +86,8 @@ class ProducerPoolImplITCase {
     /** Tests direct recycling as used during abortion of transactions. */
     @Test
     void testRecycleProducer() throws Exception {
-        try (ProducerPoolImpl producerPool = new ProducerPoolImpl(getProducerConfig(), INIT)) {
+        try (ProducerPoolImpl producerPool =
+                new ProducerPoolImpl(getProducerConfig(), INIT, Collections.emptyList())) {
             FlinkKafkaInternalProducer<byte[], byte[]> producer =
                     producerPool.getTransactionalProducer(TRANSACTIONAL_ID, 1L);
 
@@ -97,7 +104,8 @@ class ProducerPoolImplITCase {
     /** Tests indirect recycling triggered through the backchannel. */
     @Test
     void testRecycleByTransactionId() throws Exception {
-        try (ProducerPoolImpl producerPool = new ProducerPoolImpl(getProducerConfig(), INIT)) {
+        try (ProducerPoolImpl producerPool =
+                new ProducerPoolImpl(getProducerConfig(), INIT, Collections.emptyList())) {
             FlinkKafkaInternalProducer<byte[], byte[]> producer =
                     producerPool.getTransactionalProducer(TRANSACTIONAL_ID, 1L);
 
@@ -114,10 +122,45 @@ class ProducerPoolImplITCase {
         }
     }
 
+    /** Tests the edge case where some transaction ids are implicitly closed. */
+    @ParameterizedTest
+    @ValueSource(longs = {2, 3})
+    void testEarlierTransactionRecycleByTransactionId(long finishedCheckpoint) throws Exception {
+        CheckpointTransaction oldTransaction1 =
+                new CheckpointTransaction(TRANSACTIONAL_ID + "-0", 1L);
+        CheckpointTransaction oldTransaction2 =
+                new CheckpointTransaction(TRANSACTIONAL_ID + "-1", 2L);
+
+        try (ProducerPoolImpl producerPool =
+                new ProducerPoolImpl(
+                        getProducerConfig(),
+                        INIT,
+                        Arrays.asList(oldTransaction1, oldTransaction2))) {
+            FlinkKafkaInternalProducer<byte[], byte[]> producer =
+                    producerPool.getTransactionalProducer(
+                            TRANSACTIONAL_ID + "-2", finishedCheckpoint);
+
+            assertThat(producerPool.getOngoingTransactions()).hasSize(3);
+
+            assertThat(producerPool.getProducers()).isEmpty();
+            producer.beginTransaction();
+            producerPool.recycleByTransactionId(TRANSACTIONAL_ID + "-2", true);
+            assertThat(producerPool.getProducers()).contains(producer);
+
+            // expect that old transactions have been removed where checkpoint id is smaller
+            if (finishedCheckpoint == 2) {
+                assertThat(producerPool.getOngoingTransactions()).hasSize(1);
+            } else {
+                assertThat(producerPool.getOngoingTransactions()).hasSize(0);
+            }
+        }
+    }
+
     /** Tests indirect recycling triggered through the backchannel. */
     @Test
     void testCloseByTransactionId() throws Exception {
-        try (ProducerPoolImpl producerPool = new ProducerPoolImpl(getProducerConfig(), INIT)) {
+        try (ProducerPoolImpl producerPool =
+                new ProducerPoolImpl(getProducerConfig(), INIT, List.of())) {
             FlinkKafkaInternalProducer<byte[], byte[]> producer =
                     producerPool.getTransactionalProducer(TRANSACTIONAL_ID, 1L);
 

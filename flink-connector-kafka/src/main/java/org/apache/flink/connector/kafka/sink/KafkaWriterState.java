@@ -17,44 +17,101 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.flink.annotation.Internal;
+import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.connector.kafka.sink.internal.CheckpointTransaction;
+import org.apache.flink.connector.kafka.sink.internal.TransactionOwnership;
+
+import java.util.Collection;
 import java.util.Objects;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
-class KafkaWriterState {
-    private final String transactionalIdPrefix;
+/** The state of the Kafka writer. Used to capture information regarding transactions. */
+@Internal
+public class KafkaWriterState {
+    public static final int UNKNOWN = -1;
 
-    KafkaWriterState(String transactionalIdPrefix) {
+    private final String transactionalIdPrefix;
+    private final int ownedSubtaskId;
+    private final int totalNumberOfOwnedSubtasks;
+    private final TransactionOwnership transactionOwnership;
+    private final Collection<CheckpointTransaction> precommittedTransactionalIds;
+
+    @VisibleForTesting
+    public KafkaWriterState(
+            String transactionalIdPrefix,
+            int ownedSubtaskId,
+            int totalNumberOfOwnedSubtasks,
+            TransactionOwnership transactionOwnership,
+            Collection<CheckpointTransaction> precommittedTransactionalIds) {
         this.transactionalIdPrefix = checkNotNull(transactionalIdPrefix, "transactionalIdPrefix");
+        this.ownedSubtaskId = ownedSubtaskId;
+        this.totalNumberOfOwnedSubtasks = totalNumberOfOwnedSubtasks;
+        this.transactionOwnership = transactionOwnership;
+        this.precommittedTransactionalIds = precommittedTransactionalIds;
     }
 
     public String getTransactionalIdPrefix() {
         return transactionalIdPrefix;
     }
 
+    public int getOwnedSubtaskId() {
+        return ownedSubtaskId;
+    }
+
+    public int getTotalNumberOfOwnedSubtasks() {
+        return totalNumberOfOwnedSubtasks;
+    }
+
+    public Collection<CheckpointTransaction> getPrecommittedTransactionalIds() {
+        return precommittedTransactionalIds;
+    }
+
+    public TransactionOwnership getTransactionOwnership() {
+        return transactionOwnership;
+    }
+
     @Override
-    public boolean equals(Object o) {
-        if (this == o) {
+    public boolean equals(Object object) {
+        if (this == object) {
             return true;
         }
-        if (o == null || getClass() != o.getClass()) {
+        if (object == null || getClass() != object.getClass()) {
             return false;
         }
-        KafkaWriterState that = (KafkaWriterState) o;
-        return transactionalIdPrefix.equals(that.transactionalIdPrefix);
+        KafkaWriterState that = (KafkaWriterState) object;
+        return ownedSubtaskId == that.ownedSubtaskId
+                && totalNumberOfOwnedSubtasks == that.totalNumberOfOwnedSubtasks
+                && Objects.equals(transactionalIdPrefix, that.transactionalIdPrefix)
+                && transactionOwnership == that.transactionOwnership
+                && Objects.equals(precommittedTransactionalIds, that.precommittedTransactionalIds);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(transactionalIdPrefix);
+        return Objects.hash(
+                transactionalIdPrefix,
+                ownedSubtaskId,
+                totalNumberOfOwnedSubtasks,
+                transactionOwnership,
+                precommittedTransactionalIds);
     }
 
     @Override
     public String toString() {
         return "KafkaWriterState{"
-                + ", transactionalIdPrefix='"
+                + "transactionalIdPrefix='"
                 + transactionalIdPrefix
                 + '\''
+                + ", ownedSubtaskId="
+                + ownedSubtaskId
+                + ", totalNumberOfOwnedSubtasks="
+                + totalNumberOfOwnedSubtasks
+                + ", transactionOwnership="
+                + transactionOwnership
+                + ", precommittedTransactionalIds="
+                + precommittedTransactionalIds
                 + '}';
     }
 }

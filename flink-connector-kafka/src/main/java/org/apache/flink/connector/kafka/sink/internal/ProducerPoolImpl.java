@@ -21,6 +21,7 @@ package org.apache.flink.connector.kafka.sink.internal;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.annotation.VisibleForTesting;
 
+import org.apache.kafka.common.KafkaException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,9 +29,11 @@ import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.Deque;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Objects;
@@ -96,28 +99,39 @@ public class ProducerPoolImpl implements ProducerPool {
      * checkpoints.
      */
     private final NavigableMap<CheckpointTransaction, String> transactionalIdsByCheckpoint =
-            new TreeMap<>(Comparator.comparing(CheckpointTransaction::getCheckpointId));
+            new TreeMap<>(
+                    Comparator.comparing(CheckpointTransaction::getCheckpointId)
+                            .thenComparing(CheckpointTransaction::getTransactionalId));
 
     /** Creates a new {@link ProducerPoolImpl}. */
     public ProducerPoolImpl(
             Properties kafkaProducerConfig,
-            Consumer<FlinkKafkaInternalProducer<byte[], byte[]>> producerInit) {
+            Consumer<FlinkKafkaInternalProducer<byte[], byte[]>> producerInit,
+            Collection<CheckpointTransaction> precommittedTransactions) {
         this.kafkaProducerConfig =
                 checkNotNull(kafkaProducerConfig, "kafkaProducerConfig must not be null");
         this.producerInit = checkNotNull(producerInit, "producerInit must not be null");
+
+        initPrecommittedTransactions(precommittedTransactions);
     }
 
     @Override
     public void recycleByTransactionId(String transactionalId, boolean success) {
         ProducerEntry producerEntry = producerByTransactionalId.remove(transactionalId);
         LOG.debug("Transaction {} finished, producer {}", transactionalId, producerEntry);
+
         if (producerEntry == null) {
-            // during recovery, the committer may finish transactions that are not yet ongoing from
-            // the writer's perspective
-            // these transaction will be closed by the second half of this method eventually
+            LOG.info(
+                    "Received unmatched producer for transaction {}. This is expected during rescale.",
+                    transactionalId);
+            // recycle of unmatched entries happens on next checkpoint at the second half of this
+            // method
             return;
         }
 
+        long finishedChkId = producerEntry.getCheckpointedTransaction().getCheckpointId();
+        boolean hasTransactionsFromPreviousCheckpoint =
+                transactionalIdsByCheckpoint.firstKey().getCheckpointId() != finishedChkId;
         transactionalIdsByCheckpoint.remove(producerEntry.getCheckpointedTransaction());
         if (success) {
             recycleProducer(producerEntry.getProducer());
@@ -125,23 +139,26 @@ public class ProducerPoolImpl implements ProducerPool {
             closeProducer(producerEntry.getProducer());
         }
 
-        // In rare cases (only for non-chained committer), some transactions may not be detected to
-        // be finished.
+        // In rare cases (non-chained committer or recovery), some transactions may not be detected
+        // to be finished.
         // For example, a transaction may be committed at the same time the writer state is
         // snapshot. The writer contains the transaction as ongoing but the committer state will
         // later not contain it.
         // In these cases, we make use of the fact that committables are processed in order of the
         // checkpoint id.
         // That means a transaction state with checkpoint id C implies that all C' < C are finished.
-        NavigableMap<CheckpointTransaction, String> earlierTransactions =
-                transactionalIdsByCheckpoint.headMap(
-                        producerEntry.getCheckpointedTransaction(), false);
-        if (!earlierTransactions.isEmpty()) {
-            for (String id : earlierTransactions.values()) {
-                ProducerEntry entry = producerByTransactionalId.remove(id);
-                closeProducer(entry.getProducer());
+        if (hasTransactionsFromPreviousCheckpoint) {
+            // We can safely remove all transactions with checkpoint id < finishedChkId.
+            // Entries are primarily sorted by checkpoint id
+            Iterator<Map.Entry<CheckpointTransaction, String>> iterator =
+                    transactionalIdsByCheckpoint.entrySet().iterator();
+            while (iterator.hasNext()) {
+                Map.Entry<CheckpointTransaction, String> entry = iterator.next();
+                if (entry.getKey().getCheckpointId() < finishedChkId) {
+                    iterator.remove();
+                    closeProducer(producerByTransactionalId.remove(entry.getValue()).getProducer());
+                }
             }
-            earlierTransactions.clear();
         }
     }
 
@@ -166,18 +183,38 @@ public class ProducerPoolImpl implements ProducerPool {
             return;
         }
 
-        // For non-chained committer, we have a split brain scenario:
-        // Both the writer and the committer have a producer representing the same transaction.
-        // The committer producer has finished the transaction while the writer producer is still in
-        // transaction.
-        if (producer.isInTransaction()) {
-            // Here we just double-commit the same transaction which succeeds in all cases
-            // because the producer shares the same epoch as the committer's producer
-            producer.commitTransaction();
-        }
-        producerPool.add(producer);
+        try {
+            // For non-chained committer, we have a split brain scenario:
+            // Both the writer and the committer have a producer representing the same transaction.
+            // The committer producer has finished the transaction while the writer producer is
+            // still in transaction.
+            if (producer.isInTransaction()) {
+                // Here we just double-commit the same transaction which succeeds in all cases
+                // because the producer shares the same epoch as the committer's producer
+                producer.commitTransaction();
+            }
 
-        LOG.debug("Recycling {}, new pool size {}", producer, producerPool.size());
+            producerPool.add(producer);
+
+            LOG.debug("Recycling {}, new pool size {}", producer, producerPool.size());
+        } catch (KafkaException e) {
+            closeProducer(producer);
+
+            LOG.debug(
+                    "Encountered exception while double-committing, discarding producer {}: {}",
+                    producer,
+                    e);
+        }
+    }
+
+    private void initPrecommittedTransactions(
+            Collection<CheckpointTransaction> precommittedTransactions) {
+        for (CheckpointTransaction transaction : precommittedTransactions) {
+            this.transactionalIdsByCheckpoint.put(transaction, transaction.getTransactionalId());
+            this.producerByTransactionalId.put(
+                    transaction.getTransactionalId(), new ProducerEntry(null, transaction));
+        }
+        LOG.debug("Initialized ongoing transactions from state {}", precommittedTransactions);
     }
 
     @Override
@@ -211,6 +248,11 @@ public class ProducerPoolImpl implements ProducerPool {
         return producer;
     }
 
+    @Override
+    public Collection<CheckpointTransaction> getOngoingTransactions() {
+        return new ArrayList<>(transactionalIdsByCheckpoint.keySet());
+    }
+
     @VisibleForTesting
     public Collection<FlinkKafkaInternalProducer<byte[], byte[]>> getProducers() {
         return producerPool;
@@ -235,13 +277,13 @@ public class ProducerPoolImpl implements ProducerPool {
     }
 
     private static class ProducerEntry {
-        private final FlinkKafkaInternalProducer<byte[], byte[]> producer;
+        @Nullable private final FlinkKafkaInternalProducer<byte[], byte[]> producer;
         private final CheckpointTransaction checkpointedTransaction;
 
         private ProducerEntry(
-                FlinkKafkaInternalProducer<byte[], byte[]> producer,
+                @Nullable FlinkKafkaInternalProducer<byte[], byte[]> producer,
                 CheckpointTransaction checkpointedTransaction) {
-            this.producer = checkNotNull(producer, "producer must not be null");
+            this.producer = producer;
             this.checkpointedTransaction =
                     checkNotNull(
                             checkpointedTransaction, "checkpointedTransaction must not be null");
@@ -251,13 +293,17 @@ public class ProducerPoolImpl implements ProducerPool {
             return checkpointedTransaction;
         }
 
+        @Nullable
         public FlinkKafkaInternalProducer<byte[], byte[]> getProducer() {
             return producer;
         }
 
         @Override
         public String toString() {
-            return producer.toString();
+            if (producer != null) {
+                return producer.toString();
+            }
+            return checkpointedTransaction.toString();
         }
     }
 }

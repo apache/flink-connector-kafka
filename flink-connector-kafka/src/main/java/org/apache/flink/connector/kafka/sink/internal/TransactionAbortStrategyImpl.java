@@ -23,7 +23,10 @@ import org.apache.flink.annotation.Internal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /** Implementations of an abort strategy for transactions left over from previous runs. */
 @Internal
@@ -112,6 +115,46 @@ public enum TransactionAbortStrategyImpl {
             }
             return numTransactionAborted;
         }
+    },
+    LISTING {
+        @Override
+        public void abortTransactions(Context context) {
+            Collection<String> openTransactionsForTopics = context.getOpenTransactionsForTopics();
+
+            if (openTransactionsForTopics.isEmpty()) {
+                return;
+            }
+
+            List<String> openTransactionsForSubtask =
+                    openTransactionsForTopics.stream()
+                            // ignore transactions from other applications
+                            .filter(name -> hasKnownPrefix(name, context))
+                            //  look only at transactions owned by this subtask
+                            .filter(context::ownsTransactionalId)
+                            .collect(Collectors.toList());
+
+            LOG.warn(
+                    "Found {} open transactions for subtask {}: {}",
+                    openTransactionsForSubtask.size(),
+                    context.getCurrentSubtaskId(),
+                    openTransactionsForSubtask);
+            // look only at transactions coming from this application
+            // remove transactions that are owned by the committer
+            TransactionAborter transactionAborter = context.getTransactionAborter();
+            for (String name : openTransactionsForSubtask) {
+                if (context.getPrecommittedTransactionalIds().contains(name)) {
+                    LOG.debug(
+                            "Skipping transaction {} because it's in the list of transactions to be committed",
+                            name);
+                    continue;
+                }
+                transactionAborter.abortTransaction(name);
+            }
+        }
+
+        private boolean hasKnownPrefix(String name, Context context) {
+            return context.getPrefixesToAbort().stream().anyMatch(name::startsWith);
+        }
     };
 
     private static final Logger LOG = LoggerFactory.getLogger(TransactionAbortStrategyImpl.class);
@@ -126,11 +169,41 @@ public enum TransactionAbortStrategyImpl {
 
     /** Context for the {@link TransactionAbortStrategyImpl}. */
     public interface Context {
+        /**
+         * Returns the list of all open transactions for the topics retrieved through introspection.
+         */
+        Collection<String> getOpenTransactionsForTopics();
+
         int getCurrentSubtaskId();
 
         int getCurrentParallelism();
 
+        /**
+         * Subtask must abort transactions that they own and must not abort any transaction that
+         * they don't own. Ownership is defined as follows:
+         *
+         * <ul>
+         *   <li>Writer states contains the old subtask id and the max parallelism when it was
+         *       snapshotted.
+         *   <li>On recovery, the state is reassigned somewhere. The new assignee takes the
+         *       ownership.
+         *   <li>If there was a downscale, one subtask may own several old subtask ids.
+         *   <li>If there was an upscale, the ids usually remain stable but that isn't necessary for
+         *       the abort to work.
+         *   <li>Any number of intermediate attempts between the recovered checkpoint and the
+         *       current attempt may produce transactions > then the current parallelism. In that
+         *       case, subtask ids are distributed in a round robin fashion using modulo.
+         * </ul>
+         */
+        boolean ownsTransactionalId(String transactionalId);
+
         Set<String> getPrefixesToAbort();
+
+        /**
+         * Returns a list of transactional ids that shouldn't be aborted because they are part of
+         * the committer state.
+         */
+        Set<String> getPrecommittedTransactionalIds();
 
         long getStartCheckpointId();
 

@@ -23,6 +23,7 @@ import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
 import org.apache.flink.connector.kafka.sink.internal.ProducerPoolImpl;
 import org.apache.flink.connector.kafka.sink.internal.TransactionFinished;
+import org.apache.flink.connector.kafka.sink.internal.TransactionOwnership;
 import org.apache.flink.connector.kafka.sink.internal.WritableBackchannel;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
@@ -211,7 +212,13 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
             onCheckpointBarrier(failedWriter, 2);
 
             // use state to ensure that the new writer knows about the old prefix
-            KafkaWriterState state = new KafkaWriterState(failedWriter.getTransactionalIdPrefix());
+            KafkaWriterState state =
+                    new KafkaWriterState(
+                            failedWriter.getTransactionalIdPrefix(),
+                            0,
+                            1,
+                            TransactionOwnership.IMPLICIT_BY_SUBTASK_ID,
+                            List.of());
 
             try (final KafkaWriter<Integer> recoveredWriter =
                     restoreWriter(EXACTLY_ONCE, List.of(state), createInitContext())) {

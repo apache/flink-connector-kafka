@@ -18,10 +18,15 @@
 package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.api.common.TaskInfo;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.connector.sink2.WriterInitContext;
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacet;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacetProvider;
+import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifier;
 import org.apache.flink.connector.kafka.sink.internal.BackchannelFactory;
+import org.apache.flink.connector.kafka.sink.internal.CheckpointTransaction;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
 import org.apache.flink.connector.kafka.sink.internal.ProducerPool;
 import org.apache.flink.connector.kafka.sink.internal.ProducerPoolImpl;
@@ -31,9 +36,13 @@ import org.apache.flink.connector.kafka.sink.internal.TransactionAbortStrategyIm
 import org.apache.flink.connector.kafka.sink.internal.TransactionFinished;
 import org.apache.flink.connector.kafka.sink.internal.TransactionNamingStrategyContextImpl;
 import org.apache.flink.connector.kafka.sink.internal.TransactionNamingStrategyImpl;
+import org.apache.flink.connector.kafka.sink.internal.TransactionOwnership;
+import org.apache.flink.connector.kafka.util.AdminUtils;
 import org.apache.flink.runtime.checkpoint.CheckpointIDCounter;
 import org.apache.flink.util.FlinkRuntimeException;
 
+import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.slf4j.Logger;
@@ -46,6 +55,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.util.IOUtils.closeAll;
 import static org.apache.flink.util.Preconditions.checkNotNull;
@@ -69,7 +80,6 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     /** Strategy to name transactions. */
     private final TransactionNamingStrategyImpl transactionNamingStrategy;
 
-    private final KafkaWriterState kafkaWriterState;
     private final Collection<KafkaWriterState> recoveredStates;
     private final long restoredCheckpointId;
 
@@ -87,6 +97,11 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     private final ReadableBackchannel<TransactionFinished> backchannel;
     /** The context used to name transactions. */
     private final TransactionNamingStrategyContextImpl namingContext;
+
+    private final int totalNumberOfOwnedSubtasks;
+    private final int[] ownedSubtaskIds;
+    /** Lazily created admin client for {@link TransactionAbortStrategyImpl}. */
+    private AdminClient adminClient;
 
     /**
      * Constructor creating a kafka writer.
@@ -133,25 +148,37 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
             throw new FlinkRuntimeException("Cannot initialize schema.", e);
         }
 
-        this.kafkaWriterState = new KafkaWriterState(transactionalIdPrefix);
-
         this.recoveredStates = checkNotNull(recoveredStates, "recoveredStates");
+        TaskInfo taskInfo = sinkInitContext.getTaskInfo();
+        TransactionOwnership ownership = transactionNamingStrategy.getOwnership();
+        int subtaskId = taskInfo.getIndexOfThisSubtask();
+        int parallelism = taskInfo.getNumberOfParallelSubtasks();
+        this.ownedSubtaskIds =
+                ownership.getOwnedSubtaskIds(subtaskId, parallelism, recoveredStates);
+        this.totalNumberOfOwnedSubtasks =
+                ownership.getTotalNumberOfOwnedSubtasks(subtaskId, parallelism, recoveredStates);
         initFlinkMetrics();
         restoredCheckpointId =
                 sinkInitContext
                         .getRestoredCheckpointId()
                         .orElse(CheckpointIDCounter.INITIAL_CHECKPOINT_ID - 1);
-        int subtaskId = sinkInitContext.getTaskInfo().getIndexOfThisSubtask();
-        this.producerPool = new ProducerPoolImpl(kafkaProducerConfig, this::initKafkaMetrics);
+        this.producerPool =
+                new ProducerPoolImpl(
+                        kafkaProducerConfig,
+                        this::initKafkaMetrics,
+                        recoveredStates.stream()
+                                .flatMap(r -> r.getPrecommittedTransactionalIds().stream())
+                                .collect(Collectors.toList()));
         this.backchannel =
                 BackchannelFactory.getInstance()
                         .getReadableBackchannel(
-                                subtaskId,
-                                sinkInitContext.getTaskInfo().getAttemptNumber(),
-                                transactionalIdPrefix);
+                                subtaskId, taskInfo.getAttemptNumber(), transactionalIdPrefix);
         this.namingContext =
                 new TransactionNamingStrategyContextImpl(
-                        transactionalIdPrefix, subtaskId, restoredCheckpointId, producerPool);
+                        transactionalIdPrefix,
+                        this.ownedSubtaskIds[0],
+                        restoredCheckpointId,
+                        producerPool);
     }
 
     @Override
@@ -202,8 +229,30 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
             producerPool.recycleByTransactionId(
                     finishedTransaction.getTransactionId(), finishedTransaction.isSuccess());
         }
+        // persist the ongoing transactions into the state; these will not be aborted on restart
+        Collection<CheckpointTransaction> ongoingTransactions =
+                producerPool.getOngoingTransactions();
         currentProducer = startTransaction(checkpointId + 1);
-        return Collections.singletonList(kafkaWriterState);
+        return createSnapshots(ongoingTransactions);
+    }
+
+    private List<KafkaWriterState> createSnapshots(
+            Collection<CheckpointTransaction> ongoingTransactions) {
+        List<KafkaWriterState> states = new ArrayList<>();
+        int[] subtaskIds = this.ownedSubtaskIds;
+        for (int index = 0; index < subtaskIds.length; index++) {
+            int ownedSubtask = subtaskIds[index];
+            states.add(
+                    new KafkaWriterState(
+                            transactionalIdPrefix,
+                            ownedSubtask,
+                            totalNumberOfOwnedSubtasks,
+                            transactionNamingStrategy.getOwnership(),
+                            // new transactions are only created with the first owned subtask id
+                            index == 0 ? ongoingTransactions : List.of()));
+        }
+        LOG.debug("Snapshotting state {}", states);
+        return states;
     }
 
     @Override
@@ -281,11 +330,53 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
                     producerPool.recycle(producer);
                     return epoch;
                 };
+        Set<String> precommittedTransactionalIds =
+                recoveredStates.stream()
+                        .flatMap(
+                                s ->
+                                        s.getPrecommittedTransactionalIds().stream()
+                                                .map(CheckpointTransaction::getTransactionalId))
+                        .collect(Collectors.toSet());
         return new TransactionAbortStrategyContextImpl(
+                this::getTopicNames,
                 kafkaSinkContext.getParallelInstanceId(),
                 kafkaSinkContext.getNumberOfParallelInstances(),
+                ownedSubtaskIds,
+                totalNumberOfOwnedSubtasks,
                 prefixesToAbort,
                 startCheckpointId,
-                aborter);
+                aborter,
+                this::getAdminClient,
+                precommittedTransactionalIds);
+    }
+
+    private Collection<String> getTopicNames() {
+        KafkaDatasetIdentifier identifier =
+                getDatasetIdentifier()
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "The record serializer does not expose a static list of target topics."));
+        if (identifier.getTopics() != null) {
+            return identifier.getTopics();
+        }
+        return AdminUtils.getTopicsByPattern(getAdminClient(), identifier.getTopicPattern());
+    }
+
+    private Optional<KafkaDatasetIdentifier> getDatasetIdentifier() {
+        if (recordSerializer instanceof KafkaDatasetFacetProvider) {
+            Optional<KafkaDatasetFacet> kafkaDatasetFacet =
+                    ((KafkaDatasetFacetProvider) recordSerializer).getKafkaDatasetFacet();
+
+            return kafkaDatasetFacet.map(KafkaDatasetFacet::getTopicIdentifier);
+        }
+        return Optional.empty();
+    }
+
+    private Admin getAdminClient() {
+        if (adminClient == null) {
+            adminClient = AdminClient.create(kafkaProducerConfig);
+        }
+        return adminClient;
     }
 }

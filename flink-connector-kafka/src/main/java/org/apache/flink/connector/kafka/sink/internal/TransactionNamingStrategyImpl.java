@@ -26,7 +26,7 @@ import static org.apache.flink.util.Preconditions.checkState;
 /** Implementation of {@link TransactionNamingStrategy}. */
 @Internal
 public enum TransactionNamingStrategyImpl {
-    INCREMENTING {
+    INCREMENTING(TransactionOwnership.IMPLICIT_BY_SUBTASK_ID) {
         /**
          * For each checkpoint we create new {@link FlinkKafkaInternalProducer} so that new
          * transactions will not clash with transactions created during previous checkpoints ({@code
@@ -57,12 +57,22 @@ public enum TransactionNamingStrategyImpl {
         }
     };
 
+    private final TransactionOwnership ownership;
+
+    TransactionNamingStrategyImpl(TransactionOwnership ownership) {
+        this.ownership = ownership;
+    }
+
     /**
      * Returns a {@link FlinkKafkaInternalProducer} that will not clash with any ongoing
      * transactions.
      */
     public abstract FlinkKafkaInternalProducer<byte[], byte[]> getTransactionalProducer(
             Context context);
+
+    public TransactionOwnership getOwnership() {
+        return ownership;
+    }
 
     /** Context for the transaction naming strategy. */
     public interface Context {

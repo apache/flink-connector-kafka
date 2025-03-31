@@ -33,7 +33,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriberUtils.getTopicMetadata;
+import static org.apache.flink.connector.kafka.util.AdminUtils.getTopicMetadata;
 
 /** A subscriber for a partition set. */
 class PartitionSetSubscriber implements KafkaSubscriber, KafkaDatasetIdentifierProvider {
