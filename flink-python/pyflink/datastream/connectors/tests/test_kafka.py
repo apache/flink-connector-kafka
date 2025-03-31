@@ -19,7 +19,6 @@ import json
 from typing import Dict
 
 import pyflink.datastream.data_stream as data_stream
-from pyflink.common import typeinfo
 
 from pyflink.common.configuration import Configuration
 from pyflink.common.serialization import SimpleStringSchema, DeserializationSchema
@@ -28,8 +27,7 @@ from pyflink.common.types import Row
 from pyflink.common.watermark_strategy import WatermarkStrategy
 from pyflink.datastream.connectors.base import DeliveryGuarantee
 from pyflink.datastream.connectors.kafka import KafkaSource, KafkaTopicPartition, \
-    KafkaOffsetsInitializer, KafkaOffsetResetStrategy, KafkaRecordSerializationSchema, KafkaSink, \
-    FlinkKafkaProducer, FlinkKafkaConsumer
+    KafkaOffsetsInitializer, KafkaOffsetResetStrategy, KafkaRecordSerializationSchema, KafkaSink
 from pyflink.datastream.formats.avro import AvroRowDeserializationSchema, AvroRowSerializationSchema
 from pyflink.datastream.formats.csv import CsvRowDeserializationSchema, CsvRowSerializationSchema
 from pyflink.datastream.formats.json import JsonRowDeserializationSchema, JsonRowSerializationSchema
@@ -37,7 +35,6 @@ from pyflink.java_gateway import get_gateway
 from pyflink.testing.test_case_utils import (
     PyFlinkStreamingTestCase,
     PyFlinkTestCase,
-    invoke_java_object_method,
     to_java_data_structure,
 )
 from pyflink.util.java_utils import to_jarray, is_instance_of, get_field_value
