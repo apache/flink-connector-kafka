@@ -19,11 +19,19 @@
 package org.apache.flink.connector.kafka.sink.internal;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.connector.kafka.util.AdminUtils;
 
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.TransactionListing;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import static org.apache.flink.connector.kafka.sink.internal.TransactionalIdFactory.extractSubtaskId;
 
 /** Implementations of an abort strategy for transactions left over from previous runs. */
 @Internal
@@ -110,6 +118,61 @@ public enum TransactionAbortStrategyImpl {
             }
             return numTransactionAborted;
         }
+    },
+    LISTING {
+        @Override
+        public void abortTransactions(Context context) {
+
+            Collection<TransactionListing> openTransactionsForTopics =
+                    AdminUtils.getOpenTransactionsForTopics(
+                            context.getAdminClient(), context.getTopicNames());
+
+            // This list could be huge if TransactionNamingStrategy#INCREMENTING is used, so cap it
+            if (LOG.isWarnEnabled()) {
+                LOG.warn(
+                        "Found {} open transactions for topic: {} (capped at 100)",
+                        openTransactionsForTopics.size(),
+                        openTransactionsForTopics.stream()
+                                .map(TransactionListing::transactionalId)
+                                .limit(100)
+                                .collect(Collectors.toList()));
+            }
+
+            List<String> openTransactionsForSubtask =
+                    openTransactionsForTopics.stream()
+                            .map(TransactionListing::transactionalId)
+                            //  look only at transactions from this subtask
+                            .filter(
+                                    name ->
+                                            extractSubtaskId(name) % context.getParallelism()
+                                                    == context.getSubtaskId())
+                            .collect(Collectors.toList());
+
+            LOG.debug(
+                    "Found {} open transactions for subtask {}: {}",
+                    openTransactionsForSubtask.size(),
+                    context.getSubtaskId(),
+                    openTransactionsForSubtask);
+            // look only at transactions coming from this application
+            // remove transactions that are owned by the committer
+            TransactionAborter transactionAborter = context.getTransactionAborter();
+            for (String name : openTransactionsForSubtask) {
+                if (context.getPrefixesToAbort().stream().noneMatch(name::startsWith)) {
+                    LOG.debug(
+                            "Skipping transaction {} because it's not belonging to the known prefixes {}",
+                            name,
+                            context.getPrefixesToAbort());
+                    continue;
+                }
+                if (context.getOngoingTransactionIds().contains(name)) {
+                    LOG.debug(
+                            "Skipping transaction {} because it's in the list of transactions to be committed",
+                            name);
+                    continue;
+                }
+                transactionAborter.abortTransaction(name);
+            }
+        }
     };
 
     private static final Logger LOG = LoggerFactory.getLogger(TransactionAbortStrategyImpl.class);
@@ -124,11 +187,17 @@ public enum TransactionAbortStrategyImpl {
 
     /** Context for the {@link TransactionAbortStrategyImpl}. */
     public interface Context {
+        AdminClient getAdminClient();
+
+        Collection<String> getTopicNames();
+
         int getSubtaskId();
 
         int getParallelism();
 
         List<String> getPrefixesToAbort();
+
+        Set<String> getOngoingTransactionIds();
 
         long getStartCheckpointId();
 

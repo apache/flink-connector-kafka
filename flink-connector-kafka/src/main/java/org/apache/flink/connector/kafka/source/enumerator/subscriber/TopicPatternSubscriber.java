@@ -34,7 +34,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-import static org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriberUtils.getTopicMetadata;
+import static org.apache.flink.connector.kafka.util.AdminUtils.getTopicMetadata;
 
 /** A subscriber to a topic pattern. */
 class TopicPatternSubscriber implements KafkaSubscriber, KafkaDatasetIdentifierProvider {

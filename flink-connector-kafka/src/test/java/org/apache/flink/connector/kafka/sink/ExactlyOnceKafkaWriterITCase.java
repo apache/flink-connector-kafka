@@ -211,7 +211,8 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
             onCheckpointBarrier(failedWriter, 2);
 
             // use state to ensure that the new writer knows about the old prefix
-            KafkaWriterState state = new KafkaWriterState(failedWriter.getTransactionalIdPrefix());
+            KafkaWriterState state =
+                    new KafkaWriterState(failedWriter.getTransactionalIdPrefix(), List.of());
 
             try (final KafkaWriter<Integer> recoveredWriter =
                     restoreWriter(EXACTLY_ONCE, List.of(state), createInitContext())) {
