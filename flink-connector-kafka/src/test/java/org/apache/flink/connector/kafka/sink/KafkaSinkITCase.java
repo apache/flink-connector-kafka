@@ -66,8 +66,6 @@ import org.apache.flink.testutils.junit.SharedObjectsExtension;
 import org.apache.flink.testutils.junit.SharedReference;
 import org.apache.flink.util.TestLogger;
 
-import org.apache.flink.shaded.guava32.com.google.common.collect.Lists;
-
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.CreateTopicsResult;
@@ -551,7 +549,9 @@ public class KafkaSinkITCase extends TestLogger {
         public void notifyCheckpointComplete(long checkpointId) throws Exception {
             // sync with shared object, this is guaranteed to sync eventually because of final
             // checkpoint
-            checkpointedRecords.get().addAll(Lists.newArrayList(snapshottedRecords.get()));
+            ArrayList<Long> committedRecords = new ArrayList<>();
+            snapshottedRecords.get().forEach(committedRecords::add);
+            checkpointedRecords.get().addAll(committedRecords);
         }
 
         @Override
