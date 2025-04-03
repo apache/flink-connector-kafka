@@ -17,6 +17,7 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
@@ -43,6 +44,7 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
 import java.util.Properties;
+import java.util.function.Consumer;
 
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.drainAllRecordsFromTopic;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -60,6 +62,9 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
                             .setNumberSlotsPerTaskManager(8)
                             .setConfiguration(new Configuration())
                             .build());
+
+    private static final Consumer<KafkaSinkBuilder<?>> EXACTLY_ONCE =
+            sink -> sink.setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE);
 
     @Test
     void testFlushAsyncErrorPropagationAndErrorCounter() throws Exception {
@@ -197,36 +202,35 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
 
     /** Test that producer is not accidentally recreated or pool is used. */
     @Test
-    void testLingeringTransaction() throws Exception {
-        final KafkaWriter<Integer> failedWriter = createWriter(DeliveryGuarantee.EXACTLY_ONCE);
-
-        // create two lingering transactions
-        failedWriter.flush(false);
-        failedWriter.prepareCommit();
-        failedWriter.snapshotState(1);
-        failedWriter.flush(false);
-        failedWriter.prepareCommit();
-        failedWriter.snapshotState(2);
-
-        try (final KafkaWriter<Integer> recoveredWriter =
+    void shouldAbortLingeringTransactions() throws Exception {
+        try (final ExactlyOnceKafkaWriter<Integer> failedWriter =
                 createWriter(DeliveryGuarantee.EXACTLY_ONCE)) {
-            recoveredWriter.write(1, SINK_WRITER_CONTEXT);
 
-            recoveredWriter.flush(false);
-            Collection<KafkaCommittable> committables = recoveredWriter.prepareCommit();
-            recoveredWriter.snapshotState(1);
-            assertThat(committables).hasSize(1);
-            final KafkaCommittable committable = committables.stream().findFirst().get();
-            assertThat(committable.getProducer().isPresent()).isTrue();
+            // create two lingering transactions
+            onCheckpointBarrier(failedWriter, 1);
+            onCheckpointBarrier(failedWriter, 2);
 
-            committable.getProducer().get().commitTransaction();
+            // use state to ensure that the new writer knows about the old prefix
+            KafkaWriterState state = new KafkaWriterState(failedWriter.getTransactionalIdPrefix());
 
-            List<ConsumerRecord<byte[], byte[]>> records =
-                    drainAllRecordsFromTopic(topic, getKafkaClientConfiguration(), true);
-            assertThat(records).hasSize(1);
+            try (final KafkaWriter<Integer> recoveredWriter =
+                    restoreWriter(EXACTLY_ONCE, List.of(state), createInitContext())) {
+                recoveredWriter.write(1, SINK_WRITER_CONTEXT);
+
+                recoveredWriter.flush(false);
+                Collection<KafkaCommittable> committables = recoveredWriter.prepareCommit();
+                recoveredWriter.snapshotState(1);
+                assertThat(committables).hasSize(1);
+                final KafkaCommittable committable = committables.stream().findFirst().get();
+                assertThat(committable.getProducer().isPresent()).isTrue();
+
+                committable.getProducer().get().commitTransaction();
+
+                List<ConsumerRecord<byte[], byte[]>> records =
+                        drainAllRecordsFromTopic(topic, getKafkaClientConfiguration(), true);
+                assertThat(records).hasSize(1);
+            }
         }
-
-        failedWriter.close();
     }
 
     /** Test that producers are reused when committed. */
@@ -331,5 +335,16 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
     private static Collection<FlinkKafkaInternalProducer<byte[], byte[]>> getProducers(
             ExactlyOnceKafkaWriter<Integer> writer) {
         return ((ProducerPoolImpl) writer.getProducerPool()).getProducers();
+    }
+
+    private Tuple2<KafkaWriterState, KafkaCommittable> onCheckpointBarrier(
+            KafkaWriter<Integer> failedWriter, int checkpointId)
+            throws IOException, InterruptedException {
+        // constant number to force the same partition
+        failedWriter.write(1, SINK_WRITER_CONTEXT);
+        failedWriter.flush(false);
+        KafkaCommittable committable = Iterables.getOnlyElement(failedWriter.prepareCommit());
+        KafkaWriterState state = Iterables.getOnlyElement(failedWriter.snapshotState(checkpointId));
+        return Tuple2.of(state, committable);
     }
 }

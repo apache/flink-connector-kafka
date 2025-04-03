@@ -56,6 +56,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Map;
@@ -127,6 +128,14 @@ public abstract class KafkaWriterTestBase {
             Consumer<KafkaSinkBuilder<?>> sinkBuilderAdjuster, SinkInitContext sinkInitContext)
             throws IOException {
         return (T) createSink(sinkBuilderAdjuster).createWriter(sinkInitContext);
+    }
+
+    @SuppressWarnings("unchecked")
+    <T extends KafkaWriter<?>> T restoreWriter(
+            Consumer<KafkaSinkBuilder<?>> sinkBuilderAdjuster,
+            Collection<KafkaWriterState> recoveredState,
+            SinkInitContext initContext) {
+        return (T) createSink(sinkBuilderAdjuster).restoreWriter(initContext, recoveredState);
     }
 
     KafkaSink<Integer> createSink(Consumer<KafkaSinkBuilder<?>> sinkBuilderAdjuster) {
@@ -223,7 +232,8 @@ public abstract class KafkaWriterTestBase {
                 // in general, serializers should be allowed to skip invalid elements
                 return null;
             }
-            return new ProducerRecord<>(topic, ByteBuffer.allocate(4).putInt(element).array());
+            byte[] bytes = ByteBuffer.allocate(4).putInt(element).array();
+            return new ProducerRecord<>(topic, bytes, bytes);
         }
     }
 
