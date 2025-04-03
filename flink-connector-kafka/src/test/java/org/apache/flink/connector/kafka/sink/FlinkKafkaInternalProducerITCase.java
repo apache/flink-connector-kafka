@@ -34,11 +34,13 @@ import org.apache.kafka.common.errors.InvalidTxnStateException;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.assertj.core.api.AbstractThrowableAssert;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -54,6 +56,7 @@ import java.util.stream.Collectors;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Testcontainers
@@ -172,6 +175,51 @@ class FlinkKafkaInternalProducerITCase {
             // Internal transaction should be reset and setting a new transactional id is possible
             fenced.setTransactionId("dummy2");
         }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"true,true", "true,false", "false,true", "false,false"})
+    void testDoubleCommitAndAbort(boolean firstCommit, boolean secondCommit) {
+        final String topic = "test-double-commit-transaction-" + firstCommit + secondCommit;
+        final String transactionIdPrefix = "testDoubleCommitTransaction-";
+        final String transactionalId = transactionIdPrefix + "id";
+
+        KafkaCommittable committable;
+        try (FlinkKafkaInternalProducer<String, String> producer =
+                new FlinkKafkaInternalProducer<>(getProperties(), transactionalId)) {
+            producer.initTransactions();
+            producer.beginTransaction();
+            producer.send(new ProducerRecord<>(topic, "test-value"));
+            producer.flush();
+            committable = KafkaCommittable.of(producer);
+            if (firstCommit) {
+                producer.commitTransaction();
+            } else {
+                producer.abortTransaction();
+            }
+        }
+
+        try (FlinkKafkaInternalProducer<String, String> resumedProducer =
+                new FlinkKafkaInternalProducer<>(getProperties(), transactionalId)) {
+            resumedProducer.resumeTransaction(committable.getProducerId(), committable.getEpoch());
+            AbstractThrowableAssert<?, ? extends Throwable> secondOp =
+                    assertThatCode(
+                            () -> {
+                                if (secondCommit) {
+                                    resumedProducer.commitTransaction();
+                                } else {
+                                    resumedProducer.abortTransaction();
+                                }
+                            });
+            if (firstCommit == secondCommit) {
+                secondOp.doesNotThrowAnyException();
+            } else {
+                secondOp.isInstanceOf(InvalidTxnStateException.class);
+            }
+        }
+
+        assertNumTransactions(1, transactionIdPrefix);
+        assertThat(readRecords(topic).count()).isEqualTo(firstCommit ? 1 : 0);
     }
 
     private static Properties getProperties() {

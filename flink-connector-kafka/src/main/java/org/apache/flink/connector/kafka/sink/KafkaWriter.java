@@ -148,8 +148,18 @@ class KafkaWriter<IN>
     }
 
     public void initialize() {
-        this.currentProducer = new FlinkKafkaInternalProducer<>(this.kafkaProducerConfig);
-        initKafkaMetrics(this.currentProducer);
+        // Workaround for FLINK-37612: ensure that we are not leaking producers
+        try {
+            this.currentProducer = new FlinkKafkaInternalProducer<>(this.kafkaProducerConfig);
+            initKafkaMetrics(this.currentProducer);
+        } catch (Throwable t) {
+            try {
+                close();
+            } catch (Exception e) {
+                t.addSuppressed(e);
+            }
+            throw t;
+        }
     }
 
     @Override
