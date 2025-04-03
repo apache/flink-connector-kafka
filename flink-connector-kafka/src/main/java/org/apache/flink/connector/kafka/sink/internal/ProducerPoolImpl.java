@@ -21,6 +21,7 @@ package org.apache.flink.connector.kafka.sink.internal;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.annotation.VisibleForTesting;
 
+import org.apache.kafka.common.KafkaException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -173,18 +174,28 @@ public class ProducerPoolImpl implements ProducerPool {
             return;
         }
 
-        // For non-chained committer, we have a split brain scenario:
-        // Both the writer and the committer have a producer representing the same transaction.
-        // The committer producer has finished the transaction while the writer producer is still in
-        // transaction.
-        if (producer.isInTransaction()) {
-            // Here we just double-commit the same transaction which succeeds in all cases
-            // because the producer shares the same epoch as the committer's producer
-            producer.commitTransaction();
-        }
-        producerPool.add(producer);
+        try {
+            // For non-chained committer, we have a split brain scenario:
+            // Both the writer and the committer have a producer representing the same transaction.
+            // The committer producer has finished the transaction while the writer producer is
+            // still in transaction.
+            if (producer.isInTransaction()) {
+                // Here we just double-commit the same transaction which succeeds in all cases
+                // because the producer shares the same epoch as the committer's producer
+                producer.commitTransaction();
+            }
 
-        LOG.debug("Recycling {}, new pool size {}", producer, producerPool.size());
+            producerPool.add(producer);
+
+            LOG.debug("Recycling {}, new pool size {}", producer, producerPool.size());
+        } catch (KafkaException e) {
+            closeProducer(producer);
+
+            LOG.debug(
+                    "Encountered exception while double-committing, discarding producer {}: {}",
+                    producer,
+                    e);
+        }
     }
 
     private void initOngoingTransactions(Collection<CheckpointTransaction> ongoingTransactions) {

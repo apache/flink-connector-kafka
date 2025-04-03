@@ -362,9 +362,7 @@ public class KafkaSinkITCase extends TestLogger {
     }
 
     @ParameterizedTest(name = "{0}->{1}")
-    @CsvSource({
-        "1,2", "2,3", "2,5", "6,5", "5,2", "5,3", "3,2", "2,1"
-    }) // "3,5", "5,6",  result in FLINK-37605
+    @CsvSource({"1,2", "2,3", "2,5", "3,5", "5,6", "6,5", "5,2", "5,3", "3,2", "2,1"})
     public void rescaleListing(
             int oldParallelism,
             int newParallelsm,

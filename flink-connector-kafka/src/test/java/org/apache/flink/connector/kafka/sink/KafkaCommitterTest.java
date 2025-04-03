@@ -66,7 +66,8 @@ class KafkaCommitterTest {
     public void testRetryCommittableOnRetriableError() throws IOException, InterruptedException {
         Properties properties = getProperties();
         try (final KafkaCommitter committer =
-                        new KafkaCommitter(properties, TRANS_ID, SUB_ID, ATTEMPT, MOCK_FACTORY);
+                        new KafkaCommitter(
+                                properties, TRANS_ID, SUB_ID, ATTEMPT, false, MOCK_FACTORY);
                 FlinkKafkaInternalProducer<Object, Object> producer =
                         new FlinkKafkaInternalProducer<>(properties, TRANS_ID);
                 ReadableBackchannel<TransactionFinished> backchannel =
@@ -87,7 +88,8 @@ class KafkaCommitterTest {
     public void testFailJobOnUnknownFatalError() throws IOException, InterruptedException {
         Properties properties = getProperties();
         try (final KafkaCommitter committer =
-                        new KafkaCommitter(properties, TRANS_ID, SUB_ID, ATTEMPT, MOCK_FACTORY);
+                        new KafkaCommitter(
+                                properties, TRANS_ID, SUB_ID, ATTEMPT, false, MOCK_FACTORY);
                 FlinkKafkaInternalProducer<Object, Object> producer =
                         new FlinkKafkaInternalProducer<>(properties, TRANS_ID);
                 ReadableBackchannel<TransactionFinished> backchannel =
@@ -111,7 +113,8 @@ class KafkaCommitterTest {
     public void testFailJobOnKnownFatalError() throws IOException, InterruptedException {
         Properties properties = getProperties();
         try (final KafkaCommitter committer =
-                        new KafkaCommitter(properties, TRANS_ID, SUB_ID, ATTEMPT, MOCK_FACTORY);
+                        new KafkaCommitter(
+                                properties, TRANS_ID, SUB_ID, ATTEMPT, false, MOCK_FACTORY);
                 FlinkKafkaInternalProducer<?, ?> producer =
                         new MockProducer(properties, new ProducerFencedException("test"));
                 ReadableBackchannel<TransactionFinished> backchannel =
@@ -135,7 +138,8 @@ class KafkaCommitterTest {
                     return new MockProducer(props, new ProducerFencedException("test"));
                 };
         try (final KafkaCommitter committer =
-                        new KafkaCommitter(properties, TRANS_ID, SUB_ID, ATTEMPT, failingFactory);
+                        new KafkaCommitter(
+                                properties, TRANS_ID, SUB_ID, ATTEMPT, false, failingFactory);
                 ReadableBackchannel<TransactionFinished> backchannel =
                         BackchannelFactory.getInstance()
                                 .getReadableBackchannel(SUB_ID, ATTEMPT, TRANS_ID)) {
@@ -164,7 +168,8 @@ class KafkaCommitterTest {
         Properties properties = getProperties();
         try (FlinkKafkaInternalProducer<?, ?> producer = new MockProducer(properties, null);
                 final KafkaCommitter committer =
-                        new KafkaCommitter(properties, TRANS_ID, SUB_ID, ATTEMPT, MOCK_FACTORY);
+                        new KafkaCommitter(
+                                properties, TRANS_ID, SUB_ID, ATTEMPT, false, MOCK_FACTORY);
                 ReadableBackchannel<TransactionFinished> backchannel =
                         BackchannelFactory.getInstance()
                                 .getReadableBackchannel(SUB_ID, ATTEMPT, TRANS_ID)) {
