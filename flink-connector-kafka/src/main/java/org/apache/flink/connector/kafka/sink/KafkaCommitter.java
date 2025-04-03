@@ -139,6 +139,7 @@ class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
                         "Transaction ({}) encountered error and data has been potentially lost.",
                         request,
                         e);
+                closeCommitterProducer(producer);
                 // cause failover
                 request.signalFailedWithUnknownReason(e);
             }
@@ -150,6 +151,10 @@ class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
             return;
         }
         backchannel.send(TransactionFinished.erroneously(producer.getTransactionalId()));
+        closeCommitterProducer(producer);
+    }
+
+    private void closeCommitterProducer(FlinkKafkaInternalProducer<?, ?> producer) {
         if (producer == this.committingProducer) {
             this.committingProducer.close();
             this.committingProducer = null;

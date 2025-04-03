@@ -131,9 +131,19 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
 
     @Override
     public void initialize() {
-        abortLingeringTransactions(
-                checkNotNull(recoveredStates, "recoveredStates"), restoredCheckpointId + 1);
-        this.currentProducer = startTransaction(restoredCheckpointId + 1);
+        // Workaround for FLINK-37612: ensure that we are not leaking producers
+        try {
+            abortLingeringTransactions(
+                    checkNotNull(recoveredStates, "recoveredStates"), restoredCheckpointId + 1);
+            this.currentProducer = startTransaction(restoredCheckpointId + 1);
+        } catch (Throwable t) {
+            try {
+                close();
+            } catch (Exception e) {
+                t.addSuppressed(e);
+            }
+            throw t;
+        }
     }
 
     private FlinkKafkaInternalProducer<byte[], byte[]> startTransaction(long checkpointId) {
