@@ -25,6 +25,7 @@ import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.sink.KafkaSinkBuilder;
+import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 import org.apache.flink.connector.testframe.external.ExternalSystemDataReader;
 import org.apache.flink.connector.testframe.external.sink.DataStreamSinkV2ExternalContext;
 import org.apache.flink.connector.testframe.external.sink.TestingSinkSettings;
@@ -76,15 +77,21 @@ public class KafkaSinkExternalContext implements DataStreamSinkV2ExternalContext
 
     private final List<ExternalSystemDataReader<String>> readers = new ArrayList<>();
 
+    private final TransactionNamingStrategy transactionNamingStrategy;
+
     protected int numSplits = 0;
 
     private List<URL> connectorJarPaths;
 
     protected final AdminClient kafkaAdminClient;
 
-    public KafkaSinkExternalContext(String bootstrapServers, List<URL> connectorJarPaths) {
+    public KafkaSinkExternalContext(
+            String bootstrapServers,
+            List<URL> connectorJarPaths,
+            TransactionNamingStrategy transactionNamingStrategy) {
         this.bootstrapServers = bootstrapServers;
         this.connectorJarPaths = connectorJarPaths;
+        this.transactionNamingStrategy = transactionNamingStrategy;
         this.topicName =
                 TOPIC_NAME_PREFIX + "-" + ThreadLocalRandom.current().nextLong(Long.MAX_VALUE);
         kafkaAdminClient = createAdminClient();
@@ -136,6 +143,7 @@ public class KafkaSinkExternalContext implements DataStreamSinkV2ExternalContext
                 .setDeliveryGuarantee(toDeliveryGuarantee(sinkSettings.getCheckpointingMode()))
                 .setTransactionalIdPrefix("testingFramework")
                 .setKafkaProducerConfig(properties)
+                .setTransactionNamingStrategy(transactionNamingStrategy)
                 .setRecordSerializer(
                         KafkaRecordSerializationSchema.builder()
                                 .setTopic(topicName)
@@ -235,7 +243,7 @@ public class KafkaSinkExternalContext implements DataStreamSinkV2ExternalContext
 
     @Override
     public String toString() {
-        return "Single-topic Kafka";
+        return transactionNamingStrategy.toString();
     }
 
     @Override

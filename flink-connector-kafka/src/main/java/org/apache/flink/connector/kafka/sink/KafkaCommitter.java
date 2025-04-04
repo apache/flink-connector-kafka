@@ -56,6 +56,7 @@ class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
                     + "To avoid data loss, the application will restart.";
 
     private final Properties kafkaProducerConfig;
+    private final boolean reusesTransactionalIds;
     private final BiFunction<Properties, String, FlinkKafkaInternalProducer<?, ?>> producerFactory;
     private final WritableBackchannel<TransactionFinished> backchannel;
     @Nullable private FlinkKafkaInternalProducer<?, ?> committingProducer;
@@ -65,8 +66,10 @@ class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
             String transactionalIdPrefix,
             int subtaskId,
             int attemptNumber,
+            boolean reusesTransactionalIds,
             BiFunction<Properties, String, FlinkKafkaInternalProducer<?, ?>> producerFactory) {
         this.kafkaProducerConfig = kafkaProducerConfig;
+        this.reusesTransactionalIds = reusesTransactionalIds;
         this.producerFactory = producerFactory;
         backchannel =
                 BackchannelFactory.getInstance()
@@ -102,19 +105,7 @@ class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
                         "Encountered retriable exception while committing {}.", transactionalId, e);
                 request.retryLater();
             } catch (ProducerFencedException e) {
-                // initTransaction has been called on this transaction before
-                LOG.error(
-                        "Unable to commit transaction ({}) because its producer is already fenced."
-                                + " This means that you either have a different producer with the same '{}' (this is"
-                                + " unlikely with the '{}' as all generated ids are unique and shouldn't be reused)"
-                                + " or recovery took longer than '{}' ({}ms). In both cases this most likely signals data loss,"
-                                + " please consult the Flink documentation for more details.",
-                        request,
-                        ProducerConfig.TRANSACTIONAL_ID_CONFIG,
-                        KafkaSink.class.getSimpleName(),
-                        ProducerConfig.TRANSACTION_TIMEOUT_CONFIG,
-                        kafkaProducerConfig.getProperty(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG),
-                        e);
+                logFencedRequest(request, e);
                 handleFailedTransaction(producer);
                 request.signalFailedWithKnownReason(e);
             } catch (InvalidTxnStateException e) {
@@ -143,6 +134,40 @@ class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
                 // cause failover
                 request.signalFailedWithUnknownReason(e);
             }
+        }
+    }
+
+    private void logFencedRequest(
+            CommitRequest<KafkaCommittable> request, ProducerFencedException e) {
+        if (reusesTransactionalIds) {
+            // If checkpoint 1 succeeds, checkpoint 2 is aborted, and checkpoint 3 may reuse the id
+            // of checkpoint 1. A recovery of checkpoint 1 would show that the transaction has been
+            // fenced.
+            LOG.warn(
+                    "Unable to commit transaction ({}) because its producer is already fenced."
+                            + " If this warning appears as part of the recovery of a checkpoint, it is expected in some cases (e.g., aborted checkpoints in previous attempt)."
+                            + " If it's outside of recovery, this means that you either have a different sink with the same '{}'"
+                            + " or recovery took longer than '{}' ({}ms). In both cases this most likely signals data loss,"
+                            + " please consult the Flink documentation for more details.",
+                    request,
+                    ProducerConfig.TRANSACTIONAL_ID_CONFIG,
+                    ProducerConfig.TRANSACTION_TIMEOUT_CONFIG,
+                    kafkaProducerConfig.getProperty(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG),
+                    e);
+        } else {
+            // initTransaction has been called on this transaction before
+            LOG.error(
+                    "Unable to commit transaction ({}) because its producer is already fenced."
+                            + " This means that you either have a different producer with the same '{}' (this is"
+                            + " unlikely with the '{}' as all generated ids are unique and shouldn't be reused)"
+                            + " or recovery took longer than '{}' ({}ms). In both cases this most likely signals data loss,"
+                            + " please consult the Flink documentation for more details.",
+                    request,
+                    ProducerConfig.TRANSACTIONAL_ID_CONFIG,
+                    KafkaSink.class.getSimpleName(),
+                    ProducerConfig.TRANSACTION_TIMEOUT_CONFIG,
+                    kafkaProducerConfig.getProperty(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG),
+                    e);
         }
     }
 

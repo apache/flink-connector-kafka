@@ -22,7 +22,9 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.configuration.StateRecoveryOptions;
+import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaPartitioner;
+import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.runtime.messages.FlinkJobTerminatedWithoutCancellationException;
@@ -355,6 +357,55 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         cleanupTopic(topic1);
         cleanupTopic(topic2);
+    }
+
+    @Test
+    public void testExactlyOnceSink() throws Exception {
+        // we always use a different topic name for each parameterized topic,
+        // in order to make sure the topic can be created.
+        final String topic = "topics_" + format + "_" + UUID.randomUUID();
+        createTestTopic(topic, 1, 1);
+
+        // ---------- Produce an event time stream into Kafka -------------------
+        String bootstraps = getBootstrapServers();
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE sink (\n"
+                                + "  `user_id` INT,\n"
+                                + "  `item_id` INT,\n"
+                                + "  `behavior` STRING\n"
+                                + ") WITH (\n"
+                                + "  'connector' = '%s',\n"
+                                + "  'sink.delivery-guarantee' = '%s',\n"
+                                + "  'sink.transactional-id-prefix' = '%s',\n"
+                                + "  'sink.transaction-naming-strategy' = '%s',\n"
+                                + "  'topic' = '%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'scan.startup.mode' = 'earliest-offset',\n"
+                                + "  'scan.bounded.mode' = 'latest-offset',\n"
+                                + "  %s\n"
+                                + ")\n",
+                        KafkaDynamicTableFactory.IDENTIFIER,
+                        DeliveryGuarantee.EXACTLY_ONCE,
+                        topic, // use topic as transactional id prefix - it's unique
+                        TransactionNamingStrategy.POOLING,
+                        topic,
+                        bootstraps,
+                        formatOptions()));
+
+        List<Row> values =
+                Arrays.asList(Row.of(1, 1102, "behavior 1"), Row.of(2, 1103, "behavior 2"));
+        tEnv.fromValues(values).insertInto("sink").execute().await();
+
+        // ---------- Consume stream from Kafka -------------------
+        List<Row> results = collectAllRows(tEnv.sqlQuery("SELECT * from sink"));
+        assertThat(results)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 1102, "behavior 1"), Row.of(2, 1103, "behavior 2"));
+
+        // ------------- cleanup -------------------
+
+        cleanupTopic(topic);
     }
 
     @Test

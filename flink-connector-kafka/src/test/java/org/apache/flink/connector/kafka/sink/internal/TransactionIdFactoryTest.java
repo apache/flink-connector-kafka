@@ -18,18 +18,31 @@
 
 package org.apache.flink.connector.kafka.sink.internal;
 
-import org.apache.flink.annotation.Internal;
+import org.apache.flink.util.TestLogger;
 
-/**
- * The writable portion of a {@link Backchannel} for communication between the commiter -> writer.
- * It's used to signal that certain transactions have been committed and respective producers are
- * good to be reused.
- *
- * <p>Messages can be sent before the backchannel is established. They will be consumed once the
- * backchannel is established.
- */
-@Internal
-public interface WritableBackchannel<T> extends Backchannel {
-    /** Send a message to the backchannel. */
-    void send(T message);
+import org.junit.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/** Tests for {@link TransactionalIdFactory}. */
+public class TransactionIdFactoryTest extends TestLogger {
+
+    @Test
+    public void testBuildTransactionalId() {
+        final String expected = "prefix-1-2";
+        assertThat(TransactionalIdFactory.buildTransactionalId("prefix", 1, 2L))
+                .isEqualTo(expected);
+    }
+
+    @Test
+    public void testExtractSubtaskId() {
+        final String transactionalId = "prefix-1-2";
+        assertThat(TransactionalIdFactory.extractSubtaskId(transactionalId)).isEqualTo(1);
+    }
+
+    @Test
+    public void testExtractPrefix() {
+        final String transactionalId = "prefix-1-2";
+        assertThat(TransactionalIdFactory.extractPrefix(transactionalId)).isEqualTo("prefix");
+    }
 }

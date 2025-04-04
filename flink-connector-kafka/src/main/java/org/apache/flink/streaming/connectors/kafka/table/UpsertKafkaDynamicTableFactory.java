@@ -69,6 +69,7 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC_PATTERN;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TRANSACTIONAL_ID_PREFIX;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TRANSACTION_NAMING_STRATEGY;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FIELDS_INCLUDE;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.PROPERTIES_PREFIX;
@@ -117,12 +118,14 @@ public class UpsertKafkaDynamicTableFactory
         options.add(DELIVERY_GUARANTEE);
         options.add(TRANSACTIONAL_ID_PREFIX);
         options.add(SCAN_PARALLELISM);
+        options.add(TRANSACTION_NAMING_STRATEGY);
         return options;
     }
 
     @Override
     public Set<ConfigOption<?>> forwardOptions() {
-        return Stream.of(DELIVERY_GUARANTEE, TRANSACTIONAL_ID_PREFIX).collect(Collectors.toSet());
+        return Stream.of(DELIVERY_GUARANTEE, TRANSACTIONAL_ID_PREFIX, TRANSACTION_NAMING_STRATEGY)
+                .collect(Collectors.toSet());
     }
 
     @Override
@@ -227,7 +230,8 @@ public class UpsertKafkaDynamicTableFactory
                 true,
                 flushMode,
                 parallelism,
-                tableOptions.get(TRANSACTIONAL_ID_PREFIX));
+                tableOptions.get(TRANSACTIONAL_ID_PREFIX),
+                tableOptions.get(TRANSACTION_NAMING_STRATEGY));
     }
 
     private Tuple2<int[], int[]> createKeyValueProjections(ResolvedCatalogTable catalogTable) {

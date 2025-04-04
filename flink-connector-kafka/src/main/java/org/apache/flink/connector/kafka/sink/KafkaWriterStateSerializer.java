@@ -17,6 +17,7 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.flink.connector.kafka.sink.internal.CheckpointTransaction;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 
 import java.io.ByteArrayInputStream;
@@ -24,13 +25,16 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
+
+import static org.apache.flink.connector.kafka.sink.KafkaWriterState.UNKNOWN;
 
 /** A serializer used to serialize {@link KafkaWriterState}. */
 class KafkaWriterStateSerializer implements SimpleVersionedSerializer<KafkaWriterState> {
-
     @Override
     public int getVersion() {
-        return 1;
+        return 2;
     }
 
     @Override
@@ -38,6 +42,13 @@ class KafkaWriterStateSerializer implements SimpleVersionedSerializer<KafkaWrite
         try (final ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 final DataOutputStream out = new DataOutputStream(baos)) {
             out.writeUTF(state.getTransactionalIdPrefix());
+            out.writeInt(state.getOwnedSubtaskId());
+            out.writeInt(state.getTotalNumberOfOwnedSubtasks());
+            out.writeInt(state.getPrecommittedTransactionalIds().size());
+            for (CheckpointTransaction transaction : state.getPrecommittedTransactionalIds()) {
+                out.writeUTF(transaction.getTransactionalId());
+                out.writeLong(transaction.getCheckpointId());
+            }
             out.flush();
             return baos.toByteArray();
         }
@@ -45,10 +56,30 @@ class KafkaWriterStateSerializer implements SimpleVersionedSerializer<KafkaWrite
 
     @Override
     public KafkaWriterState deserialize(int version, byte[] serialized) throws IOException {
+        if (version > 2) {
+            throw new IOException("Unknown version: " + version);
+        }
+
         try (final ByteArrayInputStream bais = new ByteArrayInputStream(serialized);
                 final DataInputStream in = new DataInputStream(bais)) {
-            final String transactionalIdPrefx = in.readUTF();
-            return new KafkaWriterState(transactionalIdPrefx);
+            final String transactionalIdPrefix = in.readUTF();
+            int ownedSubtaskId = UNKNOWN;
+            int totalNumberOfOwnedSubtaskId = UNKNOWN;
+            final Collection<CheckpointTransaction> ongoingTransactions = new ArrayList<>();
+            if (version == 2) {
+                ownedSubtaskId = in.readInt();
+                totalNumberOfOwnedSubtaskId = in.readInt();
+
+                final int usedTransactionIdsSize = in.readInt();
+                for (int i = 0; i < usedTransactionIdsSize; i++) {
+                    ongoingTransactions.add(new CheckpointTransaction(in.readUTF(), in.readLong()));
+                }
+            }
+            return new KafkaWriterState(
+                    transactionalIdPrefix,
+                    ownedSubtaskId,
+                    totalNumberOfOwnedSubtaskId,
+                    ongoingTransactions);
         }
     }
 }

@@ -18,6 +18,7 @@
 
 package org.apache.flink.tests.util.kafka;
 
+import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 import org.apache.flink.connector.kafka.sink.testutils.KafkaSinkExternalContextFactory;
 import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
 import org.apache.flink.connector.testframe.container.FlinkContainerTestEnvironment;
@@ -62,7 +63,7 @@ public class KafkaSinkE2ECase extends SinkTestSuiteBase<String> {
     // Defines 2 External context Factories, so test cases will be invoked twice using these two
     // kinds of external contexts.
     @TestContext
-    KafkaSinkExternalContextFactory contextFactory =
+    KafkaSinkExternalContextFactory incrementing =
             new KafkaSinkExternalContextFactory(
                     kafka.getContainer(),
                     Arrays.asList(
@@ -77,7 +78,27 @@ public class KafkaSinkE2ECase extends SinkTestSuiteBase<String> {
                             ResourceTestUtils.getResource("flink-connector-testing.jar")
                                     .toAbsolutePath()
                                     .toUri()
-                                    .toURL()));
+                                    .toURL()),
+                    TransactionNamingStrategy.INCREMENTING);
+
+    @TestContext
+    KafkaSinkExternalContextFactory pooling =
+            new KafkaSinkExternalContextFactory(
+                    kafka.getContainer(),
+                    Arrays.asList(
+                            ResourceTestUtils.getResource("kafka-connector.jar")
+                                    .toAbsolutePath()
+                                    .toUri()
+                                    .toURL(),
+                            ResourceTestUtils.getResource("kafka-clients.jar")
+                                    .toAbsolutePath()
+                                    .toUri()
+                                    .toURL(),
+                            ResourceTestUtils.getResource("flink-connector-testing.jar")
+                                    .toAbsolutePath()
+                                    .toUri()
+                                    .toURL()),
+                    TransactionNamingStrategy.POOLING);
 
     public KafkaSinkE2ECase() throws Exception {}
 }

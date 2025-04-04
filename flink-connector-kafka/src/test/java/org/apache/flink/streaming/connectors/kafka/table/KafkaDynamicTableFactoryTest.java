@@ -28,6 +28,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaPartitioner;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
+import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.connector.kafka.source.KafkaSourceTestUtils;
@@ -110,7 +111,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Tests for {@link KafkaDynamicTableFactory}. */
 @ExtendWith(TestLoggerExtension.class)
 public class KafkaDynamicTableFactoryTest {
-
     private static final String TOPIC = "myTopic";
     private static final String TOPICS = "myTopic-1;myTopic-2;myTopic-3";
     private static final String TOPIC_REGEX = "myTopic-\\d+";
@@ -652,7 +652,8 @@ public class KafkaDynamicTableFactoryTest {
                         new FlinkFixedPartitioner<>(),
                         DeliveryGuarantee.EXACTLY_ONCE,
                         null,
-                        "kafka-sink");
+                        "kafka-sink",
+                        TransactionNamingStrategy.DEFAULT);
         assertThat(actualSink).isEqualTo(expectedSink);
 
         // Test kafka producer.
@@ -697,7 +698,41 @@ public class KafkaDynamicTableFactoryTest {
                             new FlinkFixedPartitioner<>(),
                             DeliveryGuarantee.valueOf(semantic.toUpperCase().replace("-", "_")),
                             null,
-                            "kafka-sink");
+                            "kafka-sink",
+                            TransactionNamingStrategy.DEFAULT);
+            assertThat(actualSink).isEqualTo(expectedSink);
+        }
+    }
+
+    @Test
+    public void testTableSinkStrategyTranslation() {
+        for (TransactionNamingStrategy namingStrategy : TransactionNamingStrategy.values()) {
+            final EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat =
+                    new EncodingFormatMock(",");
+            final Map<String, String> modifiedOptions =
+                    getModifiedOptions(
+                            getBasicSinkOptions(),
+                            options -> {
+                                options.put(
+                                        "sink.transaction-naming-strategy", namingStrategy.name());
+                            });
+            final DynamicTableSink actualSink = createTableSink(SCHEMA, modifiedOptions);
+            final DynamicTableSink expectedSink =
+                    createExpectedSink(
+                            SCHEMA_DATA_TYPE,
+                            null,
+                            valueEncodingFormat,
+                            new int[0],
+                            new int[] {0, 1, 2},
+                            null,
+                            Collections.singletonList(TOPIC),
+                            null,
+                            KAFKA_SINK_PROPERTIES,
+                            new FlinkFixedPartitioner<>(),
+                            DeliveryGuarantee.EXACTLY_ONCE,
+                            null,
+                            "kafka-sink",
+                            namingStrategy);
             assertThat(actualSink).isEqualTo(expectedSink);
         }
     }
@@ -741,7 +776,8 @@ public class KafkaDynamicTableFactoryTest {
                         new FlinkFixedPartitioner<>(),
                         DeliveryGuarantee.EXACTLY_ONCE,
                         null,
-                        "kafka-sink");
+                        "kafka-sink",
+                        TransactionNamingStrategy.DEFAULT);
 
         assertThat(actualSink).isEqualTo(expectedSink);
     }
@@ -770,7 +806,8 @@ public class KafkaDynamicTableFactoryTest {
                         new FlinkFixedPartitioner<>(),
                         DeliveryGuarantee.EXACTLY_ONCE,
                         100,
-                        "kafka-sink");
+                        "kafka-sink",
+                        TransactionNamingStrategy.DEFAULT);
         assertThat(actualSink).isEqualTo(expectedSink);
 
         final DynamicTableSink.SinkRuntimeProvider provider =
@@ -882,7 +919,8 @@ public class KafkaDynamicTableFactoryTest {
                         new FlinkFixedPartitioner<>(),
                         DeliveryGuarantee.EXACTLY_ONCE,
                         null,
-                        "kafka-sink");
+                        "kafka-sink",
+                        TransactionNamingStrategy.DEFAULT);
         assertThat(actualSink).isEqualTo(expectedSink);
         final KafkaDynamicSink actualKafkaSink = (KafkaDynamicSink) actualSink;
         assertThat(actualKafkaSink.listWritableMetadata())
@@ -920,7 +958,8 @@ public class KafkaDynamicTableFactoryTest {
                         new FlinkFixedPartitioner<>(),
                         DeliveryGuarantee.EXACTLY_ONCE,
                         null,
-                        "kafka-sink");
+                        "kafka-sink",
+                        TransactionNamingStrategy.DEFAULT);
         assertThat(actualSink).isEqualTo(expectedSink);
         final KafkaDynamicSink actualKafkaSink = (KafkaDynamicSink) actualSink;
         assertThat(actualKafkaSink.listWritableMetadata())
@@ -1333,7 +1372,8 @@ public class KafkaDynamicTableFactoryTest {
             @Nullable KafkaPartitioner<RowData> partitioner,
             DeliveryGuarantee deliveryGuarantee,
             @Nullable Integer parallelism,
-            String transactionalIdPrefix) {
+            String transactionalIdPrefix,
+            TransactionNamingStrategy transactionNamingStrategy) {
         return new KafkaDynamicSink(
                 physicalDataType,
                 physicalDataType,
@@ -1350,7 +1390,8 @@ public class KafkaDynamicTableFactoryTest {
                 false,
                 SinkBufferFlushMode.DISABLED,
                 parallelism,
-                transactionalIdPrefix);
+                transactionalIdPrefix,
+                transactionNamingStrategy);
     }
 
     /**
