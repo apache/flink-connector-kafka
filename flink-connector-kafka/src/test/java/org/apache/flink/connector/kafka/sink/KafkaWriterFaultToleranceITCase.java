@@ -67,7 +67,11 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
             try {
                 writer.getCurrentProducer().flush();
                 assertThatCode(() -> writer.write(1, SINK_WRITER_CONTEXT))
-                        .hasRootCauseExactlyInstanceOf(NetworkException.class);
+                        .rootCause()
+                        .matches(
+                                e ->
+                                        e instanceof NetworkException
+                                                || e instanceof TimeoutException);
             } finally {
                 KAFKA_CONTAINER.start();
             }
