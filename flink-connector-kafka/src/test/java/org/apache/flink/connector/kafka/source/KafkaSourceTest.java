@@ -61,7 +61,7 @@ public class KafkaSourceTest {
                                 new KafkaSubscriber() {
                                     @Override
                                     public Set<TopicPartition> getSubscribedTopicPartitions(
-                                            AdminClient adminClient) {
+                                            AdminClient adminClient, Properties properties) {
                                         return null;
                                     }
                                 })
@@ -176,7 +176,8 @@ public class KafkaSourceTest {
         }
 
         @Override
-        public Set<TopicPartition> getSubscribedTopicPartitions(AdminClient adminClient) {
+        public Set<TopicPartition> getSubscribedTopicPartitions(
+                AdminClient adminClient, Properties properties) {
             return null;
         }
     }
