@@ -18,6 +18,7 @@
 package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.connector.kafka.sink.internal.CheckpointTransaction;
 
 import java.util.Collection;
@@ -28,19 +29,22 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 /** The state of the Kafka writer. Used to capture information regarding transactions. */
 @Internal
 public class KafkaWriterState {
+    public static final int UNKNOWN = -1;
+
     private final String transactionalIdPrefix;
     private final int ownedSubtaskId;
-    private final int maxParallelism;
+    private final int totalNumberOfOwnedSubtasks;
     private final Collection<CheckpointTransaction> precommittedTransactionalIds;
 
-    KafkaWriterState(
+    @VisibleForTesting
+    public KafkaWriterState(
             String transactionalIdPrefix,
             int ownedSubtaskId,
-            int maxParallelism,
+            int totalNumberOfOwnedSubtasks,
             Collection<CheckpointTransaction> precommittedTransactionalIds) {
         this.transactionalIdPrefix = checkNotNull(transactionalIdPrefix, "transactionalIdPrefix");
         this.ownedSubtaskId = ownedSubtaskId;
-        this.maxParallelism = maxParallelism;
+        this.totalNumberOfOwnedSubtasks = totalNumberOfOwnedSubtasks;
         this.precommittedTransactionalIds = precommittedTransactionalIds;
     }
 
@@ -52,8 +56,8 @@ public class KafkaWriterState {
         return ownedSubtaskId;
     }
 
-    public int getMaxParallelism() {
-        return maxParallelism;
+    public int getTotalNumberOfOwnedSubtasks() {
+        return totalNumberOfOwnedSubtasks;
     }
 
     public Collection<CheckpointTransaction> getPrecommittedTransactionalIds() {
@@ -70,7 +74,7 @@ public class KafkaWriterState {
         }
         KafkaWriterState that = (KafkaWriterState) object;
         return ownedSubtaskId == that.ownedSubtaskId
-                && maxParallelism == that.maxParallelism
+                && totalNumberOfOwnedSubtasks == that.totalNumberOfOwnedSubtasks
                 && Objects.equals(transactionalIdPrefix, that.transactionalIdPrefix)
                 && Objects.equals(precommittedTransactionalIds, that.precommittedTransactionalIds);
     }
@@ -80,7 +84,7 @@ public class KafkaWriterState {
         return Objects.hash(
                 transactionalIdPrefix,
                 ownedSubtaskId,
-                maxParallelism,
+                totalNumberOfOwnedSubtasks,
                 precommittedTransactionalIds);
     }
 
@@ -92,8 +96,8 @@ public class KafkaWriterState {
                 + '\''
                 + ", ownedSubtaskId="
                 + ownedSubtaskId
-                + ", maxParallelism="
-                + maxParallelism
+                + ", numOwnedSubtasks="
+                + totalNumberOfOwnedSubtasks
                 + ", precommittedTransactionalIds="
                 + precommittedTransactionalIds
                 + '}';

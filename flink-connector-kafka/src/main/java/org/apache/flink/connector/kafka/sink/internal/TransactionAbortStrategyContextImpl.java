@@ -25,6 +25,7 @@ import org.apache.flink.connector.kafka.util.AdminUtils;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.TransactionListing;
 
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
@@ -54,7 +55,7 @@ public class TransactionAbortStrategyContextImpl implements TransactionAbortStra
             Supplier<Collection<String>> topicNames,
             int subtaskId,
             int parallelism,
-            Collection<Integer> ownedSubtaskIds,
+            int[] ownedSubtaskIds,
             int maxParallelism,
             List<String> prefixesToAbort,
             long startCheckpointId,
@@ -64,7 +65,7 @@ public class TransactionAbortStrategyContextImpl implements TransactionAbortStra
         this.topicNames = checkNotNull(topicNames, "topicNames must not be null");
         this.subtaskId = subtaskId;
         this.parallelism = parallelism;
-        this.ownedSubtaskIds = Set.copyOf(ownedSubtaskIds);
+        this.ownedSubtaskIds = Arrays.stream(ownedSubtaskIds).boxed().collect(Collectors.toSet());
         this.maxParallelism = maxParallelism;
         this.prefixesToAbort = checkNotNull(prefixesToAbort, "prefixesToAbort must not be null");
         this.startCheckpointId = startCheckpointId;

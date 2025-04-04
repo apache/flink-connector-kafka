@@ -36,6 +36,7 @@ import org.apache.flink.connector.kafka.sink.internal.TransactionAbortStrategyIm
 import org.apache.flink.connector.kafka.sink.internal.TransactionFinished;
 import org.apache.flink.connector.kafka.sink.internal.TransactionNamingStrategyContextImpl;
 import org.apache.flink.connector.kafka.sink.internal.TransactionNamingStrategyImpl;
+import org.apache.flink.connector.kafka.sink.internal.TransactionOwnership;
 import org.apache.flink.connector.kafka.util.AdminUtils;
 import org.apache.flink.runtime.checkpoint.CheckpointIDCounter;
 import org.apache.flink.util.FlinkRuntimeException;
@@ -58,7 +59,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.flink.util.IOUtils.closeAll;
 import static org.apache.flink.util.Preconditions.checkNotNull;
-import static org.apache.flink.util.Preconditions.checkState;
 
 /**
  * Exactly-once Kafka writer that writes records to Kafka in transactions.
@@ -97,8 +97,8 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     /** The context used to name transactions. */
     private final TransactionNamingStrategyContextImpl namingContext;
 
-    private final int maxParallellism;
-    private final List<Integer> ownedSubtaskIds;
+    private final int totalNumberOfOwnedSubtasks;
+    private final int[] ownedSubtaskIds;
     /** Lazily created admin client for {@link TransactionAbortStrategyImpl}. */
     private AdminClient adminClient;
 
@@ -149,35 +149,18 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
 
         this.recoveredStates = checkNotNull(recoveredStates, "recoveredStates");
         TaskInfo taskInfo = sinkInitContext.getTaskInfo();
-        if (recoveredStates.isEmpty()) {
-            this.maxParallellism = taskInfo.getNumberOfParallelSubtasks();
-            this.ownedSubtaskIds = List.of(taskInfo.getIndexOfThisSubtask());
-        } else {
-            int maxParallelism = recoveredStates.iterator().next().getMaxParallelism();
-            // Assumption of the ownership model: state is distributed consecutively across the
-            // subtasks starting with subtask 0
-            checkState(
-                    taskInfo.getIndexOfThisSubtask() < maxParallelism,
-                    "State not consecutively assigned");
-
-            this.ownedSubtaskIds =
-                    recoveredStates.stream()
-                            .map(KafkaWriterState::getOwnedSubtaskId)
-                            .sorted()
-                            .collect(Collectors.toList());
-            int currentParallelism = taskInfo.getNumberOfParallelSubtasks();
-            if (currentParallelism >= maxParallelism) {
-                // Second part of above assumption: ensure that in upscaling, all
-                checkState(this.ownedSubtaskIds.size() == 1, "Not uniformly assigned");
-            }
-            this.maxParallellism = Math.max(maxParallelism, currentParallelism);
-        }
+        TransactionOwnership ownership = transactionNamingStrategy.getOwnership();
+        int subtaskId = taskInfo.getIndexOfThisSubtask();
+        int parallelism = taskInfo.getNumberOfParallelSubtasks();
+        this.ownedSubtaskIds =
+                ownership.getOwnedSubtaskIds(subtaskId, parallelism, recoveredStates);
+        this.totalNumberOfOwnedSubtasks =
+                ownership.getTotalNumberOfOwnedSubtasks(subtaskId, parallelism, recoveredStates);
         initFlinkMetrics();
         restoredCheckpointId =
                 sinkInitContext
                         .getRestoredCheckpointId()
                         .orElse(CheckpointIDCounter.INITIAL_CHECKPOINT_ID - 1);
-        int subtaskId = taskInfo.getIndexOfThisSubtask();
         this.producerPool =
                 new ProducerPoolImpl(
                         kafkaProducerConfig,
@@ -192,7 +175,7 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
         this.namingContext =
                 new TransactionNamingStrategyContextImpl(
                         transactionalIdPrefix,
-                        this.ownedSubtaskIds.get(0),
+                        this.ownedSubtaskIds[0],
                         restoredCheckpointId,
                         producerPool);
     }
@@ -259,14 +242,14 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     private List<KafkaWriterState> createSnapshots(
             Collection<CheckpointTransaction> ongoingTransactions) {
         List<KafkaWriterState> states = new ArrayList<>();
-        List<Integer> subtaskIds = this.ownedSubtaskIds;
-        for (int index = 0; index < subtaskIds.size(); index++) {
-            Integer ownedSubtask = subtaskIds.get(index);
+        int[] subtaskIds = this.ownedSubtaskIds;
+        for (int index = 0; index < subtaskIds.length; index++) {
+            int ownedSubtask = subtaskIds[index];
             states.add(
                     new KafkaWriterState(
                             transactionalIdPrefix,
                             ownedSubtask,
-                            maxParallellism,
+                            totalNumberOfOwnedSubtasks,
                             // new transactions are only created with the first owned subtask id
                             index == 0 ? ongoingTransactions : List.of()));
         }
@@ -361,7 +344,7 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
                 kafkaSinkContext.getParallelInstanceId(),
                 kafkaSinkContext.getNumberOfParallelInstances(),
                 ownedSubtaskIds,
-                maxParallellism,
+                totalNumberOfOwnedSubtasks,
                 prefixesToAbort,
                 startCheckpointId,
                 aborter,

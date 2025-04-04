@@ -28,6 +28,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 
+import static org.apache.flink.connector.kafka.sink.KafkaWriterState.UNKNOWN;
+
 /** A serializer used to serialize {@link KafkaWriterState}. */
 class KafkaWriterStateSerializer implements SimpleVersionedSerializer<KafkaWriterState> {
     @Override
@@ -41,7 +43,7 @@ class KafkaWriterStateSerializer implements SimpleVersionedSerializer<KafkaWrite
                 final DataOutputStream out = new DataOutputStream(baos)) {
             out.writeUTF(state.getTransactionalIdPrefix());
             out.writeInt(state.getOwnedSubtaskId());
-            out.writeInt(state.getMaxParallelism());
+            out.writeInt(state.getTotalNumberOfOwnedSubtasks());
             out.writeInt(state.getPrecommittedTransactionalIds().size());
             for (CheckpointTransaction transaction : state.getPrecommittedTransactionalIds()) {
                 out.writeUTF(transaction.getTransactionalId());
@@ -61,12 +63,12 @@ class KafkaWriterStateSerializer implements SimpleVersionedSerializer<KafkaWrite
         try (final ByteArrayInputStream bais = new ByteArrayInputStream(serialized);
                 final DataInputStream in = new DataInputStream(bais)) {
             final String transactionalIdPrefix = in.readUTF();
-            int subtaskId = 0;
-            int parallelism = 1;
+            int ownedSubtaskId = UNKNOWN;
+            int totalNumberOfOwnedSubtaskId = UNKNOWN;
             final Collection<CheckpointTransaction> ongoingTransactions = new ArrayList<>();
             if (version == 2) {
-                subtaskId = in.readInt();
-                parallelism = in.readInt();
+                ownedSubtaskId = in.readInt();
+                totalNumberOfOwnedSubtaskId = in.readInt();
 
                 final int usedTransactionIdsSize = in.readInt();
                 for (int i = 0; i < usedTransactionIdsSize; i++) {
@@ -74,7 +76,10 @@ class KafkaWriterStateSerializer implements SimpleVersionedSerializer<KafkaWrite
                 }
             }
             return new KafkaWriterState(
-                    transactionalIdPrefix, subtaskId, parallelism, ongoingTransactions);
+                    transactionalIdPrefix,
+                    ownedSubtaskId,
+                    totalNumberOfOwnedSubtaskId,
+                    ongoingTransactions);
         }
     }
 }
