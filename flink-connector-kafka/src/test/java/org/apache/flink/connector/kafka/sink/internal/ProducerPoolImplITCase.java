@@ -83,7 +83,7 @@ class ProducerPoolImplITCase {
         }
     }
 
-    /** Tests direct recycling as used during abortion of transactions. */
+    /** Tests direct recycling as used during abort of transactions. */
     @Test
     void testRecycleProducer() throws Exception {
         try (ProducerPoolImpl producerPool =

@@ -260,7 +260,7 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
                             this::withPooling,
                             List.of(states.get(numCheckpointed - 1)),
                             createInitContext())) {
-                // test abortion of recoveredWriter; this should abort all transactions that have
+                // test abort of recoveredWriter; this should abort all transactions that have
                 // not been in the part of the checkpoint
                 try (AdminClient admin = AdminClient.create(getKafkaClientConfiguration())) {
                     assertThat(
