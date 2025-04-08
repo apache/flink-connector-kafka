@@ -18,6 +18,7 @@
 package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.api.common.JobID;
+import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.serialization.SerializationSchema;
@@ -237,6 +238,31 @@ public class KafkaSinkITCase extends TestLogger {
     public void testWriteRecordsToKafkaWithExactlyOnceGuarantee(
             TransactionNamingStrategy namingStrategy, boolean chained) throws Exception {
         writeRecordsToKafka(DeliveryGuarantee.EXACTLY_ONCE, namingStrategy, chained);
+    }
+
+    @Test
+    public void testWriteRecordsToKafkaWithExactlyOnceGuaranteeBatch() throws Exception {
+        final StreamExecutionEnvironment env =
+                StreamExecutionEnvironment.getExecutionEnvironment(createConfiguration(1));
+        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
+        int count = 1000;
+        final DataStream<Long> source = createSource(env, false, count);
+        source.sinkTo(
+                new KafkaSinkBuilder<Long>()
+                        .setBootstrapServers(KAFKA_CONTAINER.getBootstrapServers())
+                        .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
+                        .setRecordSerializer(
+                                KafkaRecordSerializationSchema.builder()
+                                        .setTopic(topic)
+                                        .setValueSerializationSchema(new RecordSerializer())
+                                        .build())
+                        .setTransactionalIdPrefix("kafka-sink")
+                        .build());
+        env.execute();
+
+        final List<Long> collectedRecords =
+                deserializeValues(drainAllRecordsFromTopic(topic, true));
+        assertThat(collectedRecords).hasSize(count);
     }
 
     static Stream<Arguments> getEOSParameters() {
@@ -659,11 +685,18 @@ public class KafkaSinkITCase extends TestLogger {
     }
 
     private DataStream<Long> createThrottlingSource(StreamExecutionEnvironment env) {
+        return createSource(env, true, 1000);
+    }
+
+    private DataStream<Long> createSource(
+            StreamExecutionEnvironment env, boolean throttled, int count) {
         return env.fromSource(
                 new DataGeneratorSource<>(
                         value -> value,
-                        1000,
-                        new ThrottleUntilFirstCheckpointStrategy(),
+                        count,
+                        throttled
+                                ? new ThrottleUntilFirstCheckpointStrategy()
+                                : RateLimiterStrategy.noOp(),
                         BasicTypeInfo.LONG_TYPE_INFO),
                 WatermarkStrategy.noWatermarks(),
                 "Generator Source");
