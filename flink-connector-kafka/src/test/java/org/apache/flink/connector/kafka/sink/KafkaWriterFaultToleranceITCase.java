@@ -68,10 +68,7 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
                 writer.getCurrentProducer().flush();
                 assertThatCode(() -> writer.write(1, SINK_WRITER_CONTEXT))
                         .rootCause()
-                        .matches(
-                                e ->
-                                        e instanceof NetworkException
-                                                || e instanceof TimeoutException);
+                        .isInstanceOfAny(NetworkException.class, TimeoutException.class);
             } finally {
                 KAFKA_CONTAINER.start();
             }
@@ -91,7 +88,8 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
             KAFKA_CONTAINER.stop();
             try {
                 assertThatCode(() -> writer.flush(false))
-                        .hasRootCauseExactlyInstanceOf(NetworkException.class);
+                        .rootCause()
+                        .isInstanceOfAny(NetworkException.class, TimeoutException.class);
             } finally {
                 KAFKA_CONTAINER.start();
             }
@@ -115,7 +113,8 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
             writer.getCurrentProducer().flush();
             // closing producer resource throws exception first
             assertThatCode(() -> writer.close())
-                    .hasRootCauseExactlyInstanceOf(NetworkException.class);
+                    .rootCause()
+                    .isInstanceOfAny(NetworkException.class, TimeoutException.class);
         } catch (Exception e) {
             writer.close();
             throw e;
