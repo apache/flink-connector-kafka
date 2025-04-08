@@ -55,8 +55,7 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
     private static final String PRODUCER_ID_AND_EPOCH_FIELD_NAME = "producerIdAndEpoch";
 
     @Nullable private String transactionalId;
-    private volatile boolean inTransaction;
-    private volatile boolean hasRecordsInTransaction;
+    private volatile TransactionState transactionState = TransactionState.NOT_IN_TRANSACTION;
     private volatile boolean closed;
 
     public FlinkKafkaInternalProducer(Properties properties) {
@@ -79,8 +78,8 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
 
     @Override
     public Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback) {
-        if (inTransaction) {
-            hasRecordsInTransaction = true;
+        if (isInTransaction()) {
+            transactionState = TransactionState.DATA_IN_TRANSACTION;
         }
         return super.send(record, callback);
     }
@@ -88,7 +87,7 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
     @Override
     public void flush() {
         super.flush();
-        if (inTransaction) {
+        if (isInTransaction()) {
             flushNewPartitions();
         }
     }
@@ -97,33 +96,40 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
     public void beginTransaction() throws ProducerFencedException {
         super.beginTransaction();
         LOG.debug("beginTransaction {}", transactionalId);
-        inTransaction = true;
+        transactionState = TransactionState.IN_TRANSACTION;
     }
 
     @Override
     public void abortTransaction() throws ProducerFencedException {
         LOG.debug("abortTransaction {}", transactionalId);
-        checkState(inTransaction, "Transaction was not started");
-        inTransaction = false;
-        hasRecordsInTransaction = false;
+        checkState(isInTransaction(), "Transaction was not started");
+        transactionState = TransactionState.NOT_IN_TRANSACTION;
         super.abortTransaction();
     }
 
     @Override
     public void commitTransaction() throws ProducerFencedException {
         LOG.debug("commitTransaction {}", transactionalId);
-        checkState(inTransaction, "Transaction was not started");
-        inTransaction = false;
-        hasRecordsInTransaction = false;
+        checkState(isInTransaction(), "Transaction was not started");
+        transactionState = TransactionState.NOT_IN_TRANSACTION;
         super.commitTransaction();
     }
 
     public boolean isInTransaction() {
-        return inTransaction;
+        return transactionState != TransactionState.NOT_IN_TRANSACTION;
     }
 
     public boolean hasRecordsInTransaction() {
-        return hasRecordsInTransaction;
+        return transactionState == TransactionState.DATA_IN_TRANSACTION;
+    }
+
+    public boolean isPrecommitted() {
+        return transactionState == TransactionState.PRECOMMITTED;
+    }
+
+    public void precommitTransaction() {
+        checkState(hasRecordsInTransaction(), "Transaction was not started");
+        transactionState = TransactionState.PRECOMMITTED;
     }
 
     @Override
@@ -172,7 +178,7 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
      */
     public void setTransactionId(String transactionalId) {
         checkState(
-                !inTransaction,
+                !isInTransaction(),
                 String.format("Another transaction %s is still open.", transactionalId));
         LOG.debug("Change transaction id from {} to {}", this.transactionalId, transactionalId);
         this.transactionalId = transactionalId;
@@ -292,7 +298,7 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
      * https://github.com/apache/kafka/commit/5d2422258cb975a137a42a4e08f03573c49a387e#diff-f4ef1afd8792cd2a2e9069cd7ddea630
      */
     public void resumeTransaction(long producerId, short epoch) {
-        checkState(!inTransaction, "Already in transaction %s", transactionalId);
+        checkState(!isInTransaction(), "Already in transaction %s", transactionalId);
         checkState(
                 producerId >= 0 && epoch >= 0,
                 "Incorrect values for producerId %s and epoch %s",
@@ -329,9 +335,8 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
             // when we create recovery producers to resume transactions and commit
             // them, we should always set this flag.
             setField(transactionManager, "transactionStarted", true);
-            this.inTransaction = true;
-            this.hasRecordsInTransaction = true;
         }
+        this.transactionState = TransactionState.PRECOMMITTED;
     }
 
     private static Object createProducerIdAndEpoch(long producerId, short epoch) {
@@ -391,7 +396,14 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
     @Override
     public String toString() {
         return String.format(
-                "FlinkKafkaInternalProducer@%d{transactionalId='%s', inTransaction=%s, closed=%s}",
-                System.identityHashCode(this), transactionalId, inTransaction, closed);
+                "FlinkKafkaInternalProducer@%d{transactionalId='%s', transactionState=%s, closed=%s}",
+                System.identityHashCode(this), transactionalId, transactionState, closed);
+    }
+
+    enum TransactionState {
+        NOT_IN_TRANSACTION,
+        IN_TRANSACTION,
+        DATA_IN_TRANSACTION,
+        PRECOMMITTED,
     }
 }
