@@ -69,6 +69,7 @@ under the License.
                                 <includes>
                                     <include>org.apache.flink:flink-connector-kafka</include>
                                     <include>org.apache.kafka:*</include>
+									<include>com.google.guava:*</include>
                                 </includes>
                             </artifactSet>
                             <filters>
@@ -90,6 +91,14 @@ under the License.
                                     <pattern>org.apache.kafka</pattern>
                                     <shadedPattern>org.apache.flink.kafka.shaded.org.apache.kafka</shadedPattern>
                                 </relocation>
+								<relocation>
+									<pattern>com.google.common</pattern>
+									<shadedPattern>org.apache.flink.kafka.shaded.com.google.common</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>com.google.thirdparty.publicsuffix</pattern>
+									<shadedPattern>org.apache.flink.kafka.shaded.com.google.thirdparty.publicsuffix</shadedPattern>
+								</relocation>
                             </relocations>
                         </configuration>
                     </execution>
