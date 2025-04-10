@@ -23,8 +23,6 @@ import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplitSerializer;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 
-import com.google.common.io.ByteStreams;
-
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
@@ -69,7 +67,7 @@ public class DynamicKafkaSourceSplitSerializer
             int kafkaPartitionSplitSerializerVersion = in.readInt();
             KafkaPartitionSplit kafkaPartitionSplit =
                     kafkaPartitionSplitSerializer.deserialize(
-                            kafkaPartitionSplitSerializerVersion, ByteStreams.toByteArray(in));
+                            kafkaPartitionSplitSerializerVersion, in.readAllBytes());
             return new DynamicKafkaSourceSplit(kafkaClusterId, kafkaPartitionSplit);
         }
     }

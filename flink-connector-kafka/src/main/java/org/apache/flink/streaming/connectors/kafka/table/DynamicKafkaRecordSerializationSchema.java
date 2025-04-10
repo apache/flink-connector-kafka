@@ -19,8 +19,8 @@ package org.apache.flink.streaming.connectors.kafka.table;
 
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.serialization.SerializationSchema;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
+import org.apache.flink.api.java.typeutils.TypeExtractor;
 import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetIdentifier;
 import org.apache.flink.connector.kafka.lineage.DefaultTypeDatasetFacet;
@@ -36,11 +36,13 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Preconditions;
 
-import com.google.common.reflect.TypeToken;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -58,6 +60,8 @@ class DynamicKafkaRecordSerializationSchema
         implements KafkaRecordSerializationSchema<RowData>,
                 KafkaDatasetFacetProvider,
                 TypeDatasetFacetProvider {
+    private static final Logger LOG =
+            LoggerFactory.getLogger(DynamicKafkaRecordSerializationSchema.class);
 
     private final Set<String> topics;
     private final Pattern topicPattern;
@@ -208,13 +212,16 @@ class DynamicKafkaRecordSerializationSchema
                             ((ResultTypeQueryable<?>) this.valueSerialization).getProducedType()));
         } else {
             // gets type information from serialize method signature
-            TypeToken serializationSchemaType = TypeToken.of(valueSerialization.getClass());
-            Class parameterType =
-                    serializationSchemaType
-                            .resolveType(SerializationSchema.class.getTypeParameters()[0])
-                            .getRawType();
-            if (parameterType != Object.class) {
-                return Optional.of(new DefaultTypeDatasetFacet(TypeInformation.of(parameterType)));
+            Type type =
+                    TypeExtractor.getParameterType(
+                            SerializationSchema.class, valueSerialization.getClass(), 0);
+            try {
+                return Optional.of(new DefaultTypeDatasetFacet(TypeExtractor.createTypeInfo(type)));
+            } catch (Exception e) {
+                LOG.info(
+                        "Could not extract type information from {}",
+                        valueSerialization.getClass(),
+                        e);
             }
         }
         return Optional.empty();

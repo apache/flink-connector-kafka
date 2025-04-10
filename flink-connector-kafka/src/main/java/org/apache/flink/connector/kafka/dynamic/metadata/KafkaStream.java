@@ -20,8 +20,6 @@ package org.apache.flink.connector.kafka.dynamic.metadata;
 
 import org.apache.flink.annotation.Experimental;
 
-import com.google.common.base.MoreObjects;
-
 import java.io.Serializable;
 import java.util.Map;
 import java.util.Objects;
@@ -68,10 +66,13 @@ public class KafkaStream implements Serializable {
 
     @Override
     public String toString() {
-        return MoreObjects.toStringHelper(this)
-                .add("streamId", streamId)
-                .add("clusterMetadataMap", clusterMetadataMap)
-                .toString();
+        return "KafkaStream{"
+                + "streamId='"
+                + streamId
+                + '\''
+                + ", clusterMetadataMap="
+                + clusterMetadataMap
+                + '}';
     }
 
     @Override

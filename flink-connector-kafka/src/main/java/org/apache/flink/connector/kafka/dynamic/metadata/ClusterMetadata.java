@@ -20,8 +20,6 @@ package org.apache.flink.connector.kafka.dynamic.metadata;
 
 import org.apache.flink.annotation.Experimental;
 
-import com.google.common.base.MoreObjects;
-
 import java.io.Serializable;
 import java.util.Objects;
 import java.util.Properties;
@@ -67,10 +65,7 @@ public class ClusterMetadata implements Serializable {
 
     @Override
     public String toString() {
-        return MoreObjects.toStringHelper(this)
-                .add("topics", topics)
-                .add("properties", properties)
-                .toString();
+        return "ClusterMetadata{" + "topics=" + topics + ", properties=" + properties + '}';
     }
 
     @Override
