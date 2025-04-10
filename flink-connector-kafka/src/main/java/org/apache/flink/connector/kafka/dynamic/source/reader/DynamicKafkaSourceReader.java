@@ -91,6 +91,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     private final List<DynamicKafkaSourceSplit> pendingSplits;
 
     private MultipleFuturesAvailabilityHelper availabilityHelper;
+    private int availabilityHelperSize;
     private boolean isActivelyConsumingSplits;
     private boolean isNoMoreSplits;
     private AtomicBoolean restartingReaders;
@@ -110,7 +111,8 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                         .addGroup(KafkaClusterMetricGroup.DYNAMIC_KAFKA_SOURCE_METRIC_GROUP);
         this.kafkaClusterMetricGroupManager = new KafkaClusterMetricGroupManager();
         this.pendingSplits = new ArrayList<>();
-        this.availabilityHelper = new MultipleFuturesAvailabilityHelper(0);
+        this.availabilityHelper =
+                new MultipleFuturesAvailabilityHelper(this.availabilityHelperSize = 0);
         this.isNoMoreSplits = false;
         this.isActivelyConsumingSplits = false;
         this.restartingReaders = new AtomicBoolean();
@@ -472,7 +474,9 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
      */
     private void completeAndResetAvailabilityHelper() {
         CompletableFuture<?> cachedPreviousFuture = availabilityHelper.getAvailableFuture();
-        availabilityHelper = new MultipleFuturesAvailabilityHelper(clusterReaderMap.size());
+        availabilityHelper =
+                new MultipleFuturesAvailabilityHelper(
+                        this.availabilityHelperSize = clusterReaderMap.size());
         syncAvailabilityHelperWithReaders();
 
         // We cannot immediately complete the previous future here. We must complete it only when
@@ -538,8 +542,8 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     }
 
     @VisibleForTesting
-    public MultipleFuturesAvailabilityHelper getAvailabilityHelper() {
-        return availabilityHelper;
+    public int getAvailabilityHelperSize() {
+        return availabilityHelperSize;
     }
 
     @VisibleForTesting

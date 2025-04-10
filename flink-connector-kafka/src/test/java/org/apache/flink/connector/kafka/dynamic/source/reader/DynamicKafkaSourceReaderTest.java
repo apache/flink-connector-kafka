@@ -39,7 +39,6 @@ import org.apache.kafka.common.serialization.IntegerDeserializer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.powermock.reflect.Whitebox;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -175,7 +174,7 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
             assertThat(futureAtInit)
                     .as("future is not complete at fresh startup since no readers are created")
                     .isNotDone();
-            assertThat(getAvailabilityHelperSize(reader)).isZero();
+            assertThat(reader.getAvailabilityHelperSize()).isZero();
 
             reader.start();
             MetadataUpdateEvent metadata =
@@ -193,7 +192,7 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
                     .as(
                             "New future should have been produced since metadata triggers reader creation")
                     .isNotSameAs(futureAfterSplitAssignment);
-            assertThat(getAvailabilityHelperSize(reader)).isEqualTo(2);
+            assertThat(reader.getAvailabilityHelperSize()).isEqualTo(2);
 
             // remove cluster 0
             KafkaStream kafkaStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
@@ -204,15 +203,8 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
             assertThat(futureAfterRemovingCluster0)
                     .as("There should new future since the metadata has changed")
                     .isNotSameAs(futureAfterSplitAssignment);
-            assertThat(getAvailabilityHelperSize(reader)).isEqualTo(1);
+            assertThat(reader.getAvailabilityHelperSize()).isEqualTo(1);
         }
-    }
-
-    private int getAvailabilityHelperSize(DynamicKafkaSourceReader<?> reader) {
-        return ((CompletableFuture<?>[])
-                        Whitebox.getInternalState(
-                                reader.getAvailabilityHelper(), "futuresToCombine"))
-                .length;
     }
 
     @Test
