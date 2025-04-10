@@ -18,6 +18,8 @@
 
 package org.apache.flink.connector.kafka.source.reader.deserializer;
 
+import org.apache.flink.api.common.typeinfo.TypeHint;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.connector.kafka.testutils.SimpleCollector;
 import org.apache.flink.connector.kafka.util.JacksonMapperFactory;
 import org.apache.flink.connector.testutils.formats.DummyInitializationContext;
@@ -79,25 +81,17 @@ public class KafkaRecordDeserializationSchemaTest {
     @Test
     public void testKafkaValueDeserializationSchemaWrapper() throws Exception {
         final ConsumerRecord<byte[], byte[]> consumerRecord = getConsumerRecord();
-        KafkaRecordDeserializationSchema<
-                        org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node
-                                .ObjectNode>
-                schema =
-                        KafkaRecordDeserializationSchema.valueOnly(
-                                new JsonDeserializationSchema<>(
-                                        org.apache.flink.shaded.jackson2.com.fasterxml.jackson
-                                                .databind.node.ObjectNode.class));
+        KafkaRecordDeserializationSchema<Map<String, Object>> schema =
+                KafkaRecordDeserializationSchema.valueOnly(
+                        new JsonDeserializationSchema<>(
+                                TypeInformation.of(new TypeHint<Map<String, Object>>() {})));
         schema.open(new DummyInitializationContext());
-        SimpleCollector<
-                        org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node
-                                .ObjectNode>
-                collector = new SimpleCollector<>();
+        SimpleCollector<Map<String, Object>> collector = new SimpleCollector<>();
         schema.deserialize(consumerRecord, collector);
 
         assertThat(collector.getList()).hasSize(1);
-        org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ObjectNode
-                deserializedValue = collector.getList().get(0);
-        assertThat(deserializedValue.get("word").asText()).isEqualTo("world");
+        Map<String, Object> deserializedValue = collector.getList().get(0);
+        assertThat(deserializedValue.get("word")).isEqualTo("world");
         assertThat(deserializedValue.get("key")).isNull();
         assertThat(deserializedValue.get("metadata")).isNull();
     }
