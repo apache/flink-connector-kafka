@@ -16,9 +16,10 @@ import org.apache.flink.streaming.api.graph.StreamNode;
 import org.apache.flink.streaming.api.lineage.LineageVertex;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.Optional;
