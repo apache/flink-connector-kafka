@@ -36,6 +36,7 @@ tools/flink
 tools/flink-*
 tools/releasing/release
 tools/japicmp-output
+.vscode/
 
 # Generated file, do not store in git
 flink-connector-kafka/.idea
