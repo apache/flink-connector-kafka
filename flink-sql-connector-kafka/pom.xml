@@ -44,12 +44,23 @@ under the License.
             <artifactId>flink-connector-kafka</artifactId>
             <version>${project.version}</version>
         </dependency>
+
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-test-utils</artifactId>
             <version>${flink.version}</version>
             <scope>test</scope>
         </dependency>
+		<dependency>
+			<groupId>org.junit.jupiter</groupId>
+			<artifactId>junit-jupiter-api</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.flink</groupId>
+			<artifactId>flink-table-common</artifactId>
+			<scope>test</scope>
+		</dependency>
     </dependencies>
 
     <build>
@@ -95,6 +106,23 @@ under the License.
                     </execution>
                 </executions>
             </plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-dependency-plugin</artifactId>
+				<executions>
+					<execution>
+						<id>analyze-deps</id>
+						<goals>
+							<goal>analyze</goal>
+						</goals>
+						<phase>verify</phase>
+						<configuration>
+							<ignoredUnusedDeclaredDependencies>org.apache.flink:flink-connector-kafka
+							</ignoredUnusedDeclaredDependencies>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
         </plugins>
     </build>
 </project>
