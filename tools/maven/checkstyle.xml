@@ -210,7 +210,7 @@ This file is based on the checkstyle file of Apache Beam.
 
 		<module name="IllegalImport">
 			<property name="illegalPkgs"
-					  value="autovalue.shaded, avro.shaded, com.google.api.client.repackaged, com.google.appengine.repackaged"/>
+					  value="autovalue.shaded, avro.shaded, com.google.api.client.repackaged, com.google"/>
 		</module>
 		<module name="IllegalImport">
 			<property name="illegalPkgs" value="org.codehaus.jackson"/>
@@ -223,6 +223,10 @@ This file is based on the checkstyle file of Apache Beam.
 		<module name="IllegalImport">
 			<property name="illegalPkgs" value="io.netty"/>
 			<message key="import.illegal" value="{0}; Use flink-shaded-netty instead."/>
+		</module>
+		<module name="IllegalImport">
+			<property name="illegalPkgs" value="com.google"/>
+			<message key="import.illegal" value="{0}; Don't use guava in prod code."/>
 		</module>
 
 		<module name="RedundantModifier">
