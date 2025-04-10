@@ -21,12 +21,10 @@ import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
 import org.apache.flink.connector.kafka.testutils.KafkaUtil;
 import org.apache.flink.core.testutils.CommonTestUtils;
 
-import org.apache.commons.collections.list.UnmodifiableList;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.clients.admin.TopicListing;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
@@ -42,7 +40,6 @@ import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -218,13 +215,6 @@ public class KafkaTestEnvironmentImpl extends KafkaTestEnvironment {
     @Override
     public String getVersion() {
         return DockerImageVersions.KAFKA;
-    }
-
-    @Override
-    @SuppressWarnings("unchecked")
-    public <K, V> Collection<ConsumerRecord<K, V>> getAllRecordsFromTopic(
-            Properties properties, String topic) {
-        return UnmodifiableList.decorate(KafkaUtil.drainAllRecordsFromTopic(topic, properties));
     }
 
     @Override

@@ -17,9 +17,6 @@
 
 package org.apache.flink.streaming.connectors.kafka;
 
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-
-import java.util.Collection;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
@@ -109,9 +106,6 @@ public abstract class KafkaTestEnvironment {
         props.put("transactional.id", UUID.randomUUID().toString());
         return props;
     }
-
-    public abstract <K, V> Collection<ConsumerRecord<K, V>> getAllRecordsFromTopic(
-            Properties properties, String topic);
 
     // -- offset handlers
 
