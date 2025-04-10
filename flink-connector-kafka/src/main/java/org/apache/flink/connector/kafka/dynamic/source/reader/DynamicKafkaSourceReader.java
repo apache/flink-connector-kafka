@@ -49,7 +49,6 @@ import org.apache.flink.streaming.runtime.io.MultipleFuturesAvailabilityHelper;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.UserCodeClassLoader;
 
-import com.google.common.collect.ArrayListMultimap;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -185,10 +184,11 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
             return;
         }
 
-        ArrayListMultimap<String, KafkaPartitionSplit> clusterSplitsMap =
-                ArrayListMultimap.create();
+        Map<String, List<KafkaPartitionSplit>> clusterSplitsMap = new HashMap<>();
         for (DynamicKafkaSourceSplit split : splits) {
-            clusterSplitsMap.put(split.getKafkaClusterId(), split);
+            clusterSplitsMap
+                    .computeIfAbsent(split.getKafkaClusterId(), unused -> new ArrayList<>())
+                    .add(split);
         }
 
         Set<String> kafkaClusterIds = clusterSplitsMap.keySet();

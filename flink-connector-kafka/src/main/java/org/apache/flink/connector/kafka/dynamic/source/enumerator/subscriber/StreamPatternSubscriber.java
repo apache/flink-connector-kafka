@@ -22,8 +22,8 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
 
-import com.google.common.collect.ImmutableSet;
-
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -40,14 +40,14 @@ public class StreamPatternSubscriber implements KafkaStreamSubscriber {
     @Override
     public Set<KafkaStream> getSubscribedStreams(KafkaMetadataService kafkaMetadataService) {
         Set<KafkaStream> allStreams = kafkaMetadataService.getAllStreams();
-        ImmutableSet.Builder<KafkaStream> builder = ImmutableSet.builder();
+        List<KafkaStream> matches = new ArrayList<>();
         for (KafkaStream kafkaStream : allStreams) {
             String streamId = kafkaStream.getStreamId();
             if (streamPattern.matcher(streamId).find()) {
-                builder.add(kafkaStream);
+                matches.add(kafkaStream);
             }
         }
 
-        return builder.build();
+        return Set.copyOf(matches);
     }
 }
