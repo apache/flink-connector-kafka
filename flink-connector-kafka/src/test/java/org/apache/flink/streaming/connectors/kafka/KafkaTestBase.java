@@ -33,7 +33,6 @@ import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.TestLogger;
 
 import com.google.common.base.MoreObjects;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -48,16 +47,11 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Properties;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
-
-import static org.assertj.core.api.Assertions.fail;
 
 /**
  * The base for the Kafka tests. It brings up:
@@ -275,96 +269,6 @@ public abstract class KafkaTestBase extends TestLogger {
         }
         if (sendingError.get() != null) {
             throw sendingError.get();
-        }
-    }
-
-    /**
-     * We manually handle the timeout instead of using JUnit's timeout to return failure instead of
-     * timeout error. After timeout we assume that there are missing records and there is a bug, not
-     * that the test has run out of time.
-     */
-    public void assertAtLeastOnceForTopic(
-            Properties properties,
-            String topic,
-            int partition,
-            Set<Integer> expectedElements,
-            long timeoutMillis)
-            throws Exception {
-
-        long startMillis = System.currentTimeMillis();
-        Set<Integer> actualElements = new HashSet<>();
-
-        // until we timeout...
-        while (System.currentTimeMillis() < startMillis + timeoutMillis) {
-            properties.put(
-                    "key.deserializer",
-                    "org.apache.kafka.common.serialization.IntegerDeserializer");
-            properties.put(
-                    "value.deserializer",
-                    "org.apache.kafka.common.serialization.IntegerDeserializer");
-            // We need to set these two properties so that they are lower than request.timeout.ms.
-            // This is
-            // required for some old KafkaConsumer versions.
-            properties.put("session.timeout.ms", "2000");
-            properties.put("heartbeat.interval.ms", "500");
-
-            // query kafka for new records ...
-            Collection<ConsumerRecord<Integer, Integer>> records =
-                    kafkaServer.getAllRecordsFromTopic(properties, topic);
-
-            for (ConsumerRecord<Integer, Integer> record : records) {
-                actualElements.add(record.value());
-            }
-
-            // succeed if we got all expectedElements
-            if (actualElements.containsAll(expectedElements)) {
-                return;
-            }
-        }
-
-        fail(
-                String.format(
-                        "Expected to contain all of: <%s>, but was: <%s>",
-                        expectedElements, actualElements));
-    }
-
-    public void assertExactlyOnceForTopic(
-            Properties properties, String topic, List<Integer> expectedElements) {
-
-        List<Integer> actualElements = new ArrayList<>();
-
-        Properties consumerProperties = new Properties();
-        consumerProperties.putAll(properties);
-        consumerProperties.put(
-                "key.deserializer", "org.apache.kafka.common.serialization.IntegerDeserializer");
-        consumerProperties.put(
-                "value.deserializer", "org.apache.kafka.common.serialization.IntegerDeserializer");
-        consumerProperties.put("isolation.level", "read_committed");
-
-        // query kafka for new records ...
-        Collection<ConsumerRecord<byte[], byte[]>> records =
-                kafkaServer.getAllRecordsFromTopic(consumerProperties, topic);
-
-        for (ConsumerRecord<byte[], byte[]> record : records) {
-            actualElements.add(ByteBuffer.wrap(record.value()).getInt());
-        }
-
-        // succeed if we got all expectedElements
-        if (actualElements.equals(expectedElements)) {
-            return;
-        }
-
-        fail(
-                String.format(
-                        "Expected %s, but was: %s",
-                        formatElements(expectedElements), formatElements(actualElements)));
-    }
-
-    private String formatElements(List<Integer> elements) {
-        if (elements.size() > 50) {
-            return String.format("number of elements: <%s>", elements.size());
-        } else {
-            return String.format("elements: <%s>", elements);
         }
     }
 
