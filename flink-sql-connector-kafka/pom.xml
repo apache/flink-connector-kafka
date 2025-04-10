@@ -85,6 +85,13 @@ under the License.
                                         <exclude>common/**</exclude>
                                     </excludes>
                                 </filter>
+								<filter>
+									<artifact>com.google.guava:*</artifact>
+									<excludes>
+										<exclude>LICENSE</exclude>
+										<exclude>NOTICE</exclude>
+									</excludes>
+								</filter>
                             </filters>
                             <relocations>
                                 <relocation>
