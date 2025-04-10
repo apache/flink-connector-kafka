@@ -23,8 +23,6 @@ import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
 import org.apache.flink.connector.kafka.dynamic.source.reader.DynamicKafkaSourceReader;
 
-import com.google.common.base.MoreObjects;
-
 import java.util.Objects;
 import java.util.Set;
 
@@ -55,7 +53,7 @@ public class MetadataUpdateEvent implements SourceEvent {
 
     @Override
     public String toString() {
-        return MoreObjects.toStringHelper(this).add("kafkaStreams", kafkaStreams).toString();
+        return "MetadataUpdateEvent{" + "kafkaStreams=" + kafkaStreams + '}';
     }
 
     @Override

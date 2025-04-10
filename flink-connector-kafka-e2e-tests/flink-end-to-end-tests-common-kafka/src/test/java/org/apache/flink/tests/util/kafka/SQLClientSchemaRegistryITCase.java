@@ -65,8 +65,6 @@ public class SQLClientSchemaRegistryITCase {
             ResourceTestUtils.getResource(".*avro-confluent.jar");
     private final Path sqlConnectorKafkaJar = ResourceTestUtils.getResource(".*kafka.jar");
 
-    private final Path guavaJar = ResourceTestUtils.getResource(".*guava.jar");
-
     @ClassRule public static final Network NETWORK = Network.newNetwork();
 
     @ClassRule public static final Timeout TIMEOUT = new Timeout(10, TimeUnit.MINUTES);
@@ -252,7 +250,7 @@ public class SQLClientSchemaRegistryITCase {
     private void executeSqlStatements(List<String> sqlLines) throws Exception {
         flink.submitSQLJob(
                 new SQLJobSubmission.SQLJobSubmissionBuilder(sqlLines)
-                        .addJars(sqlAvroJar, sqlAvroRegistryJar, sqlConnectorKafkaJar, guavaJar)
+                        .addJars(sqlAvroJar, sqlAvroRegistryJar, sqlConnectorKafkaJar)
                         .build());
     }
 }

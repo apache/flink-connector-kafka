@@ -21,8 +21,6 @@ package org.apache.flink.connector.kafka.dynamic.source.split;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 
-import com.google.common.base.MoreObjects;
-
 import java.util.Objects;
 
 /** Split that wraps {@link KafkaPartitionSplit} with Kafka cluster information. */
@@ -56,10 +54,13 @@ public class DynamicKafkaSourceSplit extends KafkaPartitionSplit {
 
     @Override
     public String toString() {
-        return MoreObjects.toStringHelper(this)
-                .add("kafkaClusterId", kafkaClusterId)
-                .add("kafkaPartitionSplit", kafkaPartitionSplit)
-                .toString();
+        return "DynamicKafkaSourceSplit{"
+                + "kafkaClusterId='"
+                + kafkaClusterId
+                + '\''
+                + ", kafkaPartitionSplit="
+                + kafkaPartitionSplit
+                + '}';
     }
 
     @Override

@@ -41,9 +41,6 @@ import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscr
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.util.Preconditions;
 
-import com.google.common.collect.ArrayListMultimap;
-import com.google.common.collect.MapDifference;
-import com.google.common.collect.Maps;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
@@ -61,6 +58,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 /**
@@ -260,17 +258,11 @@ public class DynamicKafkaSourceEnumerator
         }
 
         if (logger.isInfoEnabled()) {
-            MapDifference<String, Set<String>> metadataDifference =
-                    Maps.difference(latestClusterTopicsMap, newClustersTopicsMap);
+            // log the maps in a sorted fashion so it's easy to see the changes
             logger.info(
-                    "Common cluster topics after metadata refresh: {}",
-                    metadataDifference.entriesInCommon());
-            logger.info(
-                    "Removed cluster topics after metadata refresh: {}",
-                    metadataDifference.entriesOnlyOnLeft());
-            logger.info(
-                    "Additional cluster topics after metadata refresh: {}",
-                    metadataDifference.entriesOnlyOnRight());
+                    "Detected changed cluster topics after metadata refresh:\nPrevious: {}\nNew: {}",
+                    new TreeMap<>(latestClusterTopicsMap),
+                    new TreeMap<>(newClustersTopicsMap));
         }
 
         DynamicKafkaSourceEnumState dynamicKafkaSourceEnumState;
@@ -456,10 +448,11 @@ public class DynamicKafkaSourceEnumerator
     public void addSplitsBack(List<DynamicKafkaSourceSplit> splits, int subtaskId) {
         logger.debug("Adding splits back for {}", subtaskId);
         // separate splits by cluster
-        ArrayListMultimap<String, KafkaPartitionSplit> kafkaPartitionSplits =
-                ArrayListMultimap.create();
+        Map<String, List<KafkaPartitionSplit>> kafkaPartitionSplits = new HashMap<>();
         for (DynamicKafkaSourceSplit split : splits) {
-            kafkaPartitionSplits.put(split.getKafkaClusterId(), split.getKafkaPartitionSplit());
+            kafkaPartitionSplits
+                    .computeIfAbsent(split.getKafkaClusterId(), unused -> new ArrayList<>())
+                    .add(split.getKafkaPartitionSplit());
         }
 
         // add splits back and assign pending splits for all enumerators
