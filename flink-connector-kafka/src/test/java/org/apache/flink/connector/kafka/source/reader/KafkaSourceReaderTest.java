@@ -54,7 +54,6 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -68,6 +67,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -82,8 +82,6 @@ import static org.apache.flink.connector.kafka.source.metrics.KafkaSourceReaderM
 import static org.apache.flink.connector.kafka.testutils.KafkaSourceTestEnv.NUM_PARTITIONS;
 import static org.apache.flink.core.testutils.CommonTestUtils.waitUtil;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 
 /** Unit tests for {@link KafkaSourceReader}. */
 public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSplit> {
@@ -508,7 +506,12 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
 
     @Test
     public void testThatReaderDoesNotCallRackIdSupplierOnInit() throws Exception {
-        SerializableSupplier<String> rackIdSupplier = Mockito.mock(SerializableSupplier.class);
+        AtomicBoolean called = new AtomicBoolean();
+        SerializableSupplier<String> rackIdSupplier =
+                () -> {
+                    called.set(true);
+                    return "dummy";
+                };
 
         try (KafkaSourceReader<Integer> reader =
                 (KafkaSourceReader<Integer>)
@@ -521,13 +524,17 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
             // Do nothing here
         }
 
-        verify(rackIdSupplier, never()).get();
+        assertThat(called).isFalse();
     }
 
     @Test
     public void testThatReaderDoesCallRackIdSupplierOnSplitAssignment() throws Exception {
-        SerializableSupplier<String> rackIdSupplier = Mockito.mock(SerializableSupplier.class);
-        Mockito.when(rackIdSupplier.get()).thenReturn("use1-az1");
+        AtomicBoolean called = new AtomicBoolean();
+        SerializableSupplier<String> rackIdSupplier =
+                () -> {
+                    called.set(true);
+                    return "use1-az1";
+                };
 
         try (KafkaSourceReader<Integer> reader =
                 (KafkaSourceReader<Integer>)
@@ -542,7 +549,7 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
                             new KafkaPartitionSplit(new TopicPartition(TOPIC, 1), 1L)));
         }
 
-        verify(rackIdSupplier).get();
+        assertThat(called).isTrue();
     }
 
     // ------------------------------------------
