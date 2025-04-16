@@ -222,6 +222,11 @@ public class KafkaDynamicTableFactoryTest {
     }
 
     @Test
+    public void testProjectionPushdown() {
+
+    }
+
+    @Test
     public void testTableSourceWithParallelism() {
         final Map<String, String> modifiedOptions =
                 getModifiedOptions(

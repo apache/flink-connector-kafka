@@ -42,6 +42,7 @@ import org.apache.flink.table.connector.format.DecodingFormat;
 import org.apache.flink.table.connector.source.DataStreamScanProvider;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
+import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsReadingMetadata;
 import org.apache.flink.table.connector.source.abilities.SupportsWatermarkPushDown;
 import org.apache.flink.table.data.GenericMapData;
@@ -79,7 +80,10 @@ import java.util.stream.Stream;
 /** A version-agnostic Kafka {@link ScanTableSource}. */
 @Internal
 public class KafkaDynamicSource
-        implements ScanTableSource, SupportsReadingMetadata, SupportsWatermarkPushDown {
+        implements ScanTableSource,
+        SupportsReadingMetadata,
+        SupportsWatermarkPushDown,
+        SupportsProjectionPushDown {
 
     private static final String KAFKA_TRANSFORMATION = "kafka";
 
@@ -112,10 +116,10 @@ public class KafkaDynamicSource
     protected final DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat;
 
     /** Indices that determine the key fields and the target position in the produced row. */
-    protected final int[] keyProjection;
+    protected int[] keyProjection;
 
     /** Indices that determine the value fields and the target position in the produced row. */
-    protected final int[] valueProjection;
+    protected int[] valueProjection;
 
     /** Prefix that needs to be removed from fields when constructing the physical data type. */
     protected final @Nullable String keyPrefix;
@@ -574,6 +578,39 @@ public class KafkaDynamicSource
             physicalFormatDataType = DataTypeUtils.stripRowPrefix(physicalFormatDataType, prefix);
         }
         return format.createRuntimeDecoder(context, physicalFormatDataType);
+    }
+
+    @Override
+    public boolean supportsNestedProjection() {
+        return true;
+    }
+
+    @Override
+    public void applyProjection(final int[][] projectedFields, final DataType producedDataType) {
+        final int keyFieldCount = keyProjection.length;
+        final int valueFieldCount = valueProjection.length;
+
+        final List<Integer> newKeyProjection = new ArrayList<>();
+        final List<Integer> newValueProjection = new ArrayList<>();
+
+        for (final int[] field : projectedFields) {
+            if (field.length == 0) {
+                continue;
+            }
+            final int firstIndex = field[0];
+            if (firstIndex < keyFieldCount) {
+                newKeyProjection.add(keyProjection[firstIndex]);
+            } else {
+                final int valueIndex = firstIndex - keyFieldCount;
+                if (valueIndex < valueFieldCount) {
+                    newValueProjection.add(valueProjection[valueIndex]);
+                }
+            }
+        }
+
+        this.keyProjection = newKeyProjection.stream().mapToInt(Integer::intValue).toArray();
+        this.valueProjection = newValueProjection.stream().mapToInt(Integer::intValue).toArray();
+        this.producedDataType = producedDataType;
     }
 
     // --------------------------------------------------------------------------------------------
