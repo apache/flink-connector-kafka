@@ -400,6 +400,24 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
                 .isEqualTo(BasicTypeInfo.STRING_TYPE_INFO);
     }
 
+    @Test
+    public void testTypeDatasetFacetWithErasureProblem() {
+        SerializationSchema serializationSchema = element -> new byte[0];
+
+        KafkaRecordSerializationSchema<String> schema =
+                KafkaRecordSerializationSchema.builder()
+                        .setTopic("some-topic")
+                        .setValueSerializationSchema(serializationSchema)
+                        .setKeySerializationSchema(new SimpleStringSchema())
+                        .build();
+
+        assertThat(((TypeDatasetFacetProvider) schema).getTypeDatasetFacet())
+                .isPresent()
+                .get()
+                .extracting(TypeDatasetFacet::getSerializationSchema)
+                .isEqualTo(Optional.of(serializationSchema));
+    }
+
     private static void assertOnlyOneSerializerAllowed(
             List<
                             Function<

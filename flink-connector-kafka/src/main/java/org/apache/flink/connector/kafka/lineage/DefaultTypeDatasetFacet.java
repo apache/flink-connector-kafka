@@ -1,9 +1,11 @@
 package org.apache.flink.connector.kafka.lineage;
 
 import org.apache.flink.annotation.PublicEvolving;
+import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 
 import java.util.Objects;
+import java.util.Optional;
 
 /** Default implementation of {@link KafkaDatasetFacet}. */
 @PublicEvolving
@@ -13,12 +15,24 @@ public class DefaultTypeDatasetFacet implements TypeDatasetFacet {
 
     private final TypeInformation typeInformation;
 
+    private final Optional<SerializationSchema> serializationSchema;
+
     public DefaultTypeDatasetFacet(TypeInformation typeInformation) {
         this.typeInformation = typeInformation;
+        this.serializationSchema = Optional.empty();
+    }
+
+    public DefaultTypeDatasetFacet(SerializationSchema serializationSchema) {
+        this.serializationSchema = Optional.of(serializationSchema);
+        this.typeInformation = null;
     }
 
     public TypeInformation getTypeInformation() {
         return typeInformation;
+    }
+
+    public Optional<SerializationSchema> getSerializationSchema() {
+        return serializationSchema;
     }
 
     public boolean equals(Object o) {
@@ -29,12 +43,13 @@ public class DefaultTypeDatasetFacet implements TypeDatasetFacet {
             return false;
         }
         DefaultTypeDatasetFacet that = (DefaultTypeDatasetFacet) o;
-        return Objects.equals(typeInformation, that.typeInformation);
+        return Objects.equals(typeInformation, that.typeInformation)
+                && Objects.equals(serializationSchema, that.serializationSchema);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(typeInformation);
+        return Objects.hash(typeInformation, serializationSchema);
     }
 
     @Override
