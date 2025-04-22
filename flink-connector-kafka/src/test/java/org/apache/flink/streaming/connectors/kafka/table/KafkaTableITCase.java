@@ -47,7 +47,9 @@ import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.assertj.core.api.Assertions;
 import org.assertj.core.api.ThrowingConsumer;
 import org.junit.Before;
+import org.junit.ClassRule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
@@ -89,6 +91,8 @@ public class KafkaTableITCase extends KafkaTableTestBase {
     private static final String JSON_FORMAT = "json";
     private static final String AVRO_FORMAT = "avro";
     private static final String CSV_FORMAT = "csv";
+
+    @ClassRule public static TemporaryFolder temporaryFolder = new TemporaryFolder();
 
     @Parameterized.Parameter public String format;
 
@@ -1286,7 +1290,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         // ---------- Stop the consume job with savepoint  -------------------
 
-        String savepointBasePath = getTempDirPath(topic + "-savepoint");
+        String savepointBasePath = temporaryFolder.newFolder(topic + "-savepoint").getPath();
         assert tableResult.getJobClient().isPresent();
         JobClient client = tableResult.getJobClient().get();
         String savepointPath =
