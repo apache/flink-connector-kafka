@@ -46,12 +46,9 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.assertj.core.api.Assertions;
 import org.assertj.core.api.ThrowingConsumer;
-import org.junit.Before;
-import org.junit.ClassRule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -85,31 +82,22 @@ import static org.assertj.core.api.Assertions.fail;
 import static org.assertj.core.api.HamcrestCondition.matching;
 
 /** Basic IT cases for the Kafka table source and sink. */
-@RunWith(Parameterized.class)
-public class KafkaTableITCase extends KafkaTableTestBase {
+class KafkaTableITCase extends KafkaTableTestBase {
 
-    private static final String JSON_FORMAT = "json";
-    private static final String AVRO_FORMAT = "avro";
-    private static final String CSV_FORMAT = "csv";
-
-    @ClassRule public static TemporaryFolder temporaryFolder = new TemporaryFolder();
-
-    @Parameterized.Parameter public String format;
-
-    @Parameterized.Parameters(name = "format = {0}")
-    public static Collection<String> parameters() {
-        return Arrays.asList(JSON_FORMAT, AVRO_FORMAT, CSV_FORMAT);
+    private static Collection<String> formats() {
+        return Arrays.asList("avro", "csv", "json");
     }
 
-    @Before
-    public void before() {
+    @BeforeEach
+    void before() {
         // we have to use single parallelism,
         // because we will count the messages in sink to terminate the job
         env.setParallelism(1);
     }
 
-    @Test
-    public void testKafkaSourceSink() throws Exception {
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testKafkaSourceSink(final String format) throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "tstopic_" + format + "_" + UUID.randomUUID();
@@ -142,7 +130,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                         topic,
                         bootstraps,
                         groupId,
-                        formatOptions());
+                        formatOptions(format));
 
         tEnv.executeSql(createTable);
 
@@ -199,8 +187,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         cleanupTopic(topic);
     }
 
-    @Test
-    public void testKafkaSourceSinkWithTopicList() throws Exception {
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testKafkaSourceSinkWithTopicList(final String format) throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic1 = "topics1_" + format + "_" + UUID.randomUUID();
@@ -234,7 +223,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                         String.join(";", Arrays.asList(topic1, topic2)),
                         bootstraps,
                         groupId,
-                        formatOptions());
+                        formatOptions(format));
         final String createTopic1Table =
                 String.format(
                         createTableTemplate,
@@ -243,7 +232,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                         topic1,
                         bootstraps,
                         groupId,
-                        formatOptions());
+                        formatOptions(format));
         final String createTopic2Table =
                 String.format(
                         createTableTemplate,
@@ -252,7 +241,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                         topic2,
                         bootstraps,
                         groupId,
-                        formatOptions());
+                        formatOptions(format));
 
         tEnv.executeSql(createTopicListTable);
         tEnv.executeSql(createTopic1Table);
@@ -280,8 +269,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         cleanupTopic(topic2);
     }
 
-    @Test
-    public void testKafkaSourceSinkWithTopicPattern() throws Exception {
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testKafkaSourceSinkWithTopicPattern(final String format) throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic1 = "topics1_" + format + "_" + UUID.randomUUID();
@@ -316,7 +306,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                         topicPattern,
                         bootstraps,
                         groupId,
-                        formatOptions());
+                        formatOptions(format));
         final String createTopic1Table =
                 String.format(
                         createTableTemplate,
@@ -325,7 +315,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                         topic1,
                         bootstraps,
                         groupId,
-                        formatOptions());
+                        formatOptions(format));
         final String createTopic2Table =
                 String.format(
                         createTableTemplate,
@@ -334,7 +324,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                         topic2,
                         bootstraps,
                         groupId,
-                        formatOptions());
+                        formatOptions(format));
 
         tEnv.executeSql(createTopicPatternTable);
         tEnv.executeSql(createTopic1Table);
@@ -363,8 +353,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         cleanupTopic(topic2);
     }
 
-    @Test
-    public void testExactlyOnceSink() throws Exception {
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testExactlyOnceSink(final String format) throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "topics_" + format + "_" + UUID.randomUUID();
@@ -395,7 +386,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                         TransactionNamingStrategy.POOLING,
                         topic,
                         bootstraps,
-                        formatOptions()));
+                        formatOptions(format)));
 
         List<Row> values =
                 Arrays.asList(Row.of(1, 1102, "behavior 1"), Row.of(2, 1103, "behavior 2"));
@@ -412,8 +403,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         cleanupTopic(topic);
     }
 
-    @Test
-    public void testKafkaSourceEmptyResultOnDeletedOffsets() throws Exception {
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testKafkaSourceEmptyResultOnDeletedOffsets(final String format) throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "bounded_" + format + "_" + UUID.randomUUID();
@@ -443,7 +435,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                         topic,
                         bootstraps,
                         groupId,
-                        formatOptions());
+                        formatOptions(format));
         tEnv.executeSql(createTable);
         List<Row> values =
                 Arrays.asList(
@@ -468,8 +460,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         cleanupTopic(topic);
     }
 
-    @Test
-    public void testKafkaSourceSinkWithBoundedSpecificOffsets() throws Exception {
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testKafkaSourceSinkWithBoundedSpecificOffsets(final String format) throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "bounded_" + format + "_" + UUID.randomUUID();
@@ -499,7 +492,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                         topic,
                         bootstraps,
                         groupId,
-                        formatOptions());
+                        formatOptions(format));
 
         tEnv.executeSql(createTable);
 
@@ -522,8 +515,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         cleanupTopic(topic);
     }
 
-    @Test
-    public void testKafkaSourceSinkWithBoundedTimestamp() throws Exception {
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testKafkaSourceSinkWithBoundedTimestamp(final String format) throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "bounded_" + format + "_" + UUID.randomUUID();
@@ -554,7 +548,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                         topic,
                         bootstraps,
                         groupId,
-                        formatOptions());
+                        formatOptions(format));
 
         tEnv.executeSql(createTable);
 
@@ -579,8 +573,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         cleanupTopic(topic);
     }
 
-    @Test
-    public void testKafkaTableWithMultipleTopics() throws Exception {
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testKafkaTableWithMultipleTopics(final String format) throws Exception {
         // ---------- create source and sink tables -------------------
         String tableTemp =
                 "create table %s (\n"
@@ -618,7 +613,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                                             topics.get(index),
                                             bootstraps,
                                             groupId,
-                                            formatOptions()));
+                                            formatOptions(format)));
                         });
         // create source table
         tEnv.executeSql(
@@ -629,7 +624,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                         String.join(";", topics),
                         bootstraps,
                         groupId,
-                        formatOptions()));
+                        formatOptions(format)));
 
         // ---------- Prepare data in Kafka topics -------------------
         String insertTemp =
@@ -672,8 +667,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         topics.forEach(super::deleteTestTopic);
     }
 
-    @Test
-    public void testKafkaSourceSinkWithMetadata() throws Exception {
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testKafkaSourceSinkWithMetadata(final String format) throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "metadata_topic_" + format + "_" + UUID.randomUUID();
@@ -705,7 +701,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
                                 + "  'scan.startup.mode' = 'earliest-offset',\n"
                                 + "  %s\n"
                                 + ")",
-                        topic, bootstraps, groupId, formatOptions());
+                        topic, bootstraps, groupId, formatOptions(format));
         tEnv.executeSql(createTable);
 
         String initialValues =
@@ -764,8 +760,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         cleanupTopic(topic);
     }
 
-    @Test
-    public void testKafkaSourceSinkWithKeyAndPartialValue() throws Exception {
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testKafkaSourceSinkWithKeyAndPartialValue(final String format) throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "key_partial_value_topic_" + format + "_" + UUID.randomUUID();
@@ -845,8 +842,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         cleanupTopic(topic);
     }
 
-    @Test
-    public void testKafkaSourceSinkWithKeyAndFullValue() throws Exception {
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testKafkaSourceSinkWithKeyAndFullValue(final String format) throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "key_full_value_topic_" + format + "_" + UUID.randomUUID();
@@ -923,8 +921,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         cleanupTopic(topic);
     }
 
-    @Test
-    public void testKafkaTemporalJoinChangelog() throws Exception {
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testKafkaTemporalJoinChangelog(final String format) throws Exception {
         // Set the session time zone to UTC, because the next `METADATA FROM
         // 'value.source.timestamp'` DDL
         // will use the session time zone when convert the changelog time from milliseconds to
@@ -1066,8 +1065,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         tEnv.executeSql(insertSql).await();
     }
 
-    @Test
-    public void testPerPartitionWatermarkKafka() throws Exception {
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testPerPartitionWatermarkKafka(final String format) throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "per_partition_watermark_topic_" + format + "_" + UUID.randomUUID();
@@ -1156,8 +1156,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         cleanupTopic(topic);
     }
 
-    @Test
-    public void testPerPartitionWatermarkWithIdleSource() throws Exception {
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testPerPartitionWatermarkWithIdleSource(final String format) throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "idle_partition_watermark_topic_" + format + "_" + UUID.randomUUID();
@@ -1231,8 +1232,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         cleanupTopic(topic);
     }
 
-    @Test
-    public void testLatestOffsetStrategyResume() throws Exception {
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testLatestOffsetStrategyResume(final String format) throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "latest_offset_resume_topic_" + format + "_" + UUID.randomUUID();
@@ -1290,7 +1292,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         // ---------- Stop the consume job with savepoint  -------------------
 
-        String savepointBasePath = temporaryFolder.newFolder(topic + "-savepoint").getPath();
+        String savepointBasePath = getTempDirPath(topic + "-savepoint");
         assert tableResult.getJobClient().isPresent();
         JobClient client = tableResult.getJobClient().get();
         String savepointPath =
@@ -1363,19 +1365,22 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         cleanupTopic(topic);
     }
 
-    @Test
-    public void testStartFromGroupOffsetsLatest() throws Exception {
-        testStartFromGroupOffsets("latest");
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testStartFromGroupOffsetsLatest(final String format) throws Exception {
+        testStartFromGroupOffsets("latest", format);
     }
 
-    @Test
-    public void testStartFromGroupOffsetsEarliest() throws Exception {
-        testStartFromGroupOffsets("earliest");
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testStartFromGroupOffsetsEarliest(final String format) throws Exception {
+        testStartFromGroupOffsets("earliest", format);
     }
 
-    @Test
-    public void testStartFromGroupOffsetsNone() {
-        Assertions.assertThatThrownBy(() -> testStartFromGroupOffsetsWithNoneResetStrategy())
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testStartFromGroupOffsetsNone(final String format) {
+        Assertions.assertThatThrownBy(() -> testStartFromGroupOffsetsWithNoneResetStrategy(format))
                 .satisfies(anyCauseMatches(NoOffsetForPartitionException.class));
     }
 
@@ -1406,7 +1411,12 @@ public class KafkaTableITCase extends KafkaTableTestBase {
     }
 
     private TableResult startFromGroupOffset(
-            String tableName, String topic, String groupId, String resetStrategy, String sinkName)
+            String tableName,
+            String topic,
+            String groupId,
+            String resetStrategy,
+            String sinkName,
+            String format)
             throws ExecutionException, InterruptedException {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
@@ -1471,7 +1481,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         return tEnv.executeSql("INSERT INTO " + sinkName + " SELECT * FROM " + tableName);
     }
 
-    private void testStartFromGroupOffsets(String resetStrategy) throws Exception {
+    private void testStartFromGroupOffsets(String resetStrategy, String format) throws Exception {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String tableName = "Table" + format + resetStrategy;
@@ -1485,7 +1495,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         TableResult tableResult = null;
         try {
-            tableResult = startFromGroupOffset(tableName, topic, groupId, resetStrategy, sinkName);
+            tableResult =
+                    startFromGroupOffset(
+                            tableName, topic, groupId, resetStrategy, sinkName, format);
             if ("latest".equals(resetStrategy)) {
                 expected = appendNewData(topic, tableName, groupId, expected.size());
             }
@@ -1497,7 +1509,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         }
     }
 
-    private void testStartFromGroupOffsetsWithNoneResetStrategy()
+    private void testStartFromGroupOffsetsWithNoneResetStrategy(final String format)
             throws ExecutionException, InterruptedException {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
@@ -1508,7 +1520,9 @@ public class KafkaTableITCase extends KafkaTableTestBase {
 
         TableResult tableResult = null;
         try {
-            tableResult = startFromGroupOffset(tableName, topic, groupId, resetStrategy, "MySink");
+            tableResult =
+                    startFromGroupOffset(
+                            tableName, topic, groupId, resetStrategy, "MySink", format);
             tableResult.await();
         } finally {
             // ------------- cleanup -------------------
@@ -1534,7 +1548,7 @@ public class KafkaTableITCase extends KafkaTableTestBase {
         }
     }
 
-    private String formatOptions() {
+    private String formatOptions(final String format) {
         return String.format("'format' = '%s'", format);
     }
 
