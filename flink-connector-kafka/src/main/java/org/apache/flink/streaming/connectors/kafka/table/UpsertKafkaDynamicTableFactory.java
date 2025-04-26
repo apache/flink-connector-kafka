@@ -175,7 +175,9 @@ public class UpsertKafkaDynamicTableFactory
                 boundedOptions.boundedTimestampMillis,
                 true,
                 context.getObjectIdentifier().asSummaryString(),
-                parallelism);
+                parallelism,
+                KafkaConnectorOptionsUtil.disableKeyProjectionPushdownIntoDecoder(tableOptions),
+                KafkaConnectorOptionsUtil.disableValueProjectionPushdownIntoDecoder(tableOptions));
     }
 
     @Override

@@ -18,6 +18,7 @@
 
 package org.apache.flink.streaming.connectors.kafka.table;
 
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.configuration.RestartStrategyOptions;
@@ -27,10 +28,14 @@ import org.apache.flink.connector.kafka.sink.KafkaPartitioner;
 import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.execution.SavepointFormatType;
+import org.apache.flink.formats.avro.registry.confluent.AvroConfluentFormatOptions;
 import org.apache.flink.runtime.messages.FlinkJobTerminatedWithoutCancellationException;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.sink.legacy.SinkFunction;
+import org.apache.flink.table.api.DataTypes;
+import org.apache.flink.table.api.Schema;
+import org.apache.flink.table.api.Table;
+import org.apache.flink.table.api.TableDescriptor;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.api.config.TableConfigOptions;
@@ -61,18 +66,22 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static org.apache.flink.core.testutils.CommonTestUtils.waitUtil;
 import static org.apache.flink.core.testutils.FlinkAssertions.anyCauseMatches;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaTableTestUtils.collectAllRows;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaTableTestUtils.collectRows;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaTableTestUtils.readLines;
+import static org.apache.flink.streaming.connectors.kafka.table.Utils.RANDOM;
+import static org.apache.flink.streaming.connectors.kafka.table.Utils.generateRandomString;
 import static org.apache.flink.table.api.config.ExecutionConfigOptions.TABLE_EXEC_SOURCE_IDLE_TIMEOUT;
 import static org.apache.flink.table.utils.TableTestMatchers.deepEqualTo;
 import static org.apache.flink.util.CollectionUtil.entry;
@@ -82,10 +91,19 @@ import static org.assertj.core.api.Assertions.fail;
 import static org.assertj.core.api.HamcrestCondition.matching;
 
 /** Basic IT cases for the Kafka table source and sink. */
-class KafkaTableITCase extends KafkaTableTestBase {
+public class KafkaTableITCase extends KafkaTableTestBase {
 
-    private static Collection<String> formats() {
-        return Arrays.asList("avro", "csv", "json");
+    private static Collection<Tuple2<String, Map<String, String>>> formats() {
+        return Arrays.asList(
+                Tuple2.of("json", Map.of()),
+                Tuple2.of("csv", Map.of()),
+                Tuple2.of("avro", Map.of()),
+                Tuple2.of(
+                        "avro-confluent",
+                        Map.of(
+                                AvroConfluentFormatOptions.URL.key(), getSchemaRegistryUrl(),
+                                AvroConfluentFormatOptions.SUBJECT.key(),
+                                        UUID.randomUUID().toString())));
     }
 
     @BeforeEach
@@ -97,7 +115,10 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
-    void testKafkaSourceSink(final String format) throws Exception {
+    void testKafkaSourceSink(final Tuple2<String, Map<String, String>> formatOptions)
+            throws Exception {
+        final String format = formatOptions.f0;
+
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "tstopic_" + format + "_" + UUID.randomUUID();
@@ -130,7 +151,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                         topic,
                         bootstraps,
                         groupId,
-                        formatOptions(format));
+                        formatOptions(formatOptions));
 
         tEnv.executeSql(createTable);
 
@@ -180,7 +201,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                         "+I(2019-12-12 00:00:05.000,2019-12-12,00:00:03,2019-12-12 00:00:04.004,3,50.00)",
                         "+I(2019-12-12 00:00:10.000,2019-12-12,00:00:05,2019-12-12 00:00:06.006,2,5.33)");
 
-        assertThat(TestingSinkFunction.rows).isEqualTo(expected);
+        assertThat(TestingSinkFunction.getRows()).isEqualTo(expected);
 
         // ------------- cleanup -------------------
 
@@ -189,7 +210,10 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
-    void testKafkaSourceSinkWithTopicList(final String format) throws Exception {
+    void testKafkaSourceSinkWithTopicList(final Tuple2<String, Map<String, String>> formatOptions)
+            throws Exception {
+        final String format = formatOptions.f0;
+
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic1 = "topics1_" + format + "_" + UUID.randomUUID();
@@ -223,7 +247,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                         String.join(";", Arrays.asList(topic1, topic2)),
                         bootstraps,
                         groupId,
-                        formatOptions(format));
+                        formatOptions(formatOptions));
         final String createTopic1Table =
                 String.format(
                         createTableTemplate,
@@ -232,7 +256,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                         topic1,
                         bootstraps,
                         groupId,
-                        formatOptions(format));
+                        formatOptions(formatOptions));
         final String createTopic2Table =
                 String.format(
                         createTableTemplate,
@@ -241,7 +265,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                         topic2,
                         bootstraps,
                         groupId,
-                        formatOptions(format));
+                        formatOptions(formatOptions));
 
         tEnv.executeSql(createTopicListTable);
         tEnv.executeSql(createTopic1Table);
@@ -271,7 +295,10 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
-    void testKafkaSourceSinkWithTopicPattern(final String format) throws Exception {
+    void testKafkaSourceSinkWithTopicPattern(
+            final Tuple2<String, Map<String, String>> formatOptions) throws Exception {
+        final String format = formatOptions.f0;
+
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic1 = "topics1_" + format + "_" + UUID.randomUUID();
@@ -306,7 +333,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                         topicPattern,
                         bootstraps,
                         groupId,
-                        formatOptions(format));
+                        formatOptions(formatOptions));
         final String createTopic1Table =
                 String.format(
                         createTableTemplate,
@@ -315,7 +342,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                         topic1,
                         bootstraps,
                         groupId,
-                        formatOptions(format));
+                        formatOptions(formatOptions));
         final String createTopic2Table =
                 String.format(
                         createTableTemplate,
@@ -324,7 +351,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                         topic2,
                         bootstraps,
                         groupId,
-                        formatOptions(format));
+                        formatOptions(formatOptions));
 
         tEnv.executeSql(createTopicPatternTable);
         tEnv.executeSql(createTopic1Table);
@@ -355,7 +382,10 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
-    void testExactlyOnceSink(final String format) throws Exception {
+    void testExactlyOnceSink(final Tuple2<String, Map<String, String>> formatOptions)
+            throws Exception {
+        final String format = formatOptions.f0;
+
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "topics_" + format + "_" + UUID.randomUUID();
@@ -386,7 +416,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                         TransactionNamingStrategy.POOLING,
                         topic,
                         bootstraps,
-                        formatOptions(format)));
+                        formatOptions(formatOptions)));
 
         List<Row> values =
                 Arrays.asList(Row.of(1, 1102, "behavior 1"), Row.of(2, 1103, "behavior 2"));
@@ -405,7 +435,10 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
-    void testKafkaSourceEmptyResultOnDeletedOffsets(final String format) throws Exception {
+    void testKafkaSourceEmptyResultOnDeletedOffsets(
+            final Tuple2<String, Map<String, String>> formatOptions) throws Exception {
+        final String format = formatOptions.f0;
+
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "bounded_" + format + "_" + UUID.randomUUID();
@@ -435,7 +468,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                         topic,
                         bootstraps,
                         groupId,
-                        formatOptions(format));
+                        formatOptions(formatOptions));
         tEnv.executeSql(createTable);
         List<Row> values =
                 Arrays.asList(
@@ -462,7 +495,10 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
-    void testKafkaSourceSinkWithBoundedSpecificOffsets(final String format) throws Exception {
+    void testKafkaSourceSinkWithBoundedSpecificOffsets(
+            final Tuple2<String, Map<String, String>> formatOptions) throws Exception {
+        final String format = formatOptions.f0;
+
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "bounded_" + format + "_" + UUID.randomUUID();
@@ -492,7 +528,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                         topic,
                         bootstraps,
                         groupId,
-                        formatOptions(format));
+                        formatOptions(formatOptions));
 
         tEnv.executeSql(createTable);
 
@@ -517,7 +553,10 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
-    void testKafkaSourceSinkWithBoundedTimestamp(final String format) throws Exception {
+    void testKafkaSourceSinkWithBoundedTimestamp(
+            final Tuple2<String, Map<String, String>> formatOptions) throws Exception {
+        final String format = formatOptions.f0;
+
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "bounded_" + format + "_" + UUID.randomUUID();
@@ -548,7 +587,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                         topic,
                         bootstraps,
                         groupId,
-                        formatOptions(format));
+                        formatOptions(formatOptions));
 
         tEnv.executeSql(createTable);
 
@@ -575,7 +614,10 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
-    void testKafkaTableWithMultipleTopics(final String format) throws Exception {
+    void testKafkaTableWithMultipleTopics(final Tuple2<String, Map<String, String>> formatOptions)
+            throws Exception {
+        final String format = formatOptions.f0;
+
         // ---------- create source and sink tables -------------------
         String tableTemp =
                 "create table %s (\n"
@@ -613,7 +655,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                                             topics.get(index),
                                             bootstraps,
                                             groupId,
-                                            formatOptions(format)));
+                                            formatOptions(formatOptions)));
                         });
         // create source table
         tEnv.executeSql(
@@ -624,7 +666,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                         String.join(";", topics),
                         bootstraps,
                         groupId,
-                        formatOptions(format)));
+                        formatOptions(formatOptions)));
 
         // ---------- Prepare data in Kafka topics -------------------
         String insertTemp =
@@ -660,8 +702,8 @@ class KafkaTableITCase extends KafkaTableTestBase {
             }
         }
         List<String> expected = Arrays.asList("+I(Dollar)", "+I(Dummy)", "+I(Euro)", "+I(Yen)");
-        TestingSinkFunction.rows.sort(Comparator.naturalOrder());
-        assertThat(TestingSinkFunction.rows).isEqualTo(expected);
+        TestingSinkFunction.getRows().sort(Comparator.naturalOrder());
+        assertThat(TestingSinkFunction.getRows()).isEqualTo(expected);
 
         // ------------- cleanup -------------------
         topics.forEach(super::deleteTestTopic);
@@ -669,7 +711,10 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
-    void testKafkaSourceSinkWithMetadata(final String format) throws Exception {
+    void testKafkaSourceSinkWithMetadata(final Tuple2<String, Map<String, String>> formatOptions)
+            throws Exception {
+        final String format = formatOptions.f0;
+
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "metadata_topic_" + format + "_" + UUID.randomUUID();
@@ -701,7 +746,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                                 + "  'scan.startup.mode' = 'earliest-offset',\n"
                                 + "  %s\n"
                                 + ")",
-                        topic, bootstraps, groupId, formatOptions(format));
+                        topic, bootstraps, groupId, formatOptions(formatOptions));
         tEnv.executeSql(createTable);
 
         String initialValues =
@@ -762,7 +807,10 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
-    void testKafkaSourceSinkWithKeyAndPartialValue(final String format) throws Exception {
+    void testKafkaSourceSinkWithKeyAndPartialValue(
+            final Tuple2<String, Map<String, String>> formatOptions) throws Exception {
+        final String format = formatOptions.f0;
+
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "key_partial_value_topic_" + format + "_" + UUID.randomUUID();
@@ -789,13 +837,17 @@ class KafkaTableITCase extends KafkaTableTestBase {
                                 + "  'properties.bootstrap.servers' = '%s',\n"
                                 + "  'properties.group.id' = '%s',\n"
                                 + "  'scan.startup.mode' = 'earliest-offset',\n"
-                                + "  'key.format' = '%s',\n"
+                                + "  %s,\n"
                                 + "  'key.fields' = 'k_event_id; k_user_id',\n"
                                 + "  'key.fields-prefix' = 'k_',\n"
-                                + "  'value.format' = '%s',\n"
+                                + "  %s,\n"
                                 + "  'value.fields-include' = 'EXCEPT_KEY'\n"
                                 + ")",
-                        topic, bootstraps, groupId, format, format);
+                        topic,
+                        bootstraps,
+                        groupId,
+                        keyFormatOptions(formatOptions),
+                        valueFormatOptions(formatOptions));
 
         tEnv.executeSql(createTable);
 
@@ -844,7 +896,10 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
-    void testKafkaSourceSinkWithKeyAndFullValue(final String format) throws Exception {
+    void testKafkaSourceSinkWithKeyAndFullValue(
+            final Tuple2<String, Map<String, String>> formatOptions) throws Exception {
+        final String format = formatOptions.f0;
+
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "key_full_value_topic_" + format + "_" + UUID.randomUUID();
@@ -872,12 +927,16 @@ class KafkaTableITCase extends KafkaTableTestBase {
                                 + "  'properties.bootstrap.servers' = '%s',\n"
                                 + "  'properties.group.id' = '%s',\n"
                                 + "  'scan.startup.mode' = 'earliest-offset',\n"
-                                + "  'key.format' = '%s',\n"
+                                + "  %s,\n"
                                 + "  'key.fields' = 'event_id; user_id',\n"
-                                + "  'value.format' = '%s',\n"
+                                + "  %s,\n"
                                 + "  'value.fields-include' = 'ALL'\n"
                                 + ")",
-                        topic, bootstraps, groupId, format, format);
+                        topic,
+                        bootstraps,
+                        groupId,
+                        keyFormatOptions(formatOptions),
+                        valueFormatOptions(formatOptions));
 
         tEnv.executeSql(createTable);
 
@@ -923,7 +982,10 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
-    void testKafkaTemporalJoinChangelog(final String format) throws Exception {
+    void testKafkaTemporalJoinChangelog(final Tuple2<String, Map<String, String>> formatOptions)
+            throws Exception {
+        final String format = formatOptions.f0;
+
         // Set the session time zone to UTC, because the next `METADATA FROM
         // 'value.source.timestamp'` DDL
         // will use the session time zone when convert the changelog time from milliseconds to
@@ -959,9 +1021,9 @@ class KafkaTableITCase extends KafkaTableTestBase {
                                 + "  'scan.startup.mode' = 'earliest-offset',\n"
                                 + "  'properties.bootstrap.servers' = '%s',\n"
                                 + "  'properties.group.id' = '%s',\n"
-                                + "  'format' = '%s'\n"
+                                + "  %s\n"
                                 + ")",
-                        orderTopic, bootstraps, groupId, format);
+                        orderTopic, bootstraps, groupId, formatOptions(formatOptions));
         tEnv.executeSql(orderTableDDL);
         String orderInitialValues =
                 "INSERT INTO ordersTable\n"
@@ -1067,7 +1129,10 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
-    void testPerPartitionWatermarkKafka(final String format) throws Exception {
+    void testPerPartitionWatermarkKafka(final Tuple2<String, Map<String, String>> formatOptions)
+            throws Exception {
+        final String format = formatOptions.f0;
+
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "per_partition_watermark_topic_" + format + "_" + UUID.randomUUID();
@@ -1091,9 +1156,13 @@ class KafkaTableITCase extends KafkaTableTestBase {
                                 + "  'properties.group.id' = '%s',\n"
                                 + "  'scan.startup.mode' = 'earliest-offset',\n"
                                 + "  'sink.partitioner' = '%s',\n"
-                                + "  'format' = '%s'\n"
+                                + "  %s\n"
                                 + ")",
-                        topic, bootstraps, groupId, TestPartitioner.class.getName(), format);
+                        topic,
+                        bootstraps,
+                        groupId,
+                        TestPartitioner.class.getName(),
+                        formatOptions(formatOptions));
 
         tEnv.executeSql(createTable);
 
@@ -1158,7 +1227,10 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
-    void testPerPartitionWatermarkWithIdleSource(final String format) throws Exception {
+    void testPerPartitionWatermarkWithIdleSource(
+            final Tuple2<String, Map<String, String>> formatOptions) throws Exception {
+        final String format = formatOptions.f0;
+
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "idle_partition_watermark_topic_" + format + "_" + UUID.randomUUID();
@@ -1183,9 +1255,13 @@ class KafkaTableITCase extends KafkaTableTestBase {
                                 + "  'properties.group.id' = '%s',\n"
                                 + "  'scan.startup.mode' = 'earliest-offset',\n"
                                 + "  'sink.partitioner' = '%s',\n"
-                                + "  'format' = '%s'\n"
+                                + "  %s\n"
                                 + ")",
-                        topic, bootstraps, groupId, TestPartitioner.class.getName(), format);
+                        topic,
+                        bootstraps,
+                        groupId,
+                        TestPartitioner.class.getName(),
+                        formatOptions(formatOptions));
 
         tEnv.executeSql(createTable);
 
@@ -1234,7 +1310,10 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
-    void testLatestOffsetStrategyResume(final String format) throws Exception {
+    void testLatestOffsetStrategyResume(final Tuple2<String, Map<String, String>> formatOptions)
+            throws Exception {
+        final String format = formatOptions.f0;
+
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String topic = "latest_offset_resume_topic_" + format + "_" + UUID.randomUUID();
@@ -1258,9 +1337,13 @@ class KafkaTableITCase extends KafkaTableTestBase {
                                 + "  'properties.group.id' = '%s',\n"
                                 + "  'scan.startup.mode' = 'latest-offset',\n"
                                 + "  'sink.partitioner' = '%s',\n"
-                                + "  'format' = '%s'\n"
+                                + "  %s\n"
                                 + ")",
-                        topic, bootstraps, groupId, TestPartitioner.class.getName(), format);
+                        topic,
+                        bootstraps,
+                        groupId,
+                        TestPartitioner.class.getName(),
+                        formatOptions(formatOptions));
 
         tEnv.executeSql(createTable);
 
@@ -1367,20 +1450,23 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
-    void testStartFromGroupOffsetsLatest(final String format) throws Exception {
-        testStartFromGroupOffsets("latest", format);
+    void testStartFromGroupOffsetsLatest(final Tuple2<String, Map<String, String>> formatOptions)
+            throws Exception {
+        testStartFromGroupOffsets("latest", formatOptions);
     }
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
-    void testStartFromGroupOffsetsEarliest(final String format) throws Exception {
-        testStartFromGroupOffsets("earliest", format);
+    void testStartFromGroupOffsetsEarliest(final Tuple2<String, Map<String, String>> formatOptions)
+            throws Exception {
+        testStartFromGroupOffsets("earliest", formatOptions);
     }
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
-    void testStartFromGroupOffsetsNone(final String format) {
-        Assertions.assertThatThrownBy(() -> testStartFromGroupOffsetsWithNoneResetStrategy(format))
+    void testStartFromGroupOffsetsNone(final Tuple2<String, Map<String, String>> formatOptions) {
+        Assertions.assertThatThrownBy(
+                        () -> testStartFromGroupOffsetsWithNoneResetStrategy(formatOptions))
                 .satisfies(anyCauseMatches(NoOffsetForPartitionException.class));
     }
 
@@ -1416,7 +1502,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
             String groupId,
             String resetStrategy,
             String sinkName,
-            String format)
+            Tuple2<String, Map<String, String>> formatOptions)
             throws ExecutionException, InterruptedException {
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
@@ -1439,7 +1525,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                         + "  'properties.auto.offset.reset' = '%s',\n"
                         + "  'properties.enable.auto.commit' = 'true',\n"
                         + "  'properties.auto.commit.interval.ms' = '1000',\n"
-                        + "  'format' = '%s'\n"
+                        + "  %s\n"
                         + ")";
         tEnv.executeSql(
                 String.format(
@@ -1449,7 +1535,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                         bootstraps,
                         groupId,
                         resetStrategy,
-                        format));
+                        formatOptions(formatOptions)));
 
         String initialValues =
                 "INSERT INTO "
@@ -1481,7 +1567,10 @@ class KafkaTableITCase extends KafkaTableTestBase {
         return tEnv.executeSql("INSERT INTO " + sinkName + " SELECT * FROM " + tableName);
     }
 
-    private void testStartFromGroupOffsets(String resetStrategy, String format) throws Exception {
+    private void testStartFromGroupOffsets(
+            String resetStrategy, Tuple2<String, Map<String, String>> formatOptions)
+            throws Exception {
+        final String format = formatOptions.f0.replaceAll("-", "_");
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String tableName = "Table" + format + resetStrategy;
@@ -1497,7 +1586,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
         try {
             tableResult =
                     startFromGroupOffset(
-                            tableName, topic, groupId, resetStrategy, sinkName, format);
+                            tableName, topic, groupId, resetStrategy, sinkName, formatOptions);
             if ("latest".equals(resetStrategy)) {
                 expected = appendNewData(topic, tableName, groupId, expected.size());
             }
@@ -1509,8 +1598,10 @@ class KafkaTableITCase extends KafkaTableTestBase {
         }
     }
 
-    private void testStartFromGroupOffsetsWithNoneResetStrategy(final String format)
+    private void testStartFromGroupOffsetsWithNoneResetStrategy(
+            final Tuple2<String, Map<String, String>> formatAndOptions)
             throws ExecutionException, InterruptedException {
+        final String format = formatAndOptions.f0;
         // we always use a different topic name for each parameterized topic,
         // in order to make sure the topic can be created.
         final String resetStrategy = "none";
@@ -1522,13 +1613,248 @@ class KafkaTableITCase extends KafkaTableTestBase {
         try {
             tableResult =
                     startFromGroupOffset(
-                            tableName, topic, groupId, resetStrategy, "MySink", format);
+                            tableName, topic, groupId, resetStrategy, "MySink", formatAndOptions);
             tableResult.await();
         } finally {
             // ------------- cleanup -------------------
             cancelJob(tableResult);
             cleanupTopic(topic);
         }
+    }
+
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    public void testProjectionPushdown(final Tuple2<String, Map<String, String>> formatOptions)
+            throws Exception {
+        // Setup data
+
+        final String topic = UUID.randomUUID().toString();
+        createTestTopic(topic, 1, 1);
+
+        final Schema writeSchema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.STRING())
+                        .column("b", DataTypes.STRING())
+                        .column("c", DataTypes.STRING())
+                        .column("d", DataTypes.STRING())
+                        .build();
+        final String tableName = "kafka";
+        final String keyFields = "a;b";
+        final KafkaConnectorOptions.ValueFieldsStrategy valueFieldsStrategy =
+                KafkaConnectorOptions.ValueFieldsStrategy.EXCEPT_KEY;
+        createKafkaTable(
+                topic, formatOptions, tableName, writeSchema, keyFields, valueFieldsStrategy);
+
+        final String a0 = generateRandomString();
+        final String b0 = generateRandomString();
+        final String c0 = generateRandomString();
+        final String d0 = generateRandomString();
+
+        final String a1 = generateRandomString();
+        final String b1 = generateRandomString();
+        final String c1 = generateRandomString();
+        final String d1 = generateRandomString();
+
+        tEnv.executeSql(
+                        String.format(
+                                "INSERT INTO %s SELECT * FROM (VALUES ('%s', '%s', '%s', '%s')) AS orders (a, b, c, d)",
+                                tableName, a0, b0, c0, d0))
+                .await();
+
+        tEnv.executeSql(
+                        String.format(
+                                "INSERT INTO %s SELECT * FROM (VALUES ('%s', '%s', '%s', '%s')) AS orders (a, b, c, d)",
+                                tableName, a1, b1, c1, d1))
+                .await();
+
+        assertThat(tEnv.dropTable(tableName)).isTrue();
+
+        // Read data
+
+        final Schema readSchema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.STRING())
+                        .column("b", DataTypes.STRING())
+                        .column("c", DataTypes.STRING())
+                        .column("d", DataTypes.STRING())
+                        .columnByMetadata(
+                                "kafka_offset",
+                                KafkaDynamicSource.ReadableMetadata.OFFSET.dataType,
+                                KafkaDynamicSource.ReadableMetadata.OFFSET.key)
+                        .build();
+        createKafkaTable(
+                topic, formatOptions, tableName, readSchema, keyFields, valueFieldsStrategy);
+
+        assertQueryResult(
+                String.format("SELECT a, b, kafka_offset FROM %s", tableName),
+                "== Optimized Execution Plan ==\n"
+                        + String.format(
+                                "TableSourceScan(table=[[default_catalog, default_database, %s, project=[a, b], metadata=[offset]]], fields=[a, b, kafka_offset])\n",
+                                tableName),
+                Arrays.asList(
+                        String.format("+I(%s,%s,0)", a0, b0),
+                        String.format("+I(%s,%s,1)", a1, b1)));
+
+        assertQueryResult(
+                String.format("SELECT a, c FROM %s", tableName),
+                "== Optimized Execution Plan ==\n"
+                        + String.format(
+                                "TableSourceScan(table=[[default_catalog, default_database, %s, project=[a, c], metadata=[]]], fields=[a, c])\n",
+                                tableName),
+                Arrays.asList(
+                        String.format("+I(%s,%s)", a0, c0), String.format("+I(%s,%s)", a1, c1)));
+
+        assertQueryResult(
+                String.format("SELECT b, c FROM %s", tableName),
+                "== Optimized Execution Plan ==\n"
+                        + String.format(
+                                "TableSourceScan(table=[[default_catalog, default_database, %s, project=[b, c], metadata=[]]], fields=[b, c])\n",
+                                tableName),
+                Arrays.asList(
+                        String.format("+I(%s,%s)", b0, c0), String.format("+I(%s,%s)", b1, c1)));
+
+        assertQueryResult(
+                String.format("SELECT c, kafka_offset, a FROM %s", tableName),
+                "== Optimized Execution Plan ==\n"
+                        + "Calc(select=[c, kafka_offset, a])\n"
+                        + String.format(
+                                "+- TableSourceScan(table=[[default_catalog, default_database, %s, project=[c, a], metadata=[offset]]], fields=[c, a, kafka_offset])\n",
+                                tableName),
+                Arrays.asList(
+                        String.format("+I(%s,%d,%s)", c0, 0, a0),
+                        String.format("+I(%s,%d,%s)", c1, 1, a1)));
+
+        // clean up
+
+        cleanupTopic(topic);
+    }
+
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    public void testWithBreakingSchemaChange(
+            final Tuple2<String, Map<String, String>> formatOptions) throws Exception {
+        final String topic = UUID.randomUUID().toString();
+        createTestTopic(topic, 1, 1);
+
+        final String tableName = "kafka";
+        final String keyFields = "a;b";
+        final KafkaConnectorOptions.ValueFieldsStrategy valueFieldsStrategy =
+                KafkaConnectorOptions.ValueFieldsStrategy.EXCEPT_KEY;
+
+        final Schema originalSchema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.STRING())
+                        .column("b", DataTypes.INT()) // b is an INT originally
+                        .column("c", DataTypes.STRING())
+                        .column("d", DataTypes.INT()) // d is an INT originally
+                        .build();
+
+        createKafkaTable(
+                topic, formatOptions, tableName, originalSchema, keyFields, valueFieldsStrategy);
+        final String a0 = generateRandomString();
+        final int b0 = RANDOM.nextInt(Integer.MAX_VALUE);
+        final String c0 = generateRandomString();
+        final int d0 = RANDOM.nextInt(Integer.MAX_VALUE);
+
+        tEnv.executeSql(
+                        String.format(
+                                "INSERT INTO %s SELECT * FROM (VALUES ('%s', %d, '%s', %d)) AS orders (a, b, c, d)",
+                                tableName, a0, b0, c0, d0))
+                .await();
+
+        assertThat(tEnv.dropTable(tableName)).isTrue();
+
+        final Schema updatedSchema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.STRING())
+                        .column("b", DataTypes.STRING()) // b is now a STRING
+                        .column("c", DataTypes.STRING())
+                        .column("d", DataTypes.STRING()) // d is now a STRING
+                        .build();
+
+        createKafkaTable(
+                topic, formatOptions, tableName, updatedSchema, keyFields, valueFieldsStrategy);
+        final String a1 = generateRandomString();
+        final String b1 = generateRandomString();
+        final String c1 = generateRandomString();
+        final String d1 = generateRandomString();
+
+        tEnv.executeSql(
+                        String.format(
+                                "INSERT INTO %s SELECT * FROM (VALUES ('%s', '%s', '%s', '%s')) AS orders (a, b, c, d)",
+                                tableName, a1, b1, c1, d1))
+                .await();
+
+        assertThat(tEnv.dropTable(tableName)).isTrue();
+
+        // Read data
+
+        final Schema readSchema =
+                Schema.newBuilder()
+                        // Using original schema
+                        .fromColumns(originalSchema.getColumns())
+                        // Added some Kafka metadata
+                        .columnByMetadata(
+                                "kafka_offset",
+                                KafkaDynamicSource.ReadableMetadata.OFFSET.dataType,
+                                KafkaDynamicSource.ReadableMetadata.OFFSET.key)
+                        .build();
+
+        createKafkaTable(
+                topic, formatOptions, tableName, readSchema, keyFields, valueFieldsStrategy);
+
+        assertQueryResult(
+                String.format("SELECT a, c FROM %s", tableName),
+                "",
+                Arrays.asList(
+                        String.format("+I(%s,%s)", a0, c0), String.format("+I(%s,%s)", a1, c1)));
+
+        assertQueryResult(
+                String.format("SELECT c, kafka_offset, a FROM %s", tableName),
+                "== Optimized Execution Plan ==\n"
+                        + "Calc(select=[c, kafka_offset, a])\n"
+                        + String.format(
+                                "+- TableSourceScan(table=[[default_catalog, default_database, %s, project=[c, a], metadata=[offset]]], fields=[c, a, kafka_offset])\n",
+                                tableName),
+                Arrays.asList(
+                        String.format("+I(%s,0,%s)", c0, a0),
+                        String.format("+I(%s,1,%s)", c1, a1)));
+
+        cleanupTopic(topic);
+    }
+
+    private void createKafkaTable(
+            final String topic,
+            final Tuple2<String, Map<String, String>> formatOptions,
+            final String tableName,
+            final Schema schema,
+            final String keyFields,
+            final KafkaConnectorOptions.ValueFieldsStrategy valueFieldsStrategy) {
+
+        final TableDescriptor.Builder builder =
+                TableDescriptor.forConnector("kafka")
+                        .schema(schema)
+                        .option(
+                                KafkaConnectorOptions.PROPS_BOOTSTRAP_SERVERS,
+                                getBootstrapServers())
+                        .option(KafkaConnectorOptions.TOPIC.key(), topic)
+                        .option(
+                                KafkaConnectorOptions.PROPS_GROUP_ID.key(),
+                                getStandardProps().getProperty("group.id"))
+                        .option(KafkaConnectorOptions.SCAN_STARTUP_MODE.key(), "earliest-offset")
+                        .option(KafkaConnectorOptions.KEY_FORMAT.key(), formatOptions.f0)
+                        .option(KafkaConnectorOptions.KEY_FIELDS.key(), keyFields)
+                        .option(KafkaConnectorOptions.VALUE_FORMAT.key(), formatOptions.f0)
+                        .option(
+                                KafkaConnectorOptions.VALUE_FIELDS_INCLUDE.key(),
+                                valueFieldsStrategy.name());
+        final String format = formatOptions.f0;
+        formatOptions.f1.forEach(
+                (key, value) -> builder.option(String.format("key.%s.%s", format, key), value));
+        formatOptions.f1.forEach(
+                (key, value) -> builder.option(String.format("value.%s.%s", format, key), value));
+        final TableDescriptor tableDescriptor = builder.build();
+        tEnv.createTable(tableName, tableDescriptor);
     }
 
     // --------------------------------------------------------------------------------------------
@@ -1548,30 +1874,51 @@ class KafkaTableITCase extends KafkaTableTestBase {
         }
     }
 
-    private String formatOptions(final String format) {
-        return String.format("'format' = '%s'", format);
+    private String formatOptions(
+            final Tuple2<String, Map<String, String>> formatOptions,
+            final Optional<String> optionalPrefix) {
+        final String format = formatOptions.f0;
+
+        final Stream<String> formatOptionsStr =
+                Stream.concat(
+                        Stream.of(
+                                String.format(
+                                        "'%s' = '%s'",
+                                        optionalPrefix.map(s -> s + ".").orElse("") + "format",
+                                        format)),
+                        formatOptions.f1.entrySet().stream()
+                                .map(
+                                        entry ->
+                                                String.format(
+                                                        "'%s' = '%s'",
+                                                        optionalPrefix
+                                                                        .map(
+                                                                                s ->
+                                                                                        String
+                                                                                                .format(
+                                                                                                        "%s.%s.",
+                                                                                                        s,
+                                                                                                        format))
+                                                                        .orElse(
+                                                                                String.format(
+                                                                                        "%s.",
+                                                                                        format))
+                                                                + entry.getKey(),
+                                                        entry.getValue())));
+
+        return formatOptionsStr.collect(Collectors.joining(",\n"));
     }
 
-    private static final class TestingSinkFunction implements SinkFunction<RowData> {
+    private String formatOptions(final Tuple2<String, Map<String, String>> formatOptions) {
+        return formatOptions(formatOptions, Optional.empty());
+    }
 
-        private static final long serialVersionUID = 455430015321124493L;
-        private static List<String> rows = new ArrayList<>();
+    private String keyFormatOptions(final Tuple2<String, Map<String, String>> formatOptions) {
+        return formatOptions(formatOptions, Optional.of("key"));
+    }
 
-        private final int expectedSize;
-
-        private TestingSinkFunction(int expectedSize) {
-            this.expectedSize = expectedSize;
-            rows.clear();
-        }
-
-        @Override
-        public void invoke(RowData value, Context context) {
-            rows.add(value.toString());
-            if (rows.size() >= expectedSize) {
-                // job finish
-                throw new SuccessException();
-            }
-        }
+    private String valueFormatOptions(final Tuple2<String, Map<String, String>> formatOptions) {
+        return formatOptions(formatOptions, Optional.of("value"));
     }
 
     private static boolean isCausedByJobFinished(Throwable e) {
@@ -1611,5 +1958,26 @@ class KafkaTableITCase extends KafkaTableTestBase {
             // check if the exception is one of the ignored ones
             assertThat(ex).satisfiesAnyOf(ignoreIf);
         }
+    }
+
+    private void assertQueryResult(
+            final String query, final String expectedPlanEndsWith, final List<String> expected)
+            throws Exception {
+        final Table table = tEnv.sqlQuery(query);
+
+        assertThat(table.explain()).endsWith(expectedPlanEndsWith);
+
+        final DataStream<RowData> result =
+                tEnv.toRetractStream(table, RowData.class).map(tuple -> tuple.f1);
+        final TestingSinkFunction sink = new TestingSinkFunction(2);
+        result.addSink(sink).setParallelism(1);
+        try {
+            env.execute("Job_2");
+        } catch (Throwable e) {
+            if (!isCausedByJobFinished(e)) {
+                throw e;
+            }
+        }
+        assertThat(TestingSinkFunction.getRows()).isEqualTo(expected);
     }
 }

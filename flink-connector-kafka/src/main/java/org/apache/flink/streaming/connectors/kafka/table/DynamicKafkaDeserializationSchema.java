@@ -37,6 +37,7 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /** A specific {@link KafkaRecordDeserializationSchema} for {@link KafkaDynamicSource}. */
 @Internal
@@ -58,19 +59,21 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
 
     private final boolean upsertMode;
 
+    private final Map<Integer, Integer> valueProjection;
+
     DynamicKafkaDeserializationSchema(
             int physicalArity,
             @Nullable DeserializationSchema<RowData> keyDeserialization,
-            int[] keyProjection,
+            Map<Integer, Integer> keyProjection,
             DeserializationSchema<RowData> valueDeserialization,
-            int[] valueProjection,
+            Map<Integer, Integer> valueProjection,
             boolean hasMetadata,
             MetadataConverter[] metadataConverters,
             TypeInformation<RowData> producedTypeInfo,
             boolean upsertMode) {
         if (upsertMode) {
             Preconditions.checkArgument(
-                    keyDeserialization != null && keyProjection.length > 0,
+                    keyDeserialization != null && !keyProjection.isEmpty(),
                     "Key must be set in upsert mode for deserialization schema.");
         }
         this.keyDeserialization = keyDeserialization;
@@ -86,6 +89,7 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
                         upsertMode);
         this.producedTypeInfo = producedTypeInfo;
         this.upsertMode = upsertMode;
+        this.valueProjection = valueProjection;
     }
 
     @Override
@@ -101,7 +105,7 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
             throws IOException {
         // shortcut in case no output projection is required,
         // also not for a cartesian product with the keys
-        if (keyDeserialization == null && !hasMetadata) {
+        if (keyDeserialization == null && !hasMetadata && valueProjection.isEmpty()) {
             valueDeserialization.deserialize(record.value(), collector);
             return;
         }
@@ -176,9 +180,9 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
 
         private final int physicalArity;
 
-        private final int[] keyProjection;
+        private final Map<Integer, Integer> keyProjection;
 
-        private final int[] valueProjection;
+        private final Map<Integer, Integer> valueProjection;
 
         private final MetadataConverter[] metadataConverters;
 
@@ -192,8 +196,8 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
 
         OutputProjectionCollector(
                 int physicalArity,
-                int[] keyProjection,
-                int[] valueProjection,
+                Map<Integer, Integer> keyProjection,
+                Map<Integer, Integer> valueProjection,
                 MetadataConverter[] metadataConverters,
                 boolean upsertMode) {
             this.physicalArity = physicalArity;
@@ -206,7 +210,7 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
         @Override
         public void collect(RowData physicalValueRow) {
             // no key defined
-            if (keyProjection.length == 0) {
+            if (keyProjection.isEmpty()) {
                 emitRow(null, (GenericRowData) physicalValueRow);
                 return;
             }
@@ -241,16 +245,17 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
             final GenericRowData producedRow =
                     new GenericRowData(rowKind, physicalArity + metadataArity);
 
-            for (int keyPos = 0; keyPos < keyProjection.length; keyPos++) {
-                assert physicalKeyRow != null;
-                producedRow.setField(keyProjection[keyPos], physicalKeyRow.getField(keyPos));
-            }
+            keyProjection.forEach(
+                    (keyPos, targetPos) -> {
+                        assert physicalKeyRow != null;
+                        producedRow.setField(targetPos, physicalKeyRow.getField(keyPos));
+                    });
 
             if (physicalValueRow != null) {
-                for (int valuePos = 0; valuePos < valueProjection.length; valuePos++) {
-                    producedRow.setField(
-                            valueProjection[valuePos], physicalValueRow.getField(valuePos));
-                }
+                valueProjection.forEach(
+                        (valuePos, targetPos) ->
+                                producedRow.setField(
+                                        targetPos, physicalValueRow.getField(valuePos)));
             }
 
             for (int metadataPos = 0; metadataPos < metadataArity; metadataPos++) {
