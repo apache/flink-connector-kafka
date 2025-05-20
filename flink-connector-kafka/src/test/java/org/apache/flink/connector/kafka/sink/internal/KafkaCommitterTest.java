@@ -15,13 +15,10 @@
  * limitations under the License.
  */
 
-package org.apache.flink.connector.kafka.sink;
+package org.apache.flink.connector.kafka.sink.internal;
 
 import org.apache.flink.api.connector.sink2.mocks.MockCommitRequest;
-import org.apache.flink.connector.kafka.sink.internal.BackchannelFactory;
-import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
-import org.apache.flink.connector.kafka.sink.internal.ReadableBackchannel;
-import org.apache.flink.connector.kafka.sink.internal.TransactionFinished;
+import org.apache.flink.connector.kafka.sink.KafkaCommittable;
 import org.apache.flink.util.TestLoggerExtension;
 
 import org.apache.kafka.clients.CommonClientConfigs;

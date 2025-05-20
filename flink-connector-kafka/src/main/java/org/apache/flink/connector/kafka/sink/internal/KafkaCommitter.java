@@ -15,14 +15,13 @@
  * limitations under the License.
  */
 
-package org.apache.flink.connector.kafka.sink;
+package org.apache.flink.connector.kafka.sink.internal;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.sink2.Committer;
-import org.apache.flink.connector.kafka.sink.internal.BackchannelFactory;
-import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
-import org.apache.flink.connector.kafka.sink.internal.TransactionFinished;
-import org.apache.flink.connector.kafka.sink.internal.WritableBackchannel;
+import org.apache.flink.connector.kafka.sink.KafkaCommittable;
+import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.IOUtils;
 
@@ -48,7 +47,8 @@ import java.util.function.BiFunction;
  *
  * <p>The committer is responsible to finalize the Kafka transactions by committing them.
  */
-class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
+@Internal
+public class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaCommitter.class);
     public static final String UNKNOWN_PRODUCER_ID_ERROR_MESSAGE =
