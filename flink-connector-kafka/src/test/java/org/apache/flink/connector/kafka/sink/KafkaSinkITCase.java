@@ -64,6 +64,7 @@ import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.test.junit5.InjectClusterClient;
 import org.apache.flink.test.junit5.InjectMiniCluster;
@@ -90,6 +91,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.Logger;
@@ -127,6 +129,7 @@ import static org.apache.flink.configuration.StateRecoveryOptions.SAVEPOINT_PATH
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for using KafkaSink writing to a Kafka cluster. */
 @Testcontainers
@@ -542,6 +545,30 @@ public class KafkaSinkITCase extends TestLogger {
                     .rootCause()
                     .hasMessageContaining(
                             "Attempted to switch the transaction naming strategy back to INCREMENTING");
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(DeliveryGuarantee.class)
+    void ensureUniqueTransactionalIdPrefixIfNeeded(DeliveryGuarantee guarantee) throws Exception {
+        KafkaSinkBuilder<Integer> builder =
+                new KafkaSinkBuilder<Integer>()
+                        .setDeliveryGuarantee(guarantee)
+                        .setBootstrapServers(KAFKA_CONTAINER.getBootstrapServers())
+                        .setRecordSerializer(new IntegerRecordSerializer("topic"));
+
+        Configuration config = new Configuration();
+        config.set(RestartStrategyOptions.RESTART_STRATEGY, "disable");
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(config);
+        env.enableCheckpointing(100);
+        DataStreamSource<Integer> source = env.fromData(1, 2);
+        if (guarantee == DeliveryGuarantee.EXACTLY_ONCE) {
+            assertThatThrownBy(builder::build).hasMessageContaining("unique");
+        } else {
+            source.sinkTo(builder.build());
+            source.sinkTo(builder.build());
+
+            env.execute();
         }
     }
 
