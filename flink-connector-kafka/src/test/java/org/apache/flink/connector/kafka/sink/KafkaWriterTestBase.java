@@ -23,10 +23,6 @@ import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.base.sink.writer.TestSinkInitContext;
-import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetFacet;
-import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetIdentifier;
-import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacet;
-import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacetProvider;
 import org.apache.flink.connector.kafka.sink.internal.BackchannelFactory;
 import org.apache.flink.connector.kafka.sink.internal.TransactionFinished;
 import org.apache.flink.connector.kafka.sink.internal.WritableBackchannel;
@@ -43,7 +39,6 @@ import org.apache.flink.util.UserCodeClassLoader;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
-import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.jupiter.api.AfterEach;
@@ -59,7 +54,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -151,7 +145,7 @@ public abstract class KafkaWriterTestBase {
                 KafkaSink.<Integer>builder()
                         .setKafkaProducerConfig(getKafkaClientConfiguration())
                         .setTransactionalIdPrefix(TEST_PREFIX + writerIndex++)
-                        .setRecordSerializer(new DummyRecordSerializer());
+                        .setRecordSerializer(new IntegerRecordSerializer(topic));
         sinkBuilderAdjuster.accept(builder);
         return builder.build();
     }
@@ -232,29 +226,6 @@ public abstract class KafkaWriterTestBase {
 
         public void setRestoredCheckpointId(long checkpointId) {
             this.checkpointId = checkpointId;
-        }
-    }
-
-    /** mock recordSerializer for KafkaSink. */
-    protected static class DummyRecordSerializer
-            implements KafkaRecordSerializationSchema<Integer>, KafkaDatasetFacetProvider {
-        @Override
-        public ProducerRecord<byte[], byte[]> serialize(
-                Integer element, KafkaSinkContext context, Long timestamp) {
-            if (element == null) {
-                // in general, serializers should be allowed to skip invalid elements
-                return null;
-            }
-            byte[] bytes = ByteBuffer.allocate(4).putInt(element).array();
-            return new ProducerRecord<>(topic, bytes, bytes);
-        }
-
-        @Override
-        public Optional<KafkaDatasetFacet> getKafkaDatasetFacet() {
-            return Optional.of(
-                    new DefaultKafkaDatasetFacet(
-                            DefaultKafkaDatasetIdentifier.ofTopics(
-                                    Collections.singletonList(topic))));
         }
     }
 

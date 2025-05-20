@@ -61,7 +61,7 @@ public class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
     private final WritableBackchannel<TransactionFinished> backchannel;
     @Nullable private FlinkKafkaInternalProducer<?, ?> committingProducer;
 
-    KafkaCommitter(
+    public KafkaCommitter(
             Properties kafkaProducerConfig,
             String transactionalIdPrefix,
             int subtaskId,
