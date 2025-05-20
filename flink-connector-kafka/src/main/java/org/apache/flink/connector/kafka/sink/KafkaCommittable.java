@@ -19,6 +19,7 @@ package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
+import org.apache.flink.connector.kafka.sink.internal.KafkaCommitter;
 
 import javax.annotation.Nullable;
 
@@ -30,7 +31,7 @@ import java.util.Optional;
  * to commit transactions in {@link KafkaCommitter}.
  */
 @Internal
-class KafkaCommittable {
+public class KafkaCommittable {
 
     private final long producerId;
     private final short epoch;
