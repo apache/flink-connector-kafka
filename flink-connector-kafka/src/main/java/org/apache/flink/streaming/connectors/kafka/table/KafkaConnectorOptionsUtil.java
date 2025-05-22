@@ -50,6 +50,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.regex.Pattern;
@@ -585,6 +586,19 @@ class KafkaConnectorOptionsUtil {
                     .toArray();
         }
         throw new TableException("Unknown value fields strategy:" + strategy);
+    }
+
+    public static boolean disableKeyProjectionPushdownIntoDecoder(final ReadableConfig options) {
+        return options.getOptional(KEY_FORMAT)
+                .map(format -> Objects.equals(format, "avro"))
+                .orElse(false);
+    }
+
+    public static boolean disableValueProjectionPushdownIntoDecoder(final ReadableConfig options) {
+        return options.getOptional(FactoryUtil.FORMAT)
+                .or(() -> options.getOptional(VALUE_FORMAT))
+                .map(format -> Objects.equals(format, "avro"))
+                .orElse(false);
     }
 
     /**

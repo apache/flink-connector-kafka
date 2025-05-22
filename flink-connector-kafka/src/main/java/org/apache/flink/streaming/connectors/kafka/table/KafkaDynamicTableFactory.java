@@ -224,6 +224,12 @@ public class KafkaDynamicTableFactory
 
         final Integer parallelism = tableOptions.getOptional(SCAN_PARALLELISM).orElse(null);
 
+        final boolean disableKeyProjectionPushdownIntoDecoder =
+                KafkaConnectorOptionsUtil.disableKeyProjectionPushdownIntoDecoder(tableOptions);
+
+        final boolean disableValueProjectionPushdownIntoDecoder =
+                KafkaConnectorOptionsUtil.disableValueProjectionPushdownIntoDecoder(tableOptions);
+
         return createKafkaTableSource(
                 physicalDataType,
                 keyDecodingFormat.orElse(null),
@@ -241,7 +247,9 @@ public class KafkaDynamicTableFactory
                 boundedOptions.specificOffsets,
                 boundedOptions.boundedTimestampMillis,
                 context.getObjectIdentifier().asSummaryString(),
-                parallelism);
+                parallelism,
+                disableKeyProjectionPushdownIntoDecoder,
+                disableValueProjectionPushdownIntoDecoder);
     }
 
     @Override
@@ -408,7 +416,9 @@ public class KafkaDynamicTableFactory
             Map<TopicPartition, Long> specificEndOffsets,
             long endTimestampMillis,
             String tableIdentifier,
-            Integer parallelism) {
+            Integer parallelism,
+            boolean disableKeyProjectionPushdownIntoDecoder,
+            boolean disableValueProjectionPushdownIntoDecoder) {
         return new KafkaDynamicSource(
                 physicalDataType,
                 keyDecodingFormat,
@@ -427,7 +437,9 @@ public class KafkaDynamicTableFactory
                 endTimestampMillis,
                 false,
                 tableIdentifier,
-                parallelism);
+                parallelism,
+                disableKeyProjectionPushdownIntoDecoder,
+                disableValueProjectionPushdownIntoDecoder);
     }
 
     protected KafkaDynamicSink createKafkaTableSink(

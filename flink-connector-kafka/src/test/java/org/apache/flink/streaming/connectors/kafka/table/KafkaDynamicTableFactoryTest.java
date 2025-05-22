@@ -1356,7 +1356,9 @@ public class KafkaDynamicTableFactoryTest {
                 0,
                 false,
                 FactoryMocks.IDENTIFIER.asSummaryString(),
-                parallelism);
+                parallelism,
+                false,
+                false);
     }
 
     private static KafkaDynamicSink createExpectedSink(

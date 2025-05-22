@@ -20,6 +20,7 @@ package org.apache.flink.streaming.connectors.kafka.table;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestartStrategyOptions;
+import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
 import org.apache.flink.connector.kafka.testutils.KafkaUtil;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
@@ -42,8 +43,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.containers.Network;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -65,6 +68,10 @@ abstract class KafkaTableTestBase extends AbstractTestBase {
     private static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
     private static final int zkTimeoutMills = 30000;
 
+    private static final String INTER_CONTAINER_SCHEMA_REGISTRY_ALIAS = "schema-registry";
+
+    public static final Network NETWORK = Network.newNetwork();
+
     @Container
     public static final KafkaContainer KAFKA_CONTAINER =
             KafkaUtil.createKafkaContainer(KafkaTableTestBase.class)
@@ -74,7 +81,16 @@ abstract class KafkaTableTestBase extends AbstractTestBase {
                             "KAFKA_TRANSACTION_MAX_TIMEOUT_MS",
                             String.valueOf(Duration.ofHours(2).toMillis()))
                     // Disable log deletion to prevent records from being deleted during test run
-                    .withEnv("KAFKA_LOG_RETENTION_MS", "-1");
+                    .withEnv("KAFKA_LOG_RETENTION_MS", "-1")
+                    .withNetwork(NETWORK);
+
+    @Container
+    public static final SchemaRegistryContainer SCHEMA_REGISTRY_CONTAINER =
+            new SchemaRegistryContainer(DockerImageName.parse(DockerImageVersions.SCHEMA_REGISTRY))
+                    .withKafka(INTER_CONTAINER_KAFKA_ALIAS + ":9092")
+                    .withNetworkAliases(INTER_CONTAINER_SCHEMA_REGISTRY_ALIAS)
+                    .dependsOn(KAFKA_CONTAINER)
+                    .withNetwork(NETWORK);
 
     protected StreamExecutionEnvironment env;
     protected StreamTableEnvironment tEnv;
@@ -123,6 +139,11 @@ abstract class KafkaTableTestBase extends AbstractTestBase {
 
     public String getBootstrapServers() {
         return KAFKA_CONTAINER.getBootstrapServers();
+    }
+
+    public static String getSchemaRegistryUrl() {
+        System.out.println(SCHEMA_REGISTRY_CONTAINER.getSchemaRegistryUrl());
+        return SCHEMA_REGISTRY_CONTAINER.getSchemaRegistryUrl();
     }
 
     public void createTestTopic(String topic, int numPartitions, int replicationFactor) {
