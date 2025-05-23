@@ -4,6 +4,7 @@ scalastyle-output.xml
 .classpath
 .idea/*
 !.idea/vcs.xml
+.vscode
 .metadata
 .settings
 .project
