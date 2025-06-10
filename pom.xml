@@ -50,7 +50,7 @@ under the License.
 
 	<properties>
 		<flink.version>2.0.0</flink.version>
-		<kafka.version>3.9.0</kafka.version>
+		<kafka.version>3.9.1</kafka.version>
 		<confluent.version>7.8.2</confluent.version>
 
 		<jackson-bom.version>2.16.2</jackson-bom.version>
