@@ -40,7 +40,10 @@ __all__ = [
     'KafkaOffsetResetStrategy',
     'KafkaRecordSerializationSchema',
     'KafkaRecordSerializationSchemaBuilder',
-    'KafkaTopicSelector'
+    'KafkaTopicSelector',
+    'KafkaStream',
+    'ClusterMetadata',
+    'KafkaMetadataService'
 ]
 
 # ---- DynamicKafkaSource ----
@@ -74,6 +77,14 @@ class DynamicKafkaSource(Source):
         return DynamicKafkaSourceBuilder()
 
 
+class KafkaMetadataService(object):
+    pass
+
+
+def single_cluster_topic_metadata_service(kafka_cluster_id: str, properties: Dict[str, str]) -> JavaObject:
+    gateway = get_gateway()
+    return gateway.jvm.org.apache.flink.connector.kafka.dynamic.metadata.SingleClusterTopicMetadataService(kafka_cluster_id, properties)
+
 class DynamicKafkaSourceBuilder(object):
     """Builder for :class:`DynamicKafkaSource`.
 
@@ -88,17 +99,9 @@ class DynamicKafkaSourceBuilder(object):
             .builder()
         )
 
-    # ---------------------------------------------------------------------
-    #  Build
-    # ---------------------------------------------------------------------
-
     def build(self) -> 'DynamicKafkaSource':
         """Finalize the configuration and return a :class:`DynamicKafkaSource`."""
         return DynamicKafkaSource(self._j_builder.build())
-
-    # ---------------------------------------------------------------------
-    #  Stream subscription configuration
-    # ---------------------------------------------------------------------
 
     def set_stream_ids(self, stream_ids: Set[str]) -> 'DynamicKafkaSourceBuilder':
         """Subscribe to a fixed set of stream IDs.
@@ -123,19 +126,15 @@ class DynamicKafkaSourceBuilder(object):
         self._j_builder.setKafkaStreamSubscriber(kafka_stream_subscriber)
         return self
 
-    # ---------------------------------------------------------------------
-    #  Metadata service
-    # ---------------------------------------------------------------------
-
-    def set_kafka_metadata_service(self, kafka_metadata_service: JavaObject) -> \
+    def set_kafka_metadata_service(self, kafka_metadata_service: JavaObject | KafkaMetadataService) -> \
             'DynamicKafkaSourceBuilder':
         """Specify the :class:`KafkaMetadataService` that resolves stream IDs to clusters."""
-        self._j_builder.setKafkaMetadataService(kafka_metadata_service)
-        return self
-
-    # ---------------------------------------------------------------------
-    #  Offset initializers & boundedness
-    # ---------------------------------------------------------------------
+        if isinstance(kafka_metadata_service, KafkaMetadataService):
+            kafka_metadata_service = kafka_metadata_service._j_kafka_metadata_service
+            return self
+        else:
+            self._j_builder.setKafkaMetadataService(kafka_metadata_service)
+            return self
 
     def set_starting_offsets(self, starting_offsets_initializer: 'KafkaOffsetsInitializer') -> \
             'DynamicKafkaSourceBuilder':
@@ -146,10 +145,6 @@ class DynamicKafkaSourceBuilder(object):
             'DynamicKafkaSourceBuilder':
         self._j_builder.setBounded(stopping_offsets_initializer._j_initializer)
         return self
-
-    # ---------------------------------------------------------------------
-    #  Deserializer helpers
-    # ---------------------------------------------------------------------
 
     def set_deserializer(self, kafka_record_deserializer: JavaObject) -> \
             'DynamicKafkaSourceBuilder':
@@ -170,10 +165,6 @@ class DynamicKafkaSourceBuilder(object):
         )
         self._j_builder.setDeserializer(j_value_only_wrapper)
         return self
-
-    # ---------------------------------------------------------------------
-    #  Misc Kafka consumer properties
-    # ---------------------------------------------------------------------
 
     def set_properties(self, props: Dict[str, str]) -> 'DynamicKafkaSourceBuilder':
         j_props = self._gateway.jvm.java.util.Properties()
@@ -541,6 +532,176 @@ class KafkaTopicPartition(object):
 
     def __hash__(self):
         return 31 * (31 + self._partition) + hash(self._topic)
+
+
+class ClusterMetadata(object):
+    """
+    Corresponding to Java `org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata` class.
+    """
+
+    def __init__(self, topics: Set[str], properties: Dict[str, str]):
+        self._topics = topics
+        self._properties = properties
+
+    def _to_j_cluster_metadata(self):
+        gateway = get_gateway()
+        j_topics = gateway.jvm.java.util.HashSet()
+        for t in self._topics:
+            j_topics.add(t)
+        j_props = gateway.jvm.java.util.Properties()
+        for k, v in self._properties.items():
+            j_props.setProperty(k, v)
+        return gateway.jvm.org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata(
+            j_topics, j_props)
+
+    @staticmethod
+    def _from_j_cluster_metadata(j_cluster_metadata: JavaObject):
+        # Extract topics
+        j_topics = j_cluster_metadata.getTopics()
+        topics = set()
+        for t in j_topics:
+            topics.add(t)
+        # Extract properties
+        j_props = j_cluster_metadata.getProperties()
+        props = {}
+        for name in j_props.stringPropertyNames():
+            props[name] = j_props.getProperty(name)
+        return ClusterMetadata(topics, props)
+
+    def __eq__(self, other):
+        if not isinstance(other, ClusterMetadata):
+            return False
+        return self._topics == other._topics and self._properties == other._properties
+
+    def __hash__(self):
+        return hash(frozenset(self._topics)) ^ hash(frozenset(self._properties.items()))
+
+
+class KafkaStream(object):
+    """
+    Corresponding to Java `org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream` class.
+    """
+
+    def __init__(self, stream_id: str, cluster_metadata_map: Dict[str, ClusterMetadata]):
+        self._stream_id = stream_id
+        self._cluster_metadata_map = cluster_metadata_map
+
+    def _to_j_kafka_stream(self):
+        gateway = get_gateway()
+        j_map = gateway.jvm.java.util.HashMap()
+        for cluster_id, cm in self._cluster_metadata_map.items():
+            j_map.put(cluster_id, cm._to_j_cluster_metadata())
+        return gateway.jvm.org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream(
+            self._stream_id, j_map)
+
+    @staticmethod
+    def _from_j_kafka_stream(j_kafka_stream: JavaObject):
+        stream_id = j_kafka_stream.getStreamId()
+        j_map = j_kafka_stream.getClusterMetadataMap()
+        cluster_map = {}
+        for entry in j_map.entrySet():
+            cid = entry.getKey()
+            cm = ClusterMetadata._from_j_cluster_metadata(entry.getValue())
+            cluster_map[cid] = cm
+        return KafkaStream(stream_id, cluster_map)
+
+    def __eq__(self, other):
+        if not isinstance(other, KafkaStream):
+            return False
+        return (self._stream_id == other._stream_id and
+                self._cluster_metadata_map == other._cluster_metadata_map)
+
+    def __hash__(self):
+        return hash(self._stream_id) ^ hash(frozenset(self._cluster_metadata_map.items()))
+
+
+class KafkaMetadataService(object):
+    """
+    Python wrapper for Java `org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService` interface.
+    """
+
+    def __init__(self, j_service: JavaObject):
+        self._j_service = j_service
+
+    @staticmethod
+    def single_cluster_service(kafka_cluster_id: str,
+                               properties: Dict[str, str]) -> 'KafkaMetadataService':
+        """
+        Create a KafkaMetadataService scoped to a single cluster.
+
+        :param kafka_cluster_id: the id of the Kafka cluster.
+        :param properties: the properties to connect to the cluster.
+        """
+        gateway = get_gateway()
+        j_props = gateway.jvm.java.util.Properties()
+        for k, v in properties.items():
+            j_props.setProperty(k, v)
+        j_service = gateway.jvm.org.apache.flink.connector.kafka.dynamic.metadata.\
+            SingleClusterTopicMetadataService(kafka_cluster_id, j_props)
+        return KafkaMetadataService(j_service)
+
+    @staticmethod
+    def yaml_file_service(metadata_file_path: str,
+                          refresh_interval: Any) -> 'KafkaMetadataService':
+        """
+        Create a KafkaMetadataService backed by a YAML metadata file, with periodic refresh.
+
+        :param metadata_file_path: path to the metadata YAML file.
+        :param refresh_interval: java.time.Duration, or Python timedelta/int/float (seconds).
+        """
+        from datetime import timedelta
+
+        gateway = get_gateway()
+        # Convert Python types to Java Duration if necessary
+        if isinstance(refresh_interval, (int, float)):
+            j_duration = gateway.jvm.java.time.Duration.ofMillis(int(refresh_interval * 1000))
+        elif isinstance(refresh_interval, timedelta):
+            j_duration = gateway.jvm.java.time.Duration.ofMillis(
+                int(refresh_interval.total_seconds() * 1000))
+        else:
+            j_duration = refresh_interval
+        j_service = gateway.jvm.org.apache.flink.connector.kafka.testutils.\
+            YamlFileMetadataService(metadata_file_path, j_duration)
+        return KafkaMetadataService(j_service)
+
+    def get_all_streams(self) -> Set[KafkaStream]:
+        """
+        Get current metadata for all streams.
+        """
+        result = set()
+        for j_stream in self._j_service.getAllStreams():
+            result.add(KafkaStream._from_j_kafka_stream(j_stream))
+        return result
+
+    def describe_streams(self, stream_ids: Set[str]) -> Dict[str, KafkaStream]:
+        """
+        Get current metadata for queried streams.
+
+        :param stream_ids: a set of stream full names.
+        """
+        gateway = get_gateway()
+        j_set = gateway.jvm.java.util.HashSet()
+        for sid in stream_ids:
+            j_set.add(sid)
+        j_map = self._j_service.describeStreams(j_set)
+        result = {}
+        for entry in j_map.entrySet():
+            key = entry.getKey()
+            val = KafkaStream._from_j_kafka_stream(entry.getValue())
+            result[key] = val
+        return result
+
+    def is_cluster_active(self, kafka_cluster_id: str) -> bool:
+        """
+        Check if the given cluster is active.
+        """
+        return self._j_service.isClusterActive(kafka_cluster_id)
+
+    def close(self):
+        """
+        Close the metadata service.
+        """
+        self._j_service.close()
 
 
 class KafkaOffsetResetStrategy(Enum):
