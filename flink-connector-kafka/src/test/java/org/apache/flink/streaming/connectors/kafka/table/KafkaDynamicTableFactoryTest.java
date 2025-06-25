@@ -43,6 +43,7 @@ import org.apache.flink.formats.avro.typeutils.AvroSchemaConverter;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.SourceTransformation;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
+import org.apache.flink.streaming.connectors.kafka.config.FormatProjectionPushdownLevel;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkFixedPartitioner;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanStartupMode;
@@ -394,6 +395,7 @@ public class KafkaDynamicTableFactoryTest {
                         0,
                         null);
         expectedKafkaSource.producedDataType = SCHEMA_WITH_METADATA.toSourceRowDataType();
+        expectedKafkaSource.valueFormatMetadataKeys = Collections.singletonList("metadata_2");
         expectedKafkaSource.metadataKeys = Collections.singletonList("timestamp");
 
         assertThat(actualSource).isEqualTo(expectedKafkaSource);
@@ -1356,7 +1358,9 @@ public class KafkaDynamicTableFactoryTest {
                 0,
                 false,
                 FactoryMocks.IDENTIFIER.asSummaryString(),
-                parallelism);
+                parallelism,
+                FormatProjectionPushdownLevel.NONE,
+                FormatProjectionPushdownLevel.NONE);
     }
 
     private static KafkaDynamicSink createExpectedSink(

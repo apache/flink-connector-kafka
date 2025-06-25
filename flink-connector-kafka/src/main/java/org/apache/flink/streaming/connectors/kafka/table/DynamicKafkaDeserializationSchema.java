@@ -50,6 +50,8 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
 
     private final boolean hasMetadata;
 
+    private final boolean hasValueProjection;
+
     private final BufferingCollector keyCollector;
 
     private final OutputProjectionCollector outputCollector;
@@ -61,27 +63,28 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
     DynamicKafkaDeserializationSchema(
             int physicalArity,
             @Nullable DeserializationSchema<RowData> keyDeserialization,
-            int[] keyProjection,
+            Decoder.Projector keyProjector,
             DeserializationSchema<RowData> valueDeserialization,
-            int[] valueProjection,
+            Decoder.Projector valueProjector,
             boolean hasMetadata,
             MetadataConverter[] metadataConverters,
             TypeInformation<RowData> producedTypeInfo,
             boolean upsertMode) {
         if (upsertMode) {
             Preconditions.checkArgument(
-                    keyDeserialization != null && keyProjection.length > 0,
+                    keyDeserialization != null && !keyProjector.isEmptyProjection(),
                     "Key must be set in upsert mode for deserialization schema.");
         }
         this.keyDeserialization = keyDeserialization;
         this.valueDeserialization = valueDeserialization;
         this.hasMetadata = hasMetadata;
+        this.hasValueProjection = valueProjector.isProjectionNeeded();
         this.keyCollector = new BufferingCollector();
         this.outputCollector =
                 new OutputProjectionCollector(
                         physicalArity,
-                        keyProjection,
-                        valueProjection,
+                        keyProjector,
+                        valueProjector,
                         metadataConverters,
                         upsertMode);
         this.producedTypeInfo = producedTypeInfo;
@@ -101,7 +104,7 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
             throws IOException {
         // shortcut in case no output projection is required,
         // also not for a cartesian product with the keys
-        if (keyDeserialization == null && !hasMetadata) {
+        if (keyDeserialization == null && !hasMetadata && !hasValueProjection) {
             valueDeserialization.deserialize(record.value(), collector);
             return;
         }
@@ -176,9 +179,9 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
 
         private final int physicalArity;
 
-        private final int[] keyProjection;
+        private final Decoder.Projector keyProjector;
 
-        private final int[] valueProjection;
+        private final Decoder.Projector valueProjector;
 
         private final MetadataConverter[] metadataConverters;
 
@@ -192,13 +195,13 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
 
         OutputProjectionCollector(
                 int physicalArity,
-                int[] keyProjection,
-                int[] valueProjection,
+                Decoder.Projector keyProjector,
+                Decoder.Projector valueProjector,
                 MetadataConverter[] metadataConverters,
                 boolean upsertMode) {
             this.physicalArity = physicalArity;
-            this.keyProjection = keyProjection;
-            this.valueProjection = valueProjection;
+            this.keyProjector = keyProjector;
+            this.valueProjector = valueProjector;
             this.metadataConverters = metadataConverters;
             this.upsertMode = upsertMode;
         }
@@ -206,7 +209,7 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
         @Override
         public void collect(RowData physicalValueRow) {
             // no key defined
-            if (keyProjection.length == 0) {
+            if (keyProjector.isEmptyProjection()) {
                 emitRow(null, (GenericRowData) physicalValueRow);
                 return;
             }
@@ -241,16 +244,10 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
             final GenericRowData producedRow =
                     new GenericRowData(rowKind, physicalArity + metadataArity);
 
-            for (int keyPos = 0; keyPos < keyProjection.length; keyPos++) {
-                assert physicalKeyRow != null;
-                producedRow.setField(keyProjection[keyPos], physicalKeyRow.getField(keyPos));
-            }
+            keyProjector.project(physicalKeyRow, producedRow);
 
             if (physicalValueRow != null) {
-                for (int valuePos = 0; valuePos < valueProjection.length; valuePos++) {
-                    producedRow.setField(
-                            valueProjection[valuePos], physicalValueRow.getField(valuePos));
-                }
+                valueProjector.project(physicalValueRow, producedRow);
             }
 
             for (int metadataPos = 0; metadataPos < metadataArity; metadataPos++) {
