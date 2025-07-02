@@ -43,6 +43,7 @@ import org.apache.flink.formats.avro.typeutils.AvroSchemaConverter;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.SourceTransformation;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
+import org.apache.flink.streaming.connectors.kafka.config.FormatProjectionPushdownLevel;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkFixedPartitioner;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanStartupMode;
@@ -85,16 +86,19 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import static org.apache.flink.core.testutils.FlinkAssertions.anyCauseMatches;
@@ -439,9 +443,90 @@ public class KafkaDynamicTableFactoryTest {
                         0,
                         null);
         expectedKafkaSource.producedDataType = SCHEMA_WITH_METADATA.toSourceRowDataType();
+        expectedKafkaSource.valueFormatMetadataKeys = Collections.singletonList("metadata_2");
         expectedKafkaSource.metadataKeys = Collections.singletonList("timestamp");
 
         assertThat(actualSource).isEqualTo(expectedKafkaSource);
+    }
+
+    private static class NotIdempotentDecodingFormat
+            implements DecodingFormat<DeserializationSchema<RowData>> {
+        private final List<String> metadataKeys = new ArrayList<>();
+
+        @Override
+        public Map<String, DataType> listReadableMetadata() {
+            return Collections.singletonMap("a", DataTypes.STRING());
+        }
+
+        @Override
+        public void applyReadableMetadata(List<String> metadataKeys) {
+            // this is deliberately not idempotent for testing purposes
+            this.metadataKeys.addAll(metadataKeys);
+        }
+
+        @Override
+        public DeserializationSchema<RowData> createRuntimeDecoder(
+                DynamicTableSource.Context context, DataType physicalDataType) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ChangelogMode getChangelogMode() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            NotIdempotentDecodingFormat that = (NotIdempotentDecodingFormat) o;
+            return Objects.equals(metadataKeys, that.metadataKeys);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hashCode(metadataKeys);
+        }
+    }
+
+    @Test
+    public void testApplyReadableMetadataIsIdempotent() {
+        final KafkaDynamicSource kafkaSource =
+                new KafkaDynamicSource(
+                        SCHEMA_WITH_METADATA.toPhysicalRowDataType(),
+                        null,
+                        new NotIdempotentDecodingFormat(),
+                        new int[] {},
+                        new int[] {},
+                        null,
+                        TOPIC_LIST,
+                        null,
+                        new Properties(),
+                        StartupMode.EARLIEST,
+                        Collections.emptyMap(),
+                        0L,
+                        BoundedMode.GROUP_OFFSETS,
+                        Collections.emptyMap(),
+                        0L,
+                        false,
+                        "abc",
+                        1,
+                        FormatProjectionPushdownLevel.NONE,
+                        FormatProjectionPushdownLevel.NONE);
+
+        final Supplier<Integer> runnable =
+                () -> {
+                    kafkaSource.applyReadableMetadata(
+                            Arrays.asList("timestamp", "value.a"),
+                            SCHEMA_WITH_METADATA.toSourceRowDataType());
+                    return kafkaSource.hashCode();
+                };
+
+        assertThat(runnable.get()).isEqualTo(runnable.get());
     }
 
     @Test
@@ -1401,7 +1486,9 @@ public class KafkaDynamicTableFactoryTest {
                 0,
                 false,
                 FactoryMocks.IDENTIFIER.asSummaryString(),
-                parallelism);
+                parallelism,
+                FormatProjectionPushdownLevel.NONE,
+                FormatProjectionPushdownLevel.NONE);
     }
 
     private static KafkaDynamicSink createExpectedSink(

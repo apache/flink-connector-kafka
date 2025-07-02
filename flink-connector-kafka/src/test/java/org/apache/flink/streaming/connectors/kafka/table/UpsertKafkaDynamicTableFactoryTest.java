@@ -39,6 +39,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.transformations.SourceTransformation;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
+import org.apache.flink.streaming.connectors.kafka.config.FormatProjectionPushdownLevel;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanBoundedMode;
 import org.apache.flink.streaming.connectors.kafka.testutils.MockPartitionOffsetsRetriever;
@@ -996,7 +997,9 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                 0,
                 true,
                 FactoryMocks.IDENTIFIER.asSummaryString(),
-                parallelism);
+                parallelism,
+                FormatProjectionPushdownLevel.NONE,
+                FormatProjectionPushdownLevel.NONE);
     }
 
     private static KafkaDynamicSink createExpectedSink(
