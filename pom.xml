@@ -49,46 +49,63 @@ under the License.
 	</modules>
 
 	<properties>
-		<flink.version>2.0.0</flink.version>
-		<kafka.version>3.9.1</kafka.version>
-		<confluent.version>7.9.2</confluent.version>
-
-		<jackson-bom.version>2.16.2</jackson-bom.version>
-		<junit4.version>4.13.2</junit4.version>
-		<junit5.version>5.9.1</junit5.version>
-		<assertj.version>3.23.1</assertj.version>
-		<testcontainers.version>1.21.2</testcontainers.version>
-		<mockito.version>3.4.6</mockito.version>
-		<powermock.version>2.0.9</powermock.version>
-		<hamcrest.version>1.3</hamcrest.version>
-		<byte-buddy.version>1.12.10</byte-buddy.version>
-		<commons-cli.version>1.5.0</commons-cli.version>
-		<scala.binary.version>2.12</scala.binary.version>
-		<scala-reflect.version>2.12.19</scala-reflect.version>
-		<scala-library.version>2.12.19</scala-library.version>
-		<snappy-java.version>1.1.10.5</snappy-java.version>
-		<avro.version>1.11.4</avro.version>
-		<guava.version>32.1.2-jre</guava.version>
-
-		<japicmp.skip>false</japicmp.skip>
-		<japicmp.referenceVersion>1.17.0</japicmp.referenceVersion>
-
-		<slf4j.version>1.7.36</slf4j.version>
-		<log4j.version>2.17.1</log4j.version>
-
 		<flink.parent.artifactId>flink-connector-kafka-parent</flink.parent.artifactId>
 
+		<!-- Main Dependencies -->
+		<confluent.version>7.9.2</confluent.version>
+		<flink.version>2.0.0</flink.version>
+		<kafka.version>3.9.1</kafka.version>
+
+		<!-- Other Dependencies -->
+		<avro.version>1.12.0</avro.version>
+		<byte-buddy.version>1.12.10</byte-buddy.version>
+		<commons-cli.version>1.9.0</commons-cli.version>
+		<commons-codec.version>1.18.0</commons-codec.version>
+		<commons-compress.version>1.27.1</commons-compress.version>
+		<commons-io.version>2.19.0</commons-io.version>
+		<commons-lang3.version>3.18.0</commons-lang3.version>
+		<httpcore.version>4.4.16</httpcore.version>
+		<httpclient.version>4.5.14</httpclient.version>
+		<jackson-bom.version>2.18.2</jackson-bom.version>
+		<javassist.version>3.30.2-GA</javassist.version>
+		<jsr305.version>1.3.9</jsr305.version>
+		<kryo.version>5.6.2</kryo.version>
+		<log4j.version>2.25.0</log4j.version>
+		<objenesis.version>3.4</objenesis.version>
+		<scala.binary.version>2.12</scala.binary.version>
+		<scala-library.version>${scala.binary.version}.20</scala-library.version>
+		<scala-reflect.version>${scala.binary.version}.20</scala-reflect.version>
+		<slf4j.version>1.7.36</slf4j.version>
+		<snakeyaml.version>2.4</snakeyaml.version>
+		<snappy-java.version>1.1.10.7</snappy-java.version>
+
+		<!-- Test Dependencies -->
+		<archunit.version>1.4.1</archunit.version>
+		<assertj.version>3.27.3</assertj.version>
+		<docker-java-api.version>3.5.2</docker-java-api.version>
+		<guava.version>33.4.8-jre</guava.version>
+		<hamcrest.version>1.3</hamcrest.version>
+		<junit4.version>4.13.2</junit4.version>
+		<junit5.version>5.13.3</junit5.version>
+		<mockito.version>5.18.0</mockito.version>
+		<powermock.version>2.0.9</powermock.version>
+		<snakeyaml.version>2.4</snakeyaml.version>
+		<testcontainers.version>1.21.3</testcontainers.version>
+
+		<!-- Plugins -->
+		<japicmp.referenceVersion>1.17.0</japicmp.referenceVersion>
+		<japicmp.skip>false</japicmp.skip>
+		<maven.dependency.plugin.version>3.8.1</maven.dependency.plugin.version>
+
 		<!-- This property should contain the add-opens/add-exports commands required for the tests
-		 in the given connector's module to pass.
-		 It MUST be a space-separated list not containing any newlines,
-		 of entries in the form '[-]{2}add-[opens|exports]=<module>/<package>=ALL-UNNAMED'.-->
+		in the given connector's module to pass.
+		It MUST be a space-separated list not containing any newlines,
+		of entries in the form '[-]{2}add-[opens|exports]=<module>/<package>=ALL-UNNAMED'.-->
 		<flink.connector.module.config/>
 		<flink.surefire.baseArgLine>-XX:+UseG1GC -Xms256m -XX:+IgnoreUnrecognizedVMOptions
-			${flink.connector.module.config}
+		${flink.connector.module.config}
 		</flink.surefire.baseArgLine>
 	</properties>
-
-	<!-- This section defines the module versions that are used if nothing else is specified. -->
 
 	<dependencyManagement>
 
@@ -290,7 +307,7 @@ under the License.
 			<dependency>
 				<groupId>org.javassist</groupId>
 				<artifactId>javassist</artifactId>
-				<version>3.27.0-GA</version>
+				<version>${javassist.version}</version>
 			</dependency>
 
 			<dependency>
@@ -302,7 +319,7 @@ under the License.
 			<dependency>
 				<groupId>org.apache.commons</groupId>
 				<artifactId>commons-lang3</artifactId>
-				<version>3.3.2</version>
+				<version>${commons-lang3.version}</version>
 			</dependency>
 
 			<dependency>
@@ -340,12 +357,12 @@ under the License.
 			<dependency>
 				<groupId>com.tngtech.archunit</groupId>
 				<artifactId>archunit</artifactId>
-				<version>1.2.0</version>
+				<version>${archunit.version}</version>
 			</dependency>
 			<dependency>
 				<groupId>com.tngtech.archunit</groupId>
 				<artifactId>archunit-junit5-api</artifactId>
-				<version>1.2.0</version>
+				<version>${archunit.version}</version>
 			</dependency>
 
 			<dependency>
@@ -368,25 +385,25 @@ under the License.
 			<dependency>
 				<groupId>com.google.code.findbugs</groupId>
 				<artifactId>jsr305</artifactId>
-				<version>1.3.9</version>
+				<version>${jsr305.version}</version>
 			</dependency>
 
 			<dependency>
 				<groupId>commons-codec</groupId>
 				<artifactId>commons-codec</artifactId>
-				<version>1.15</version>
+				<version>${commons-codec.version}</version>
 			</dependency>
 
 			<dependency>
 				<groupId>org.apache.httpcomponents</groupId>
 				<artifactId>httpcore</artifactId>
-				<version>4.4.14</version>
+				<version>${httpcore.version}</version>
 			</dependency>
 
 			<dependency>
 				<groupId>org.apache.httpcomponents</groupId>
 				<artifactId>httpclient</artifactId>
-				<version>4.5.13</version>
+				<version>${httpclient.version}</version>
 			</dependency>
 
 			<dependency>
@@ -457,35 +474,35 @@ under the License.
 			<dependency>
 				<groupId>com.esotericsoftware.kryo</groupId>
 				<artifactId>kryo</artifactId>
-				<version>2.24.0</version>
+				<version>${kryo.version}</version>
 			</dependency>
 
 			<!-- For dependency convergence -->
 			<dependency>
 				<groupId>org.objenesis</groupId>
 				<artifactId>objenesis</artifactId>
-				<version>2.1</version>
+				<version>${objenesis.version}</version>
 			</dependency>
 
 			<!-- For dependency convergence -->
 			<dependency>
 				<groupId>org.yaml</groupId>
 				<artifactId>snakeyaml</artifactId>
-				<version>2.2</version>
+				<version>${snakeyaml.version}</version>
 			</dependency>
 
 			<!-- For dependency convergence -->
 			<dependency>
 				<groupId>org.apache.commons</groupId>
 				<artifactId>commons-compress</artifactId>
-				<version>1.26.1</version>
+				<version>${commons-compress.version}</version>
 			</dependency>
 
 			<!-- For dependency convergence -->
 			<dependency>
 				<groupId>commons-io</groupId>
 				<artifactId>commons-io</artifactId>
-				<version>2.15.1</version>
+				<version>${commons-io.version}</version>
 			</dependency>
 
 			<dependency>
@@ -499,7 +516,7 @@ under the License.
 			<dependency>
 				<groupId>com.github.docker-java</groupId>
 				<artifactId>docker-java-api</artifactId>
-				<version>3.5.1</version>
+				<version>${docker-java-api.version}</version>
 			</dependency>
 
 			<dependency>
@@ -587,7 +604,7 @@ under the License.
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-dependency-plugin</artifactId>
-				<version>3.7.1</version>
+				<version>${maven.dependency.plugin.version}</version>
 				<executions>
 					<execution>
 						<id>analyze-deps</id>
