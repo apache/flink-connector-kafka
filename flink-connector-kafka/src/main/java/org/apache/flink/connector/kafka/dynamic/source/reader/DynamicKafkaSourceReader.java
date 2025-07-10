@@ -35,6 +35,7 @@ import org.apache.flink.connector.kafka.dynamic.source.MetadataUpdateEvent;
 import org.apache.flink.connector.kafka.dynamic.source.metrics.KafkaClusterMetricGroup;
 import org.apache.flink.connector.kafka.dynamic.source.metrics.KafkaClusterMetricGroupManager;
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
+import org.apache.flink.connector.kafka.source.KafkaConsumerFactory;
 import org.apache.flink.connector.kafka.source.KafkaPropertiesUtil;
 import org.apache.flink.connector.kafka.source.metrics.KafkaSourceReaderMetrics;
 import org.apache.flink.connector.kafka.source.reader.KafkaRecordEmitter;
@@ -89,6 +90,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     private final NavigableMap<String, KafkaSourceReader<T>> clusterReaderMap;
     private final Map<String, Properties> clustersProperties;
     private final List<DynamicKafkaSourceSplit> pendingSplits;
+    private final KafkaConsumerFactory kafkaConsumerFactory;
 
     private MultipleFuturesAvailabilityHelper availabilityHelper;
     private int availabilityHelperSize;
@@ -99,7 +101,8 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     public DynamicKafkaSourceReader(
             SourceReaderContext readerContext,
             KafkaRecordDeserializationSchema<T> deserializationSchema,
-            Properties properties) {
+            Properties properties,
+            KafkaConsumerFactory kafkaConsumerFactory) {
         this.readerContext = readerContext;
         this.clusterReaderMap = new TreeMap<>();
         this.deserializationSchema = deserializationSchema;
@@ -117,6 +120,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         this.isActivelyConsumingSplits = false;
         this.restartingReaders = new AtomicBoolean();
         this.clustersProperties = new HashMap<>();
+        this.kafkaConsumerFactory = kafkaConsumerFactory;
     }
 
     /**
@@ -460,7 +464,8 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                                         readerSpecificProperties,
                                         readerContext,
                                         kafkaSourceReaderMetrics,
-                                        kafkaClusterId),
+                                        kafkaClusterId,
+                                        kafkaConsumerFactory),
                         (ignore) -> {}),
                 recordEmitter,
                 toConfiguration(readerSpecificProperties),
