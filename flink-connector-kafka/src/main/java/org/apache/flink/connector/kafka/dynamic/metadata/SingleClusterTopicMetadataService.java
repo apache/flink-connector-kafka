@@ -72,8 +72,8 @@ public class SingleClusterTopicMetadataService implements KafkaMetadataService {
     @Override
     public Map<String, KafkaStream> describeStreams(Collection<String> streamIds) {
         try {
-            return getAdminClient().describeTopics(new ArrayList<>(streamIds)).all().get().keySet()
-                    .stream()
+            return getAdminClient().describeTopics(new ArrayList<>(streamIds)).allTopicNames().get()
+                    .keySet().stream()
                     .collect(Collectors.toMap(topic -> topic, this::createKafkaStream));
         } catch (InterruptedException | ExecutionException e) {
             throw new RuntimeException("Fetching all streams failed", e);
