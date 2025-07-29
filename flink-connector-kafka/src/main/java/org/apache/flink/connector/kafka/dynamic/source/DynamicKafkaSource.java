@@ -37,6 +37,7 @@ import org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.Kaf
 import org.apache.flink.connector.kafka.dynamic.source.reader.DynamicKafkaSourceReader;
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplitSerializer;
+import org.apache.flink.connector.kafka.source.KafkaConsumerFactory;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
@@ -87,6 +88,7 @@ public class DynamicKafkaSource<T>
     private final OffsetsInitializer stoppingOffsetsInitializer;
     private final Properties properties;
     private final Boundedness boundedness;
+    private final KafkaConsumerFactory kafkaConsumerFactory;
 
     DynamicKafkaSource(
             KafkaStreamSubscriber kafkaStreamSubscriber,
@@ -95,7 +97,8 @@ public class DynamicKafkaSource<T>
             OffsetsInitializer startingOffsetsInitializer,
             OffsetsInitializer stoppingOffsetsInitializer,
             Properties properties,
-            Boundedness boundedness) {
+            Boundedness boundedness,
+            KafkaConsumerFactory kafkaConsumerFactory) {
         this.kafkaStreamSubscriber = kafkaStreamSubscriber;
         this.deserializationSchema = deserializationSchema;
         this.properties = properties;
@@ -103,6 +106,7 @@ public class DynamicKafkaSource<T>
         this.startingOffsetsInitializer = startingOffsetsInitializer;
         this.stoppingOffsetsInitializer = stoppingOffsetsInitializer;
         this.boundedness = boundedness;
+        this.kafkaConsumerFactory = kafkaConsumerFactory;
     }
 
     /**
@@ -134,7 +138,11 @@ public class DynamicKafkaSource<T>
     @Override
     public SourceReader<T, DynamicKafkaSourceSplit> createReader(
             SourceReaderContext readerContext) {
-        return new DynamicKafkaSourceReader<>(readerContext, deserializationSchema, properties);
+        return new DynamicKafkaSourceReader<>(
+                readerContext,
+                deserializationSchema,
+                properties,
+                kafkaConsumerFactory);
     }
 
     /**
