@@ -110,7 +110,7 @@ Kafka source provide 3 ways of topic-partition subscription:
   {{< tabs "KafkaSource#setTopicPattern" >}}
   {{< tab "Java" >}}
   ```java
-  KafkaSource.builder().setTopicPattern("topic.*");
+  KafkaSource.builder().setTopicPattern(Pattern.compile("topic.*"));
   ```
   {{< /tab >}}
   {{< tab "Python" >}}
