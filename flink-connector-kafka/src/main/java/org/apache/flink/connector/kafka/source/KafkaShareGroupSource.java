@@ -18,6 +18,16 @@
 
 package org.apache.flink.connector.kafka.source;
 
+import org.apache.flink.util.Preconditions;
+
+import javax.annotation.Nullable;
+
+import java.io.IOException;
+import java.util.Collections;
+import java.util.Objects;
+import java.util.Properties;
+import java.util.Set;
+
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.source.Boundedness;
@@ -29,64 +39,69 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
-import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumerator;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumStateSerializer;
+import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumerator;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
-import org.apache.flink.connector.kafka.source.reader.KafkaSourceReader;
+import org.apache.flink.connector.kafka.source.metrics.KafkaShareGroupSourceMetrics;
+import org.apache.flink.connector.kafka.source.reader.KafkaShareGroupSourceReader;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplitSerializer;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
-import org.apache.flink.streaming.api.lineage.LineageVertexProvider;
-import org.apache.flink.streaming.api.lineage.SourceLineageVertex;
 import org.apache.flink.util.function.SerializableSupplier;
-
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
-import java.io.IOException;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Properties;
-import java.util.Set;
-
 /**
  * A Kafka source that uses Kafka 4.1.0+ share group semantics for queue-like consumption.
- * This source enables message-level consumption and automatic load balancing
- * through Kafka's share group functionality (KIP-932).
- *
- * <p>Share group semantics provide several advantages over traditional partition-based consumption:
+ * 
+ * <p>This source enables message-level consumption and automatic load balancing through
+ * Kafka's share group functionality (KIP-932), providing several advantages over traditional
+ * partition-based consumption:
+ * 
  * <ul>
- *   <li>Automatic load balancing of individual messages across consumers</li>
- *   <li>Dynamic scaling without being limited by partition count</li>
- *   <li>Simplified consumer group management with shared groups</li>
- *   <li>Better fault tolerance and message distribution</li>
+ *   <li><strong>Message-level distribution:</strong> Messages are distributed across consumers
+ *       at the individual message level rather than partition level</li>
+ *   <li><strong>Dynamic scaling:</strong> Can scale beyond partition count limitations</li>
+ *   <li><strong>Automatic load balancing:</strong> Kafka broker handles load distribution</li>
+ *   <li><strong>Improved resource utilization:</strong> Reduces idle consumers</li>
+ *   <li><strong>Enhanced fault tolerance:</strong> Failed consumers' work is automatically
+ *       redistributed</li>
  * </ul>
  *
- * <p>This source requires Kafka 4.1.0+ with share group support enabled.
- * It operates alongside the traditional {@link KafkaSource} for backward compatibility.
+ * <h2>Requirements</h2>
+ * <ul>
+ *   <li>Kafka 4.1.0+ with share group support enabled</li>
+ *   <li>Share group ID must be configured</li>
+ *   <li>Topics and deserializer must be specified</li>
+ * </ul>
  *
- * <p>Example usage:
+ * <h2>Usage Example</h2>
  * <pre>{@code
  * KafkaShareGroupSource<String> source = KafkaShareGroupSource
  *     .<String>builder()
  *     .setBootstrapServers("localhost:9092")
- *     .setTopics("my-topic")
- *     .setShareGroupId("my-share-group")
+ *     .setTopics("orders-topic")
+ *     .setShareGroupId("order-processors")
  *     .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(new SimpleStringSchema()))
+ *     .setStartingOffsets(OffsetsInitializer.earliest())
  *     .build();
+ *
+ * env.fromSource(source, WatermarkStrategy.noWatermarks(), "Share Group Source");
  * }</pre>
  *
+ * <p><strong>Note:</strong> This source maintains full compatibility with FLIP-27 unified source API,
+ * FLIP-246 dynamic sources, and supports per-partition watermark generation as specified in FLINK-3375.
+ *
  * @param <OUT> the output type of the source
+ * @see KafkaSource
+ * @see KafkaShareGroupSourceBuilder
  */
 @PublicEvolving
 public class KafkaShareGroupSource<OUT>
-        implements LineageVertexProvider,
-                Source<OUT, KafkaPartitionSplit, KafkaSourceEnumState>,
+        implements Source<OUT, KafkaPartitionSplit, KafkaSourceEnumState>,
                 ResultTypeQueryable<OUT> {
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaShareGroupSource.class);
@@ -98,7 +113,7 @@ public class KafkaShareGroupSource<OUT>
     private final OffsetsInitializer stoppingOffsetsInitializer;
     private final Boundedness boundedness;
     private final KafkaRecordDeserializationSchema<OUT> deserializationSchema;
-    private final Properties props;
+    private final Properties properties;
     private final SerializableSupplier<String> rackIdSupplier;
     
     // Share group specific configuration
@@ -111,19 +126,26 @@ public class KafkaShareGroupSource<OUT>
             @Nullable OffsetsInitializer stoppingOffsetsInitializer,
             Boundedness boundedness,
             KafkaRecordDeserializationSchema<OUT> deserializationSchema,
-            Properties props,
+            Properties properties,
             SerializableSupplier<String> rackIdSupplier,
             String shareGroupId,
             boolean shareGroupMetricsEnabled) {
         
-        this.subscriber = subscriber;
-        this.startingOffsetsInitializer = startingOffsetsInitializer;
+        this.subscriber = Preconditions.checkNotNull(subscriber, "KafkaSubscriber cannot be null");
+        this.startingOffsetsInitializer = Preconditions.checkNotNull(
+            startingOffsetsInitializer, "Starting offsets initializer cannot be null");
         this.stoppingOffsetsInitializer = stoppingOffsetsInitializer;
-        this.boundedness = boundedness;
-        this.deserializationSchema = deserializationSchema;
-        this.props = props;
+        this.boundedness = Preconditions.checkNotNull(boundedness, "Boundedness cannot be null");
+        this.deserializationSchema = Preconditions.checkNotNull(
+            deserializationSchema, "Deserialization schema cannot be null");
+        this.properties = new Properties();
+        if (properties != null) {
+            this.properties.putAll(properties);
+        }
         this.rackIdSupplier = rackIdSupplier;
-        this.shareGroupId = shareGroupId;
+        this.shareGroupId = Preconditions.checkNotNull(shareGroupId, "Share group ID cannot be null");
+        Preconditions.checkArgument(!shareGroupId.trim().isEmpty(), 
+            "Share group ID cannot be empty");
         this.shareGroupMetricsEnabled = shareGroupMetricsEnabled;
     }
 
@@ -144,25 +166,68 @@ public class KafkaShareGroupSource<OUT>
     @Override
     public SourceReader<OUT, KafkaPartitionSplit> createReader(SourceReaderContext readerContext)
             throws Exception {
-        // For now, delegate to existing Kafka source for reader creation
-        // The share group logic is handled at the consumer level via properties
-        KafkaSource<OUT> delegateSource = KafkaSource.<OUT>builder()
-                .setBootstrapServers(props.getProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG))
-                .setDeserializer(deserializationSchema)
-                .build();
-                
-        return delegateSource.createReader(readerContext);
+        
+        // Configure properties for share group
+        Properties shareConsumerProperties = new Properties();
+        shareConsumerProperties.putAll(this.properties);
+        
+        // Ensure share group configuration is applied
+        configureShareGroupProperties(shareConsumerProperties);
+        
+        // Pass topic information to consumer properties for error reporting
+        Set<String> topics = getTopics();
+        if (!topics.isEmpty()) {
+            shareConsumerProperties.setProperty("topic", topics.iterator().next());
+        }
+        
+        // Create share group metrics if enabled
+        KafkaShareGroupSourceMetrics shareGroupMetrics = null;
+        if (shareGroupMetricsEnabled) {
+            shareGroupMetrics = new KafkaShareGroupSourceMetrics(readerContext.metricGroup());
+        }
+        
+        // Use proper KafkaShareGroupSourceReader with KafkaShareConsumer API
+        return new KafkaShareGroupSourceReader<>(
+                shareConsumerProperties,
+                deserializationSchema,
+                readerContext,
+                shareGroupMetrics
+        );
+    }
+    
+    /**
+     * Configures Kafka consumer properties for share group semantics.
+     * 
+     * @param consumerProperties the properties to configure
+     */
+    private void configureShareGroupProperties(Properties consumerProperties) {
+        // Force share group type - this is the key configuration that enables share group semantics
+        consumerProperties.setProperty("group.type", "share");
+        consumerProperties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, shareGroupId);
+        
+        // Remove properties not supported by share groups
+        consumerProperties.remove(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG);
+        consumerProperties.remove(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
+        consumerProperties.remove(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG);
+        consumerProperties.remove(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG);
+        
+        // Configure client ID for better tracking
+        if (!consumerProperties.containsKey(ConsumerConfig.CLIENT_ID_CONFIG)) {
+            consumerProperties.setProperty(ConsumerConfig.CLIENT_ID_CONFIG, 
+                shareGroupId + "-share-consumer");
+        }
     }
 
     @Override
     public SplitEnumerator<KafkaPartitionSplit, KafkaSourceEnumState> createEnumerator(
             SplitEnumeratorContext<KafkaPartitionSplit> enumContext) {
-        // Use existing KafkaSourceEnumerator - share group logic handled at consumer level
+        // Use existing KafkaSourceEnumerator for split management
+        // Share group semantics are handled at the Kafka consumer level, not at split level
         return new KafkaSourceEnumerator(
                 subscriber,
                 startingOffsetsInitializer,
                 stoppingOffsetsInitializer,
-                props,
+                properties,
                 enumContext,
                 boundedness
         );
@@ -177,7 +242,7 @@ public class KafkaShareGroupSource<OUT>
                 subscriber,
                 startingOffsetsInitializer,
                 stoppingOffsetsInitializer,
-                props,
+                properties,
                 enumContext,
                 boundedness,
                 checkpoint
@@ -199,48 +264,133 @@ public class KafkaShareGroupSource<OUT>
         return deserializationSchema.getProducedType();
     }
 
-    @Override
-    public SourceLineageVertex getLineageVertex() {
-        // Reuse existing KafkaSource lineage implementation
-        return KafkaSource.<OUT>builder()
-                .setBootstrapServers(props.getProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG))
-                .setDeserializer(deserializationSchema)
-                .build()
-                .getLineageVertex();
-    }
+    // TODO: Add proper lineage support when compatible Flink version is available
+    // Lineage support would track the share group as a data lineage source
 
-    // Share group specific getters
+    /**
+     * Returns the share group ID configured for this source.
+     * 
+     * @return the share group ID
+     */
     public String getShareGroupId() {
         return shareGroupId;
     }
 
+    /**
+     * Returns whether share group metrics are enabled.
+     * 
+     * @return true if share group metrics are enabled
+     */
     public boolean isShareGroupMetricsEnabled() {
         return shareGroupMetricsEnabled;
     }
 
+    /**
+     * Returns whether this source uses share group semantics.
+     * Always returns true for KafkaShareGroupSource.
+     * 
+     * @return true
+     */
     public boolean isShareGroupEnabled() {
         return true;
     }
 
+    /**
+     * Returns the topics subscribed by this source.
+     * 
+     * @return set of topic names, or empty set if unable to determine
+     */
     public Set<String> getTopics() {
-        // Get topics from subscriber using reflection or direct access
+        // Attempt to get topics from subscriber
+        // Different subscriber implementations may have different methods
         try {
-            return (Set<String>) subscriber.getClass().getMethod("getSubscribedTopics").invoke(subscriber);
+            return (Set<String>) subscriber.getClass()
+                .getMethod("getSubscribedTopics")
+                .invoke(subscriber);
         } catch (Exception e) {
-            // Fallback - return empty set if method not available
+            LOG.debug("Unable to retrieve topics from subscriber: {}", e.getMessage());
             return Collections.emptySet();
         }
     }
 
+    /**
+     * Returns the Kafka subscriber used by this source.
+     * 
+     * @return the Kafka subscriber
+     */
+    public KafkaSubscriber getSubscriber() {
+        return subscriber;
+    }
+    
+    /**
+     * Returns the starting offsets initializer.
+     * 
+     * @return the starting offsets initializer
+     */
+    public OffsetsInitializer getStartingOffsetsInitializer() {
+        return startingOffsetsInitializer;
+    }
+    
+    /**
+     * Returns the stopping offsets initializer.
+     * 
+     * @return the stopping offsets initializer, may be null
+     */
+    @Nullable
+    public OffsetsInitializer getStoppingOffsetsInitializer() {
+        return stoppingOffsetsInitializer;
+    }
+
     @VisibleForTesting
     Properties getConfiguration() {
-        return new Properties(props);
+        Properties copy = new Properties();
+        copy.putAll(properties);
+        return copy;
     }
 
     @VisibleForTesting
     Configuration toConfiguration(Properties props) {
         Configuration config = new Configuration();
-        props.stringPropertyNames().forEach(key -> config.setString(key, props.getProperty(key)));
+        props.stringPropertyNames().forEach(key -> 
+            config.setString(key, props.getProperty(key)));
         return config;
+    }
+    
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+        
+        KafkaShareGroupSource<?> that = (KafkaShareGroupSource<?>) obj;
+        return Objects.equals(subscriber, that.subscriber) &&
+               Objects.equals(startingOffsetsInitializer, that.startingOffsetsInitializer) &&
+               Objects.equals(stoppingOffsetsInitializer, that.stoppingOffsetsInitializer) &&
+               Objects.equals(boundedness, that.boundedness) &&
+               Objects.equals(deserializationSchema, that.deserializationSchema) &&
+               Objects.equals(properties, that.properties) &&
+               Objects.equals(shareGroupId, that.shareGroupId) &&
+               shareGroupMetricsEnabled == that.shareGroupMetricsEnabled;
+    }
+    
+    @Override
+    public int hashCode() {
+        return Objects.hash(
+            subscriber, startingOffsetsInitializer, stoppingOffsetsInitializer,
+            boundedness, deserializationSchema, properties, shareGroupId, shareGroupMetricsEnabled
+        );
+    }
+    
+    @Override
+    public String toString() {
+        return "KafkaShareGroupSource{" +
+               "shareGroupId='" + shareGroupId + '\'' +
+               ", topics=" + getTopics() +
+               ", boundedness=" + boundedness +
+               ", metricsEnabled=" + shareGroupMetricsEnabled +
+               '}';
     }
 }

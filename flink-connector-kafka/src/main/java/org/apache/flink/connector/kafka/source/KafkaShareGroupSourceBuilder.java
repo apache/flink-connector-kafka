@@ -18,6 +18,13 @@
 
 package org.apache.flink.connector.kafka.source;
 
+import java.util.Arrays;
+import java.util.List;
+import java.util.Properties;
+import java.util.Random;
+import java.util.Set;
+import java.util.regex.Pattern;
+
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.connector.source.Boundedness;
@@ -25,24 +32,14 @@ import org.apache.flink.connector.kafka.source.enumerator.initializer.NoStopping
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
+import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.util.Preconditions.checkState;
 import org.apache.flink.util.function.SerializableSupplier;
-
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
-import java.util.Properties;
-import java.util.Random;
-import java.util.Set;
-import java.util.regex.Pattern;
-
-import static org.apache.flink.util.Preconditions.checkNotNull;
-import static org.apache.flink.util.Preconditions.checkState;
 
 /**
  * The builder class for {@link KafkaShareGroupSource} to make it easier for users to construct
@@ -241,7 +238,7 @@ public class KafkaShareGroupSourceBuilder<OUT> {
      * @param enabled whether to enable share group metrics
      * @return this KafkaShareGroupSourceBuilder
      */
-    public KafkaShareGroupSourceBuilder<OUT> enableShareGroupMetrics(boolean enabled) {
+public KafkaShareGroupSourceBuilder<OUT> enableShareGroupMetrics(boolean enabled) {
         this.shareGroupMetricsEnabled = enabled;
         return this;
     }

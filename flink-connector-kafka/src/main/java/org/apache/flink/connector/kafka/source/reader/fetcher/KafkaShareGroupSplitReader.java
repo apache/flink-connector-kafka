@@ -27,200 +27,215 @@ import org.apache.flink.connector.base.source.reader.splitreader.SplitsRemoval;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.clients.consumer.KafkaShareConsumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.Set;
 
 /**
- * A {@link SplitReader} implementation that handles Kafka share group consumption.
- * This wrapper extends the existing Kafka split reader to support share group semantics
- * available in Kafka 4.1.0+.
+ * A {@link SplitReader} implementation that handles Kafka share group consumption using KafkaShareConsumer.
+ * This implementation uses the Kafka 4.1.0+ KafkaShareConsumer API to support true share group semantics.
  *
- * <p>Share groups provide queue-like semantics where messages are distributed automatically
- * across consumers without manual partition assignment.
+ * <p>Key differences from traditional consumer groups:
+ * <ul>
+ *   <li><strong>Uses KafkaShareConsumer instead of KafkaConsumer</strong> - The new API for share groups</li>
+ *   <li><strong>Messages distributed at message level, not partition level</strong> - Better load balancing</li>
+ *   <li><strong>No manual partition assignment</strong> - Topics are subscribed to, partitions handled automatically</li>
+ *   <li><strong>Automatic load balancing</strong> - Kafka coordinator handles message distribution</li>
+ *   <li><strong>Queue-like semantics</strong> - Each message delivered to exactly one consumer in the group</li>
+ * </ul>
+ *
+ * <p>This is the correct implementation for Kafka 4.1.0+ share groups, replacing the traditional
+ * partition-based assignment model with message-level distribution.
  */
 public class KafkaShareGroupSplitReader implements SplitReader<ConsumerRecord<byte[], byte[]>, KafkaPartitionSplit> {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaShareGroupSplitReader.class);
     
-    private final KafkaConsumer<byte[], byte[]> consumer;
+    private final KafkaShareConsumer<byte[], byte[]> shareConsumer;
     private final Map<String, KafkaPartitionSplit> assignedSplits;
-    private final boolean isShareGroupEnabled;
     private final String shareGroupId;
+    private final List<String> subscribedTopics;
 
+    /**
+     * Creates a new KafkaShareGroupSplitReader that uses the KafkaShareConsumer API.
+     * 
+     * @param consumerProps consumer properties
+     * @param shareGroupId the share group identifier
+     * @param topics topics to subscribe to
+     */
     public KafkaShareGroupSplitReader(
             Properties consumerProps, 
-            String shareGroupId) {
-        this.consumer = new KafkaConsumer<>(consumerProps);
+            String shareGroupId,
+            Collection<String> topics) {
+        // Ensure share group properties are set correctly
+        Properties shareGroupProps = new Properties();
+        shareGroupProps.putAll(consumerProps);
+        shareGroupProps.setProperty("group.type", "share");
+        shareGroupProps.setProperty("group.id", shareGroupId);
+        // Disable auto-commit as Flink handles acknowledgment
+        shareGroupProps.setProperty("enable.auto.commit", "false");
+        
+        // Create KafkaShareConsumer instead of traditional KafkaConsumer
+        this.shareConsumer = new KafkaShareConsumer<>(shareGroupProps);
         this.assignedSplits = new HashMap<>();
         this.shareGroupId = shareGroupId;
-        this.isShareGroupEnabled = "share".equals(consumerProps.getProperty("group.type"));
+        this.subscribedTopics = new ArrayList<>(topics);
         
-        LOG.info("Created Kafka share group split reader for share group: {}, enabled: {}", 
-                shareGroupId, isShareGroupEnabled);
+        // Subscribe to topics (share groups use subscription, not assignment)
+        if (!topics.isEmpty()) {
+            this.shareConsumer.subscribe(topics);
+            LOG.info("KafkaShareConsumer for share group '{}' subscribed to topics: {}", shareGroupId, topics);
+        }
+        
+        LOG.info("Created KafkaShareConsumer for share group '{}' with {} topics", shareGroupId, topics.size());
     }
 
     @Override
     public RecordsWithSplitIds<ConsumerRecord<byte[], byte[]>> fetch() throws IOException {
         try {
-            ConsumerRecords<byte[], byte[]> consumerRecords = consumer.poll(Duration.ofMillis(100));
+            // Use KafkaShareConsumer.poll() - this fetches messages distributed by the share group coordinator
+            // Messages are automatically balanced across consumers in the share group at the message level
+            ConsumerRecords<byte[], byte[]> consumerRecords = shareConsumer.poll(Duration.ofMillis(100));
             
             if (consumerRecords.isEmpty()) {
                 return new KafkaRecordsWithSplitIds(Collections.emptyIterator());
             }
 
+            LOG.debug("KafkaShareConsumer '{}' fetched {} records from share group", shareGroupId, consumerRecords.count());
+            
+            // Note: In share groups, records are automatically acknowledged unless explicit acknowledgment is configured
+            // The KafkaShareConsumer handles this based on the acknowledgment mode configuration
             return new KafkaRecordsWithSplitIds(consumerRecords.iterator());
             
         } catch (Exception e) {
-            throw new IOException("Error fetching records from Kafka share group consumer", e);
+            LOG.error("Error fetching records from KafkaShareConsumer for share group '{}': {}", shareGroupId, e.getMessage());
+            throw new IOException("Error fetching records from KafkaShareConsumer for share group: " + shareGroupId, e);
         }
     }
 
     @Override
     public void handleSplitsChanges(SplitsChange<KafkaPartitionSplit> splitsChanges) {
+        // Share groups handle subscription automatically, but we track splits for compatibility with Flink's split system
         if (splitsChanges instanceof SplitsAddition) {
             handleSplitsAddition((SplitsAddition<KafkaPartitionSplit>) splitsChanges);
         } else if (splitsChanges instanceof SplitsRemoval) {
             handleSplitsRemoval((SplitsRemoval<KafkaPartitionSplit>) splitsChanges);
         }
+        
+        LOG.debug("Share group '{}' handled split changes: {}", shareGroupId, splitsChanges.getClass().getSimpleName());
+    }
+
+    private void handleSplitsAddition(SplitsAddition<KafkaPartitionSplit> splitsAddition) {
+        // In share groups, we don't manually assign partitions like traditional consumer groups
+        // Instead, we track splits for metadata and compatibility with Flink's split system
+        for (KafkaPartitionSplit split : splitsAddition.splits()) {
+            assignedSplits.put(split.splitId(), split);
+            
+            // Extract topics from splits to ensure subscription includes all necessary topics
+            String topic = split.getTopicPartition().topic();
+            if (!subscribedTopics.contains(topic)) {
+                subscribedTopics.add(topic);
+                // Update subscription to include new topic
+                shareConsumer.subscribe(subscribedTopics);
+                LOG.info("Share group '{}' subscription updated to include topic: {}", shareGroupId, topic);
+            }
+        }
+        
+        LOG.debug("Share group '{}' added {} splits, total tracked: {}", 
+                shareGroupId, splitsAddition.splits().size(), assignedSplits.size());
+    }
+
+    private void handleSplitsRemoval(SplitsRemoval<KafkaPartitionSplit> splitsRemoval) {
+        // Remove splits from tracking (share group coordinator handles the actual unsubscription)
+        for (String splitId : splitsRemoval.splitIds()) {
+            assignedSplits.remove(splitId);
+        }
+        
+        LOG.debug("Share group '{}' removed {} splits, remaining tracked: {}", 
+                shareGroupId, splitsRemoval.splitIds().size(), assignedSplits.size());
     }
 
     @Override
     public void wakeUp() {
-        consumer.wakeup();
+        shareConsumer.wakeup();
+        LOG.debug("KafkaShareConsumer '{}' woken up", shareGroupId);
     }
 
     @Override
     public void close() throws Exception {
-        LOG.info("Closing Kafka share group split reader for share group: {}", shareGroupId);
-        consumer.close();
-    }
-
-    private void handleSplitsAddition(SplitsAddition<KafkaPartitionSplit> splitsAddition) {
-        Collection<KafkaPartitionSplit> newSplits = splitsAddition.splits();
-        
-        for (KafkaPartitionSplit split : newSplits) {
-            assignedSplits.put(split.splitId(), split);
-        }
-
-        if (isShareGroupEnabled) {
-            // For share groups, subscribe to topics (not individual partitions)
-            Set<String> topics = extractTopicsFromSplits(newSplits);
-            if (!topics.isEmpty()) {
-                LOG.info("Subscribing to topics for share group {}: {}", shareGroupId, topics);
-                consumer.subscribe(topics);
-            }
-        } else {
-            // Fallback to traditional partition assignment
-            Set<TopicPartition> partitions = extractPartitionsFromSplits(newSplits);
-            if (!partitions.isEmpty()) {
-                LOG.info("Assigning partitions: {}", partitions);
-                consumer.assign(partitions);
-                
-                // Seek to starting offsets for each partition
-                for (KafkaPartitionSplit split : newSplits) {
-                    TopicPartition tp = split.getTopicPartition();
-                    long startingOffset = split.getStartingOffset();
-                    if (startingOffset >= 0) {
-                        consumer.seek(tp, startingOffset);
-                    }
-                }
-            }
-        }
-    }
-
-    private void handleSplitsRemoval(SplitsRemoval<KafkaPartitionSplit> splitsRemoval) {
-        // Note: In some Flink versions, the method might be different
-        // Try to get finished split IDs safely
         try {
-            Collection<String> finishedSplitIds = null;
-            
-            // Try different method names that might exist
-            try {
-                finishedSplitIds = (Collection<String>) splitsRemoval.getClass()
-                    .getMethod("splitIds").invoke(splitsRemoval);
-            } catch (Exception e) {
-                try {
-                    finishedSplitIds = (Collection<String>) splitsRemoval.getClass()
-                        .getMethod("getSplitIds").invoke(splitsRemoval);
-                } catch (Exception e2) {
-                    LOG.warn("Could not access split IDs from SplitsRemoval: {}", e2.getMessage());
-                    return;
-                }
-            }
-            
-            if (finishedSplitIds != null) {
-                for (String splitId : finishedSplitIds) {
-                    assignedSplits.remove(splitId);
-                }
-                LOG.debug("Removed {} finished splits from share group reader", finishedSplitIds.size());
-            }
+            shareConsumer.close();
+            LOG.info("KafkaShareConsumer '{}' closed successfully", shareGroupId);
         } catch (Exception e) {
-            LOG.warn("Error handling splits removal: {}", e.getMessage());
+            LOG.warn("Error closing KafkaShareConsumer '{}': {}", shareGroupId, e.getMessage());
+            throw e;
         }
-    }
-
-    private Set<String> extractTopicsFromSplits(Collection<KafkaPartitionSplit> splits) {
-        Set<String> topics = new java.util.HashSet<>();
-        for (KafkaPartitionSplit split : splits) {
-            topics.add(split.getTopicPartition().topic());
-        }
-        return topics;
-    }
-
-    private Set<TopicPartition> extractPartitionsFromSplits(Collection<KafkaPartitionSplit> splits) {
-        Set<TopicPartition> partitions = new java.util.HashSet<>();
-        for (KafkaPartitionSplit split : splits) {
-            partitions.add(split.getTopicPartition());
-        }
-        return partitions;
     }
 
     /**
-     * Implementation of RecordsWithSplitIds for Kafka records.
+     * Gets the underlying KafkaShareConsumer instance for advanced operations.
+     * 
+     * @return the share consumer instance
+     */
+    public KafkaShareConsumer<byte[], byte[]> getShareConsumer() {
+        return shareConsumer;
+    }
+
+    /**
+     * Gets the share group ID associated with this reader.
+     * 
+     * @return the share group ID
+     */
+    public String getShareGroupId() {
+        return shareGroupId;
+    }
+
+    /**
+     * Gets the topics currently subscribed by the share consumer.
+     * 
+     * @return collection of subscribed topics
+     */
+    public Collection<String> getSubscribedTopics() {
+        return Collections.unmodifiableCollection(subscribedTopics);
+    }
+
+    /**
+     * Simple implementation of RecordsWithSplitIds for share group records.
      */
     private static class KafkaRecordsWithSplitIds implements RecordsWithSplitIds<ConsumerRecord<byte[], byte[]>> {
-        private final Iterator<ConsumerRecord<byte[], byte[]>> recordsIterator;
-        private String currentSplitId;
-        private ConsumerRecord<byte[], byte[]> currentRecord;
-
-        public KafkaRecordsWithSplitIds(Iterator<ConsumerRecord<byte[], byte[]>> recordsIterator) {
-            this.recordsIterator = recordsIterator;
+        private final java.util.Iterator<ConsumerRecord<byte[], byte[]>> recordIterator;
+        
+        public KafkaRecordsWithSplitIds(java.util.Iterator<ConsumerRecord<byte[], byte[]>> recordIterator) {
+            this.recordIterator = recordIterator;
         }
-
+        
         @Override
-        @Nullable
         public String nextSplit() {
-            if (recordsIterator.hasNext()) {
-                currentRecord = recordsIterator.next();
-                TopicPartition tp = new TopicPartition(currentRecord.topic(), currentRecord.partition());
-                currentSplitId = KafkaPartitionSplit.toSplitId(tp);
-                return currentSplitId;
-            }
-            return null;
+            return recordIterator.hasNext() ? "share-group-split" : null;
         }
-
+        
         @Override
-        @Nullable
         public ConsumerRecord<byte[], byte[]> nextRecordFromSplit() {
-            return currentRecord;
+            return recordIterator.hasNext() ? recordIterator.next() : null;
         }
-
+        
         @Override
-        public Set<String> finishedSplits() {
-            return Collections.emptySet(); // Share groups handle split completion automatically
+        public void recycle() {
+            // No recycling needed for this implementation
+        }
+        
+        @Override
+        public Collection<String> finishedSplits() {
+            return Collections.emptyList();
         }
     }
 }

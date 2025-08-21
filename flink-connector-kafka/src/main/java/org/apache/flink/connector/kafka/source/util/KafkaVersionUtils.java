@@ -110,32 +110,34 @@ public final class KafkaVersionUtils {
     
     private static boolean detectShareGroupSupport() {
         try {
-            // Try to find share group related classes/methods
-            // This is a simple heuristic - in production, you might want more sophisticated detection
-            
-            // Method 1: Check for share group consumer config keys
-            Class<?> consumerConfigClass = Class.forName("org.apache.kafka.clients.consumer.ConsumerConfig");
-            try {
-                // Look for share group specific config constants that were added in 4.1.0
-                consumerConfigClass.getDeclaredField("GROUP_TYPE_CONFIG");
-                LOG.info("Share group support detected via ConsumerConfig.GROUP_TYPE_CONFIG");
-                return true;
-            } catch (NoSuchFieldException e) {
-                // GROUP_TYPE_CONFIG not found, likely older version
-            }
-            
-            // Method 2: Check for KafkaShareConsumer class (if it exists)
+            // Method 1: Check for KafkaShareConsumer class (most reliable)
             try {
                 Class.forName("org.apache.kafka.clients.consumer.KafkaShareConsumer");
                 LOG.info("Share group support detected via KafkaShareConsumer class");
                 return true;
             } catch (ClassNotFoundException e) {
-                // KafkaShareConsumer not found
+                LOG.debug("KafkaShareConsumer class not found: {}", e.getMessage());
+            }
+            
+            // Method 2: Check for share group specific config constants
+            try {
+                Class<?> consumerConfigClass = Class.forName("org.apache.kafka.clients.consumer.ConsumerConfig");
+                consumerConfigClass.getDeclaredField("GROUP_TYPE_CONFIG");
+                LOG.info("Share group support detected via ConsumerConfig.GROUP_TYPE_CONFIG");
+                return true;
+            } catch (NoSuchFieldException | ClassNotFoundException e) {
+                LOG.debug("GROUP_TYPE_CONFIG not found: {}", e.getMessage());
             }
             
             // Method 3: Check version through AppInfoParser (fallback)
             String version = detectKafkaVersion();
-            return isVersionAtLeast(version, "4.1.0");
+            boolean versionSupported = isVersionAtLeast(version, "4.1.0");
+            if (versionSupported) {
+                LOG.info("Share group support detected via version check: {}", version);
+            } else {
+                LOG.info("Share group not supported in version: {}", version);
+            }
+            return versionSupported;
             
         } catch (Exception e) {
             LOG.warn("Failed to detect share group support: {}", e.getMessage());
