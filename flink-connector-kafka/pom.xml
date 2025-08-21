@@ -42,6 +42,8 @@ under the License.
         KafkaProducerExactlyOnceITCase -->
 			--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED
 		</flink.connector.module.config>
+		<maven.compiler.source>21</maven.compiler.source>
+		<maven.compiler.target>21</maven.compiler.target>
 	</properties>
 
 	<dependencies>
@@ -156,7 +158,6 @@ under the License.
 		</dependency>
 
 		<!-- Kafka -->
-
 		<dependency>
 			<groupId>org.apache.kafka</groupId>
 			<artifactId>kafka-clients</artifactId>
@@ -420,6 +421,14 @@ under the License.
 						</configuration>
 					</execution>
 				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-compiler-plugin</artifactId>
+				<configuration>
+					<source>10</source>
+					<target>10</target>
+				</configuration>
 			</plugin>
 		</plugins>
 	</build>
