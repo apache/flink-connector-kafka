@@ -77,6 +77,12 @@ public class KafkaShareGroupDynamicTableFactory implements DynamicTableSourceFac
             .noDefaultValue()
             .withDescription("The share group ID for queue-like consumption.");
             
+    public static final ConfigOption<Integer> SOURCE_PARALLELISM = ConfigOptions
+            .key("source.parallelism")
+            .intType()
+            .noDefaultValue()
+            .withDescription("Parallelism for the share group source. Allows more subtasks than topic partitions.");
+    
     public static final ConfigOption<Boolean> ENABLE_SHARE_GROUP_METRICS = ConfigOptions
             .key("enable-share-group-metrics")
             .booleanType()
@@ -139,6 +145,7 @@ public class KafkaShareGroupDynamicTableFactory implements DynamicTableSourceFac
     public Set<ConfigOption<?>> optionalOptions() {
         Set<ConfigOption<?>> optionalOptions = new HashSet<>();
         optionalOptions.add(ENABLE_SHARE_GROUP_METRICS);
+        optionalOptions.add(SOURCE_PARALLELISM);
         optionalOptions.add(GROUP_TYPE);
         optionalOptions.add(ENABLE_AUTO_COMMIT);
         optionalOptions.add(SESSION_TIMEOUT);
@@ -173,7 +180,8 @@ public class KafkaShareGroupDynamicTableFactory implements DynamicTableSourceFac
             config.get(SHARE_GROUP_ID),
             config.get(TOPIC),
             properties,
-            config.get(ENABLE_SHARE_GROUP_METRICS)
+            config.get(ENABLE_SHARE_GROUP_METRICS),
+            config.getOptional(SOURCE_PARALLELISM).orElse(null)
         );
     }
     
@@ -226,6 +234,7 @@ public class KafkaShareGroupDynamicTableFactory implements DynamicTableSourceFac
         private final String topic;
         private final Properties kafkaProperties;
         private final boolean enableMetrics;
+        private final Integer parallelism;
         
         public KafkaShareGroupDynamicTableSource(
                 DataType physicalDataType,
@@ -234,7 +243,8 @@ public class KafkaShareGroupDynamicTableFactory implements DynamicTableSourceFac
                 String shareGroupId,
                 String topic,
                 Properties kafkaProperties,
-                boolean enableMetrics) {
+                boolean enableMetrics,
+                Integer parallelism) {
             this.physicalDataType = physicalDataType;
             this.decodingFormat = decodingFormat;
             this.bootstrapServers = bootstrapServers;
@@ -242,6 +252,7 @@ public class KafkaShareGroupDynamicTableFactory implements DynamicTableSourceFac
             this.topic = topic;
             this.kafkaProperties = kafkaProperties;
             this.enableMetrics = enableMetrics;
+            this.parallelism = parallelism;
         }
 
         @Override
@@ -267,7 +278,12 @@ public class KafkaShareGroupDynamicTableFactory implements DynamicTableSourceFac
                 .enableShareGroupMetrics(enableMetrics)
                 .build();
             
-            return SourceProvider.of(shareGroupSource);
+            // Create SourceProvider with custom parallelism if specified
+            if (parallelism != null) {
+                return SourceProvider.of(shareGroupSource, parallelism);
+            } else {
+                return SourceProvider.of(shareGroupSource);
+            }
         }
 
         @Override
@@ -279,7 +295,8 @@ public class KafkaShareGroupDynamicTableFactory implements DynamicTableSourceFac
                 shareGroupId,
                 topic,
                 kafkaProperties,
-                enableMetrics
+                enableMetrics,
+                parallelism
             );
         }
 

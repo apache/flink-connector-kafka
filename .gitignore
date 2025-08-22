@@ -2,8 +2,7 @@
 .cache
 scalastyle-output.xml
 .classpath
-.idea/*
-!.idea/vcs.xml
+.idea/
 .metadata
 .settings
 .project
