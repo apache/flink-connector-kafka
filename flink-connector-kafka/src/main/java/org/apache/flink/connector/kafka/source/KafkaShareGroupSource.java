@@ -23,7 +23,11 @@ import org.apache.flink.util.Preconditions;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
@@ -38,16 +42,16 @@ import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
-import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumStateSerializer;
-import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumerator;
+import org.apache.flink.connector.kafka.source.enumerator.KafkaShareGroupEnumerator;
+import org.apache.flink.connector.kafka.source.enumerator.KafkaShareGroupEnumeratorState;
+import org.apache.flink.connector.kafka.source.enumerator.KafkaShareGroupEnumeratorStateSerializer;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
 import org.apache.flink.connector.kafka.source.metrics.KafkaShareGroupSourceMetrics;
 import org.apache.flink.connector.kafka.source.reader.KafkaShareGroupSourceReader;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
-import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
-import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplitSerializer;
+import org.apache.flink.connector.kafka.source.split.KafkaShareGroupSplit;
+import org.apache.flink.connector.kafka.source.split.KafkaShareGroupSplitSerializer;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.util.function.SerializableSupplier;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -101,7 +105,7 @@ import org.slf4j.LoggerFactory;
  */
 @PublicEvolving
 public class KafkaShareGroupSource<OUT>
-        implements Source<OUT, KafkaPartitionSplit, KafkaSourceEnumState>,
+        implements Source<OUT, KafkaShareGroupSplit, KafkaShareGroupEnumeratorState>,
                 ResultTypeQueryable<OUT> {
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaShareGroupSource.class);
@@ -164,7 +168,7 @@ public class KafkaShareGroupSource<OUT>
     }
 
     @Override
-    public SourceReader<OUT, KafkaPartitionSplit> createReader(SourceReaderContext readerContext)
+    public SourceReader<OUT, KafkaShareGroupSplit> createReader(SourceReaderContext readerContext)
             throws Exception {
         
         // Configure properties for share group
@@ -174,7 +178,7 @@ public class KafkaShareGroupSource<OUT>
         // Ensure share group configuration is applied
         configureShareGroupProperties(shareConsumerProperties);
         
-        // Pass topic information to consumer properties for error reporting
+        // Pass topic information to consumer properties
         Set<String> topics = getTopics();
         if (!topics.isEmpty()) {
             shareConsumerProperties.setProperty("topic", topics.iterator().next());
@@ -186,7 +190,10 @@ public class KafkaShareGroupSource<OUT>
             shareGroupMetrics = new KafkaShareGroupSourceMetrics(readerContext.metricGroup());
         }
         
-        // Use proper KafkaShareGroupSourceReader with KafkaShareConsumer API
+        // Use proper KafkaShareGroupSourceReader with Flink connector architecture
+        LOG.info("*** MAIN SOURCE: Creating reader for share group '{}' on subtask {} with consumer properties: {}", 
+                shareGroupId, readerContext.getIndexOfSubtask(), shareConsumerProperties.stringPropertyNames());
+        
         return new KafkaShareGroupSourceReader<>(
                 shareConsumerProperties,
                 deserializationSchema,
@@ -219,44 +226,55 @@ public class KafkaShareGroupSource<OUT>
     }
 
     @Override
-    public SplitEnumerator<KafkaPartitionSplit, KafkaSourceEnumState> createEnumerator(
-            SplitEnumeratorContext<KafkaPartitionSplit> enumContext) {
-        // Use existing KafkaSourceEnumerator for split management
-        // Share group semantics are handled at the Kafka consumer level, not at split level
-        return new KafkaSourceEnumerator(
-                subscriber,
-                startingOffsetsInitializer,
-                stoppingOffsetsInitializer,
-                properties,
-                enumContext,
-                boundedness
+    public SplitEnumerator<KafkaShareGroupSplit, KafkaShareGroupEnumeratorState> createEnumerator(
+            SplitEnumeratorContext<KafkaShareGroupSplit> enumContext) {
+        
+        Set<String> topics = getTopics();
+        LOG.info("*** MAIN SOURCE: Creating KafkaShareGroupEnumerator for topics: {} with share group '{}'", 
+                topics, shareGroupId);
+        
+        // If no topics found from subscriber, try to get from properties as fallback
+        if (topics.isEmpty()) {
+            String topicFromProps = properties.getProperty("topic");
+            if (topicFromProps != null && !topicFromProps.trim().isEmpty()) {
+                topics = Collections.singleton(topicFromProps.trim());
+                LOG.info("*** MAIN SOURCE: Using fallback topic from properties: {}", topics);
+            } else {
+                LOG.warn("*** MAIN SOURCE: No topics found from subscriber and no fallback topic in properties!");
+            }
+        }
+        
+        return new KafkaShareGroupEnumerator(
+                topics,
+                shareGroupId,
+                null, // no existing state
+                enumContext
         );
     }
 
     @Override
-    public SplitEnumerator<KafkaPartitionSplit, KafkaSourceEnumState> restoreEnumerator(
-            SplitEnumeratorContext<KafkaPartitionSplit> enumContext,
-            KafkaSourceEnumState checkpoint)
+    public SplitEnumerator<KafkaShareGroupSplit, KafkaShareGroupEnumeratorState> restoreEnumerator(
+            SplitEnumeratorContext<KafkaShareGroupSplit> enumContext,
+            KafkaShareGroupEnumeratorState checkpoint)
             throws IOException {
-        return new KafkaSourceEnumerator(
-                subscriber,
-                startingOffsetsInitializer,
-                stoppingOffsetsInitializer,
-                properties,
-                enumContext,
-                boundedness,
-                checkpoint
+        
+        Set<String> topics = checkpoint.getTopics();
+        return new KafkaShareGroupEnumerator(
+                topics,
+                shareGroupId,
+                checkpoint,
+                enumContext
         );
     }
 
     @Override
-    public SimpleVersionedSerializer<KafkaPartitionSplit> getSplitSerializer() {
-        return new KafkaPartitionSplitSerializer();
+    public SimpleVersionedSerializer<KafkaShareGroupSplit> getSplitSerializer() {
+        return new KafkaShareGroupSplitSerializer();
     }
 
     @Override
-    public SimpleVersionedSerializer<KafkaSourceEnumState> getEnumeratorCheckpointSerializer() {
-        return new KafkaSourceEnumStateSerializer();
+    public SimpleVersionedSerializer<KafkaShareGroupEnumeratorState> getEnumeratorCheckpointSerializer() {
+        return new KafkaShareGroupEnumeratorStateSerializer();
     }
 
     @Override
@@ -301,16 +319,61 @@ public class KafkaShareGroupSource<OUT>
      * @return set of topic names, or empty set if unable to determine
      */
     public Set<String> getTopics() {
-        // Attempt to get topics from subscriber
-        // Different subscriber implementations may have different methods
         try {
-            return (Set<String>) subscriber.getClass()
-                .getMethod("getSubscribedTopics")
-                .invoke(subscriber);
+            // Handle TopicListSubscriber
+            if (subscriber.getClass().getSimpleName().equals("TopicListSubscriber")) {
+                java.lang.reflect.Field topicsField = subscriber.getClass().getDeclaredField("topics");
+                topicsField.setAccessible(true);
+                List<String> topics = (List<String>) topicsField.get(subscriber);
+                LOG.info("*** MAIN SOURCE: Retrieved topics from TopicListSubscriber: {}", topics);
+                return new HashSet<>(topics);
+            }
+            
+            // Handle TopicPatternSubscriber  
+            if (subscriber.getClass().getSimpleName().equals("TopicPatternSubscriber")) {
+                // For pattern subscribers, we'll need to discover topics at runtime
+                // For now, return empty set and let enumerator handle discovery
+                LOG.info("*** MAIN SOURCE: TopicPatternSubscriber detected - topics will be discovered at runtime");
+                return Collections.emptySet();
+            }
+            
+            // Fallback: try reflection methods
+            try {
+                Object result = subscriber.getClass()
+                    .getMethod("getSubscribedTopics")
+                    .invoke(subscriber);
+                if (result instanceof Set) {
+                    Set<String> topics = (Set<String>) result;
+                    LOG.info("*** MAIN SOURCE: Retrieved topics via getSubscribedTopics(): {}", topics);
+                    return topics;
+                }
+            } catch (Exception reflectionEx) {
+                LOG.debug("getSubscribedTopics() method not found, trying other approaches");
+            }
+            
+            // Try getTopics() method
+            try {
+                Object result = subscriber.getClass()
+                    .getMethod("getTopics")
+                    .invoke(subscriber);
+                if (result instanceof Collection) {
+                    Collection<String> topics = (Collection<String>) result;
+                    Set<String> topicSet = new HashSet<>(topics);
+                    LOG.info("*** MAIN SOURCE: Retrieved topics via getTopics(): {}", topicSet);
+                    return topicSet;
+                }
+            } catch (Exception reflectionEx) {
+                LOG.debug("getTopics() method not found");
+            }
+            
         } catch (Exception e) {
-            LOG.debug("Unable to retrieve topics from subscriber: {}", e.getMessage());
-            return Collections.emptySet();
+            LOG.error("*** MAIN SOURCE ERROR: Failed to retrieve topics from subscriber {}: {}", 
+                    subscriber.getClass().getSimpleName(), e.getMessage(), e);
         }
+        
+        LOG.warn("*** MAIN SOURCE: Unable to retrieve topics from subscriber: {} - returning empty set", 
+                subscriber.getClass().getSimpleName());
+        return Collections.emptySet();
     }
 
     /**

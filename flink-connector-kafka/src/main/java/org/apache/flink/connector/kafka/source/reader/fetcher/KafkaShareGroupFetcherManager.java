@@ -23,8 +23,8 @@ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.connector.base.source.reader.fetcher.SingleThreadFetcherManager;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitReader;
 import org.apache.flink.connector.kafka.source.metrics.KafkaShareGroupSourceMetrics;
-import org.apache.flink.connector.kafka.source.reader.KafkaShareConsumerSplitReader;
-import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
+import org.apache.flink.connector.kafka.source.reader.KafkaShareGroupSplitReader;
+import org.apache.flink.connector.kafka.source.split.KafkaShareGroupSplit;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 
@@ -50,7 +50,7 @@ import java.util.function.Supplier;
  * </ul>
  */
 @Internal
-public class KafkaShareGroupFetcherManager extends SingleThreadFetcherManager<ConsumerRecord<byte[], byte[]>, KafkaPartitionSplit> {
+public class KafkaShareGroupFetcherManager extends SingleThreadFetcherManager<ConsumerRecord<byte[], byte[]>, KafkaShareGroupSplit> {
     
     private final Properties consumerProperties;
     private final SourceReaderContext context;
@@ -61,37 +61,17 @@ public class KafkaShareGroupFetcherManager extends SingleThreadFetcherManager<Co
      *
      * @param consumerProperties Kafka consumer properties configured for share groups
      * @param context the source reader context
-     */
-    public KafkaShareGroupFetcherManager(
-            Properties consumerProperties,
-            SourceReaderContext context) {
-        
-        super(
-            createSplitReaderSupplier(consumerProperties, context, null),
-            new org.apache.flink.configuration.Configuration(),
-            null
-        );
-        this.consumerProperties = consumerProperties;
-        this.context = context;
-        this.metrics = null;
-    }
-    
-    /**
-     * Creates a new fetcher manager for Kafka share group sources.
-     *
-     * @param elementQueue the queue to put fetched records
-     * @param splitReaderSupplier supplier for creating share consumer split readers
-     * @param consumerProperties Kafka consumer properties configured for share groups
-     * @param context the source reader context
      * @param metrics metrics collector for share group operations (can be null)
      */
     public KafkaShareGroupFetcherManager(
-            Supplier<SplitReader<ConsumerRecord<byte[], byte[]>, KafkaPartitionSplit>> splitReaderSupplier,
             Properties consumerProperties,
             SourceReaderContext context,
             KafkaShareGroupSourceMetrics metrics) {
         
-        super(splitReaderSupplier, new org.apache.flink.configuration.Configuration(), null);
+        super(
+            createSplitReaderSupplier(consumerProperties, context, metrics),
+            new org.apache.flink.configuration.Configuration()
+        );
         this.consumerProperties = consumerProperties;
         this.context = context;
         this.metrics = metrics;
@@ -103,15 +83,15 @@ public class KafkaShareGroupFetcherManager extends SingleThreadFetcherManager<Co
      * @param consumerProperties consumer properties configured for share groups
      * @param context source reader context
      * @param metrics metrics collector (can be null)
-     * @return supplier that creates KafkaShareConsumerSplitReader instances
+     * @return supplier that creates KafkaShareGroupSplitReader instances
      */
-    public static Supplier<SplitReader<ConsumerRecord<byte[], byte[]>, KafkaPartitionSplit>> 
+    public static Supplier<SplitReader<ConsumerRecord<byte[], byte[]>, KafkaShareGroupSplit>> 
             createSplitReaderSupplier(
                     Properties consumerProperties,
                     SourceReaderContext context,
                     KafkaShareGroupSourceMetrics metrics) {
         
-        return () -> new KafkaShareConsumerSplitReader(consumerProperties, context, metrics);
+        return () -> new KafkaShareGroupSplitReader(consumerProperties, context, metrics);
     }
     
     /**

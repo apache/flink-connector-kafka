@@ -21,58 +21,52 @@ package org.apache.flink.connector.kafka.source.reader;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.connector.base.source.reader.SingleThreadMultiplexSourceReaderBase;
-import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.connector.kafka.source.metrics.KafkaShareGroupSourceMetrics;
-import org.apache.flink.connector.kafka.source.reader.KafkaRecordEmitter;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.connector.kafka.source.reader.fetcher.KafkaShareGroupFetcherManager;
-import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
-import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplitState;
-import org.apache.flink.core.io.InputStatus;
-import org.apache.flink.metrics.MetricGroup;
+import org.apache.flink.connector.kafka.source.split.KafkaShareGroupSplit;
+import org.apache.flink.connector.kafka.source.split.KafkaShareGroupSplitState;
+import org.apache.flink.configuration.Configuration;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Source reader implementation specifically for Kafka share groups using KafkaShareConsumer API.
+ * Source reader for Kafka share groups using proper Flink connector architecture.
  * 
- * <p>This reader extends Flink's base source reader to support Kafka 4.1.0+ share group semantics,
- * providing message-level load balancing across consumers rather than partition-based assignment.
+ * <p>This reader extends SingleThreadMultiplexSourceReaderBase to leverage Flink's
+ * proven connector patterns while implementing share group semantics. It uses:
  * 
- * <p><strong>Key differences from KafkaSourceReader:</strong>
  * <ul>
- *   <li>Uses KafkaShareConsumer instead of KafkaConsumer internally</li>
- *   <li>No partition-level offset tracking (messages distributed automatically)</li>
- *   <li>Specialized metrics for share group operations</li>
- *   <li>Queue-like semantics with automatic acknowledgment</li>
- *   <li>Better horizontal scalability beyond partition count</li>
+ *   <li>Topic-based splits instead of partition-based splits</li>
+ *   <li>Share group consumer subscription instead of partition assignment</li>
+ *   <li>Proper integration with Flink's split management</li>
+ *   <li>Built-in support for checkpointing, backpressure, and metrics</li>
  * </ul>
  * 
- * <p>Compatible with all existing Flink source interfaces and checkpointing mechanisms.
+ * <p>The reader manages share group splits that represent topics rather than partitions.
+ * Multiple readers can be assigned the same topic, and Kafka's share group coordinator
+ * distributes messages at the record level across all consumers in the share group.
  */
 @Internal
 public class KafkaShareGroupSourceReader<T> extends SingleThreadMultiplexSourceReaderBase<
-        ConsumerRecord<byte[], byte[]>, T, KafkaPartitionSplit, KafkaPartitionSplitState> {
+        ConsumerRecord<byte[], byte[]>, T, KafkaShareGroupSplit, KafkaShareGroupSplitState> {
     
     private static final Logger LOG = LoggerFactory.getLogger(KafkaShareGroupSourceReader.class);
     
     private final KafkaRecordDeserializationSchema<T> deserializationSchema;
-    private final KafkaRecordEmitter<T> recordEmitter;
     private final KafkaShareGroupSourceMetrics shareGroupMetrics;
     private final String shareGroupId;
-    private final Map<String, KafkaPartitionSplitState> splitStates;
+    private final Map<String, KafkaShareGroupSplitState> splitStates;
     
     /**
-     * Creates a new share group source reader.
+     * Creates a share group source reader using Flink's connector architecture.
      *
      * @param consumerProps consumer properties configured for share groups
      * @param deserializationSchema schema for deserializing Kafka records
@@ -86,26 +80,25 @@ public class KafkaShareGroupSourceReader<T> extends SingleThreadMultiplexSourceR
             KafkaShareGroupSourceMetrics shareGroupMetrics) {
         
         super(
-            new KafkaShareGroupFetcherManager(consumerProps, context),
-            new KafkaRecordEmitter<>(deserializationSchema),
-            new org.apache.flink.configuration.Configuration(),
+            new KafkaShareGroupFetcherManager(consumerProps, context, shareGroupMetrics),
+            new KafkaShareGroupRecordEmitter<>(deserializationSchema),
+            new Configuration(),
             context
         );
         
         this.deserializationSchema = deserializationSchema;
-        this.recordEmitter = new KafkaRecordEmitter<>(deserializationSchema);
         this.shareGroupId = consumerProps.getProperty("group.id", "unknown-share-group");
         this.splitStates = new ConcurrentHashMap<>();
         this.shareGroupMetrics = shareGroupMetrics;
         
-        LOG.info("Created KafkaShareGroupSourceReader for share group '{}' on subtask {}", 
+        LOG.info("*** SOURCE READER: Created KafkaShareGroupSourceReader for share group '{}' on subtask {} using Flink connector architecture", 
                 shareGroupId, context.getIndexOfSubtask());
     }
     
     @Override
-    protected void onSplitFinished(Map<String, KafkaPartitionSplitState> finishedSplitIds) {
+    protected void onSplitFinished(Map<String, KafkaShareGroupSplitState> finishedSplitIds) {
         // For share groups, splits don't "finish" in the traditional sense
-        // Messages are distributed continuously by the coordinator
+        // Topics remain subscribed as long as the source is active
         for (String splitId : finishedSplitIds.keySet()) {
             splitStates.remove(splitId);
             LOG.debug("Share group '{}' finished processing split: {}", shareGroupId, splitId);
@@ -113,29 +106,29 @@ public class KafkaShareGroupSourceReader<T> extends SingleThreadMultiplexSourceR
     }
     
     @Override
-    protected KafkaPartitionSplitState initializedState(KafkaPartitionSplit split) {
-        // For share groups, we don't track offsets like traditional consumers
-        // The state is primarily for compatibility with Flink's split system
-        KafkaPartitionSplitState state = new KafkaPartitionSplitState(split);
+    protected KafkaShareGroupSplitState initializedState(KafkaShareGroupSplit split) {
+        // For share groups, state is minimal since offset tracking is handled by coordinator
+        KafkaShareGroupSplitState state = new KafkaShareGroupSplitState(split);
         splitStates.put(split.splitId(), state);
         
-        LOG.debug("Share group '{}' initialized state for split: {}", shareGroupId, split.splitId());
+        LOG.info("*** SOURCE READER: Share group '{}' initialized state for split: {} (topic: {})", 
+                shareGroupId, split.splitId(), split.getTopicName());
         return state;
     }
     
     @Override
-    protected KafkaPartitionSplit toSplitType(String splitId, KafkaPartitionSplitState splitState) {
-        return splitState.toKafkaPartitionSplit();
+    protected KafkaShareGroupSplit toSplitType(String splitId, KafkaShareGroupSplitState splitState) {
+        return splitState.toKafkaShareGroupSplit();
     }
     
     @Override
-    public List<KafkaPartitionSplit> snapshotState(long checkpointId) {
-        // For share groups, we don't need to track offsets for checkpointing
-        // The share group coordinator handles message delivery guarantees
-        LOG.debug("Share group '{}' snapshot state for checkpoint: {}", shareGroupId, checkpointId);
+    public List<KafkaShareGroupSplit> snapshotState(long checkpointId) {
+        // For share groups, minimal state is needed since coordinator handles message delivery
+        LOG.debug("Share group '{}' snapshot state for checkpoint: {} ({} splits)", 
+                shareGroupId, checkpointId, splitStates.size());
         
         return splitStates.values().stream()
-                .map(KafkaPartitionSplitState::toKafkaPartitionSplit)
+                .map(KafkaShareGroupSplitState::toKafkaShareGroupSplit)
                 .collect(java.util.stream.Collectors.toList());
     }
     
@@ -143,7 +136,7 @@ public class KafkaShareGroupSourceReader<T> extends SingleThreadMultiplexSourceR
     public void notifyCheckpointComplete(long checkpointId) throws Exception {
         super.notifyCheckpointComplete(checkpointId);
         
-        // Share groups handle acknowledgment automatically, but we can log for debugging
+        // Share groups handle acknowledgment automatically
         LOG.debug("Share group '{}' checkpoint {} completed", shareGroupId, checkpointId);
     }
     
@@ -156,9 +149,10 @@ public class KafkaShareGroupSourceReader<T> extends SingleThreadMultiplexSourceR
                 shareGroupMetrics.reset();
             }
             
-            LOG.info("KafkaShareGroupSourceReader '{}' closed", shareGroupId);
+            LOG.info("KafkaShareGroupSourceReader for share group '{}' closed", shareGroupId);
         } catch (Exception e) {
-            LOG.warn("Error closing KafkaShareGroupSourceReader '{}': {}", shareGroupId, e.getMessage());
+            LOG.warn("Error closing KafkaShareGroupSourceReader for share group '{}': {}", 
+                    shareGroupId, e.getMessage());
             throw e;
         }
     }
@@ -180,7 +174,7 @@ public class KafkaShareGroupSourceReader<T> extends SingleThreadMultiplexSourceR
     /**
      * Gets current split states (for debugging/monitoring).
      */
-    public Map<String, KafkaPartitionSplitState> getSplitStates() {
-        return new HashMap<>(splitStates);
+    public Map<String, KafkaShareGroupSplitState> getSplitStates() {
+        return new java.util.HashMap<>(splitStates);
     }
 }
