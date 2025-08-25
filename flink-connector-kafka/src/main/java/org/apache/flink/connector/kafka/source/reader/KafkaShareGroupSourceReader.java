@@ -123,6 +123,9 @@ public class KafkaShareGroupSourceReader<T> extends SingleThreadMultiplexSourceR
     
     @Override
     public List<KafkaShareGroupSplit> snapshotState(long checkpointId) {
+        // Notify split reader to associate upcoming records with this checkpoint
+        notifySplitReadersCheckpointStart(checkpointId);
+        
         // For share groups, minimal state is needed since coordinator handles message delivery
         LOG.debug("Share group '{}' snapshot state for checkpoint: {} ({} splits)", 
                 shareGroupId, checkpointId, splitStates.size());
@@ -134,12 +137,49 @@ public class KafkaShareGroupSourceReader<T> extends SingleThreadMultiplexSourceR
     
     @Override
     public void notifyCheckpointComplete(long checkpointId) throws Exception {
+        // First notify split readers to acknowledge records for this checkpoint
+        notifySplitReadersCheckpointComplete(checkpointId);
+        
+        // Then call parent implementation
         super.notifyCheckpointComplete(checkpointId);
         
-        // Share groups handle acknowledgment automatically
-        LOG.debug("Share group '{}' checkpoint {} completed", shareGroupId, checkpointId);
+        LOG.debug("Share group '{}' checkpoint {} completed with acknowledgments sent", shareGroupId, checkpointId);
     }
     
+    public void notifyCheckpointAborted(long checkpointId) throws Exception {
+        // Notify split readers to release records for this checkpoint
+        notifySplitReadersCheckpointAborted(checkpointId, null);
+        
+        // Call parent implementation
+        super.notifyCheckpointAborted(checkpointId);
+        
+        LOG.info("Share group '{}' checkpoint {} aborted, records released for redelivery", shareGroupId, checkpointId);
+    }
+    
+    /**
+     * Notifies all split readers that a checkpoint has started.
+     */
+    private void notifySplitReadersCheckpointStart(long checkpointId) {
+        KafkaShareGroupFetcherManager fetcherManager = (KafkaShareGroupFetcherManager) splitFetcherManager;
+        fetcherManager.notifyCheckpointStart(checkpointId);
+    }
+    
+    /**
+     * Notifies all split readers that a checkpoint has completed successfully.
+     */
+    private void notifySplitReadersCheckpointComplete(long checkpointId) throws Exception {
+        KafkaShareGroupFetcherManager fetcherManager = (KafkaShareGroupFetcherManager) splitFetcherManager;
+        fetcherManager.notifyCheckpointComplete(checkpointId);
+    }
+    
+    /**
+     * Notifies all split readers that a checkpoint has been aborted.
+     */
+    private void notifySplitReadersCheckpointAborted(long checkpointId, Throwable cause) {
+        KafkaShareGroupFetcherManager fetcherManager = (KafkaShareGroupFetcherManager) splitFetcherManager;
+        fetcherManager.notifyCheckpointAborted(checkpointId, cause);
+    }
+
     @Override
     public void close() throws Exception {
         try {
