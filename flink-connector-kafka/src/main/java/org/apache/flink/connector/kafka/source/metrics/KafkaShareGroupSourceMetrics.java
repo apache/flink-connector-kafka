@@ -279,4 +279,18 @@ public class KafkaShareGroupSourceMetrics {
         long rejected = messagesRejected.getCount();
         return received > 0 ? ((double) rejected / received) * 100.0 : 0.0;
     }
+    
+    /**
+     * Records a successful commit acknowledgment.
+     */
+    public void recordSuccessfulCommit() {
+        LOG.debug("Recorded successful acknowledgment commit");
+    }
+    
+    /**
+     * Records a failed commit acknowledgment.
+     */
+    public void recordFailedCommit() {
+        LOG.debug("Recorded failed acknowledgment commit");
+    }
 }
