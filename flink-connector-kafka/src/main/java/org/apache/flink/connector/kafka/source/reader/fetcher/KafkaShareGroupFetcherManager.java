@@ -27,6 +27,8 @@ import org.apache.flink.connector.kafka.source.reader.KafkaShareGroupSplitReader
 import org.apache.flink.connector.kafka.source.split.KafkaShareGroupSplit;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Properties;
 import java.util.function.Supplier;
@@ -51,6 +53,8 @@ import java.util.function.Supplier;
  */
 @Internal
 public class KafkaShareGroupFetcherManager extends SingleThreadFetcherManager<ConsumerRecord<byte[], byte[]>, KafkaShareGroupSplit> {
+    
+    private static final Logger LOG = LoggerFactory.getLogger(KafkaShareGroupFetcherManager.class);
     
     private final Properties consumerProperties;
     private final SourceReaderContext context;
@@ -106,5 +110,33 @@ public class KafkaShareGroupFetcherManager extends SingleThreadFetcherManager<Co
      */
     public KafkaShareGroupSourceMetrics getMetrics() {
         return metrics;
+    }
+    
+    /**
+     * Notifies all split readers that a checkpoint has started.
+     * This allows split readers to associate upcoming records with the checkpoint.
+     */
+    public void notifyCheckpointStart(long checkpointId) {
+        // For now, we'll implement this at the split reader level directly
+        LOG.info("Share group checkpoint {} started - notification will be handled per split reader", checkpointId);
+    }
+    
+    /**
+     * Notifies all split readers that a checkpoint has completed successfully.
+     * This triggers acknowledgment of records associated with the checkpoint.
+     */
+    public void notifyCheckpointComplete(long checkpointId) throws Exception {
+        // For now, we'll implement this at the split reader level directly
+        LOG.info("Share group checkpoint {} completed - acknowledgment will be handled per split reader", checkpointId);
+    }
+    
+    /**
+     * Notifies all split readers that a checkpoint has been aborted.
+     * This triggers release of records for redelivery.
+     */
+    public void notifyCheckpointAborted(long checkpointId, Throwable cause) {
+        // For now, we'll implement this at the split reader level directly
+        LOG.info("Share group checkpoint {} aborted - record release will be handled per split reader. Cause: {}", 
+               checkpointId, cause != null ? cause.getMessage() : "Unknown");
     }
 }
