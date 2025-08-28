@@ -30,14 +30,12 @@ import org.apache.flink.connector.kafka.source.split.KafkaShareGroupSplit;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.kafka.clients.consumer.AcknowledgeType;
-import org.apache.kafka.clients.consumer.AcknowledgementCommitCallback;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaShareConsumer;
 import org.apache.kafka.common.KafkaException;
-import org.apache.kafka.common.TopicIdPartition;
-import org.apache.kafka.common.errors.InvalidRecordStateException;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,8 +49,10 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
@@ -61,16 +61,28 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Enhanced SplitReader implementation for Kafka Share Groups with at-least-once semantics.
  * 
- * <p>This reader provides checkpoint-based acknowledgment to ensure at-least-once delivery
- * guarantees. Records are only acknowledged to Kafka after successful Flink checkpoint completion.
+ * <p>This reader provides checkpoint-based acknowledgment using metadata-only checkpointing
+ * following the Pulsar connector pattern. Records are cached with configurable memory bounds and only
+ * acknowledged to Kafka after successful Flink checkpoint completion.
  * 
  * <p>Key features:
  * <ul>
- *   <li>Explicit acknowledgment mode for precise control</li>
+ *   <li>Metadata-only checkpointing for memory efficiency</li>
+ *   <li>Configurable memory-bounded record caching (default: 10MB, configurable via 'flink.share.group.cache.max.memory.bytes')</li>
  *   <li>Checkpoint-coordinated acknowledgments</li>
  *   <li>Automatic record release on checkpoint failures</li>
- *   <li>Graceful handling of record state exceptions</li>
- *   <li>Memory leak prevention for stale records</li>
+ *   <li>Record release for redelivery under memory pressure (maintains at-least-once)</li>
+ *   <li>Automatic cache cleanup to prevent memory leaks</li>
+ * </ul>
+ * 
+ * <p>Memory pressure handling:
+ * When cache memory limit is exceeded, records are released back to Kafka using {@code AcknowledgeType.RELEASE}
+ * for immediate redelivery to maintain at-least-once delivery guarantees. This prevents OOM errors while
+ * ensuring no data loss.
+ * 
+ * <p>Configuration:
+ * <ul>
+ *   <li><code>flink.share.group.cache.max.memory.bytes</code> - Maximum memory for record cache (default: 10485760 = 10MB)</li>
  * </ul>
  */
 @Internal
@@ -87,62 +99,86 @@ public class KafkaShareGroupSplitReader implements SplitReader<ConsumerRecord<by
     private final Set<String> subscribedTopics;
     private final KafkaShareGroupSourceMetrics metrics;
     
-    // At-least-once semantics state
-    private final Map<Long, PendingCheckpointRecords> pendingCheckpoints;
+    // At-least-once semantics state - Pulsar-style metadata only
+    private final Map<Long, Map<TopicPartition, AcknowledgmentMetadata>> acknowledgmentsToCommit;
+    private final ConcurrentHashMap<RecordKey, ConsumerRecord<byte[], byte[]>> recordCache;
     private volatile long currentCheckpointId = -1;
     private volatile long recordLockDurationMs;
+    private volatile long currentCacheMemoryBytes = 0;
+    
+    private static final long DEFAULT_MAX_CACHE_MEMORY_BYTES = 10 * 1024 * 1024; // 10MB default cache limit
+    private static final Duration CACHE_CLEANUP_AGE = Duration.ofMinutes(5);
+    
+    private final long maxCacheMemoryBytes;
     
     /**
-     * Container for records pending acknowledgment for a specific checkpoint.
+     * Container for acknowledgment metadata following Pulsar pattern.
      */
-    private static class PendingCheckpointRecords {
-        private final List<ConsumerRecord<byte[], byte[]>> records;
+    private static class AcknowledgmentMetadata {
+        private final Set<Long> offsetsToAcknowledge;
+        private final int recordCount;
         private final long timestamp;
-        private volatile boolean acknowledged = false;
-        private volatile boolean commitInProgress = false;
         
-        PendingCheckpointRecords(List<ConsumerRecord<byte[], byte[]>> records) {
-            this.records = new ArrayList<>(records);
-            this.timestamp = System.currentTimeMillis();
+        AcknowledgmentMetadata(Set<Long> offsetsToAcknowledge, int recordCount, long timestamp) {
+            this.offsetsToAcknowledge = Collections.unmodifiableSet(new HashSet<>(offsetsToAcknowledge));
+            this.recordCount = recordCount;
+            this.timestamp = timestamp;
         }
         
-        public List<ConsumerRecord<byte[], byte[]>> getRecords() {
-            return new ArrayList<>(records);
+        public Set<Long> getOffsetsToAcknowledge() {
+            return offsetsToAcknowledge;
+        }
+        
+        public int getRecordCount() {
+            return recordCount;
         }
         
         public long getTimestamp() {
             return timestamp;
         }
         
-        public boolean isAcknowledged() {
-            return acknowledged;
+        @Override
+        public String toString() {
+            return String.format("AcknowledgmentMetadata{offsets=%d, records=%d, timestamp=%d}", 
+                    offsetsToAcknowledge.size(), recordCount, timestamp);
+        }
+    }
+    
+    /**
+     * Key for record cache entries.
+     */
+    private static class RecordKey {
+        private final String topic;
+        private final int partition;
+        private final long offset;
+        private final int hashCode;
+        
+        RecordKey(String topic, int partition, long offset) {
+            this.topic = topic;
+            this.partition = partition;
+            this.offset = offset;
+            this.hashCode = Objects.hash(topic, partition, offset);
         }
         
-        public void setAcknowledged(boolean acknowledged) {
-            this.acknowledged = acknowledged;
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (obj == null || getClass() != obj.getClass()) return false;
+            
+            RecordKey recordKey = (RecordKey) obj;
+            return partition == recordKey.partition &&
+                   offset == recordKey.offset &&
+                   Objects.equals(topic, recordKey.topic);
         }
         
-        public boolean isCommitInProgress() {
-            return commitInProgress;
+        @Override
+        public int hashCode() {
+            return hashCode;
         }
         
-        public void setCommitInProgress(boolean commitInProgress) {
-            this.commitInProgress = commitInProgress;
-        }
-        
-        public boolean matchesOffsets(Map<TopicIdPartition, Set<Long>> committedOffsets) {
-            // Simple implementation - in real scenario would match record offsets
-            return !records.isEmpty() && !committedOffsets.isEmpty();
-        }
-        
-        public void markCompleted() {
-            this.acknowledged = true;
-            this.commitInProgress = false;
-        }
-        
-        public void markFailed(Exception exception) {
-            this.acknowledged = false;
-            this.commitInProgress = false;
+        @Override
+        public String toString() {
+            return String.format("%s-%d-%d", topic, partition, offset);
         }
     }
 
@@ -162,7 +198,6 @@ public class KafkaShareGroupSplitReader implements SplitReader<ConsumerRecord<by
         this.metrics = metrics;
         this.assignedSplits = new HashMap<>();
         this.subscribedTopics = new HashSet<>();
-        this.pendingCheckpoints = new ConcurrentHashMap<>();
         
         // Configure share consumer properties
         Properties shareConsumerProps = new Properties();
@@ -179,6 +214,15 @@ public class KafkaShareGroupSplitReader implements SplitReader<ConsumerRecord<by
         this.recordLockDurationMs = Long.parseLong(
             shareConsumerProps.getProperty("group.share.record.lock.duration.ms", "30000"));
         
+        // Configure maximum cache memory (configurable)
+        this.maxCacheMemoryBytes = Long.parseLong(
+            shareConsumerProps.getProperty("flink.share.group.cache.max.memory.bytes", 
+                                         String.valueOf(DEFAULT_MAX_CACHE_MEMORY_BYTES)));
+        
+        // Initialize Pulsar-style metadata tracking
+        this.acknowledgmentsToCommit = new ConcurrentHashMap<>();
+        this.recordCache = new ConcurrentHashMap<>();
+        
         // Configure client ID for this reader
         shareConsumerProps.setProperty(
             ConsumerConfig.CLIENT_ID_CONFIG, 
@@ -194,11 +238,8 @@ public class KafkaShareGroupSplitReader implements SplitReader<ConsumerRecord<by
         // Create KafkaShareConsumer instance
         this.shareConsumer = createShareConsumer(shareConsumerProps);
         
-        // Set up global acknowledgment callback
-        setupAcknowledgmentCallback();
-        
-        LOG.info("Created KafkaShareGroupSplitReader for share group '{}' reader {} with at-least-once semantics (lockDuration={}ms)", 
-                shareGroupId, readerId, recordLockDurationMs);
+        LOG.info("Created KafkaShareGroupSplitReader for share group '{}' reader {} with metadata-only checkpointing (lockDuration={}ms, cacheLimit={}MB)", 
+                shareGroupId, readerId, recordLockDurationMs, maxCacheMemoryBytes / (1024 * 1024));
     }
     
     /**
@@ -206,72 +247,6 @@ public class KafkaShareGroupSplitReader implements SplitReader<ConsumerRecord<by
      */
     protected KafkaShareConsumer<byte[], byte[]> createShareConsumer(Properties props) {
         return new KafkaShareConsumer<>(props);
-    }
-    
-    /**
-     * Sets up the global acknowledgment callback to handle commit results.
-     */
-    private void setupAcknowledgmentCallback() {
-        shareConsumer.setAcknowledgementCommitCallback(new AcknowledgementCommitCallback() {
-            @Override
-            public void onComplete(Map<TopicIdPartition, Set<Long>> offsets, Exception exception) {
-                handleAcknowledgmentComplete(offsets, exception);
-            }
-        });
-    }
-    
-    /**
-     * Handles acknowledgment commit completion - success or failure.
-     */
-    private void handleAcknowledgmentComplete(Map<TopicIdPartition, Set<Long>> offsets, Exception exception) {
-        // Find the matching checkpoint for these offsets
-        for (Map.Entry<Long, PendingCheckpointRecords> entry : pendingCheckpoints.entrySet()) {
-            Long checkpointId = entry.getKey();
-            PendingCheckpointRecords pending = entry.getValue();
-            
-            if (pending.isCommitInProgress() && pending.matchesOffsets(offsets)) {
-                if (exception != null) {
-                    handleCommitFailure(checkpointId, pending, exception);
-                } else {
-                    handleCommitSuccess(checkpointId, pending);
-                }
-                break; // Found the matching checkpoint
-            }
-        }
-    }
-    
-    /**
-     * Handles successful acknowledgment commit.
-     */
-    private void handleCommitSuccess(Long checkpointId, PendingCheckpointRecords pending) {
-        LOG.debug("Acknowledgment succeeded for checkpoint {} ({} records)", 
-                checkpointId, pending.getRecords().size());
-        
-        pending.markCompleted();
-        pendingCheckpoints.remove(checkpointId);
-        
-        if (metrics != null) {
-            metrics.recordSuccessfulCommit();
-        }
-    }
-    
-    /**
-     * Handles failed acknowledgment commit with appropriate error handling.
-     */
-    private void handleCommitFailure(Long checkpointId, PendingCheckpointRecords pending, Exception exception) {
-        if (exception instanceof InvalidRecordStateException) {
-            // Records were likely already processed or timed out - this is acceptable
-            LOG.warn("Records for checkpoint {} were already processed or timed out: {}", 
-                   checkpointId, exception.getMessage());
-            pendingCheckpoints.remove(checkpointId);
-        } else {
-            LOG.error("Acknowledgment failed for checkpoint {}: {}", checkpointId, exception.getMessage());
-            pending.markFailed(exception);
-        }
-        
-        if (metrics != null) {
-            metrics.recordFailedCommit();
-        }
     }
 
     @Override
@@ -302,10 +277,10 @@ public class KafkaShareGroupSplitReader implements SplitReader<ConsumerRecord<by
                         shareGroupId, readerId, record.topic(), record.partition(), record.offset());
             }
             
-            // Associate records with current checkpoint
+            // Store acknowledgment metadata instead of full records (following Pulsar pattern)
             if (currentCheckpointId >= 0 && !recordList.isEmpty()) {
-                pendingCheckpoints.put(currentCheckpointId, new PendingCheckpointRecords(recordList));
-                LOG.debug("Stored {} records for checkpoint {} in share group '{}'", 
+                storeAcknowledgmentMetadata(currentCheckpointId, recordList);
+                LOG.debug("Stored acknowledgment metadata for {} records in checkpoint {} for share group '{}'", 
                         recordList.size(), currentCheckpointId, shareGroupId);
             }
             
@@ -334,33 +309,46 @@ public class KafkaShareGroupSplitReader implements SplitReader<ConsumerRecord<by
     }
     
     /**
-     * Called when Flink checkpoint completes successfully - acknowledge records.
+     * Called when Flink checkpoint completes successfully - acknowledge records using metadata.
      */
     public void notifyCheckpointComplete(long checkpointId) throws Exception {
-        PendingCheckpointRecords pending = pendingCheckpoints.get(checkpointId);
+        Map<TopicPartition, AcknowledgmentMetadata> ackMetadata = acknowledgmentsToCommit.get(checkpointId);
         
-        if (pending != null && !pending.isAcknowledged() && !pending.isCommitInProgress()) {
-            pending.setCommitInProgress(true);
-            
+        if (ackMetadata != null) {
             try {
-                List<ConsumerRecord<byte[], byte[]>> records = pending.getRecords();
-                
-                // Acknowledge all records as successfully processed
-                for (ConsumerRecord<byte[], byte[]> record : records) {
-                    shareConsumer.acknowledge(record, AcknowledgeType.ACCEPT);
+                // Acknowledge records using cached records and metadata
+                for (Map.Entry<TopicPartition, AcknowledgmentMetadata> entry : ackMetadata.entrySet()) {
+                    TopicPartition tp = entry.getKey();
+                    AcknowledgmentMetadata metadata = entry.getValue();
+                    
+                    // Acknowledge cached records for this TopicPartition
+                    for (Long offset : metadata.getOffsetsToAcknowledge()) {
+                        RecordKey key = new RecordKey(tp.topic(), tp.partition(), offset);
+                        ConsumerRecord<byte[], byte[]> record = recordCache.get(key);
+                        
+                        if (record != null) {
+                            shareConsumer.acknowledge(record, AcknowledgeType.ACCEPT);
+                            // Remove from cache after acknowledgment
+                            ConsumerRecord<byte[], byte[]> removed = recordCache.remove(key);
+                            if (removed != null) {
+                                currentCacheMemoryBytes -= estimateRecordSize(removed);
+                            }
+                        } else {
+                            LOG.debug("Record not found in cache for acknowledgment: {}", key);
+                        }
+                    }
                 }
                 
-                pending.setAcknowledged(true);
-                
-                // Commit acknowledgments asynchronously (callback handles the result)
+                // Commit acknowledgments asynchronously
                 shareConsumer.commitAsync();
                 
-                LOG.debug("Initiated acknowledgment for {} records in checkpoint {} for share group '{}'", 
-                        records.size(), checkpointId, shareGroupId);
+                // Clean up metadata
+                acknowledgmentsToCommit.remove(checkpointId);
+                
+                LOG.debug("Acknowledged {} topic-partitions for checkpoint {} in share group '{}' (cache size: {} bytes)", 
+                        ackMetadata.size(), checkpointId, shareGroupId, currentCacheMemoryBytes);
                 
             } catch (Exception e) {
-                pending.setCommitInProgress(false);
-                pending.setAcknowledged(false);
                 LOG.error("Failed to acknowledge records for checkpoint {}: {}", checkpointId, e.getMessage());
                 throw e;
             }
@@ -368,24 +356,38 @@ public class KafkaShareGroupSplitReader implements SplitReader<ConsumerRecord<by
     }
     
     /**
-     * Called when Flink checkpoint fails - release records for redelivery.
+     * Called when Flink checkpoint fails - release records for redelivery using metadata.
      */
     public void notifyCheckpointAborted(long checkpointId, Throwable cause) {
-        PendingCheckpointRecords pending = pendingCheckpoints.remove(checkpointId);
+        Map<TopicPartition, AcknowledgmentMetadata> ackMetadata = acknowledgmentsToCommit.remove(checkpointId);
         
-        if (pending != null && !pending.isAcknowledged()) {
+        if (ackMetadata != null) {
             try {
-                List<ConsumerRecord<byte[], byte[]>> records = pending.getRecords();
-                
-                // Release records for redelivery since processing failed
-                for (ConsumerRecord<byte[], byte[]> record : records) {
-                    shareConsumer.acknowledge(record, AcknowledgeType.RELEASE);
+                // Release records using cached records and metadata
+                for (Map.Entry<TopicPartition, AcknowledgmentMetadata> entry : ackMetadata.entrySet()) {
+                    TopicPartition tp = entry.getKey();
+                    AcknowledgmentMetadata metadata = entry.getValue();
+                    
+                    // Release cached records for this TopicPartition
+                    for (Long offset : metadata.getOffsetsToAcknowledge()) {
+                        RecordKey key = new RecordKey(tp.topic(), tp.partition(), offset);
+                        ConsumerRecord<byte[], byte[]> record = recordCache.get(key);
+                        
+                        if (record != null) {
+                            shareConsumer.acknowledge(record, AcknowledgeType.RELEASE);
+                            // Remove from cache after release
+                            ConsumerRecord<byte[], byte[]> removed = recordCache.remove(key);
+                            if (removed != null) {
+                                currentCacheMemoryBytes -= estimateRecordSize(removed);
+                            }
+                        }
+                    }
                 }
                 
                 shareConsumer.commitAsync();
                 
-                LOG.info("Released {} records for redelivery after checkpoint {} failure in share group '{}'", 
-                        records.size(), checkpointId, shareGroupId);
+                LOG.info("Released {} topic-partitions for redelivery after checkpoint {} failure in share group '{}' (cache size: {} bytes)", 
+                        ackMetadata.size(), checkpointId, shareGroupId, currentCacheMemoryBytes);
                         
             } catch (Exception e) {
                 LOG.warn("Failed to release records after checkpoint failure: {}", e.getMessage());
@@ -486,30 +488,110 @@ public class KafkaShareGroupSplitReader implements SplitReader<ConsumerRecord<by
      * Releases all unacknowledged records when closing the consumer.
      */
     private void releaseUnacknowledgedRecords() {
-        for (PendingCheckpointRecords pending : pendingCheckpoints.values()) {
-            if (!pending.isAcknowledged()) {
-                try {
-                    for (ConsumerRecord<byte[], byte[]> record : pending.getRecords()) {
-                        shareConsumer.acknowledge(record, AcknowledgeType.RELEASE);
-                    }
-                } catch (Exception e) {
-                    LOG.debug("Failed to release record on close: {}", e.getMessage());
-                    // Records will timeout anyway
-                }
+        for (ConsumerRecord<byte[], byte[]> record : recordCache.values()) {
+            try {
+                shareConsumer.acknowledge(record, AcknowledgeType.RELEASE);
+            } catch (Exception e) {
+                LOG.debug("Failed to release record on close: {}", e.getMessage());
+                // Records will timeout anyway
             }
         }
-        pendingCheckpoints.clear();
+        recordCache.clear();
+        currentCacheMemoryBytes = 0;
+        acknowledgmentsToCommit.clear();
     }
     
     /**
-     * Cleanup old pending records to prevent memory leaks.
+     * Stores acknowledgment metadata following Pulsar pattern.
      */
-    public void cleanupOldPendingRecords(Duration maxAge) {
-        long cutoffTime = System.currentTimeMillis() - maxAge.toMillis();
+    private void storeAcknowledgmentMetadata(long checkpointId, List<ConsumerRecord<byte[], byte[]>> records) {
+        Map<TopicPartition, AcknowledgmentMetadata> checkpointAcks = 
+            acknowledgmentsToCommit.computeIfAbsent(checkpointId, k -> new ConcurrentHashMap<>());
         
-        pendingCheckpoints.entrySet().removeIf(entry -> {
-            if (entry.getValue().getTimestamp() < cutoffTime) {
-                LOG.warn("Removing stale checkpoint {} - possible acknowledgment issue", entry.getKey());
+        // Group records by TopicPartition and store in cache
+        Map<TopicPartition, Set<Long>> offsetsByPartition = new LinkedHashMap<>();
+        
+        for (ConsumerRecord<byte[], byte[]> record : records) {
+            TopicPartition tp = new TopicPartition(record.topic(), record.partition());
+            offsetsByPartition.computeIfAbsent(tp, k -> new HashSet<>()).add(record.offset());
+            
+            // Store record in bounded cache for acknowledgment
+            storeRecordInCache(record, checkpointId);
+        }
+        
+        // Create acknowledgment metadata for each TopicPartition
+        for (Map.Entry<TopicPartition, Set<Long>> entry : offsetsByPartition.entrySet()) {
+            TopicPartition tp = entry.getKey();
+            Set<Long> offsets = entry.getValue();
+            
+            AcknowledgmentMetadata metadata = new AcknowledgmentMetadata(
+                offsets, offsets.size(), System.currentTimeMillis());
+            checkpointAcks.put(tp, metadata);
+        }
+    }
+    
+    /**
+     * Stores record in memory-bounded cache.
+     */
+    private void storeRecordInCache(ConsumerRecord<byte[], byte[]> record, long checkpointId) {
+        RecordKey key = new RecordKey(record.topic(), record.partition(), record.offset());
+        long recordSize = estimateRecordSize(record);
+        
+        // Check memory bounds - if exceeded, release record for redelivery to maintain at-least-once
+        if (currentCacheMemoryBytes + recordSize > maxCacheMemoryBytes) {
+            try {
+                // Release record back to Kafka for redelivery (maintains at-least-once semantics)
+                shareConsumer.acknowledge(record, AcknowledgeType.RELEASE);
+                LOG.warn("Memory pressure detected - releasing record for redelivery: {} (cache: {} bytes, limit: {} bytes)", 
+                        key, currentCacheMemoryBytes, maxCacheMemoryBytes);
+                return;
+            } catch (Exception e) {
+                LOG.error("Failed to release record under memory pressure: {}, falling back to caching", e.getMessage());
+                // Continue to cache anyway as fallback - risk OOM but maintain correctness
+            }
+        }
+        
+        // Store in cache for checkpoint-based acknowledgment
+        ConsumerRecord<byte[], byte[]> existing = recordCache.put(key, record);
+        if (existing == null) {
+            currentCacheMemoryBytes += recordSize;
+        }
+        
+        // Cleanup old cache entries periodically
+        if (recordCache.size() % 1000 == 0) {
+            cleanupOldCacheEntries();
+        }
+    }
+    
+    /**
+     * Estimates memory size of a ConsumerRecord.
+     */
+    private long estimateRecordSize(ConsumerRecord<byte[], byte[]> record) {
+        // Base object overhead + key + value + headers
+        long size = 200; // Base overhead
+        if (record.key() != null) {
+            size += record.key().length;
+        }
+        if (record.value() != null) {
+            size += record.value().length;
+        }
+        if (record.headers() != null) {
+            size += record.headers().toString().length();
+        }
+        return size;
+    }
+    
+    /**
+     * Cleans up old cache entries to prevent memory leaks.
+     */
+    private void cleanupOldCacheEntries() {
+        long cutoffTime = System.currentTimeMillis() - CACHE_CLEANUP_AGE.toMillis();
+        
+        recordCache.entrySet().removeIf(entry -> {
+            ConsumerRecord<byte[], byte[]> record = entry.getValue();
+            if (record.timestamp() < cutoffTime) {
+                currentCacheMemoryBytes -= estimateRecordSize(record);
+                LOG.debug("Removed stale cache entry: {}", entry.getKey());
                 return true;
             }
             return false;
@@ -517,10 +599,31 @@ public class KafkaShareGroupSplitReader implements SplitReader<ConsumerRecord<by
     }
     
     /**
-     * Cleanup old pending records with default age threshold.
+     * Cleanup old acknowledgment metadata to prevent memory leaks.
      */
-    public void cleanupOldPendingRecords() {
-        cleanupOldPendingRecords(CLEANUP_AGE_THRESHOLD);
+    public void cleanupOldAcknowledgmentMetadata(Duration maxAge) {
+        long cutoffTime = System.currentTimeMillis() - maxAge.toMillis();
+        
+        acknowledgmentsToCommit.entrySet().removeIf(entry -> {
+            boolean shouldRemove = false;
+            for (AcknowledgmentMetadata metadata : entry.getValue().values()) {
+                if (metadata.getTimestamp() < cutoffTime) {
+                    shouldRemove = true;
+                    break;
+                }
+            }
+            if (shouldRemove) {
+                LOG.warn("Removing stale acknowledgment metadata for checkpoint {} - possible acknowledgment issue", entry.getKey());
+            }
+            return shouldRemove;
+        });
+    }
+    
+    /**
+     * Cleanup old acknowledgment metadata with default age threshold.
+     */
+    public void cleanupOldAcknowledgmentMetadata() {
+        cleanupOldAcknowledgmentMetadata(CLEANUP_AGE_THRESHOLD);
     }
 
     // Utility and getter methods for testing
@@ -547,10 +650,31 @@ public class KafkaShareGroupSplitReader implements SplitReader<ConsumerRecord<by
     }
     
     /**
-     * Gets the number of pending checkpoints (for testing).
+     * Gets the number of cached records (for testing).
      */
-    public int getPendingCheckpointsCount() {
-        return pendingCheckpoints.size();
+    public int getCachedRecordsCount() {
+        return recordCache.size();
+    }
+    
+    /**
+     * Gets the current cache memory usage (for testing).
+     */
+    public long getCurrentCacheMemoryBytes() {
+        return currentCacheMemoryBytes;
+    }
+    
+    /**
+     * Gets the number of pending acknowledgment checkpoints (for testing).
+     */
+    public int getPendingAcknowledgmentCheckpointsCount() {
+        return acknowledgmentsToCommit.size();
+    }
+    
+    /**
+     * Gets the configured maximum cache memory limit (for testing/monitoring).
+     */
+    public long getMaxCacheMemoryBytes() {
+        return maxCacheMemoryBytes;
     }
     
     /**
