@@ -18,7 +18,15 @@
 
 package org.apache.flink.connector.kafka.source.split;
 
+import org.apache.flink.connector.kafka.source.reader.KafkaShareGroupSourceReader.AcknowledgmentMetadata;
+
+import org.apache.kafka.common.TopicPartition;
+
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * State wrapper for KafkaShareGroupSplit.
@@ -39,12 +47,19 @@ public class KafkaShareGroupSplitState {
     private final KafkaShareGroupSplit split;
     private boolean subscribed;
     
+    // Pulsar-style acknowledgment metadata tracking
+    private volatile AcknowledgmentMetadata latestAcknowledgmentMetadata;
+    private final Map<TopicPartition, Set<Long>> pendingOffsetsToAcknowledge;
+    private volatile int pendingRecordCount;
+    
     /**
      * Creates a state wrapper for the share group split.
      */
     public KafkaShareGroupSplitState(KafkaShareGroupSplit split) {
         this.split = Objects.requireNonNull(split, "Split cannot be null");
         this.subscribed = false;
+        this.pendingOffsetsToAcknowledge = new HashMap<>();
+        this.pendingRecordCount = 0;
     }
     
     /**
@@ -94,6 +109,51 @@ public class KafkaShareGroupSplitState {
      */
     public boolean isSubscribed() {
         return subscribed;
+    }
+    
+    /**
+     * Adds record offsets to be acknowledged following Pulsar pattern.
+     */
+    public void addPendingAcknowledgment(TopicPartition topicPartition, Set<Long> offsets) {
+        pendingOffsetsToAcknowledge.computeIfAbsent(topicPartition, k -> new HashSet<>()).addAll(offsets);
+        pendingRecordCount += offsets.size();
+        updateLatestAcknowledgmentMetadata();
+    }
+    
+    /**
+     * Gets the latest acknowledgment metadata (following Pulsar MessageId pattern).
+     */
+    public AcknowledgmentMetadata getLatestAcknowledgmentMetadata() {
+        return latestAcknowledgmentMetadata;
+    }
+    
+    /**
+     * Updates the acknowledgment metadata based on pending offsets.
+     */
+    private void updateLatestAcknowledgmentMetadata() {
+        if (!pendingOffsetsToAcknowledge.isEmpty()) {
+            this.latestAcknowledgmentMetadata = new AcknowledgmentMetadata(
+                pendingOffsetsToAcknowledge.keySet(),
+                new HashMap<>(pendingOffsetsToAcknowledge),
+                pendingRecordCount
+            );
+        }
+    }
+    
+    /**
+     * Clears pending acknowledgments after successful commit.
+     */
+    public void clearPendingAcknowledgments() {
+        pendingOffsetsToAcknowledge.clear();
+        pendingRecordCount = 0;
+        latestAcknowledgmentMetadata = null;
+    }
+    
+    /**
+     * Gets pending record count for monitoring.
+     */
+    public int getPendingRecordCount() {
+        return pendingRecordCount;
     }
     
     @Override
