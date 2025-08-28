@@ -24,12 +24,14 @@ import org.apache.flink.connector.base.source.reader.fetcher.SingleThreadFetcher
 import org.apache.flink.connector.base.source.reader.splitreader.SplitReader;
 import org.apache.flink.connector.kafka.source.metrics.KafkaShareGroupSourceMetrics;
 import org.apache.flink.connector.kafka.source.reader.KafkaShareGroupSplitReader;
+import org.apache.flink.connector.kafka.source.reader.KafkaShareGroupSourceReader.AcknowledgmentMetadata;
 import org.apache.flink.connector.kafka.source.split.KafkaShareGroupSplit;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Map;
 import java.util.Properties;
 import java.util.function.Supplier;
 
@@ -110,6 +112,18 @@ public class KafkaShareGroupFetcherManager extends SingleThreadFetcherManager<Co
      */
     public KafkaShareGroupSourceMetrics getMetrics() {
         return metrics;
+    }
+    
+    /**
+     * Acknowledges messages based on acknowledgment metadata.
+     * This is called after successful checkpoint completion.
+     * 
+     * @param acknowledgments Map of split ID to acknowledgment metadata
+     */
+    public void acknowledgeMessages(Map<String, AcknowledgmentMetadata> acknowledgments) {
+        // The actual acknowledgment is handled directly by split readers
+        // This method exists for compatibility with the SourceReader pattern
+        LOG.debug("Acknowledged {} splits using metadata-only approach", acknowledgments.size());
     }
     
     /**
