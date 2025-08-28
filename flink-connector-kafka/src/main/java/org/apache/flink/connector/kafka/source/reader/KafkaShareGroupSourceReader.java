@@ -29,13 +29,22 @@ import org.apache.flink.connector.kafka.source.split.KafkaShareGroupSplitState;
 import org.apache.flink.configuration.Configuration;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
+import java.util.SortedMap;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Source reader for Kafka share groups using proper Flink connector architecture.
@@ -65,6 +74,11 @@ public class KafkaShareGroupSourceReader<T> extends SingleThreadMultiplexSourceR
     private final String shareGroupId;
     private final Map<String, KafkaShareGroupSplitState> splitStates;
     
+    // Pulsar-style metadata-only checkpointing
+    private final SortedMap<Long, Map<String, AcknowledgmentMetadata>> acknowledgmentsToCommit;
+    private final ConcurrentMap<String, AcknowledgmentMetadata> acknowledgementsOfFinishedSplits;
+    private final AtomicReference<Throwable> acknowledgmentCommitThrowable;
+    
     /**
      * Creates a share group source reader using Flink's connector architecture.
      *
@@ -91,15 +105,31 @@ public class KafkaShareGroupSourceReader<T> extends SingleThreadMultiplexSourceR
         this.splitStates = new ConcurrentHashMap<>();
         this.shareGroupMetrics = shareGroupMetrics;
         
+        // Initialize Pulsar-style metadata tracking
+        this.acknowledgmentsToCommit = Collections.synchronizedSortedMap(new TreeMap<>());
+        this.acknowledgementsOfFinishedSplits = new ConcurrentHashMap<>();
+        this.acknowledgmentCommitThrowable = new AtomicReference<>();
+        
         LOG.info("*** SOURCE READER: Created KafkaShareGroupSourceReader for share group '{}' on subtask {} using Flink connector architecture", 
                 shareGroupId, context.getIndexOfSubtask());
     }
     
     @Override
     protected void onSplitFinished(Map<String, KafkaShareGroupSplitState> finishedSplitIds) {
-        // For share groups, splits don't "finish" in the traditional sense
-        // Topics remain subscribed as long as the source is active
-        for (String splitId : finishedSplitIds.keySet()) {
+        // Following Pulsar pattern: store metadata of finished splits for acknowledgment
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("onSplitFinished event: {}", finishedSplitIds);
+        }
+        
+        for (Map.Entry<String, KafkaShareGroupSplitState> entry : finishedSplitIds.entrySet()) {
+            String splitId = entry.getKey();
+            KafkaShareGroupSplitState state = entry.getValue();
+            AcknowledgmentMetadata metadata = state.getLatestAcknowledgmentMetadata();
+            if (metadata != null) {
+                acknowledgementsOfFinishedSplits.put(splitId, metadata);
+            }
+            
+            // Remove from active splits
             splitStates.remove(splitId);
             LOG.debug("Share group '{}' finished processing split: {}", shareGroupId, splitId);
         }
@@ -123,24 +153,66 @@ public class KafkaShareGroupSourceReader<T> extends SingleThreadMultiplexSourceR
     
     @Override
     public List<KafkaShareGroupSplit> snapshotState(long checkpointId) {
-        // Notify split reader to associate upcoming records with this checkpoint
+        // Get splits from parent - this handles the basic split state
+        List<KafkaShareGroupSplit> splits = super.snapshotState(checkpointId);
+        
+        // Following Pulsar pattern: store acknowledgment metadata for checkpoint
+        Map<String, AcknowledgmentMetadata> acknowledgments = 
+            acknowledgmentsToCommit.computeIfAbsent(checkpointId, id -> new ConcurrentHashMap<>());
+        
+        // Store acknowledgment metadata of active splits
+        for (KafkaShareGroupSplit split : splits) {
+            String splitId = split.splitId();
+            KafkaShareGroupSplitState splitState = splitStates.get(splitId);
+            if (splitState != null) {
+                AcknowledgmentMetadata metadata = splitState.getLatestAcknowledgmentMetadata();
+                if (metadata != null) {
+                    acknowledgments.put(splitId, metadata);
+                }
+            }
+        }
+        
+        // Store acknowledgment metadata of finished splits
+        acknowledgments.putAll(acknowledgementsOfFinishedSplits);
+        
+        // Notify split readers about checkpoint start (for association)
         notifySplitReadersCheckpointStart(checkpointId);
         
-        // For share groups, minimal state is needed since coordinator handles message delivery
-        LOG.debug("Share group '{}' snapshot state for checkpoint: {} ({} splits)", 
-                shareGroupId, checkpointId, splitStates.size());
+        LOG.debug("Share group '{}' snapshot state for checkpoint: {} ({} splits, {} acknowledgments)", 
+                shareGroupId, checkpointId, splits.size(), acknowledgments.size());
         
-        return splitStates.values().stream()
-                .map(KafkaShareGroupSplitState::toKafkaShareGroupSplit)
-                .collect(java.util.stream.Collectors.toList());
+        return splits;
     }
     
     @Override
     public void notifyCheckpointComplete(long checkpointId) throws Exception {
-        // First notify split readers to acknowledge records for this checkpoint
-        notifySplitReadersCheckpointComplete(checkpointId);
+        // Following Pulsar pattern: acknowledge based on stored metadata
+        LOG.debug("Committing acknowledgments for checkpoint {}", checkpointId);
         
-        // Then call parent implementation
+        Map<String, AcknowledgmentMetadata> acknowledgments = acknowledgmentsToCommit.get(checkpointId);
+        if (acknowledgments == null) {
+            LOG.debug("Acknowledgments for checkpoint {} have already been committed.", checkpointId);
+            return;
+        }
+        
+        try {
+            // Acknowledge messages using metadata instead of full records
+            KafkaShareGroupFetcherManager fetcherManager = (KafkaShareGroupFetcherManager) splitFetcherManager;
+            fetcherManager.acknowledgeMessages(acknowledgments);
+            
+            LOG.debug("Successfully acknowledged {} splits for checkpoint {}", acknowledgments.size(), checkpointId);
+            
+            // Clean up acknowledgments - following Pulsar cleanup pattern
+            acknowledgementsOfFinishedSplits.keySet().removeAll(acknowledgments.keySet());
+            acknowledgmentsToCommit.headMap(checkpointId + 1).clear();
+            
+        } catch (Exception e) {
+            LOG.error("Failed to acknowledge messages for checkpoint {}", checkpointId, e);
+            acknowledgmentCommitThrowable.compareAndSet(null, e);
+            throw e;
+        }
+        
+        // Call parent implementation
         super.notifyCheckpointComplete(checkpointId);
         
         LOG.debug("Share group '{}' checkpoint {} completed with acknowledgments sent", shareGroupId, checkpointId);
@@ -216,5 +288,47 @@ public class KafkaShareGroupSourceReader<T> extends SingleThreadMultiplexSourceR
      */
     public Map<String, KafkaShareGroupSplitState> getSplitStates() {
         return new java.util.HashMap<>(splitStates);
+    }
+    
+    /**
+     * Acknowledgment metadata class following Pulsar pattern.
+     * Stores lightweight metadata instead of full records.
+     */
+    public static class AcknowledgmentMetadata {
+        private final Set<TopicPartition> topicPartitions;
+        private final Map<TopicPartition, Set<Long>> offsetsToAcknowledge;
+        private final long timestamp;
+        private final int recordCount;
+        
+        public AcknowledgmentMetadata(Set<TopicPartition> topicPartitions, 
+                                    Map<TopicPartition, Set<Long>> offsetsToAcknowledge,
+                                    int recordCount) {
+            this.topicPartitions = Collections.unmodifiableSet(new HashSet<>(topicPartitions));
+            this.offsetsToAcknowledge = Collections.unmodifiableMap(new HashMap<>(offsetsToAcknowledge));
+            this.timestamp = System.currentTimeMillis();
+            this.recordCount = recordCount;
+        }
+        
+        public Set<TopicPartition> getTopicPartitions() {
+            return topicPartitions;
+        }
+        
+        public Map<TopicPartition, Set<Long>> getOffsetsToAcknowledge() {
+            return offsetsToAcknowledge;
+        }
+        
+        public long getTimestamp() {
+            return timestamp;
+        }
+        
+        public int getRecordCount() {
+            return recordCount;
+        }
+        
+        @Override
+        public String toString() {
+            return String.format("AcknowledgmentMetadata{partitions=%d, records=%d, timestamp=%d}", 
+                    topicPartitions.size(), recordCount, timestamp);
+        }
     }
 }
