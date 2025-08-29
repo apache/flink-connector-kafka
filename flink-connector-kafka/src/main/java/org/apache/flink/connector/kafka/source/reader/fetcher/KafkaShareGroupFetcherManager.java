@@ -23,8 +23,8 @@ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.connector.base.source.reader.fetcher.SingleThreadFetcherManager;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitReader;
 import org.apache.flink.connector.kafka.source.metrics.KafkaShareGroupSourceMetrics;
-import org.apache.flink.connector.kafka.source.reader.KafkaShareGroupSplitReader;
 import org.apache.flink.connector.kafka.source.reader.KafkaShareGroupSourceReader.AcknowledgmentMetadata;
+import org.apache.flink.connector.kafka.source.reader.KafkaShareGroupSplitReader;
 import org.apache.flink.connector.kafka.source.split.KafkaShareGroupSplit;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;

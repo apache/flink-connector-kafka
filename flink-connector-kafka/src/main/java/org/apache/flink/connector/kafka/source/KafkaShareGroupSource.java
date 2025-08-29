@@ -171,6 +171,9 @@ public class KafkaShareGroupSource<OUT>
     public SourceReader<OUT, KafkaShareGroupSplit> createReader(SourceReaderContext readerContext)
             throws Exception {
         
+        LOG.info("ShareGroup [{}]: Creating source reader for {} topics with parallelism {}", 
+                 shareGroupId, getTopics().size(), readerContext.currentParallelism());
+        
         // Configure properties for share group
         Properties shareConsumerProperties = new Properties();
         shareConsumerProperties.putAll(this.properties);
@@ -230,8 +233,8 @@ public class KafkaShareGroupSource<OUT>
             SplitEnumeratorContext<KafkaShareGroupSplit> enumContext) {
         
         Set<String> topics = getTopics();
-        LOG.info("*** MAIN SOURCE: Creating KafkaShareGroupEnumerator for topics: {} with share group '{}'", 
-                topics, shareGroupId);
+        LOG.info("ShareGroup [{}]: INIT - Creating enumerator for topics: {} with {} subtasks", 
+                 shareGroupId, topics, enumContext.currentParallelism());
         
         // If no topics found from subscriber, try to get from properties as fallback
         if (topics.isEmpty()) {

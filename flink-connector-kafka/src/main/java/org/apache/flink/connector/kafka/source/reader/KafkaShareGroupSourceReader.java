@@ -178,7 +178,7 @@ public class KafkaShareGroupSourceReader<T> extends SingleThreadMultiplexSourceR
         // Notify split readers about checkpoint start (for association)
         notifySplitReadersCheckpointStart(checkpointId);
         
-        LOG.debug("Share group '{}' snapshot state for checkpoint: {} ({} splits, {} acknowledgments)", 
+        LOG.info("ShareGroup [{}]: CHECKPOINT {} - Snapshot state for {} splits with {} acknowledgments", 
                 shareGroupId, checkpointId, splits.size(), acknowledgments.size());
         
         return splits;
@@ -187,7 +187,8 @@ public class KafkaShareGroupSourceReader<T> extends SingleThreadMultiplexSourceR
     @Override
     public void notifyCheckpointComplete(long checkpointId) throws Exception {
         // Following Pulsar pattern: acknowledge based on stored metadata
-        LOG.debug("Committing acknowledgments for checkpoint {}", checkpointId);
+        LOG.info("ShareGroup [{}]: CHECKPOINT {} COMPLETE - Committing acknowledgments for {} splits", 
+                 shareGroupId, checkpointId, acknowledgments != null ? acknowledgments.size() : 0);
         
         Map<String, AcknowledgmentMetadata> acknowledgments = acknowledgmentsToCommit.get(checkpointId);
         if (acknowledgments == null) {
@@ -215,7 +216,8 @@ public class KafkaShareGroupSourceReader<T> extends SingleThreadMultiplexSourceR
         // Call parent implementation
         super.notifyCheckpointComplete(checkpointId);
         
-        LOG.debug("Share group '{}' checkpoint {} completed with acknowledgments sent", shareGroupId, checkpointId);
+        LOG.info("ShareGroup [{}]: CHECKPOINT {} SUCCESS - Acknowledgments committed to Kafka coordinator", 
+                 shareGroupId, checkpointId);
     }
     
     public void notifyCheckpointAborted(long checkpointId) throws Exception {
@@ -225,7 +227,8 @@ public class KafkaShareGroupSourceReader<T> extends SingleThreadMultiplexSourceR
         // Call parent implementation
         super.notifyCheckpointAborted(checkpointId);
         
-        LOG.info("Share group '{}' checkpoint {} aborted, records released for redelivery", shareGroupId, checkpointId);
+        LOG.info("ShareGroup [{}]: CHECKPOINT {} ABORTED - {} records released for redelivery", 
+                 shareGroupId, checkpointId, acknowledgments != null ? acknowledgments.size() : 0);
     }
     
     /**
