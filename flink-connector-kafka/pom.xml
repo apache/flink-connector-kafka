@@ -42,8 +42,6 @@ under the License.
         KafkaProducerExactlyOnceITCase -->
 			--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED
 		</flink.connector.module.config>
-		<maven.compiler.source>21</maven.compiler.source>
-		<maven.compiler.target>21</maven.compiler.target>
 	</properties>
 
 	<dependencies>
@@ -53,7 +51,7 @@ under the License.
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-streaming-java</artifactId>
-			<scope>compile</scope>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.flink</groupId>
@@ -63,40 +61,33 @@ under the License.
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-connector-datagen</artifactId>
-			<scope>compile</scope>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-core</artifactId>
-			<scope>compile</scope>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-core-api</artifactId>
-			<scope>compile</scope>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-metrics-core</artifactId>
-			<scope>compile</scope>
+			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-runtime</artifactId>
-			<scope>compile</scope>
+			<scope>provided</scope>
 		</dependency>
 
 		<dependency>
 			<groupId>org.slf4j</groupId>
 			<artifactId>slf4j-api</artifactId>
-			<scope>compile</scope>
-		</dependency>
-
-		<dependency>
-			<groupId>org.slf4j</groupId>
-			<artifactId>slf4j-simple</artifactId>
-			<version>1.7.36</version>
-			<scope>compile</scope>
+			<scope>provided</scope>
 		</dependency>
 
 		<!-- Connectors -->
@@ -104,7 +95,7 @@ under the License.
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-connector-base</artifactId>
-			<scope>compile</scope>
+			<scope>provided</scope>
 		</dependency>
 
 		<!-- Directly used libraries -->
@@ -204,7 +195,7 @@ under the License.
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-clients</artifactId>
-			<scope>compile</scope>
+			<scope>test</scope>
 		</dependency>
 
 		<dependency>
@@ -428,14 +419,6 @@ under the License.
 						</configuration>
 					</execution>
 				</executions>
-			</plugin>
-			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-compiler-plugin</artifactId>
-				<configuration>
-					<source>11</source>
-					<target>11</target>
-				</configuration>
 			</plugin>
 		</plugins>
 	</build>
