@@ -2,6 +2,7 @@
 .cache
 scalastyle-output.xml
 .classpath
+.idea/
 .idea/*
 !.idea/vcs.xml
 .vscode
