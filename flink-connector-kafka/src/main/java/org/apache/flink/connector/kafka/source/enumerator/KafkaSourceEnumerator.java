@@ -32,7 +32,6 @@ import org.apache.flink.util.FlinkRuntimeException;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.KafkaAdminClient;
-import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsOptions;
 import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsSpec;
 import org.apache.kafka.clients.admin.ListOffsetsResult;
 import org.apache.kafka.clients.admin.OffsetSpec;
@@ -534,15 +533,12 @@ public class KafkaSourceEnumerator
 
         @Override
         public Map<TopicPartition, Long> committedOffsets(Collection<TopicPartition> partitions) {
-            ListConsumerGroupOffsetsSpec groupSpec = 
-                    new ListConsumerGroupOffsetsSpec()
-                            .topicPartitions(new ArrayList<>(partitions));
-            Map<String, ListConsumerGroupOffsetsSpec> groupSpecs = Collections.singletonMap(groupId, groupSpec);
-            ListConsumerGroupOffsetsOptions options = new ListConsumerGroupOffsetsOptions();
+            ListConsumerGroupOffsetsSpec offsetsSpec =
+                    new ListConsumerGroupOffsetsSpec().topicPartitions(partitions);
             try {
                 return adminClient
-                        .listConsumerGroupOffsets(groupSpecs, options)
-                        .all()
+                        .listConsumerGroupOffsets(Collections.singletonMap(groupId, offsetsSpec))
+                        .partitionsToOffsetAndMetadata()
                         .thenApply(
                                 result -> {
                                     Map<TopicPartition, Long> offsets = new HashMap<>();
