@@ -1,12 +1,13 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -26,6 +27,7 @@ import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.IOUtils;
 
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.errors.InvalidTxnStateException;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.errors.RetriableException;
@@ -125,6 +127,17 @@ public class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
                         e);
                 handleFailedTransaction(producer);
                 request.signalFailedWithKnownReason(e);
+            } catch (InterruptException e) {
+                // note that we do not attempt to recover from this exception; producer is likely
+                // left in an inconsistent state
+                LOG.info(
+                        "Committing transaction ({}) was interrupted. This most likely happens because the task is being cancelled.",
+                        request,
+                        e);
+                // reset the interrupt flag that is set when InterruptException is created
+                Thread.interrupted();
+                // propagate interruption through java.lang.InterruptedException instead
+                throw new InterruptedException(e.getMessage());
             } catch (Exception e) {
                 LOG.error(
                         "Transaction ({}) encountered error and data has been potentially lost.",

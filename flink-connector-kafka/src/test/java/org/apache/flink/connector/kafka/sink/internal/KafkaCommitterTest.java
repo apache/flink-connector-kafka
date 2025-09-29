@@ -1,12 +1,13 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,6 +20,7 @@ package org.apache.flink.connector.kafka.sink.internal;
 
 import org.apache.flink.api.connector.sink2.mocks.MockCommitRequest;
 import org.apache.flink.connector.kafka.sink.KafkaCommittable;
+import org.apache.flink.testutils.logging.LoggerAuditingExtension;
 import org.apache.flink.util.TestLoggerExtension;
 
 import org.apache.kafka.clients.CommonClientConfigs;
@@ -29,17 +31,22 @@ import org.assertj.core.api.Condition;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.net.ServerSocket;
 import java.util.Collections;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.slf4j.event.Level.ERROR;
 
 /** Tests for {@link KafkaCommitter}. */
 @ExtendWith({TestLoggerExtension.class})
@@ -52,6 +59,10 @@ class KafkaCommitterTest {
     public static final int SUB_ID = 1;
     private static final BiFunction<Properties, String, FlinkKafkaInternalProducer<?, ?>>
             MOCK_FACTORY = (properties, transactionalId) -> new MockProducer(properties, null);
+
+    @RegisterExtension
+    public final LoggerAuditingExtension errorLogger =
+            new LoggerAuditingExtension(KafkaCommitter.class, ERROR);
 
     @AfterEach
     public void check() {
@@ -156,6 +167,59 @@ class KafkaCommitterTest {
             assertThat(committer.getCommittingProducer()).isNull();
             assertThat(creationCounter.get()).isEqualTo(2);
         }
+    }
+
+    @Test
+    public void testInterrupt() throws IOException {
+        ServerSocket serverSocket = new ServerSocket(0);
+        Properties properties = getProperties();
+        properties.put(
+                CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG,
+                "http://localhost:" + serverSocket.getLocalPort());
+        properties.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, "1000");
+        properties.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, String.valueOf(Long.MAX_VALUE));
+        try (final KafkaCommitter committer =
+                        new KafkaCommitter(
+                                properties, TRANS_ID, SUB_ID, ATTEMPT, false, MOCK_FACTORY);
+                FlinkKafkaInternalProducer<Object, Object> producer =
+                        new FlinkKafkaInternalProducer<>(properties, TRANS_ID);
+                ReadableBackchannel<TransactionFinished> backchannel =
+                        BackchannelFactory.getInstance()
+                                .getReadableBackchannel(SUB_ID, ATTEMPT, TRANS_ID)) {
+            final MockCommitRequest<KafkaCommittable> request =
+                    new MockCommitRequest<>(KafkaCommittable.of(producer));
+
+            producer.resumeTransaction(PRODUCER_ID, EPOCH);
+
+            AtomicBoolean interrupting = interruptOnMessage(Thread.currentThread(), serverSocket);
+            assertThatThrownBy(() -> committer.commit(Collections.singletonList(request)))
+                    .isInstanceOf(InterruptedException.class);
+
+            // verify that the interrupt happened only after committing started
+            assertThat(interrupting).isTrue();
+
+            // no errors are logged
+            assertThat(errorLogger.getMessages()).isEmpty();
+
+            assertThat(backchannel).doesNotHave(transactionFinished(true));
+        }
+    }
+
+    private AtomicBoolean interruptOnMessage(Thread mainThread, ServerSocket serverSocket) {
+        final AtomicBoolean interrupting = new AtomicBoolean();
+        new Thread(
+                        () -> {
+                            try {
+                                serverSocket.accept().getInputStream().read();
+                                interrupting.set(true);
+                                mainThread.interrupt();
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        },
+                        "canceller")
+                .start();
+        return interrupting;
     }
 
     @ParameterizedTest
