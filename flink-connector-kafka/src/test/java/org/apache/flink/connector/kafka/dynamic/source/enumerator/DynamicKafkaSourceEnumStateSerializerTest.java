@@ -22,7 +22,8 @@ import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
 import org.apache.flink.connector.kafka.source.enumerator.AssignmentStatus;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
-import org.apache.flink.connector.kafka.source.enumerator.TopicPartitionAndAssignmentStatus;
+import org.apache.flink.connector.kafka.source.enumerator.SplitAndAssignmentStatus;
+import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -33,6 +34,8 @@ import org.junit.jupiter.api.Test;
 import java.util.Properties;
 import java.util.Set;
 
+import static org.apache.flink.connector.kafka.source.enumerator.AssignmentStatus.ASSIGNED;
+import static org.apache.flink.connector.kafka.source.enumerator.AssignmentStatus.UNASSIGNED;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -81,28 +84,16 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
                                 "cluster0",
                                 new KafkaSourceEnumState(
                                         ImmutableSet.of(
-                                                new TopicPartitionAndAssignmentStatus(
-                                                        new TopicPartition("topic0", 0),
-                                                        AssignmentStatus.ASSIGNED),
-                                                new TopicPartitionAndAssignmentStatus(
-                                                        new TopicPartition("topic1", 1),
-                                                        AssignmentStatus.UNASSIGNED_INITIAL)),
+                                                getSplitAssignment("topic0", 0, ASSIGNED),
+                                                getSplitAssignment("topic1", 1, UNASSIGNED)),
                                         true),
                                 "cluster1",
                                 new KafkaSourceEnumState(
                                         ImmutableSet.of(
-                                                new TopicPartitionAndAssignmentStatus(
-                                                        new TopicPartition("topic2", 0),
-                                                        AssignmentStatus.UNASSIGNED_INITIAL),
-                                                new TopicPartitionAndAssignmentStatus(
-                                                        new TopicPartition("topic3", 1),
-                                                        AssignmentStatus.UNASSIGNED_INITIAL),
-                                                new TopicPartitionAndAssignmentStatus(
-                                                        new TopicPartition("topic4", 2),
-                                                        AssignmentStatus.UNASSIGNED_INITIAL),
-                                                new TopicPartitionAndAssignmentStatus(
-                                                        new TopicPartition("topic5", 3),
-                                                        AssignmentStatus.UNASSIGNED_INITIAL)),
+                                                getSplitAssignment("topic2", 0, UNASSIGNED),
+                                                getSplitAssignment("topic3", 1, UNASSIGNED),
+                                                getSplitAssignment("topic4", 2, UNASSIGNED),
+                                                getSplitAssignment("topic5", 3, UNASSIGNED)),
                                         false)));
 
         DynamicKafkaSourceEnumState dynamicKafkaSourceEnumStateAfterSerde =
@@ -114,5 +105,11 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
         assertThat(dynamicKafkaSourceEnumState)
                 .usingRecursiveComparison()
                 .isEqualTo(dynamicKafkaSourceEnumStateAfterSerde);
+    }
+
+    private static SplitAndAssignmentStatus getSplitAssignment(
+            String topic, int partition, AssignmentStatus assignStatus) {
+        return new SplitAndAssignmentStatus(
+                new KafkaPartitionSplit(new TopicPartition(topic, partition), 0), assignStatus);
     }
 }

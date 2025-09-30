@@ -37,6 +37,8 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
+import static org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit.MIGRATED;
+
 /**
  * The {@link org.apache.flink.core.io.SimpleVersionedSerializer Serializer} for the enumerator
  * state of Kafka source.
@@ -58,7 +60,12 @@ public class KafkaSourceEnumStateSerializer
      */
     private static final int VERSION_2 = 2;
 
-    private static final int CURRENT_VERSION = VERSION_2;
+    private static final int VERSION_3 = 3;
+
+    private static final int CURRENT_VERSION = VERSION_3;
+
+    private static final KafkaPartitionSplitSerializer SPLIT_SERIALIZER =
+            new KafkaPartitionSplitSerializer();
 
     @Override
     public int getVersion() {
@@ -67,15 +74,22 @@ public class KafkaSourceEnumStateSerializer
 
     @Override
     public byte[] serialize(KafkaSourceEnumState enumState) throws IOException {
-        Set<TopicPartitionAndAssignmentStatus> partitions = enumState.partitions();
+        return serializeV3(enumState);
+    }
+
+    @VisibleForTesting
+    static byte[] serializeV3(KafkaSourceEnumState enumState) throws IOException {
+        Set<SplitAndAssignmentStatus> splits = enumState.splits();
         boolean initialDiscoveryFinished = enumState.initialDiscoveryFinished();
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 DataOutputStream out = new DataOutputStream(baos)) {
-            out.writeInt(partitions.size());
-            for (TopicPartitionAndAssignmentStatus topicPartitionAndAssignmentStatus : partitions) {
-                out.writeUTF(topicPartitionAndAssignmentStatus.topicPartition().topic());
-                out.writeInt(topicPartitionAndAssignmentStatus.topicPartition().partition());
-                out.writeInt(topicPartitionAndAssignmentStatus.assignmentStatus().getStatusCode());
+            out.writeInt(splits.size());
+            out.writeInt(SPLIT_SERIALIZER.getVersion());
+            for (SplitAndAssignmentStatus split : splits) {
+                final byte[] splitBytes = SPLIT_SERIALIZER.serialize(split.split());
+                out.writeInt(splitBytes.length);
+                out.write(splitBytes);
+                out.writeInt(split.assignmentStatus().getStatusCode());
             }
             out.writeBoolean(initialDiscoveryFinished);
             out.flush();
@@ -86,22 +100,14 @@ public class KafkaSourceEnumStateSerializer
     @Override
     public KafkaSourceEnumState deserialize(int version, byte[] serialized) throws IOException {
         switch (version) {
-            case CURRENT_VERSION:
-                return deserializeTopicPartitionAndAssignmentStatus(serialized);
+            case VERSION_3:
+                return deserializeVersion3(serialized);
+            case VERSION_2:
+                return deserializeVersion2(serialized);
             case VERSION_1:
-                return deserializeAssignedTopicPartitions(serialized);
+                return deserializeVersion1(serialized);
             case VERSION_0:
-                Map<Integer, Set<KafkaPartitionSplit>> currentPartitionAssignment =
-                        SerdeUtils.deserializeSplitAssignments(
-                                serialized, new KafkaPartitionSplitSerializer(), HashSet::new);
-                Set<TopicPartition> currentAssignedSplits = new HashSet<>();
-                currentPartitionAssignment.forEach(
-                        (reader, splits) ->
-                                splits.forEach(
-                                        split ->
-                                                currentAssignedSplits.add(
-                                                        split.getTopicPartition())));
-                return new KafkaSourceEnumState(currentAssignedSplits, new HashSet<>(), true);
+                return deserializeVersion0(serialized);
             default:
                 throw new IOException(
                         String.format(
@@ -111,44 +117,24 @@ public class KafkaSourceEnumStateSerializer
         }
     }
 
-    private static KafkaSourceEnumState deserializeAssignedTopicPartitions(
-            byte[] serializedTopicPartitions) throws IOException {
-        try (ByteArrayInputStream bais = new ByteArrayInputStream(serializedTopicPartitions);
-                DataInputStream in = new DataInputStream(bais)) {
+    private static KafkaSourceEnumState deserializeVersion3(byte[] serialized) throws IOException {
 
-            final int numPartitions = in.readInt();
-            Set<TopicPartitionAndAssignmentStatus> partitions = new HashSet<>(numPartitions);
-            for (int i = 0; i < numPartitions; i++) {
-                final String topic = in.readUTF();
-                final int partition = in.readInt();
-                partitions.add(
-                        new TopicPartitionAndAssignmentStatus(
-                                new TopicPartition(topic, partition), AssignmentStatus.ASSIGNED));
-            }
-            if (in.available() > 0) {
-                throw new IOException("Unexpected trailing bytes in serialized topic partitions");
-            }
-            return new KafkaSourceEnumState(partitions, true);
-        }
-    }
-
-    private static KafkaSourceEnumState deserializeTopicPartitionAndAssignmentStatus(
-            byte[] serialized) throws IOException {
+        final KafkaPartitionSplitSerializer splitSerializer = new KafkaPartitionSplitSerializer();
 
         try (ByteArrayInputStream bais = new ByteArrayInputStream(serialized);
                 DataInputStream in = new DataInputStream(bais)) {
 
             final int numPartitions = in.readInt();
-            Set<TopicPartitionAndAssignmentStatus> partitions = new HashSet<>(numPartitions);
+            final int splitVersion = in.readInt();
+            Set<SplitAndAssignmentStatus> partitions = new HashSet<>(numPartitions);
 
             for (int i = 0; i < numPartitions; i++) {
-                final String topic = in.readUTF();
-                final int partition = in.readInt();
+                final KafkaPartitionSplit split =
+                        splitSerializer.deserialize(splitVersion, in.readNBytes(in.readInt()));
                 final int statusCode = in.readInt();
                 partitions.add(
-                        new TopicPartitionAndAssignmentStatus(
-                                new TopicPartition(topic, partition),
-                                AssignmentStatus.ofStatusCode(statusCode)));
+                        new SplitAndAssignmentStatus(
+                                split, AssignmentStatus.ofStatusCode(statusCode)));
             }
             final boolean initialDiscoveryFinished = in.readBoolean();
             if (in.available() > 0) {
@@ -159,20 +145,102 @@ public class KafkaSourceEnumStateSerializer
         }
     }
 
+    private static KafkaSourceEnumState deserializeVersion0(byte[] serialized) throws IOException {
+        Map<Integer, Set<KafkaPartitionSplit>> currentPartitionAssignment =
+                SerdeUtils.deserializeSplitAssignments(
+                        serialized, new KafkaPartitionSplitSerializer(), HashSet::new);
+        Set<KafkaPartitionSplit> currentAssignedSplits = new HashSet<>();
+        for (Map.Entry<Integer, Set<KafkaPartitionSplit>> entry :
+                currentPartitionAssignment.entrySet()) {
+            currentAssignedSplits.addAll(entry.getValue());
+        }
+        return new KafkaSourceEnumState(currentAssignedSplits, new HashSet<>(), true);
+    }
+
     @VisibleForTesting
-    public static byte[] serializeTopicPartitions(Collection<TopicPartition> topicPartitions)
-            throws IOException {
+    static byte[] serializeV1(Collection<KafkaPartitionSplit> splits) throws IOException {
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 DataOutputStream out = new DataOutputStream(baos)) {
 
-            out.writeInt(topicPartitions.size());
-            for (TopicPartition tp : topicPartitions) {
+            out.writeInt(splits.size());
+            for (KafkaPartitionSplit split : splits) {
+                final TopicPartition tp = split.getTopicPartition();
                 out.writeUTF(tp.topic());
                 out.writeInt(tp.partition());
             }
             out.flush();
 
             return baos.toByteArray();
+        }
+    }
+
+    private static KafkaSourceEnumState deserializeVersion1(byte[] serializedTopicPartitions)
+            throws IOException {
+        try (ByteArrayInputStream bais = new ByteArrayInputStream(serializedTopicPartitions);
+                DataInputStream in = new DataInputStream(bais)) {
+
+            final int numPartitions = in.readInt();
+            Set<SplitAndAssignmentStatus> partitions = new HashSet<>(numPartitions);
+            for (int i = 0; i < numPartitions; i++) {
+                final String topic = in.readUTF();
+                final int partition = in.readInt();
+                partitions.add(
+                        new SplitAndAssignmentStatus(
+                                new KafkaPartitionSplit(
+                                        new TopicPartition(topic, partition), MIGRATED),
+                                AssignmentStatus.ASSIGNED));
+            }
+            if (in.available() > 0) {
+                throw new IOException("Unexpected trailing bytes in serialized topic partitions");
+            }
+            return new KafkaSourceEnumState(partitions, true);
+        }
+    }
+
+    @VisibleForTesting
+    static byte[] serializeV2(
+            Collection<SplitAndAssignmentStatus> splits, boolean initialDiscoveryFinished)
+            throws IOException {
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                DataOutputStream out = new DataOutputStream(baos)) {
+            out.writeInt(splits.size());
+            for (SplitAndAssignmentStatus splitAndAssignmentStatus : splits) {
+                final TopicPartition topicPartition =
+                        splitAndAssignmentStatus.split().getTopicPartition();
+                out.writeUTF(topicPartition.topic());
+                out.writeInt(topicPartition.partition());
+                out.writeInt(splitAndAssignmentStatus.assignmentStatus().getStatusCode());
+            }
+            out.writeBoolean(initialDiscoveryFinished);
+            out.flush();
+            return baos.toByteArray();
+        }
+    }
+
+    private static KafkaSourceEnumState deserializeVersion2(byte[] serialized) throws IOException {
+
+        try (ByteArrayInputStream bais = new ByteArrayInputStream(serialized);
+                DataInputStream in = new DataInputStream(bais)) {
+
+            final int numPartitions = in.readInt();
+            Set<SplitAndAssignmentStatus> partitions = new HashSet<>(numPartitions);
+
+            for (int i = 0; i < numPartitions; i++) {
+                final String topic = in.readUTF();
+                final int partition = in.readInt();
+                final int statusCode = in.readInt();
+                partitions.add(
+                        new SplitAndAssignmentStatus(
+                                new KafkaPartitionSplit(
+                                        new TopicPartition(topic, partition), MIGRATED),
+                                AssignmentStatus.ofStatusCode(statusCode)));
+            }
+            final boolean initialDiscoveryFinished = in.readBoolean();
+            if (in.available() > 0) {
+                throw new IOException("Unexpected trailing bytes in serialized topic partitions");
+            }
+
+            return new KafkaSourceEnumState(partitions, initialDiscoveryFinished);
         }
     }
 }

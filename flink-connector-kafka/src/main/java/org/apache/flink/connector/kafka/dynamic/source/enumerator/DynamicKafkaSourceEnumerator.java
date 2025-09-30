@@ -35,14 +35,13 @@ import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceS
 import org.apache.flink.connector.kafka.source.KafkaPropertiesUtil;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumerator;
-import org.apache.flink.connector.kafka.source.enumerator.TopicPartitionAndAssignmentStatus;
+import org.apache.flink.connector.kafka.source.enumerator.SplitAndAssignmentStatus;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.kafka.common.KafkaException;
-import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -174,8 +173,8 @@ public class DynamicKafkaSourceEnumerator
                 dynamicKafkaSourceEnumState.getClusterEnumeratorStates().entrySet()) {
             this.latestClusterTopicsMap.put(
                     clusterEnumState.getKey(),
-                    clusterEnumState.getValue().assignedPartitions().stream()
-                            .map(TopicPartition::topic)
+                    clusterEnumState.getValue().assignedSplits().stream()
+                            .map(KafkaPartitionSplit::getTopic)
                             .collect(Collectors.toSet()));
 
             createEnumeratorWithAssignedTopicPartitions(
@@ -291,9 +290,9 @@ public class DynamicKafkaSourceEnumerator
                 final Set<String> activeTopics = activeClusterTopics.getValue();
 
                 // filter out removed topics
-                Set<TopicPartitionAndAssignmentStatus> partitions =
-                        kafkaSourceEnumState.partitions().stream()
-                                .filter(tp -> activeTopics.contains(tp.topicPartition().topic()))
+                Set<SplitAndAssignmentStatus> partitions =
+                        kafkaSourceEnumState.splits().stream()
+                                .filter(tp -> activeTopics.contains(tp.split().getTopic()))
                                 .collect(Collectors.toSet());
 
                 newKafkaSourceEnumState =
