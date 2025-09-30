@@ -41,10 +41,14 @@ public class KafkaPartitionSplit implements SourceSplit {
     public static final long EARLIEST_OFFSET = -2;
     // Indicating the split should consume from the last committed offset.
     public static final long COMMITTED_OFFSET = -3;
+    // Used to indicate the split has been migrated from an earlier enumerator state; offset needs
+    // to be initialized on recovery
+    public static final long MIGRATED = Long.MIN_VALUE;
 
     // Valid special starting offsets
     public static final Set<Long> VALID_STARTING_OFFSET_MARKERS =
-            new HashSet<>(Arrays.asList(EARLIEST_OFFSET, LATEST_OFFSET, COMMITTED_OFFSET));
+            new HashSet<>(
+                    Arrays.asList(EARLIEST_OFFSET, LATEST_OFFSET, COMMITTED_OFFSET, MIGRATED));
     public static final Set<Long> VALID_STOPPING_OFFSET_MARKERS =
             new HashSet<>(Arrays.asList(LATEST_OFFSET, COMMITTED_OFFSET, NO_STOPPING_OFFSET));
 

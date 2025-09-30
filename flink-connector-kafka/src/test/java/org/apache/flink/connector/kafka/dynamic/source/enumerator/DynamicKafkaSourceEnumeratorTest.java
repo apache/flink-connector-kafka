@@ -33,7 +33,6 @@ import org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.Kaf
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.connector.kafka.source.enumerator.AssignmentStatus;
-import org.apache.flink.connector.kafka.source.enumerator.TopicPartitionAndAssignmentStatus;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.NoStoppingOffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.testutils.MockKafkaMetadataService;
@@ -429,7 +428,7 @@ public class DynamicKafkaSourceEnumeratorTest {
             assertThat(
                             stateBeforeSplitAssignment.getClusterEnumeratorStates().values()
                                     .stream()
-                                    .map(subState -> subState.assignedPartitions().stream())
+                                    .map(subState -> subState.assignedSplits().stream())
                                     .count())
                     .as("no readers registered, so state should be empty")
                     .isZero();
@@ -458,7 +457,7 @@ public class DynamicKafkaSourceEnumeratorTest {
 
             assertThat(
                             stateAfterSplitAssignment.getClusterEnumeratorStates().values().stream()
-                                    .flatMap(enumState -> enumState.assignedPartitions().stream())
+                                    .flatMap(enumState -> enumState.assignedSplits().stream())
                                     .count())
                     .isEqualTo(
                             NUM_SPLITS_PER_CLUSTER
@@ -514,15 +513,13 @@ public class DynamicKafkaSourceEnumeratorTest {
 
             assertThat(getFilteredTopicPartitions(initialState, TOPIC, AssignmentStatus.ASSIGNED))
                     .hasSize(2);
-            assertThat(
-                            getFilteredTopicPartitions(
-                                    initialState, TOPIC, AssignmentStatus.UNASSIGNED_INITIAL))
+            assertThat(getFilteredTopicPartitions(initialState, TOPIC, AssignmentStatus.UNASSIGNED))
                     .hasSize(1);
             assertThat(getFilteredTopicPartitions(initialState, topic2, AssignmentStatus.ASSIGNED))
                     .hasSize(2);
             assertThat(
                             getFilteredTopicPartitions(
-                                    initialState, topic2, AssignmentStatus.UNASSIGNED_INITIAL))
+                                    initialState, topic2, AssignmentStatus.UNASSIGNED))
                     .hasSize(1);
 
             // mock metadata change
@@ -540,13 +537,13 @@ public class DynamicKafkaSourceEnumeratorTest {
                     .hasSize(3);
             assertThat(
                             getFilteredTopicPartitions(
-                                    migratedState, TOPIC, AssignmentStatus.UNASSIGNED_INITIAL))
+                                    migratedState, TOPIC, AssignmentStatus.UNASSIGNED))
                     .isEmpty();
             assertThat(getFilteredTopicPartitions(migratedState, topic2, AssignmentStatus.ASSIGNED))
                     .isEmpty();
             assertThat(
                             getFilteredTopicPartitions(
-                                    migratedState, topic2, AssignmentStatus.UNASSIGNED_INITIAL))
+                                    migratedState, topic2, AssignmentStatus.UNASSIGNED))
                     .isEmpty();
         }
     }
@@ -955,12 +952,14 @@ public class DynamicKafkaSourceEnumeratorTest {
     private List<TopicPartition> getFilteredTopicPartitions(
             DynamicKafkaSourceEnumState state, String topic, AssignmentStatus assignmentStatus) {
         return state.getClusterEnumeratorStates().values().stream()
-                .flatMap(s -> s.partitions().stream())
+                .flatMap(s -> s.splits().stream())
                 .filter(
                         partition ->
-                                partition.topicPartition().topic().equals(topic)
+                                partition.split().getTopic().equals(topic)
                                         && partition.assignmentStatus() == assignmentStatus)
-                .map(TopicPartitionAndAssignmentStatus::topicPartition)
+                .map(
+                        splitAndAssignmentStatus ->
+                                splitAndAssignmentStatus.split().getTopicPartition())
                 .collect(Collectors.toList());
     }
 

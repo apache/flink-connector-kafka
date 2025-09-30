@@ -26,11 +26,8 @@ public enum AssignmentStatus {
 
     /** Partitions that have been assigned to readers. */
     ASSIGNED(0),
-    /**
-     * The partitions that have been discovered during initialization but not assigned to readers
-     * yet.
-     */
-    UNASSIGNED_INITIAL(1);
+    /** The partitions that have been discovered but not assigned to readers yet. */
+    UNASSIGNED(1);
     private final int statusCode;
 
     AssignmentStatus(int statusCode) {

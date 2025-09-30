@@ -19,9 +19,9 @@
 package org.apache.flink.connector.kafka.source.enumerator;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 
-import org.apache.kafka.common.TopicPartition;
-
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -29,8 +29,8 @@ import java.util.stream.Collectors;
 /** The state of Kafka source enumerator. */
 @Internal
 public class KafkaSourceEnumState {
-    /** Partitions with status: ASSIGNED or UNASSIGNED_INITIAL. */
-    private final Set<TopicPartitionAndAssignmentStatus> partitions;
+    /** Splits with status: ASSIGNED or UNASSIGNED_INITIAL. */
+    private final Set<SplitAndAssignmentStatus> splits;
     /**
      * this flag will be marked as true if initial partitions are discovered after enumerator
      * starts.
@@ -38,57 +38,54 @@ public class KafkaSourceEnumState {
     private final boolean initialDiscoveryFinished;
 
     public KafkaSourceEnumState(
-            Set<TopicPartitionAndAssignmentStatus> partitions, boolean initialDiscoveryFinished) {
-        this.partitions = partitions;
+            Set<SplitAndAssignmentStatus> splits, boolean initialDiscoveryFinished) {
+        this.splits = splits;
         this.initialDiscoveryFinished = initialDiscoveryFinished;
     }
 
     public KafkaSourceEnumState(
-            Set<TopicPartition> assignPartitions,
-            Set<TopicPartition> unassignedInitialPartitions,
+            Collection<KafkaPartitionSplit> assignedSplits,
+            Collection<KafkaPartitionSplit> unassignedSplits,
             boolean initialDiscoveryFinished) {
-        this.partitions = new HashSet<>();
-        partitions.addAll(
-                assignPartitions.stream()
+        this.splits = new HashSet<>();
+        splits.addAll(
+                assignedSplits.stream()
                         .map(
                                 topicPartition ->
-                                        new TopicPartitionAndAssignmentStatus(
+                                        new SplitAndAssignmentStatus(
                                                 topicPartition, AssignmentStatus.ASSIGNED))
                         .collect(Collectors.toSet()));
-        partitions.addAll(
-                unassignedInitialPartitions.stream()
+        splits.addAll(
+                unassignedSplits.stream()
                         .map(
                                 topicPartition ->
-                                        new TopicPartitionAndAssignmentStatus(
-                                                topicPartition,
-                                                AssignmentStatus.UNASSIGNED_INITIAL))
+                                        new SplitAndAssignmentStatus(
+                                                topicPartition, AssignmentStatus.UNASSIGNED))
                         .collect(Collectors.toSet()));
         this.initialDiscoveryFinished = initialDiscoveryFinished;
     }
 
-    public Set<TopicPartitionAndAssignmentStatus> partitions() {
-        return partitions;
+    public Set<SplitAndAssignmentStatus> splits() {
+        return splits;
     }
 
-    public Set<TopicPartition> assignedPartitions() {
-        return filterPartitionsByAssignmentStatus(AssignmentStatus.ASSIGNED);
+    public Collection<KafkaPartitionSplit> assignedSplits() {
+        return filterByAssignmentStatus(AssignmentStatus.ASSIGNED);
     }
 
-    public Set<TopicPartition> unassignedInitialPartitions() {
-        return filterPartitionsByAssignmentStatus(AssignmentStatus.UNASSIGNED_INITIAL);
+    public Collection<KafkaPartitionSplit> unassignedSplits() {
+        return filterByAssignmentStatus(AssignmentStatus.UNASSIGNED);
     }
 
     public boolean initialDiscoveryFinished() {
         return initialDiscoveryFinished;
     }
 
-    private Set<TopicPartition> filterPartitionsByAssignmentStatus(
+    private Collection<KafkaPartitionSplit> filterByAssignmentStatus(
             AssignmentStatus assignmentStatus) {
-        return partitions.stream()
-                .filter(
-                        partitionWithStatus ->
-                                partitionWithStatus.assignmentStatus().equals(assignmentStatus))
-                .map(TopicPartitionAndAssignmentStatus::topicPartition)
-                .collect(Collectors.toSet());
+        return splits.stream()
+                .filter(split -> split.assignmentStatus().equals(assignmentStatus))
+                .map(SplitAndAssignmentStatus::split)
+                .collect(Collectors.toList());
     }
 }

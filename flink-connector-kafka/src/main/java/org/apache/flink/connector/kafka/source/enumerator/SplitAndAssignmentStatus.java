@@ -19,23 +19,21 @@
 package org.apache.flink.connector.kafka.source.enumerator;
 
 import org.apache.flink.annotation.Internal;
-
-import org.apache.kafka.common.TopicPartition;
+import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 
 /** Kafka partition with assign status. */
 @Internal
-public class TopicPartitionAndAssignmentStatus {
-    private final TopicPartition topicPartition;
+public class SplitAndAssignmentStatus {
+    private final KafkaPartitionSplit split;
     private final AssignmentStatus assignmentStatus;
 
-    public TopicPartitionAndAssignmentStatus(
-            TopicPartition topicPartition, AssignmentStatus assignStatus) {
-        this.topicPartition = topicPartition;
+    public SplitAndAssignmentStatus(KafkaPartitionSplit split, AssignmentStatus assignStatus) {
+        this.split = split;
         this.assignmentStatus = assignStatus;
     }
 
-    public TopicPartition topicPartition() {
-        return topicPartition;
+    public KafkaPartitionSplit split() {
+        return split;
     }
 
     public AssignmentStatus assignmentStatus() {
