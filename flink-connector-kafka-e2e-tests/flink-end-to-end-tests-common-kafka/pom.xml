@@ -175,7 +175,14 @@ under the License.
             <scope>test</scope>
         </dependency>
 
-        <dependency>
+		<dependency>
+			<groupId>org.apache.flink</groupId>
+			<artifactId>flink-sql-connector-kafka</artifactId>
+			<version>${project.version}</version>
+			<scope>test</scope>
+		</dependency>
+
+		<dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-connector-test-utils</artifactId>
             <exclusions>
@@ -255,7 +262,7 @@ under the License.
                             <outputDirectory>${project.build.directory}/dependencies</outputDirectory>
                         </artifactItem>
                     </artifactItems>
-					<ignoredUnusedDeclaredDependencies>org.apache.flink:flink-streaming-kafka-test,org.apache.flink:flink-sql-avro,org.apache.flink:flink-sql-avro-confluent-registry,org.apache.flink:flink-connector-base
+					<ignoredUnusedDeclaredDependencies>org.apache.flink:flink-streaming-kafka-test,org.apache.flink:flink-sql-avro,org.apache.flink:flink-sql-avro-confluent-registry,org.apache.flink:flink-connector-base,org.apache.flink:flink-sql-connector-kafka
 					</ignoredUnusedDeclaredDependencies>
                 </configuration>
             </plugin>
