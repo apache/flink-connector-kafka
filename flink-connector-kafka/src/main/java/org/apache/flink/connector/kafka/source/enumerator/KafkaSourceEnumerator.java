@@ -602,7 +602,7 @@ public class KafkaSourceEnumerator
                         .thenApply(
                                 result -> {
                                     Map<TopicPartition, Long> offsets = new HashMap<>();
-                                    result.forEach(
+                                    result.get(groupId).forEach(
                                             (tp, oam) -> {
                                                 if (oam != null) {
                                                     offsets.put(tp, oam.offset());
