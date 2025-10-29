@@ -21,6 +21,7 @@ package org.apache.flink.connector.kafka.dynamic.source.reader;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
+import org.apache.flink.connector.kafka.source.KafkaConsumerFactory;
 import org.apache.flink.connector.kafka.source.metrics.KafkaSourceReaderMetrics;
 import org.apache.flink.connector.kafka.source.reader.KafkaPartitionSplitReader;
 
@@ -43,8 +44,9 @@ public class KafkaPartitionSplitReaderWrapper extends KafkaPartitionSplitReader
             Properties props,
             SourceReaderContext context,
             KafkaSourceReaderMetrics kafkaSourceReaderMetrics,
-            String kafkaClusterId) {
-        super(props, context, kafkaSourceReaderMetrics);
+            String kafkaClusterId,
+            KafkaConsumerFactory kafkaConsumerFactory) {
+        super(props, context, kafkaSourceReaderMetrics, kafkaConsumerFactory);
         this.kafkaClusterId = kafkaClusterId;
     }
 
