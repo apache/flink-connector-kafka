@@ -32,42 +32,52 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Test demonstrating the configuration and setup of both traditional and share group Kafka sources.
- * This test validates the builder patterns and configuration without requiring a running Kafka cluster.
+ * This test validates the builder patterns and configuration without requiring a running Kafka
+ * cluster.
  */
 class KafkaShareGroupSourceConfigurationTest {
-    private static final Logger LOG = LoggerFactory.getLogger(KafkaShareGroupSourceConfigurationTest.class);
+    private static final Logger LOG =
+            LoggerFactory.getLogger(KafkaShareGroupSourceConfigurationTest.class);
 
     @Test
     void testTraditionalKafkaSourceConfiguration() {
         // Test that traditional KafkaSource still works with Kafka 4.1.0
-        KafkaSource<String> kafkaSource = KafkaSource.<String>builder()
-                .setBootstrapServers("localhost:9092")
-                .setTopics("test-topic")
-                .setGroupId("test-group")
-                .setStartingOffsets(OffsetsInitializer.earliest())
-                .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(new SimpleStringSchema()))
-                .build();
+        KafkaSource<String> kafkaSource =
+                KafkaSource.<String>builder()
+                        .setBootstrapServers("localhost:9092")
+                        .setTopics("test-topic")
+                        .setGroupId("test-group")
+                        .setStartingOffsets(OffsetsInitializer.earliest())
+                        .setDeserializer(
+                                KafkaRecordDeserializationSchema.valueOnly(
+                                        new SimpleStringSchema()))
+                        .build();
 
         assertThat(kafkaSource).isNotNull();
         assertThat(kafkaSource.getBoundedness()).isNotNull();
-        
+
         LOG.info("✅ Traditional KafkaSource configuration successful");
     }
 
     @Test
     void testShareGroupSourceConfiguration() {
         // Only run this test if share groups are supported
-        assumeTrue(KafkaVersionUtils.isShareGroupSupported(), 
-                   "Share groups not supported in current Kafka version: " + KafkaVersionUtils.getKafkaVersion());
+        assumeTrue(
+                KafkaVersionUtils.isShareGroupSupported(),
+                "Share groups not supported in current Kafka version: "
+                        + KafkaVersionUtils.getKafkaVersion());
 
-        KafkaShareGroupSource<String> shareGroupSource = KafkaShareGroupSource.<String>builder()
-                .setBootstrapServers("localhost:9092")
-                .setTopics("test-topic")
-                .setShareGroupId("test-share-group")
-                .setStartingOffsets(OffsetsInitializer.earliest())
-                .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(new SimpleStringSchema()))
-                .enableShareGroupMetrics(true)
-                .build();
+        KafkaShareGroupSource<String> shareGroupSource =
+                KafkaShareGroupSource.<String>builder()
+                        .setBootstrapServers("localhost:9092")
+                        .setTopics("test-topic")
+                        .setShareGroupId("test-share-group")
+                        .setStartingOffsets(OffsetsInitializer.earliest())
+                        .setDeserializer(
+                                KafkaRecordDeserializationSchema.valueOnly(
+                                        new SimpleStringSchema()))
+                        .enableShareGroupMetrics(true)
+                        .build();
 
         assertThat(shareGroupSource).isNotNull();
         assertThat(shareGroupSource.getBoundedness()).isNotNull();
@@ -99,16 +109,20 @@ class KafkaShareGroupSourceConfigurationTest {
 
     @Test
     void testShareGroupPropertiesValidation() {
-        assumeTrue(KafkaVersionUtils.isShareGroupSupported(), 
-                   "Share groups not supported in current Kafka version");
+        assumeTrue(
+                KafkaVersionUtils.isShareGroupSupported(),
+                "Share groups not supported in current Kafka version");
 
         // Test that share group properties are automatically configured
-        KafkaShareGroupSource<String> source = KafkaShareGroupSource.<String>builder()
-                .setBootstrapServers("localhost:9092")
-                .setTopics("test-topic")
-                .setShareGroupId("test-share-group")
-                .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(new SimpleStringSchema()))
-                .build();
+        KafkaShareGroupSource<String> source =
+                KafkaShareGroupSource.<String>builder()
+                        .setBootstrapServers("localhost:9092")
+                        .setTopics("test-topic")
+                        .setShareGroupId("test-share-group")
+                        .setDeserializer(
+                                KafkaRecordDeserializationSchema.valueOnly(
+                                        new SimpleStringSchema()))
+                        .build();
 
         // Verify internal configuration
         assertThat(source.getConfiguration().getProperty("group.type")).isEqualTo("share");
@@ -118,26 +132,32 @@ class KafkaShareGroupSourceConfigurationTest {
         LOG.info("✅ Share group properties automatically configured correctly");
     }
 
-    @Test 
+    @Test
     void testBackwardCompatibility() {
         // Ensure both sources can coexist and be configured independently
-        
+
         // Traditional source
-        KafkaSource<String> traditional = KafkaSource.<String>builder()
-                .setBootstrapServers("localhost:9092")
-                .setTopics("traditional-topic")
-                .setGroupId("traditional-group")
-                .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(new SimpleStringSchema()))
-                .build();
+        KafkaSource<String> traditional =
+                KafkaSource.<String>builder()
+                        .setBootstrapServers("localhost:9092")
+                        .setTopics("traditional-topic")
+                        .setGroupId("traditional-group")
+                        .setDeserializer(
+                                KafkaRecordDeserializationSchema.valueOnly(
+                                        new SimpleStringSchema()))
+                        .build();
 
         // Share group source (if supported)
         if (KafkaVersionUtils.isShareGroupSupported()) {
-            KafkaShareGroupSource<String> shareGroup = KafkaShareGroupSource.<String>builder()
-                    .setBootstrapServers("localhost:9092")
-                    .setTopics("sharegroup-topic")
-                    .setShareGroupId("sharegroup-id")
-                    .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(new SimpleStringSchema()))
-                    .build();
+            KafkaShareGroupSource<String> shareGroup =
+                    KafkaShareGroupSource.<String>builder()
+                            .setBootstrapServers("localhost:9092")
+                            .setTopics("sharegroup-topic")
+                            .setShareGroupId("sharegroup-id")
+                            .setDeserializer(
+                                    KafkaRecordDeserializationSchema.valueOnly(
+                                            new SimpleStringSchema()))
+                            .build();
 
             assertThat(shareGroup.getShareGroupId()).isEqualTo("sharegroup-id");
             LOG.info("✅ Both traditional and share group sources configured successfully");

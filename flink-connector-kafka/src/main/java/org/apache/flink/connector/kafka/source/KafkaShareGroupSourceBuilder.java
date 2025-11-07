@@ -18,13 +18,6 @@
 
 package org.apache.flink.connector.kafka.source;
 
-import java.util.Arrays;
-import java.util.List;
-import java.util.Properties;
-import java.util.Random;
-import java.util.Set;
-import java.util.regex.Pattern;
-
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.connector.source.Boundedness;
@@ -32,18 +25,27 @@ import org.apache.flink.connector.kafka.source.enumerator.initializer.NoStopping
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
-import static org.apache.flink.util.Preconditions.checkNotNull;
-import static org.apache.flink.util.Preconditions.checkState;
 import org.apache.flink.util.function.SerializableSupplier;
+
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Arrays;
+import java.util.List;
+import java.util.Properties;
+import java.util.Random;
+import java.util.Set;
+import java.util.regex.Pattern;
+
+import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.util.Preconditions.checkState;
+
 /**
- * The builder class for {@link KafkaShareGroupSource} to make it easier for users to construct
- * a share group-based Kafka source.
+ * The builder class for {@link KafkaShareGroupSource} to make it easier for users to construct a
+ * share group-based Kafka source.
  *
  * <p>The following example shows the minimum setup to create a KafkaShareGroupSource that reads
  * String values from Kafka topics using share group semantics:
@@ -58,8 +60,8 @@ import org.slf4j.LoggerFactory;
  *     .build();
  * }</pre>
  *
- * <p>The bootstrap servers, topics, share group ID, and deserializer are required fields.
- * This source requires Kafka 4.1.0+ with share group support enabled.
+ * <p>The bootstrap servers, topics, share group ID, and deserializer are required fields. This
+ * source requires Kafka 4.1.0+ with share group support enabled.
  *
  * @param <OUT> the output type of the source
  */
@@ -104,8 +106,9 @@ public class KafkaShareGroupSourceBuilder<OUT> {
     }
 
     /**
-     * Sets the share group ID for share group semantics. This is required for share group-based consumption.
-     * The share group ID is used to coordinate message distribution across multiple consumers.
+     * Sets the share group ID for share group semantics. This is required for share group-based
+     * consumption. The share group ID is used to coordinate message distribution across multiple
+     * consumers.
      *
      * @param shareGroupId the share group ID
      * @return this KafkaShareGroupSourceBuilder
@@ -179,7 +182,8 @@ public class KafkaShareGroupSourceBuilder<OUT> {
      * @param stoppingOffsetsInitializer the {@link OffsetsInitializer} to specify stopping offsets
      * @return this KafkaShareGroupSourceBuilder
      */
-    public KafkaShareGroupSourceBuilder<OUT> setBounded(OffsetsInitializer stoppingOffsetsInitializer) {
+    public KafkaShareGroupSourceBuilder<OUT> setBounded(
+            OffsetsInitializer stoppingOffsetsInitializer) {
         this.boundedness = Boundedness.BOUNDED;
         this.stoppingOffsetsInitializer = stoppingOffsetsInitializer;
         return this;
@@ -191,7 +195,8 @@ public class KafkaShareGroupSourceBuilder<OUT> {
      * @param stoppingOffsetsInitializer the {@link OffsetsInitializer} to specify stopping offsets
      * @return this KafkaShareGroupSourceBuilder
      */
-    public KafkaShareGroupSourceBuilder<OUT> setUnbounded(OffsetsInitializer stoppingOffsetsInitializer) {
+    public KafkaShareGroupSourceBuilder<OUT> setUnbounded(
+            OffsetsInitializer stoppingOffsetsInitializer) {
         this.boundedness = Boundedness.CONTINUOUS_UNBOUNDED;
         this.stoppingOffsetsInitializer = stoppingOffsetsInitializer;
         return this;
@@ -238,7 +243,7 @@ public class KafkaShareGroupSourceBuilder<OUT> {
      * @param enabled whether to enable share group metrics
      * @return this KafkaShareGroupSourceBuilder
      */
-public KafkaShareGroupSourceBuilder<OUT> enableShareGroupMetrics(boolean enabled) {
+    public KafkaShareGroupSourceBuilder<OUT> enableShareGroupMetrics(boolean enabled) {
         this.shareGroupMetricsEnabled = enabled;
         return this;
     }
@@ -276,7 +281,7 @@ public KafkaShareGroupSourceBuilder<OUT> enableShareGroupMetrics(boolean enabled
     public KafkaShareGroupSource<OUT> build() {
         sanityCheck();
         parseAndSetRequiredProperties();
-        
+
         return new KafkaShareGroupSource<>(
                 subscriber,
                 startingOffsetsInitializer,
@@ -286,8 +291,7 @@ public KafkaShareGroupSourceBuilder<OUT> enableShareGroupMetrics(boolean enabled
                 props,
                 rackIdSupplier,
                 shareGroupId,
-                shareGroupMetricsEnabled
-        );
+                shareGroupMetricsEnabled);
     }
 
     // Private helper methods
@@ -316,7 +320,7 @@ public KafkaShareGroupSourceBuilder<OUT> enableShareGroupMetrics(boolean enabled
         maybeOverride("group.type", "share", true); // Force share group type
         maybeOverride("group.id", shareGroupId, true); // Use share group ID as group ID
         maybeOverride(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false", true);
-        
+
         // Set auto offset reset strategy
         maybeOverride(
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
@@ -337,7 +341,9 @@ public KafkaShareGroupSourceBuilder<OUT> enableShareGroupMetrics(boolean enabled
             if (override) {
                 LOG.warn(
                         "Property {} is provided but will be overridden from {} to {} for share group semantics",
-                        key, userValue, value);
+                        key,
+                        userValue,
+                        value);
                 props.setProperty(key, value);
                 overridden = true;
             }
@@ -359,11 +365,9 @@ public KafkaShareGroupSourceBuilder<OUT> enableShareGroupMetrics(boolean enabled
         checkState(
                 subscriber != null,
                 "No topics specified. Use setTopics(), setTopicPattern(), or setPartitions().");
-        
-        checkNotNull(
-                deserializationSchema, 
-                "Deserialization schema is required but not provided.");
-        
+
+        checkNotNull(deserializationSchema, "Deserialization schema is required but not provided.");
+
         checkState(
                 shareGroupId != null && !shareGroupId.trim().isEmpty(),
                 "Share group ID is required for share group semantics");

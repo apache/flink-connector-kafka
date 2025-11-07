@@ -23,24 +23,25 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * State class for KafkaShareGroupEnumerator that stores minimal information needed
- * for checkpointing and recovery.
- * 
- * <p>Unlike regular Kafka partition enumerator states that track complex partition
- * metadata, share group enumerator state is minimal since:
+ * State class for KafkaShareGroupEnumerator that stores minimal information needed for
+ * checkpointing and recovery.
+ *
+ * <p>Unlike regular Kafka partition enumerator states that track complex partition metadata, share
+ * group enumerator state is minimal since:
+ *
  * <ul>
- *   <li>No offset tracking (handled by share group protocol)</li>
- *   <li>No partition discovery (topics are configured upfront)</li>
- *   <li>No split lifecycle management (coordinator handles distribution)</li>
+ *   <li>No offset tracking (handled by share group protocol)
+ *   <li>No partition discovery (topics are configured upfront)
+ *   <li>No split lifecycle management (coordinator handles distribution)
  * </ul>
  */
 public class KafkaShareGroupEnumeratorState implements Serializable {
-    
+
     private static final long serialVersionUID = 1L;
-    
+
     private final Set<String> topics;
     private final String shareGroupId;
-    
+
     /**
      * Creates enumerator state for share group source.
      *
@@ -51,21 +52,17 @@ public class KafkaShareGroupEnumeratorState implements Serializable {
         this.topics = Objects.requireNonNull(topics, "Topics cannot be null");
         this.shareGroupId = Objects.requireNonNull(shareGroupId, "Share group ID cannot be null");
     }
-    
-    /**
-     * Gets the topics being consumed.
-     */
+
+    /** Gets the topics being consumed. */
     public Set<String> getTopics() {
         return topics;
     }
-    
-    /**
-     * Gets the share group ID.
-     */
+
+    /** Gets the share group ID. */
     public String getShareGroupId() {
         return shareGroupId;
     }
-    
+
     @Override
     public boolean equals(Object obj) {
         if (this == obj) {
@@ -74,19 +71,20 @@ public class KafkaShareGroupEnumeratorState implements Serializable {
         if (obj == null || getClass() != obj.getClass()) {
             return false;
         }
-        
+
         KafkaShareGroupEnumeratorState that = (KafkaShareGroupEnumeratorState) obj;
-        return Objects.equals(topics, that.topics) && Objects.equals(shareGroupId, that.shareGroupId);
+        return Objects.equals(topics, that.topics)
+                && Objects.equals(shareGroupId, that.shareGroupId);
     }
-    
+
     @Override
     public int hashCode() {
         return Objects.hash(topics, shareGroupId);
     }
-    
+
     @Override
     public String toString() {
-        return String.format("KafkaShareGroupEnumeratorState{topics=%s, shareGroup='%s'}", 
-                topics, shareGroupId);
+        return String.format(
+                "KafkaShareGroupEnumeratorState{topics=%s, shareGroup='%s'}", topics, shareGroupId);
     }
 }

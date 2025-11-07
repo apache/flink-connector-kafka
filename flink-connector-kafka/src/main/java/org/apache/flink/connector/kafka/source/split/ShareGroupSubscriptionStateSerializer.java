@@ -16,27 +16,47 @@
  * limitations under the License.
  */
 
-package org.apache.flink.connector.kafka.source.enumerator;
+package org.apache.flink.connector.kafka.source.split;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Serializer for KafkaShareGroupEnumeratorState.
+ * Serializer for {@link ShareGroupSubscriptionState}.
  *
- * <p>This serializer handles the serialization and deserialization of share group enumerator state
- * for checkpointing and recovery purposes.
+ * <p>This serializer stores the minimal state needed to restore a share group subscription after a
+ * failure. Unlike traditional Kafka split serializers that store partition assignments and offsets,
+ * this only stores the share group ID and subscribed topics.
+ *
+ * <h2>Serialization Format</h2>
+ *
+ * <pre>
+ * Version 1 Format:
+ * +------------------+
+ * | share_group_id   | (UTF string)
+ * | topic_count      | (int)
+ * | topic_1          | (UTF string)
+ * | topic_2          | (UTF string)
+ * | ...              |
+ * +------------------+
+ * </pre>
+ *
+ * <h2>Version Compatibility</h2>
+ *
+ * Version 1 is the initial version. Future versions should maintain backwards compatibility by
+ * checking the version number during deserialization.
+ *
+ * @see ShareGroupSubscriptionState
  */
-public class KafkaShareGroupEnumeratorStateSerializer
-        implements SimpleVersionedSerializer<KafkaShareGroupEnumeratorState> {
+@Internal
+public class ShareGroupSubscriptionStateSerializer
+        implements SimpleVersionedSerializer<ShareGroupSubscriptionState> {
 
+    /** Current serialization version. */
     private static final int CURRENT_VERSION = 1;
 
     @Override
@@ -45,45 +65,50 @@ public class KafkaShareGroupEnumeratorStateSerializer
     }
 
     @Override
-    public byte[] serialize(KafkaShareGroupEnumeratorState state) throws IOException {
+    public byte[] serialize(ShareGroupSubscriptionState state) throws IOException {
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 DataOutputStream out = new DataOutputStream(baos)) {
 
-            // Serialize share group ID
+            // Write share group ID
             out.writeUTF(state.getShareGroupId());
 
-            // Serialize topics
-            Set<String> topics = state.getTopics();
+            // Write subscribed topics
+            Set<String> topics = state.getSubscribedTopics();
             out.writeInt(topics.size());
             for (String topic : topics) {
                 out.writeUTF(topic);
             }
 
+            out.flush();
             return baos.toByteArray();
         }
     }
 
     @Override
-    public KafkaShareGroupEnumeratorState deserialize(int version, byte[] serialized)
+    public ShareGroupSubscriptionState deserialize(int version, byte[] serialized)
             throws IOException {
+
         if (version != CURRENT_VERSION) {
-            throw new IOException("Unsupported version: " + version);
+            throw new IOException(
+                    String.format(
+                            "Unsupported serialization version %d. Current version is %d",
+                            version, CURRENT_VERSION));
         }
 
         try (ByteArrayInputStream bais = new ByteArrayInputStream(serialized);
                 DataInputStream in = new DataInputStream(bais)) {
 
-            // Deserialize share group ID
+            // Read share group ID
             String shareGroupId = in.readUTF();
 
-            // Deserialize topics
+            // Read subscribed topics
             int topicCount = in.readInt();
-            Set<String> topics = new HashSet<>();
+            Set<String> topics = new HashSet<>(topicCount);
             for (int i = 0; i < topicCount; i++) {
                 topics.add(in.readUTF());
             }
 
-            return new KafkaShareGroupEnumeratorState(topics, shareGroupId);
+            return new ShareGroupSubscriptionState(shareGroupId, topics);
         }
     }
 }

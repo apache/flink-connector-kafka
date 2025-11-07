@@ -30,12 +30,12 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Metrics collector for Kafka share group sources.
  *
- * <p>This class provides specialized metrics for monitoring share group consumption
- * patterns, including message distribution statistics, share group coordinator
- * interactions, and performance characteristics specific to share group semantics.
+ * <p>This class provides specialized metrics for monitoring share group consumption patterns,
+ * including message distribution statistics, share group coordinator interactions, and performance
+ * characteristics specific to share group semantics.
  *
- * <p>Share group metrics complement the standard Kafka source metrics by tracking
- * additional information relevant to message-level load balancing and distribution.
+ * <p>Share group metrics complement the standard Kafka source metrics by tracking additional
+ * information relevant to message-level load balancing and distribution.
  */
 @Internal
 public class KafkaShareGroupSourceMetrics {
@@ -88,9 +88,7 @@ public class KafkaShareGroupSourceMetrics {
         LOG.info("Initialized KafkaShareGroupSourceMetrics");
     }
 
-    /**
-     * Records that a message was received from the share group.
-     */
+    /** Records that a message was received from the share group. */
     public void recordMessageReceived() {
         messagesReceived.inc();
         lastMessageTimestamp.set(System.currentTimeMillis());
@@ -109,24 +107,18 @@ public class KafkaShareGroupSourceMetrics {
         totalProcessingTime.addAndGet(processingTimeMs);
     }
 
-    /**
-     * Records that a message was rejected (failed processing).
-     */
+    /** Records that a message was rejected (failed processing). */
     public void recordMessageRejected() {
         messagesRejected.inc();
         messagesInFlight.decrementAndGet();
     }
 
-    /**
-     * Records a request to the share group coordinator.
-     */
+    /** Records a request to the share group coordinator. */
     public void recordCoordinatorRequest() {
         shareGroupCoordinatorRequests.inc();
     }
 
-    /**
-     * Records a share group rebalance event.
-     */
+    /** Records a share group rebalance event. */
     public void recordRebalance() {
         shareGroupRebalances.inc();
         LOG.debug("Share group rebalance recorded");
@@ -211,28 +203,32 @@ public class KafkaShareGroupSourceMetrics {
 
         // Timing gauges
         metricGroup.gauge("lastMessageTimestamp", () -> lastMessageTimestamp.get());
-        metricGroup.gauge("timeSinceLastMessage", () -> {
-            long last = lastMessageTimestamp.get();
-            return last > 0 ? System.currentTimeMillis() - last : -1;
-        });
+        metricGroup.gauge(
+                "timeSinceLastMessage",
+                () -> {
+                    long last = lastMessageTimestamp.get();
+                    return last > 0 ? System.currentTimeMillis() - last : -1;
+                });
 
         // Efficiency gauges
-        metricGroup.gauge("messageSuccessRate", () -> {
-            long received = messagesReceived.getCount();
-            long acknowledged = messagesAcknowledged.getCount();
-            return received > 0 ? (double) acknowledged / received : 0.0;
-        });
+        metricGroup.gauge(
+                "messageSuccessRate",
+                () -> {
+                    long received = messagesReceived.getCount();
+                    long acknowledged = messagesAcknowledged.getCount();
+                    return received > 0 ? (double) acknowledged / received : 0.0;
+                });
 
-        metricGroup.gauge("messageRejectionRate", () -> {
-            long received = messagesReceived.getCount();
-            long rejected = messagesRejected.getCount();
-            return received > 0 ? (double) rejected / received : 0.0;
-        });
+        metricGroup.gauge(
+                "messageRejectionRate",
+                () -> {
+                    long received = messagesReceived.getCount();
+                    long rejected = messagesRejected.getCount();
+                    return received > 0 ? (double) rejected / received : 0.0;
+                });
     }
 
-    /**
-     * Resets all metrics. Used primarily for testing or when starting fresh.
-     */
+    /** Resets all metrics. Used primarily for testing or when starting fresh. */
     public void reset() {
         // Note: Counters cannot be reset in Flink metrics, but we can reset our internal state
         lastMessageTimestamp.set(0);
@@ -251,21 +247,20 @@ public class KafkaShareGroupSourceMetrics {
      */
     public String getMetricsSummary() {
         return String.format(
-            "ShareGroupMetrics{" +
-            "received=%d, acknowledged=%d, rejected=%d, " +
-            "inFlight=%d, activeConsumers=%d, " +
-            "avgProcessingTime=%.2fms, processingRate=%.2f/s, " +
-            "successRate=%.2f%%, rejectionRate=%.2f%%}",
-            messagesReceived.getCount(),
-            messagesAcknowledged.getCount(),
-            messagesRejected.getCount(),
-            messagesInFlight.get(),
-            activeConsumersInGroup.get(),
-            getAverageProcessingTime(),
-            getCurrentProcessingRate(),
-            getSuccessRatePercentage(),
-            getRejectionRatePercentage()
-        );
+                "ShareGroupMetrics{"
+                        + "received=%d, acknowledged=%d, rejected=%d, "
+                        + "inFlight=%d, activeConsumers=%d, "
+                        + "avgProcessingTime=%.2fms, processingRate=%.2f/s, "
+                        + "successRate=%.2f%%, rejectionRate=%.2f%%}",
+                messagesReceived.getCount(),
+                messagesAcknowledged.getCount(),
+                messagesRejected.getCount(),
+                messagesInFlight.get(),
+                activeConsumersInGroup.get(),
+                getAverageProcessingTime(),
+                getCurrentProcessingRate(),
+                getSuccessRatePercentage(),
+                getRejectionRatePercentage());
     }
 
     private double getSuccessRatePercentage() {
@@ -279,17 +274,13 @@ public class KafkaShareGroupSourceMetrics {
         long rejected = messagesRejected.getCount();
         return received > 0 ? ((double) rejected / received) * 100.0 : 0.0;
     }
-    
-    /**
-     * Records a successful commit acknowledgment.
-     */
+
+    /** Records a successful commit acknowledgment. */
     public void recordSuccessfulCommit() {
         LOG.debug("Recorded successful acknowledgment commit");
     }
-    
-    /**
-     * Records a failed commit acknowledgment.
-     */
+
+    /** Records a failed commit acknowledgment. */
     public void recordFailedCommit() {
         LOG.debug("Recorded failed acknowledgment commit");
     }
