@@ -67,7 +67,6 @@ public class KafkaUtil {
                 .withEnv("KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR", "1")
                 .withEnv("KAFKA_TRANSACTION_STATE_LOG_MIN_ISR", "1")
                 .withEnv("KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR", "1")
-                .withEnv("KAFKA_CONFLUENT_SUPPORT_METRICS_ENABLE", "false")
                 .withEnv("KAFKA_LOG4J_ROOT_LOGLEVEL", logLevel)
                 .withEnv("KAFKA_LOG4J_LOGGERS", "state.change.logger=" + logLevel)
                 .withEnv("KAFKA_CONFLUENT_SUPPORT_METRICS_ENABLE", "false")
