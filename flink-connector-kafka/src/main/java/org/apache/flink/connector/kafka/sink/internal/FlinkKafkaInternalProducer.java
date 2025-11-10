@@ -179,7 +179,7 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
     public void setTransactionId(String transactionalId) {
         checkState(
                 !isInTransaction(),
-                String.format("Another transaction %s is still open.", transactionalId));
+                String.format("Another transaction %s is still open.", this.transactionalId));
         LOG.debug("Change transaction id from {} to {}", this.transactionalId, transactionalId);
         this.transactionalId = transactionalId;
         Object transactionManager = getTransactionManager();
