@@ -42,7 +42,6 @@ public class KafkaSourceEnumStateSerializerTest {
     private static final int NUM_READERS = 10;
     private static final String TOPIC_PREFIX = "topic-";
     private static final int NUM_PARTITIONS_PER_TOPIC = 10;
-    private static final long STARTING_OFFSET = KafkaPartitionSplit.EARLIEST_OFFSET;
 
     @Test
     public void testEnumStateSerde() throws IOException {
