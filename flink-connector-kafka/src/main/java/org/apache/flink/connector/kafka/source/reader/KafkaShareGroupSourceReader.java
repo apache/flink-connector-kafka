@@ -29,6 +29,7 @@ import org.apache.flink.connector.kafka.source.reader.acknowledgment.Acknowledgm
 import org.apache.flink.connector.kafka.source.reader.acknowledgment.RecordMetadata;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.connector.kafka.source.reader.fetcher.KafkaShareGroupFetcherManager;
+import org.apache.flink.connector.kafka.source.reader.transaction.FlinkTransactionManager;
 import org.apache.flink.connector.kafka.source.split.ShareGroupSubscriptionState;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -162,6 +163,9 @@ public class KafkaShareGroupSourceReader<T>
      */
     private final AcknowledgmentBuffer acknowledgmentBuffer;
 
+    /** Transaction manager for 2PC acknowledgments (Phase 1: prepare, Phase 2: commit) */
+    private final FlinkTransactionManager transactionManager;
+
     /**
      * Reference to the Kafka 4.1 ShareConsumer for acknowledgment operations. Obtained from the
      * fetcher manager.
@@ -230,8 +234,14 @@ public class KafkaShareGroupSourceReader<T>
         this.shareGroupId = consumerProps.getProperty("group.id", "unknown-share-group");
         this.shareGroupMetrics = shareGroupMetrics;
 
+        // Initialize transaction manager for 2PC
+        this.transactionManager = new FlinkTransactionManager(
+            this.shareGroupId,
+            null // ShareConsumer will be set after fetcher manager starts
+        );
+
         LOG.info(
-                "Created KafkaShareGroupSourceReader for share group '{}' on subtask {} with CheckpointListener pattern",
+                "Created KafkaShareGroupSourceReader for share group '{}' on subtask {} with transactional 2PC",
                 shareGroupId,
                 context.getIndexOfSubtask());
     }
@@ -286,6 +296,19 @@ public class KafkaShareGroupSourceReader<T>
 
         // Call parent start
         super.start();
+
+        // Set share consumer reference in transaction manager after fetcher starts
+        ShareConsumer<byte[], byte[]> consumer = getShareConsumer();
+        if (consumer != null) {
+            transactionManager.setShareConsumer(consumer);
+            LOG.info(
+                    "Share group '{}': Transaction manager initialized with ShareConsumer",
+                    shareGroupId);
+        } else {
+            LOG.warn(
+                    "Share group '{}': ShareConsumer not available yet - will retry on first checkpoint",
+                    shareGroupId);
+        }
     }
 
     // ===========================================================================================
@@ -332,6 +355,39 @@ public class KafkaShareGroupSourceReader<T>
         // Update current checkpoint ID for record association
         currentCheckpointId.set(checkpointId);
 
+        // Ensure share consumer is set in transaction manager
+        ShareConsumer<byte[], byte[]> consumer = getShareConsumer();
+        if (consumer != null && transactionManager != null) {
+            transactionManager.setShareConsumer(consumer);
+        }
+
+        // Get records for this checkpoint (checkpoint subsuming)
+        Set<RecordMetadata> recordsToAck = acknowledgmentBuffer.getRecordsUpTo(checkpointId);
+
+        // Phase 1 of 2PC: Prepare acknowledgments
+        if (!recordsToAck.isEmpty()) {
+            try {
+                transactionManager.prepareAcknowledgments(checkpointId, recordsToAck);
+                LOG.info(
+                        "Share group '{}': CHECKPOINT {} PREPARED - {} records marked for acknowledgment",
+                        shareGroupId,
+                        checkpointId,
+                        recordsToAck.size());
+            } catch (Exception e) {
+                LOG.error(
+                        "Share group '{}': CHECKPOINT {} PREPARE FAILED - transaction will be aborted",
+                        shareGroupId,
+                        checkpointId,
+                        e);
+                throw new RuntimeException("Failed to prepare checkpoint " + checkpointId, e);
+            }
+        } else {
+            LOG.debug(
+                    "Share group '{}': CHECKPOINT {} SNAPSHOT - No records to prepare",
+                    shareGroupId,
+                    checkpointId);
+        }
+
         // Get the current subscription state from parent
         List<ShareGroupSubscriptionState> states = super.snapshotState(checkpointId);
 
@@ -352,20 +408,12 @@ public class KafkaShareGroupSourceReader<T>
     /**
      * Callback when a checkpoint completes successfully.
      *
-     * <p>This method tracks checkpoint completion for monitoring purposes. Note that actual record
-     * acknowledgments happen immediately in the SplitReader after polling to satisfy ShareConsumer
-     * requirements (records must be acknowledged before next poll).
-     *
-     * <p>This callback is used for:
-     *
-     * <ol>
-     *   <li>Logging checkpoint statistics
-     *   <li>Cleaning up acknowledged record metadata from buffer
-     *   <li>Updating metrics
-     * </ol>
+     * Phase 2 of 2PC: Commit transaction.
+     * The broker applies acknowledgments atomically when checkpoint completes.
+     * This ensures no data loss - records remain locked until checkpoint succeeds.
      *
      * @param checkpointId the ID of the checkpoint that completed
-     * @throws Exception if cleanup fails
+     * @throws Exception if commit fails
      */
     @Override
     public void notifyCheckpointComplete(long checkpointId) throws Exception {
@@ -384,14 +432,15 @@ public class KafkaShareGroupSourceReader<T>
         }
 
         LOG.info(
-                "Share group '{}': CHECKPOINT {} COMPLETE - Processed {} records (already acknowledged in SplitReader)",
+                "Share group '{}': CHECKPOINT {} COMPLETE - Committing transaction for {} records",
                 shareGroupId,
                 checkpointId,
                 processedRecords.size());
 
         try {
-            // Records are already acknowledged in SplitReader immediately after polling
-            // Here we just update metrics and clean up the buffer
+            // Phase 2 of 2PC: Commit transaction
+            // Broker applies prepared acknowledgments atomically
+            transactionManager.commitTransaction(checkpointId);
 
             // Update metrics
             final long duration = System.currentTimeMillis() - startTime;
@@ -407,15 +456,16 @@ public class KafkaShareGroupSourceReader<T>
             int removedCount = acknowledgmentBuffer.removeUpTo(checkpointId);
 
             LOG.info(
-                    "Share group '{}': CHECKPOINT {} SUCCESS - Cleaned up {} record metadata entries in {}ms",
+                    "Share group '{}': CHECKPOINT {} SUCCESS - Committed {} records, cleaned up {} metadata entries in {}ms",
                     shareGroupId,
                     checkpointId,
+                    processedRecords.size(),
                     removedCount,
                     duration);
 
         } catch (Exception e) {
             LOG.error(
-                    "Share group '{}': CHECKPOINT {} FAILED - Error during cleanup",
+                    "Share group '{}': CHECKPOINT {} COMMIT FAILED",
                     shareGroupId,
                     checkpointId,
                     e);
@@ -432,28 +482,50 @@ public class KafkaShareGroupSourceReader<T>
     /**
      * Callback when a checkpoint is aborted.
      *
-     * <p>For share groups, when a checkpoint is aborted, we should release the records back to the
-     * share group coordinator so they can be redelivered. However, following the Checkpoint
-     * Subsuming Contract, we don't actually discard anything - the next successful checkpoint will
-     * cover a longer time span.
-     *
-     * <p>We use RELEASE acknowledgment type to indicate we didn't process these records and they
-     * should be made available to other consumers.
+     * Abort transaction and release records back to share group for redelivery.
+     * Following checkpoint subsuming pattern - next successful checkpoint will handle these records.
      *
      * @param checkpointId the ID of the checkpoint that was aborted
-     * @throws Exception if release operation fails
+     * @throws Exception if abort operation fails
      */
     @Override
     public void notifyCheckpointAborted(long checkpointId) throws Exception {
-        LOG.info(
-                "Share group '{}': CHECKPOINT {} ABORTED - Records will be subsumed by next successful checkpoint",
-                shareGroupId,
-                checkpointId);
+        // Get records for this checkpoint
+        Set<RecordMetadata> recordsToRelease = acknowledgmentBuffer.getRecordsUpTo(checkpointId);
 
-        // Following the Checkpoint Subsuming Contract: we don't discard anything
-        // The next successful checkpoint will handle these records
-        // We could optionally release records for earlier redelivery, but it's not required
+        if (!recordsToRelease.isEmpty()) {
+            LOG.info(
+                    "Share group '{}': CHECKPOINT {} ABORTED - Releasing {} records for redelivery",
+                    shareGroupId,
+                    checkpointId,
+                    recordsToRelease.size());
 
+            try {
+                // Abort transaction - releases record locks for redelivery
+                transactionManager.abortTransaction(checkpointId, recordsToRelease);
+
+                LOG.info(
+                        "Share group '{}': CHECKPOINT {} ABORTED - Released {} records",
+                        shareGroupId,
+                        checkpointId,
+                        recordsToRelease.size());
+
+            } catch (Exception e) {
+                LOG.warn(
+                        "Share group '{}': Failed to abort checkpoint {} - records will timeout and be redelivered",
+                        shareGroupId,
+                        checkpointId,
+                        e);
+                // Non-fatal - records will timeout and be redelivered automatically
+            }
+        } else {
+            LOG.debug(
+                    "Share group '{}': CHECKPOINT {} ABORTED - No records to release",
+                    shareGroupId,
+                    checkpointId);
+        }
+
+        // Following Checkpoint Subsuming Contract: next successful checkpoint will handle these records
         super.notifyCheckpointAborted(checkpointId);
     }
 
