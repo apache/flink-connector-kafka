@@ -32,16 +32,19 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Manages transactional acknowledgments for Flink share group source.
+ * Coordinates acknowledgments with Flink checkpoint lifecycle for at-least-once semantics.
  *
- * Implements two-phase commit (2PC) to ensure no data loss:
- * - Phase 1 (Prepare): Send acks to broker on snapshotState
- * - Phase 2 (Commit): Broker applies acks on notifyCheckpointComplete
+ * Two-phase commit coordinated with Flink checkpoints:
+ * - Phase 1 (snapshotState): Buffer acks locally, records stay locked at broker
+ * - Phase 2 (notifyCheckpointComplete): Send acks via commitSync(), uses Kafka's built-in 2PC
  *
- * Recovery logic:
- * - On restore, query broker for transaction state
- * - If PREPARED → commit (checkpoint was written)
- * - If ACTIVE → abort (checkpoint incomplete)
+ * At-least-once guarantee:
+ * - Records stay IN_FLIGHT (locked) at broker until checkpoint completes
+ * - If checkpoint fails: locks timeout → records automatically redelivered
+ * - If checkpoint succeeds: commitSync() atomically acknowledges records
+ *
+ * Note: Kafka's built-in commitSync() handles PREPARED→COMMITTED atomically (milliseconds).
+ * This manager coordinates the TIMING of commitSync() with Flink's checkpoint lifecycle.
  */
 @Internal
 public class FlinkTransactionManager {
@@ -50,11 +53,13 @@ public class FlinkTransactionManager {
     private final String shareGroupId;
     private ShareConsumer<?, ?> shareConsumer;
     private final Map<Long, TransactionState> checkpointTransactions;
+    private final Map<Long, Set<RecordMetadata>> readyForAcknowledgment;
 
     public FlinkTransactionManager(String shareGroupId, ShareConsumer<?, ?> shareConsumer) {
         this.shareGroupId = shareGroupId;
         this.shareConsumer = shareConsumer;
         this.checkpointTransactions = new ConcurrentHashMap<>();
+        this.readyForAcknowledgment = new ConcurrentHashMap<>();
     }
 
     /**
@@ -65,29 +70,57 @@ public class FlinkTransactionManager {
     }
 
     /**
-     * Prepare acknowledgments (Phase 1 of 2PC).
-     * Called during snapshotState before checkpoint barrier.
+     * Mark acknowledgments ready (Phase 1).
+     * Stores records locally - does NOT send to broker yet.
+     * Records remain locked (IN_FLIGHT) at broker until commitTransaction().
      */
-    public void prepareAcknowledgments(long checkpointId, Set<RecordMetadata> records) throws Exception {
+    public void markReadyForAcknowledgment(long checkpointId, Set<RecordMetadata> records) {
         if (records.isEmpty()) {
-            LOG.debug("Share group '{}': No records to prepare for checkpoint {}",
+            LOG.debug("Share group '{}': No records to mark for checkpoint {}",
                 shareGroupId, checkpointId);
-            return
-;
+            return;
         }
 
-        LOG.info("Share group '{}': Preparing {} records for checkpoint {}",
+        LOG.info("Share group '{}': Marking {} records ready for checkpoint {} (NOT sending to broker yet)",
+            shareGroupId, records.size(), checkpointId);
+
+        readyForAcknowledgment.put(checkpointId, records);
+        checkpointTransactions.put(checkpointId, TransactionState.READY);
+    }
+
+    /**
+     * Commit transaction (Phase 2).
+     * Sends acks to broker using Kafka's built-in atomic commitSync().
+     * Kafka internally: acknowledge() marks PREPARED, commitSync() applies atomically.
+     */
+    public void commitTransaction(long checkpointId) throws Exception {
+        Set<RecordMetadata> records = readyForAcknowledgment.remove(checkpointId);
+
+        if (records == null || records.isEmpty()) {
+            LOG.debug("Share group '{}': No records to commit for checkpoint {}",
+                shareGroupId, checkpointId);
+            checkpointTransactions.remove(checkpointId);
+            return;
+        }
+
+        TransactionState state = checkpointTransactions.get(checkpointId);
+        if (state != TransactionState.READY) {
+            LOG.warn("Share group '{}': Cannot commit checkpoint {} in state {}",
+                shareGroupId, checkpointId, state);
+            return;
+        }
+
+        LOG.info("Share group '{}': Committing {} records for checkpoint {}",
             shareGroupId, records.size(), checkpointId);
 
         try {
-            // Group by partition for efficient acknowledgment
+            // Send acknowledgments using Kafka's built-in atomic commit
             Map<TopicPartition, java.util.List<RecordMetadata>> byPartition = new ConcurrentHashMap<>();
             for (RecordMetadata meta : records) {
                 TopicPartition tp = new TopicPartition(meta.getTopic(), meta.getPartition());
                 byPartition.computeIfAbsent(tp, k -> new java.util.ArrayList<>()).add(meta);
             }
 
-            // Acknowledge records (marks them as prepared in broker)
             for (Map.Entry<TopicPartition, java.util.List<RecordMetadata>> entry : byPartition.entrySet()) {
                 for (RecordMetadata meta : entry.getValue()) {
                     shareConsumer.acknowledge(
@@ -97,17 +130,17 @@ public class FlinkTransactionManager {
                 }
             }
 
-            // Sync to ensure broker received acknowledgments
+            // commitSync() atomically applies all acknowledgments at broker
             shareConsumer.commitSync(Duration.ofSeconds(30));
 
-            // Track transaction state
-            checkpointTransactions.put(checkpointId, TransactionState.PREPARED);
+            checkpointTransactions.put(checkpointId, TransactionState.COMMITTED);
+            cleanupOldTransactions(checkpointId);
 
-            LOG.info("Share group '{}': Prepared checkpoint {} successfully",
+            LOG.info("Share group '{}': Successfully committed checkpoint {}",
                 shareGroupId, checkpointId);
 
         } catch (Exception e) {
-            LOG.error("Share group '{}': Failed to prepare checkpoint {}",
+            LOG.error("Share group '{}': Failed to commit checkpoint {}",
                 shareGroupId, checkpointId, e);
             checkpointTransactions.put(checkpointId, TransactionState.FAILED);
             throw e;
@@ -115,41 +148,12 @@ public class FlinkTransactionManager {
     }
 
     /**
-     * Commit transaction (Phase 2 of 2PC).
-     * Called on notifyCheckpointComplete - broker applies acknowledgments atomically.
-     */
-    public void commitTransaction(long checkpointId) {
-        TransactionState state = checkpointTransactions.get(checkpointId);
-        if (state == null) {
-            LOG.debug("Share group '{}': No transaction for checkpoint {}",
-                shareGroupId, checkpointId);
-            return;
-        }
-
-        if (state != TransactionState.PREPARED) {
-            LOG.warn("Share group '{}': Cannot commit checkpoint {} in state {}",
-                shareGroupId, checkpointId, state);
-            return;
-        }
-
-        LOG.info("Share group '{}': Committing checkpoint {}", shareGroupId, checkpointId);
-
-        // Broker automatically applies prepared acknowledgments on checkpoint complete
-        // No additional action needed - this is handled by Kafka coordinator
-
-        checkpointTransactions.put(checkpointId, TransactionState.COMMITTED);
-        cleanupOldTransactions(checkpointId);
-    }
-
-    /**
-     * Abort transaction.
-     * Called on notifyCheckpointAborted - releases record locks.
+     * Abort transaction - releases record locks for redelivery.
      */
     public void abortTransaction(long checkpointId, Set<RecordMetadata> records) {
         LOG.info("Share group '{}': Aborting checkpoint {}", shareGroupId, checkpointId);
 
         try {
-            // Release records back for redelivery
             for (RecordMetadata meta : records) {
                 shareConsumer.acknowledge(
                     meta.getConsumerRecord(),
@@ -158,32 +162,23 @@ public class FlinkTransactionManager {
             }
 
             shareConsumer.commitSync(Duration.ofSeconds(10));
-
             checkpointTransactions.put(checkpointId, TransactionState.ABORTED);
 
         } catch (Exception e) {
             LOG.error("Share group '{}': Failed to abort checkpoint {}",
                 shareGroupId, checkpointId, e);
-            // Records will timeout and be redelivered automatically
         }
 
         cleanupOldTransactions(checkpointId);
     }
 
     /**
-     * Handle recovery after task restart.
-     * Queries broker for transaction state and makes recovery decision.
+     * Recovery is handled automatically by Kafka's lock timeout mechanism.
+     * If task fails, locks expire and records are redelivered - no explicit action needed.
      */
     public void recoverFromCheckpoint(long restoredCheckpointId) {
-        LOG.info("Share group '{}': Recovering from checkpoint {}",
+        LOG.info("Share group '{}': Recovering from checkpoint {} - relying on Kafka lock timeout for redelivery",
             shareGroupId, restoredCheckpointId);
-
-        // Query broker for transaction state
-        // In actual implementation, this would use admin client to query broker
-        // For now, conservative approach: assume need to restart
-
-        LOG.info("Share group '{}': Recovery complete - ready for new checkpoints",
-            shareGroupId);
     }
 
     private void cleanupOldTransactions(long completedCheckpointId) {
@@ -193,7 +188,7 @@ public class FlinkTransactionManager {
     }
 
     private enum TransactionState {
-        PREPARED,
+        READY,
         COMMITTED,
         ABORTED,
         FAILED

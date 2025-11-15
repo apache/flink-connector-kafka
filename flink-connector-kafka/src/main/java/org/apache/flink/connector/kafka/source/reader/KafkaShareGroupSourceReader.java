@@ -352,46 +352,41 @@ public class KafkaShareGroupSourceReader<T>
 
     @Override
     public List<ShareGroupSubscriptionState> snapshotState(long checkpointId) {
-        // Update current checkpoint ID for record association
         currentCheckpointId.set(checkpointId);
 
-        // Ensure share consumer is set in transaction manager
         ShareConsumer<byte[], byte[]> consumer = getShareConsumer();
         if (consumer != null && transactionManager != null) {
             transactionManager.setShareConsumer(consumer);
         }
 
-        // Get records for this checkpoint (checkpoint subsuming)
         Set<RecordMetadata> recordsToAck = acknowledgmentBuffer.getRecordsUpTo(checkpointId);
 
-        // Phase 1 of 2PC: Prepare acknowledgments
+        // Phase 1: Mark records ready (DO NOT send to broker yet)
         if (!recordsToAck.isEmpty()) {
             try {
-                transactionManager.prepareAcknowledgments(checkpointId, recordsToAck);
+                transactionManager.markReadyForAcknowledgment(checkpointId, recordsToAck);
                 LOG.info(
-                        "Share group '{}': CHECKPOINT {} PREPARED - {} records marked for acknowledgment",
+                        "Share group '{}': CHECKPOINT {} READY - {} records marked (not sent to broker)",
                         shareGroupId,
                         checkpointId,
                         recordsToAck.size());
             } catch (Exception e) {
                 LOG.error(
-                        "Share group '{}': CHECKPOINT {} PREPARE FAILED - transaction will be aborted",
+                        "Share group '{}': CHECKPOINT {} MARK FAILED",
                         shareGroupId,
                         checkpointId,
                         e);
-                throw new RuntimeException("Failed to prepare checkpoint " + checkpointId, e);
+                throw new RuntimeException("Failed to mark checkpoint " + checkpointId, e);
             }
         } else {
             LOG.debug(
-                    "Share group '{}': CHECKPOINT {} SNAPSHOT - No records to prepare",
+                    "Share group '{}': CHECKPOINT {} SNAPSHOT - No records to mark",
                     shareGroupId,
                     checkpointId);
         }
 
-        // Get the current subscription state from parent
         List<ShareGroupSubscriptionState> states = super.snapshotState(checkpointId);
 
-        // Log checkpoint snapshot statistics
         AcknowledgmentBuffer.BufferStatistics stats = acknowledgmentBuffer.getStatistics();
         LOG.info(
                 "Share group '{}': CHECKPOINT {} SNAPSHOT - {} records buffered across {} checkpoints (memory: {} bytes)",
@@ -401,16 +396,14 @@ public class KafkaShareGroupSourceReader<T>
                 stats.getCheckpointCount(),
                 stats.getMemoryUsageBytes());
 
-        // Return minimal subscription state - no offset tracking needed
         return states;
     }
 
     /**
      * Callback when a checkpoint completes successfully.
      *
-     * Phase 2 of 2PC: Commit transaction.
-     * The broker applies acknowledgments atomically when checkpoint completes.
-     * This ensures no data loss - records remain locked until checkpoint succeeds.
+     * Phase 2 of 2PC: NOW send acknowledgments to broker.
+     * Records stay locked until this method succeeds - ensuring no data loss.
      *
      * @param checkpointId the ID of the checkpoint that completed
      * @throws Exception if commit fails
@@ -419,7 +412,6 @@ public class KafkaShareGroupSourceReader<T>
     public void notifyCheckpointComplete(long checkpointId) throws Exception {
         final long startTime = System.currentTimeMillis();
 
-        // Get all records up to this checkpoint for statistics
         Set<RecordMetadata> processedRecords = acknowledgmentBuffer.getRecordsUpTo(checkpointId);
 
         if (processedRecords.isEmpty()) {
@@ -432,17 +424,15 @@ public class KafkaShareGroupSourceReader<T>
         }
 
         LOG.info(
-                "Share group '{}': CHECKPOINT {} COMPLETE - Committing transaction for {} records",
+                "Share group '{}': CHECKPOINT {} COMPLETE - NOW sending {} acknowledgments to broker",
                 shareGroupId,
                 checkpointId,
                 processedRecords.size());
 
         try {
-            // Phase 2 of 2PC: Commit transaction
-            // Broker applies prepared acknowledgments atomically
+            // Phase 2: Send acknowledgments to broker (ONLY when checkpoint completes)
             transactionManager.commitTransaction(checkpointId);
 
-            // Update metrics
             final long duration = System.currentTimeMillis() - startTime;
             if (shareGroupMetrics != null) {
                 shareGroupMetrics.recordSuccessfulCommit();
@@ -452,11 +442,10 @@ public class KafkaShareGroupSourceReader<T>
                 }
             }
 
-            // Clean up buffer - remove processed record metadata
             int removedCount = acknowledgmentBuffer.removeUpTo(checkpointId);
 
             LOG.info(
-                    "Share group '{}': CHECKPOINT {} SUCCESS - Committed {} records, cleaned up {} metadata entries in {}ms",
+                    "Share group '{}': CHECKPOINT {} SUCCESS - Committed {} records to broker, cleaned up {} metadata entries in {}ms",
                     shareGroupId,
                     checkpointId,
                     processedRecords.size(),
@@ -465,7 +454,7 @@ public class KafkaShareGroupSourceReader<T>
 
         } catch (Exception e) {
             LOG.error(
-                    "Share group '{}': CHECKPOINT {} COMMIT FAILED",
+                    "Share group '{}': CHECKPOINT {} COMMIT FAILED - Records remain locked at broker",
                     shareGroupId,
                     checkpointId,
                     e);
@@ -475,7 +464,6 @@ public class KafkaShareGroupSourceReader<T>
             throw e;
         }
 
-        // Call parent implementation
         super.notifyCheckpointComplete(checkpointId);
     }
 
