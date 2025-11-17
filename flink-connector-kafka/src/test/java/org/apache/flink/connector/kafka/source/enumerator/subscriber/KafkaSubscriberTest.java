@@ -28,6 +28,7 @@ import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -41,6 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Unit tests for {@link KafkaSubscriber}. */
+@ResourceLock("KafkaTestBase")
 public class KafkaSubscriberTest {
     private static final String TOPIC1 = "topic1";
     private static final String TOPIC2 = "pattern-topic";
