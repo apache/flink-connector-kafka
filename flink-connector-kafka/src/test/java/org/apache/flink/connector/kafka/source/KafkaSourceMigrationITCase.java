@@ -48,6 +48,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -67,6 +68,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** The test for creation savepoint for migration tests for the Kafka Sink. */
 @Testcontainers
+@ResourceLock("KafkaTestBase")
 public class KafkaSourceMigrationITCase extends TestLogger {
     public static final String KAFKA_SOURCE_UID = "kafka-source-operator-uid";
     // Directory to store the savepoints in src/test/resources

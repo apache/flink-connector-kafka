@@ -54,6 +54,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -84,6 +85,7 @@ import static org.apache.flink.core.testutils.CommonTestUtils.waitUtil;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for {@link KafkaSourceReader}. */
+@ResourceLock("KafkaTestBase")
 public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSplit> {
     private static final String TOPIC = "KafkaSourceReaderTest";
 

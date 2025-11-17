@@ -28,6 +28,7 @@ import org.apache.kafka.common.TopicPartition;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -38,6 +39,7 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for {@link OffsetsInitializer}. */
+@ResourceLock("KafkaTestBase")
 public class OffsetsInitializerTest {
     private static final String TOPIC = "topic";
     private static final String TOPIC2 = "topic2";
