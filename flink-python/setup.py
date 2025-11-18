@@ -81,7 +81,16 @@ def prepare_pyflink_dir():
     connector_version = pom_root.findall(
         "./{http://maven.apache.org/POM/4.0.0}version")[0].text.replace("-SNAPSHOT", ".dev0")
 
-    flink_dependency = "apache-flink>=" + flink_version
+    # Pin to the minor version (e.g., >=1.19.1,<1.20.0) to allow patch updates
+    # but prevent major/minor version upgrades
+    version_parts = flink_version.split('.')
+    if len(version_parts) >= 2:
+        next_minor = str(int(version_parts[1]) + 1)
+        next_version = version_parts[0] + '.' + next_minor + '.0'
+        flink_dependency = "apache-flink>=" + flink_version + ",<" + next_version
+    else:
+        # Fallback to exact match if version format is unexpected
+        flink_dependency = "apache-flink==" + flink_version
 
     os.makedirs(LIB_PATH)
     connector_jar = \
