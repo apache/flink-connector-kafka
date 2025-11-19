@@ -30,22 +30,25 @@ jobs:
     strategy:
       matrix:
         flink_branches: [{
-          flink: 2.1-SNAPSHOT,
+          flink: 2.2-SNAPSHOT,
           branch: main
         }, {
-          flink: 2.0.0,
+          flink: 2.1.1,
           branch: main
         }, {
-          flink: 1.19.1,
+          flink: 2.0.1,
+          branch: main
+        }, {
+          flink: 1.19.3,
           branch: v3.3
         }, {
-          flink: 1.20.0,
+          flink: 1.20.3,
           branch: v3.3
         }, {
-          flink: 1.20.0,
+          flink: 1.20.3,
           branch: v3.4
         }, {
-          flink: 2.0.0,
+          flink: 2.0.1,
           branch: v4.0
         }]
     uses: apache/flink-connector-shared-utils/.github/workflows/ci.yml@ci_utils
@@ -54,3 +57,34 @@ jobs:
       connector_branch: ${{ matrix.flink_branches.branch }}
       jdk_version: ${{ matrix.flink_branches.jdk || '11, 17, 21' }}
       run_dependency_convergence: false
+  python_test:
+    if: github.repository_owner == 'apache'
+    strategy:
+      matrix:
+        flink_branches: [{
+          flink: 2.2-SNAPSHOT,
+          branch: main
+        }, {
+          flink: 2.1.1,
+          branch: main
+        }, {
+          flink: 2.0.1,
+          branch: main
+        }, {
+          flink: 1.19.3,
+          branch: v3.3
+        }, {
+          flink: 1.20.3,
+          branch: v3.3
+        }, {
+          flink: 1.20.3,
+          branch: v3.4
+        }, {
+          flink: 2.0.1,
+          branch: v4.0
+        }]
+    uses: apache/flink-connector-shared-utils/.github/workflows/python_ci.yml@ci_utils
+    with:
+      flink_version: ${{ matrix.flink_branches.flink }}
+      connector_branch: ${{ matrix.flink_branches.branch }}
+      jdk_version: ${{ matrix.flink_branches.jdk || '11, 17, 21' }}
