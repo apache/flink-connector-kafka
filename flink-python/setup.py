@@ -90,6 +90,7 @@ def prepare_pyflink_dir():
         flink_dependency = "apache-flink>=" + flink_version + ",<" + next_version
     else:
         # Fallback to exact match if version format is unexpected
+        print("Falling back to exact match for unexpected version format: " + flink_version)
         flink_dependency = "apache-flink==" + flink_version
 
     os.makedirs(LIB_PATH)
