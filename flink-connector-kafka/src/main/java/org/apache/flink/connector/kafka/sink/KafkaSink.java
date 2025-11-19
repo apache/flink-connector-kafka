@@ -218,6 +218,10 @@ public class KafkaSink<IN>
         Optional<TypeDatasetFacet> typeDatasetFacet = Optional.empty();
         if (recordSerializer instanceof TypeDatasetFacetProvider) {
             typeDatasetFacet = ((TypeDatasetFacetProvider) recordSerializer).getTypeDatasetFacet();
+        } else {
+            LOG.info(
+                    "recordSerializer does not implement TypeDatasetFacetProvider: {}",
+                    recordSerializer);
         }
 
         if (typeDatasetFacet.isPresent()) {
