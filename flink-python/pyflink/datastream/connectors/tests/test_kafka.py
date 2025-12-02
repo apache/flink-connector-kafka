@@ -26,8 +26,16 @@ from pyflink.common.typeinfo import Types
 from pyflink.common.types import Row
 from pyflink.common.watermark_strategy import WatermarkStrategy
 from pyflink.datastream.connectors.base import DeliveryGuarantee
-from pyflink.datastream.connectors.kafka import KafkaSource, KafkaTopicPartition, \
-    KafkaOffsetsInitializer, KafkaOffsetResetStrategy, KafkaRecordSerializationSchema, KafkaSink
+from pyflink.datastream.connectors.kafka import (
+    DynamicKafkaSource,
+    KafkaOffsetResetStrategy,
+    KafkaOffsetsInitializer,
+    KafkaRecordDeserializationSchema,
+    KafkaRecordSerializationSchema,
+    KafkaSink,
+    KafkaSource,
+    KafkaTopicPartition,
+)
 from pyflink.datastream.formats.avro import AvroRowDeserializationSchema, AvroRowSerializationSchema
 from pyflink.datastream.formats.csv import CsvRowDeserializationSchema, CsvRowSerializationSchema
 from pyflink.datastream.formats.json import JsonRowDeserializationSchema, JsonRowSerializationSchema
@@ -38,6 +46,116 @@ from pyflink.testing.test_case_utils import (
     to_java_data_structure,
 )
 from pyflink.util.java_utils import to_jarray, is_instance_of, get_field_value
+
+
+class DynamicKafkaSourceTests(PyFlinkStreamingTestCase):
+
+    def test_compiling(self):
+        metadata_service = self._create_metadata_service('test-stream')
+        source = self._base_builder(metadata_service) \
+            .set_stream_ids({'test-stream'}) \
+            .build()
+
+        ds = self.env.from_source(source=source,
+                                  watermark_strategy=WatermarkStrategy.for_monotonous_timestamps(),
+                                  source_name='dynamic kafka source')
+        ds.print()
+        plan = json.loads(self.env.get_execution_plan())
+        self.assertEqual('Source: dynamic kafka source', plan['nodes'][0]['type'])
+
+    def test_set_stream_ids_and_metadata_service(self):
+        metadata_service = self._create_metadata_service('stream-a')
+        source = self._base_builder(metadata_service) \
+            .set_stream_ids({'stream-a'}) \
+            .build()
+
+        subscriber = get_field_value(source.get_java_function(), 'kafkaStreamSubscriber')
+        self.assertEqual(
+            subscriber.getClass().getCanonicalName(),
+            'org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.'
+            'KafkaStreamSetSubscriber'
+        )
+        stream_ids = get_field_value(subscriber, 'streamIds')
+        self.assertTrue(is_instance_of(stream_ids, get_gateway().jvm.java.util.Set))
+        self.assertEqual(stream_ids.size(), 1)
+        self.assertTrue(stream_ids.contains('stream-a'))
+        self.assertEqual(
+            get_field_value(source.get_java_function(), 'kafkaMetadataService'),
+            metadata_service
+        )
+
+    def test_set_stream_pattern_and_bounded(self):
+        metadata_service = self._create_metadata_service('pattern-stream')
+        source = self._base_builder(metadata_service) \
+            .set_stream_pattern('pattern-.*') \
+            .set_bounded(KafkaOffsetsInitializer.latest()) \
+            .set_property('client.id.prefix', 'dynamic-client') \
+            .build()
+
+        subscriber = get_field_value(source.get_java_function(), 'kafkaStreamSubscriber')
+        self.assertEqual(
+            subscriber.getClass().getCanonicalName(),
+            'org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.'
+            'StreamPatternSubscriber'
+        )
+        stream_pattern = get_field_value(subscriber, 'streamPattern')
+        self.assertEqual(stream_pattern.toString(), 'pattern-.*')
+
+        deserialization_schema = get_field_value(source.get_java_function(), 'deserializationSchema')
+        self.assertEqual(
+            deserialization_schema.getClass().getCanonicalName(),
+            'org.apache.flink.connector.kafka.source.reader.deserializer.'
+            'KafkaValueOnlyDeserializationSchemaWrapper'
+        )
+        boundedness = get_field_value(source.get_java_function(), 'boundedness')
+        self.assertEqual(boundedness.toString(), 'BOUNDED')
+        stopping_offsets_initializer = get_field_value(
+            source.get_java_function(), 'stoppingOffsetsInitializer')
+        self.assertEqual(
+            stopping_offsets_initializer.getClass().getCanonicalName(),
+            'org.apache.flink.connector.kafka.source.enumerator.initializer'
+            '.LatestOffsetsInitializer'
+        )
+        properties = get_field_value(source.get_java_function(), 'properties')
+        self.assertEqual(properties.getProperty('client.id.prefix'), 'dynamic-client')
+
+    def test_set_custom_stream_subscriber(self):
+        metadata_service = self._create_metadata_service('custom-stream')
+        custom_subscriber = get_gateway().jvm.org.apache.flink.connector.kafka.dynamic.source. \
+            enumerator.subscriber.StreamPatternSubscriber(
+                get_gateway().jvm.java.util.regex.Pattern.compile('custom-.*'))
+        source = self._base_builder(metadata_service) \
+            .set_kafka_stream_subscriber(custom_subscriber) \
+            .build()
+
+        subscriber = get_field_value(source.get_java_function(), 'kafkaStreamSubscriber')
+        self.assertEqual(subscriber, custom_subscriber)
+
+    @staticmethod
+    def _base_builder(metadata_service):
+        return DynamicKafkaSource.builder() \
+            .set_kafka_metadata_service(metadata_service) \
+            .set_deserializer(
+                KafkaRecordDeserializationSchema.value_only(SimpleStringSchema())) \
+            .set_group_id('test-group')
+
+    @staticmethod
+    def _create_metadata_service(stream_id: str):
+        jvm = get_gateway().jvm
+        topics = jvm.java.util.HashSet()
+        topics.add('test-topic')
+        properties = jvm.java.util.Properties()
+        properties.setProperty('bootstrap.servers', 'localhost:9092')
+        cluster_metadata = jvm.org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata(
+            topics, properties)
+        cluster_metadata_map = jvm.java.util.HashMap()
+        cluster_metadata_map.put('test-cluster', cluster_metadata)
+        kafka_stream = jvm.org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream(
+            stream_id, cluster_metadata_map)
+        kafka_streams = jvm.java.util.HashSet()
+        kafka_streams.add(kafka_stream)
+        return jvm.org.apache.flink.connector.kafka.testutils.MockKafkaMetadataService(
+            kafka_streams)
 
 
 class KafkaSourceTests(PyFlinkStreamingTestCase):

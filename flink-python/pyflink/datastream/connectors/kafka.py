@@ -29,6 +29,8 @@ from pyflink.java_gateway import get_gateway
 from pyflink.util.java_utils import to_jarray, get_field, get_field_value
 
 __all__ = [
+    'DynamicKafkaSource',
+    'DynamicKafkaSourceBuilder',
     'KafkaSource',
     'KafkaSourceBuilder',
     'KafkaSink',
@@ -36,10 +38,191 @@ __all__ = [
     'KafkaTopicPartition',
     'KafkaOffsetsInitializer',
     'KafkaOffsetResetStrategy',
+    'KafkaRecordDeserializationSchema',
     'KafkaRecordSerializationSchema',
     'KafkaRecordSerializationSchemaBuilder',
     'KafkaTopicSelector'
 ]
+
+
+# ---- DynamicKafkaSource ----
+
+
+class DynamicKafkaSource(Source):
+    """
+    The Dynamic Source implementation of Kafka. Please use a
+    :class:`DynamicKafkaSourceBuilder` to construct a :class:`DynamicKafkaSource`.
+    """
+
+    def __init__(self, j_dynamic_kafka_source: JavaObject):
+        super().__init__(j_dynamic_kafka_source)
+
+    @staticmethod
+    def builder() -> 'DynamicKafkaSourceBuilder':
+        """
+        Get a DynamicKafkaSourceBuilder to build a :class:`DynamicKafkaSource`.
+
+        :return: a Dynamic Kafka source builder.
+        """
+        return DynamicKafkaSourceBuilder()
+
+
+class DynamicKafkaSourceBuilder(object):
+    """
+    The builder class for :class:`DynamicKafkaSource` to make it easier for users to construct a
+    :class:`DynamicKafkaSource`.
+
+    The bootstrap servers are derived from the configured :class:`KafkaMetadataService`. Users
+    should provide stream identifiers or a stream pattern together with the metadata service and a
+    record deserializer.
+    """
+
+    def __init__(self):
+        self._j_builder = get_gateway().jvm.org.apache.flink.connector.kafka.dynamic.source \
+            .DynamicKafkaSource.builder()
+
+    def build(self) -> 'DynamicKafkaSource':
+        return DynamicKafkaSource(self._j_builder.build())
+
+    def set_stream_ids(self, stream_ids: Set[str]) -> 'DynamicKafkaSourceBuilder':
+        """
+        Set the stream ids belonging to the :class:`KafkaMetadataService`.
+
+        :param stream_ids: the stream ids to read.
+        :return: this DynamicKafkaSourceBuilder.
+        """
+        j_set = get_gateway().jvm.java.util.HashSet()
+        for stream_id in stream_ids:
+            j_set.add(stream_id)
+        self._j_builder.setStreamIds(j_set)
+        return self
+
+    def set_stream_pattern(self, stream_pattern: str) -> 'DynamicKafkaSourceBuilder':
+        """
+        Set the stream pattern to determine stream ids belonging to the
+        :class:`KafkaMetadataService`.
+
+        :param stream_pattern: the stream name pattern to match.
+        :return: this DynamicKafkaSourceBuilder.
+        """
+        j_pattern = get_gateway().jvm.java.util.regex.Pattern.compile(stream_pattern)
+        self._j_builder.setStreamPattern(j_pattern)
+        return self
+
+    def set_kafka_metadata_service(self, kafka_metadata_service: JavaObject) \
+            -> 'DynamicKafkaSourceBuilder':
+        """
+        Set the :class:`KafkaMetadataService` that resolves streams to clusters/topics.
+
+        :param kafka_metadata_service: Java implementation of KafkaMetadataService.
+        :return: this DynamicKafkaSourceBuilder.
+        """
+        self._j_builder.setKafkaMetadataService(kafka_metadata_service)
+        return self
+
+    def set_kafka_stream_subscriber(self, kafka_stream_subscriber: JavaObject) \
+            -> 'DynamicKafkaSourceBuilder':
+        """
+        Set a custom Kafka stream subscriber.
+
+        :param kafka_stream_subscriber: Java implementation of KafkaStreamSubscriber.
+        :return: this DynamicKafkaSourceBuilder.
+        """
+        self._j_builder.setKafkaStreamSubscriber(kafka_stream_subscriber)
+        return self
+
+    def set_deserializer(self, record_deserializer: Union['KafkaRecordDeserializationSchema',
+                                                         DeserializationSchema]) \
+            -> 'DynamicKafkaSourceBuilder':
+        """
+        Set the record deserializer.
+
+        :param record_deserializer: a :class:`KafkaRecordDeserializationSchema` or a
+            :class:`~pyflink.common.serialization.DeserializationSchema` which will be wrapped
+            as a value-only deserializer.
+        :return: this DynamicKafkaSourceBuilder.
+        """
+        if isinstance(record_deserializer, DeserializationSchema):
+            j_deserializer = get_gateway().jvm.org.apache.flink.connector.kafka.source.reader. \
+                deserializer.KafkaRecordDeserializationSchema.valueOnly(
+                    record_deserializer._j_deserialization_schema)
+        elif isinstance(record_deserializer, KafkaRecordDeserializationSchema):
+            j_deserializer = record_deserializer._j_record_deserialization_schema
+        else:
+            raise TypeError(
+                "record_deserializer should be either KafkaRecordDeserializationSchema or "
+                "DeserializationSchema.")
+        self._j_builder.setDeserializer(j_deserializer)
+        return self
+
+    def set_starting_offsets(self, starting_offsets_initializer: 'KafkaOffsetsInitializer') \
+            -> 'DynamicKafkaSourceBuilder':
+        """
+        Specify the starting offsets by providing a :class:`KafkaOffsetsInitializer`.
+
+        :param starting_offsets_initializer: starting offsets initializer applied to all clusters.
+        :return: this DynamicKafkaSourceBuilder.
+        """
+        self._j_builder.setStartingOffsets(starting_offsets_initializer._j_initializer)
+        return self
+
+    def set_bounded(self, stopping_offsets_initializer: 'KafkaOffsetsInitializer') \
+            -> 'DynamicKafkaSourceBuilder':
+        """
+        Set the source bounded and specify stopping offsets.
+
+        :param stopping_offsets_initializer: stopping offsets initializer applied to all clusters.
+        :return: this DynamicKafkaSourceBuilder.
+        """
+        self._j_builder.setBounded(stopping_offsets_initializer._j_initializer)
+        return self
+
+    def set_property(self, key: str, value: str) -> 'DynamicKafkaSourceBuilder':
+        """
+        Set an arbitrary property for the consumer. Values apply to all clusters and may be
+        overridden by the metadata service.
+
+        :param key: the key of the property.
+        :param value: the value of the property.
+        :return: this DynamicKafkaSourceBuilder.
+        """
+        self._j_builder.setProperty(key, value)
+        return self
+
+    def set_properties(self, props: Dict) -> 'DynamicKafkaSourceBuilder':
+        """
+        Set arbitrary properties for the consumer. Values apply to all clusters and may be
+        overridden by the metadata service.
+
+        :param props: the properties to set.
+        :return: this DynamicKafkaSourceBuilder.
+        """
+        gateway = get_gateway()
+        j_properties = gateway.jvm.java.util.Properties()
+        for key, value in props.items():
+            j_properties.setProperty(key, value)
+        self._j_builder.setProperties(j_properties)
+        return self
+
+    def set_group_id(self, group_id: str) -> 'DynamicKafkaSourceBuilder':
+        """
+        Set the consumer group id for all clusters.
+
+        :param group_id: the group id of the DynamicKafkaSource.
+        :return: this DynamicKafkaSourceBuilder.
+        """
+        self._j_builder.setGroupId(group_id)
+        return self
+
+    def set_client_id_prefix(self, prefix: str) -> 'DynamicKafkaSourceBuilder':
+        """
+        Set the client id prefix of the consumers for all clusters.
+
+        :param prefix: the client id prefix to use.
+        :return: this DynamicKafkaSourceBuilder.
+        """
+        self._j_builder.setClientIdPrefix(prefix)
+        return self
 
 
 # ---- KafkaSource ----
@@ -513,6 +696,30 @@ class KafkaOffsetsInitializer(object):
             enumerator.initializer.OffsetsInitializer
         return KafkaOffsetsInitializer(JOffsetsInitializer.offsets(
             j_map_wrapper.asMap(), offset_reset_strategy._to_j_offset_reset_strategy()))
+
+
+class KafkaRecordDeserializationSchema(object):
+    """
+    Wrapper around Java ``KafkaRecordDeserializationSchema``.
+    """
+
+    def __init__(self, j_record_deserialization_schema: JavaObject):
+        self._j_record_deserialization_schema = j_record_deserialization_schema
+
+    @staticmethod
+    def value_only(value_deserialization_schema: DeserializationSchema) \
+            -> 'KafkaRecordDeserializationSchema':
+        """
+        Wrap the provided :class:`~pyflink.common.serialization.DeserializationSchema` so that only
+        the Kafka record value is deserialized.
+
+        :param value_deserialization_schema: the value deserialization schema.
+        :return: a :class:`KafkaRecordDeserializationSchema`.
+        """
+        j_deserializer = get_gateway().jvm.org.apache.flink.connector.kafka.source.reader. \
+            deserializer.KafkaRecordDeserializationSchema.valueOnly(
+                value_deserialization_schema._j_deserialization_schema)
+        return KafkaRecordDeserializationSchema(j_deserializer)
 
 
 class KafkaSink(Sink, SupportsPreprocessing):
