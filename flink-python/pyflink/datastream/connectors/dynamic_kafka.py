@@ -15,13 +15,16 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from typing import Dict, Optional, Set, Union
+from typing import Dict, Optional, Set, Union, TYPE_CHECKING
 
 from py4j.java_gateway import JavaObject, get_java_class
 
 from pyflink.common import DeserializationSchema
 from pyflink.datastream.connectors import Source
 from pyflink.java_gateway import get_gateway
+
+if TYPE_CHECKING:
+    from pyflink.datastream.connectors.kafka import KafkaOffsetsInitializer
 
 __all__ = [
     'DynamicKafkaSource',
