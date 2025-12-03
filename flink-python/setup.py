@@ -144,6 +144,10 @@ if in_flink_source:
 # Runs the python setup
 setup(
     py_modules=[],
+    data_files=[
+        ('pyflink/datastream/connectors',
+         ['pyflink/datastream/connectors/dynamic_kafka.py'])
+    ],
     name=PACKAGE_NAME,
     version=connector_version,
     include_package_data=True,
