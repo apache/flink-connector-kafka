@@ -61,6 +61,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestInstance.Lifecycle;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.containers.KafkaContainer;
@@ -84,6 +85,7 @@ import static org.apache.flink.streaming.connectors.kafka.KafkaTestBase.kafkaSer
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unite test class for {@link KafkaSource}. */
+@ResourceLock("KafkaTestBase")
 public class KafkaSourceITCase {
     private static final String TOPIC1 = "topic1";
     private static final String TOPIC2 = "topic2";

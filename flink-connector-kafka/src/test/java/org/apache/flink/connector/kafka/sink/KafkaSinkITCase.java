@@ -29,7 +29,6 @@ import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeutils.SimpleTypeSerializerSnapshot;
 import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
 import org.apache.flink.api.common.typeutils.base.TypeSerializerSingleton;
-import org.apache.flink.api.connector.source.util.ratelimit.RateLimiter;
 import org.apache.flink.api.connector.source.util.ratelimit.RateLimiterStrategy;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.configuration.CheckpointingOptions;
@@ -116,8 +115,6 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
@@ -722,7 +719,7 @@ public class KafkaSinkITCase extends TestLogger {
                         value -> value,
                         count,
                         throttled
-                                ? new ThrottleUntilFirstCheckpointStrategy()
+                                ? RateLimiterStrategy.perCheckpoint(10)
                                 : RateLimiterStrategy.noOp(),
                         BasicTypeInfo.LONG_TYPE_INFO),
                 WatermarkStrategy.noWatermarks(),
@@ -965,33 +962,6 @@ public class KafkaSinkITCase extends TestLogger {
         public void notifyCheckpointComplete(long checkpointId) {
             lastCheckpointId = checkpointId;
             emittedBetweenCheckpoint = 0;
-        }
-    }
-
-    private static class ThrottleUntilFirstCheckpointStrategy implements RateLimiterStrategy {
-        private final RateLimiterStrategy baseStrategy = RateLimiterStrategy.perCheckpoint(10);
-
-        @Override
-        public RateLimiter createRateLimiter(int parallelism) {
-            RateLimiter baseLimiter = baseStrategy.createRateLimiter(parallelism);
-
-            return new RateLimiter() {
-                int numCheckpointed;
-
-                @Override
-                public CompletionStage<Void> acquire() {
-                    if (numCheckpointed >= 2) {
-                        return CompletableFuture.completedFuture(null);
-                    }
-                    return baseLimiter.acquire();
-                }
-
-                @Override
-                public void notifyCheckpointComplete(long checkpointId) {
-                    baseLimiter.notifyCheckpointComplete(checkpointId);
-                    numCheckpointed++;
-                }
-            };
         }
     }
 }

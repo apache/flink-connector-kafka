@@ -229,11 +229,12 @@ public class KafkaSourceEnumStateSerializer
                 final String topic = in.readUTF();
                 final int partition = in.readInt();
                 final int statusCode = in.readInt();
+                final AssignmentStatus assignStatus = AssignmentStatus.ofStatusCode(statusCode);
                 partitions.add(
                         new SplitAndAssignmentStatus(
                                 new KafkaPartitionSplit(
                                         new TopicPartition(topic, partition), MIGRATED),
-                                AssignmentStatus.ofStatusCode(statusCode)));
+                                assignStatus));
             }
             final boolean initialDiscoveryFinished = in.readBoolean();
             if (in.available() > 0) {

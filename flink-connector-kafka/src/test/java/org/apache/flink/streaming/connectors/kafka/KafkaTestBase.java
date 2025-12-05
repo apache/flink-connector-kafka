@@ -41,6 +41,7 @@ import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
 import org.junit.Rule;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.rules.TemporaryFolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -72,6 +73,7 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @SuppressWarnings("serial")
 @RetryOnFailure(times = 3)
+@ResourceLock("KafkaTestBase")
 public abstract class KafkaTestBase extends TestLogger {
 
     public static final Logger LOG = LoggerFactory.getLogger(KafkaTestBase.class);

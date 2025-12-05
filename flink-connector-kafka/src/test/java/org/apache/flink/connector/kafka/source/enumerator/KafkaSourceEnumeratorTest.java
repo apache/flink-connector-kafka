@@ -29,6 +29,8 @@ import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscr
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.connector.kafka.testutils.KafkaSourceTestEnv;
 import org.apache.flink.mock.Whitebox;
+import org.apache.flink.runtime.checkpoint.CheckpointException;
+import org.apache.flink.runtime.checkpoint.CheckpointFailureReason;
 
 import com.google.common.collect.Iterables;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -41,7 +43,7 @@ import org.assertj.core.api.SoftAssertions;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
@@ -56,7 +58,6 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.StringJoiner;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -64,6 +65,7 @@ import static org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit.
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for {@link KafkaSourceEnumerator}. */
+@ResourceLock("KafkaTestBase")
 public class KafkaSourceEnumeratorTest {
     private static final int NUM_SUBTASKS = 3;
     private static final String DYNAMIC_TOPIC_NAME = "dynamic_topic";
@@ -252,8 +254,8 @@ public class KafkaSourceEnumeratorTest {
     public void testRunWithDiscoverPartitionsOnceWithZeroMsToCheckNoMoreSplit() throws Throwable {
         try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
-                // Disable periodic partition discovery
-                KafkaSourceEnumerator enumerator = createEnumerator(context, false)) {
+                // set partitionDiscoveryIntervalMs = 0
+                KafkaSourceEnumerator enumerator = createEnumerator(context, 0L)) {
 
             // Start the enumerator, and it should schedule a one time task to discover and assign
             // partitions.
@@ -273,7 +275,6 @@ public class KafkaSourceEnumeratorTest {
     }
 
     @Test
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
     public void testDiscoverPartitionsPeriodically() throws Throwable {
         try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
@@ -342,14 +343,8 @@ public class KafkaSourceEnumeratorTest {
         }
     }
 
-    /**
-     * Ensures that migrated splits are immediately initialized with {@link OffsetsInitializer},
-     * such that an early {@link
-     * org.apache.flink.api.connector.source.SplitEnumerator#snapshotState(long)} doesn't see the
-     * special value.
-     */
     @Test
-    public void shouldEagerlyInitializeSplitOffsetsOnMigration() throws Throwable {
+    public void shouldLazilyInitializeSplitOffsetsOnMigration() throws Throwable {
         final TopicPartition assigned1 = new TopicPartition(TOPIC1, 0);
         final TopicPartition assigned2 = new TopicPartition(TOPIC1, 1);
         final TopicPartition unassigned1 = new TopicPartition(TOPIC2, 0);
@@ -363,7 +358,7 @@ public class KafkaSourceEnumeratorTest {
                     public Map<TopicPartition, Long> getPartitionOffsets(
                             Collection<TopicPartition> partitions,
                             PartitionOffsetsRetriever partitionOffsetsRetriever) {
-                        return Map.of(assigned1, migratedOffset1, unassigned2, migratedOffset2);
+                        return Map.of(unassigned2, migratedOffset2);
                     }
 
                     @Override
@@ -376,6 +371,7 @@ public class KafkaSourceEnumeratorTest {
                 KafkaSourceEnumerator enumerator =
                         createEnumerator(
                                 context,
+                                0,
                                 offsetsInitializer,
                                 PRE_EXISTING_TOPICS,
                                 List.of(
@@ -386,15 +382,44 @@ public class KafkaSourceEnumeratorTest {
                                         new KafkaPartitionSplit(unassigned2, MIGRATED)),
                                 false,
                                 new Properties())) {
-            final KafkaSourceEnumState state = enumerator.snapshotState(1L);
+            KafkaSourceEnumState state = snapshotWhenReady(enumerator);
             assertThat(state.assignedSplits())
                     .containsExactlyInAnyOrder(
-                            new KafkaPartitionSplit(assigned1, migratedOffset1),
+                            new KafkaPartitionSplit(assigned1, MIGRATED),
                             new KafkaPartitionSplit(assigned2, 2));
             assertThat(state.unassignedSplits())
                     .containsExactlyInAnyOrder(
                             new KafkaPartitionSplit(unassigned1, 1),
+                            new KafkaPartitionSplit(unassigned2, MIGRATED));
+
+            enumerator.start();
+
+            runOneTimePartitionDiscovery(context);
+            KafkaSourceEnumState state2 = snapshotWhenReady(enumerator);
+            // verify that only unassigned splits are migrated; assigned splits are tracked by
+            // the reader, so any initialization on enumerator would be discarded
+            assertThat(state2.assignedSplits())
+                    .containsExactlyInAnyOrder(
+                            new KafkaPartitionSplit(assigned1, MIGRATED),
+                            new KafkaPartitionSplit(assigned2, 2));
+            assertThat(state2.unassignedSplits())
+                    .containsExactlyInAnyOrder(
+                            new KafkaPartitionSplit(unassigned1, 1),
                             new KafkaPartitionSplit(unassigned2, migratedOffset2));
+        }
+    }
+
+    private static KafkaSourceEnumState snapshotWhenReady(KafkaSourceEnumerator enumerator)
+            throws Exception {
+        while (true) {
+            try {
+                return enumerator.snapshotState(1L);
+            } catch (CheckpointException e) {
+                if (e.getCheckpointFailureReason()
+                        != CheckpointFailureReason.CHECKPOINT_DECLINED_TASK_NOT_READY) {
+                    throw e;
+                }
+            }
         }
     }
 
@@ -436,10 +461,12 @@ public class KafkaSourceEnumeratorTest {
                     .as("The added back splits should have not been assigned")
                     .hasSize(2);
 
-            assertThat(enumerator.snapshotState(2L).unassignedSplits())
+            final KafkaSourceEnumState state = enumerator.snapshotState(2L);
+            assertThat(state.unassignedSplits())
                     .containsExactlyInAnyOrderElementsOf(
                             Iterables.concat(
                                     advancedSplits, unassignedSplits)); // READER0 + READER2
+            assertThat(state.assignedSplits()).doesNotContainAnyElementsOf(advancedSplits);
 
             // Simulate a reader recovery.
             registerReader(context, enumerator, READER0);
@@ -468,6 +495,7 @@ public class KafkaSourceEnumeratorTest {
                 KafkaSourceEnumerator enumerator =
                         createEnumerator(
                                 context2,
+                                ENABLE_PERIODIC_PARTITION_DISCOVERY ? 1 : -1,
                                 OffsetsInitializer.earliest(),
                                 PRE_EXISTING_TOPICS,
                                 preexistingAssignments,
@@ -499,6 +527,7 @@ public class KafkaSourceEnumeratorTest {
                 KafkaSourceEnumerator enumerator =
                         createEnumerator(
                                 context,
+                                ENABLE_PERIODIC_PARTITION_DISCOVERY ? 1 : -1,
                                 OffsetsInitializer.earliest(),
                                 PRE_EXISTING_TOPICS,
                                 Collections.emptySet(),
@@ -538,31 +567,38 @@ public class KafkaSourceEnumeratorTest {
             registerReader(context, enumerator, READER0);
             registerReader(context, enumerator, READER1);
 
-            // Step2: Assign partials partitions to reader0 and reader1
+            // Step2: First partition discovery after start, but no assignments to readers
+            context.runNextOneTimeCallable();
+            final KafkaSourceEnumState state2 = enumerator.snapshotState(2L);
+            assertThat(state2.assignedSplits()).isEmpty();
+            assertThat(state2.unassignedSplits()).isEmpty();
+            assertThat(state2.initialDiscoveryFinished()).isFalse();
+
+            // Step3: Assign partials partitions to reader0 and reader1
             context.runNextOneTimeCallable();
 
             // The state should contain splits assigned to READER0 and READER1, but no READER2
             // register.
             // Thus, both assignedPartitions and unassignedInitialPartitions are not empty.
-            final KafkaSourceEnumState state2 = enumerator.snapshotState(2L);
+            final KafkaSourceEnumState state3 = enumerator.snapshotState(2L);
             verifySplitAssignmentWithPartitions(
                     getExpectedAssignments(
                             new HashSet<>(Arrays.asList(READER0, READER1)),
                             PRE_EXISTING_TOPICS,
                             offsetsInitializer.getOffsetsInitializer()),
-                    state2.assignedSplits());
-            assertThat(state2.assignedSplits()).isNotEmpty();
-            assertThat(state2.unassignedSplits()).isNotEmpty();
-            assertThat(state2.initialDiscoveryFinished()).isTrue();
+                    state3.assignedSplits());
+            assertThat(state3.assignedSplits()).isNotEmpty();
+            assertThat(state3.unassignedSplits()).isNotEmpty();
+            assertThat(state3.initialDiscoveryFinished()).isTrue();
 
             // Step3: register READER2, then all partitions are assigned
             registerReader(context, enumerator, READER2);
-            final KafkaSourceEnumState state3 = enumerator.snapshotState(3L);
-            assertThat(state3.assignedSplits())
+            final KafkaSourceEnumState state4 = enumerator.snapshotState(3L);
+            assertThat(state4.assignedSplits())
                     .containsExactlyInAnyOrderElementsOf(
-                            Iterables.concat(state2.assignedSplits(), state2.unassignedSplits()));
-            assertThat(state3.unassignedSplits()).isEmpty();
-            assertThat(state3.initialDiscoveryFinished()).isTrue();
+                            Iterables.concat(state3.assignedSplits(), state3.unassignedSplits()));
+            assertThat(state4.unassignedSplits()).isEmpty();
+            assertThat(state4.initialDiscoveryFinished()).isTrue();
         }
     }
 
@@ -585,7 +621,7 @@ public class KafkaSourceEnumeratorTest {
             Set<TopicPartition> fetchedPartitions = new HashSet<>();
             fetchedPartitions.add(newPartition);
             final KafkaSourceEnumerator.PartitionChange partitionChange =
-                    enumerator.getPartitionChange(fetchedPartitions);
+                    enumerator.getPartitionChange(fetchedPartitions, false);
 
             // Since enumerator never met DYNAMIC_TOPIC_NAME-0, it should be mark as a new partition
             Set<TopicPartition> expectedNewPartitions = Collections.singleton(newPartition);
@@ -598,35 +634,11 @@ public class KafkaSourceEnumeratorTest {
                 expectedRemovedPartitions.add(new TopicPartition(TOPIC2, i));
             }
 
+            // Since enumerator never met DYNAMIC_TOPIC_NAME-1, it should be marked as a new
+            // partition
             assertThat(partitionChange.getNewPartitions()).isEqualTo(expectedNewPartitions);
+            assertThat(partitionChange.getInitialPartitions()).isEqualTo(Set.of());
             assertThat(partitionChange.getRemovedPartitions()).isEqualTo(expectedRemovedPartitions);
-        }
-    }
-
-    @Test
-    public void testEnablePartitionDiscoveryByDefault() throws Throwable {
-        try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
-                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
-                KafkaSourceEnumerator enumerator = createEnumerator(context, new Properties())) {
-            enumerator.start();
-            long partitionDiscoveryIntervalMs =
-                    (long) Whitebox.getInternalState(enumerator, "partitionDiscoveryIntervalMs");
-            assertThat(partitionDiscoveryIntervalMs)
-                    .isEqualTo(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.defaultValue());
-            assertThat(context.getPeriodicCallables()).isNotEmpty();
-        }
-    }
-
-    @Test
-    public void testDisablePartitionDiscovery() throws Throwable {
-        Properties props = new Properties();
-        props.setProperty(
-                KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), String.valueOf(0));
-        try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
-                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
-                KafkaSourceEnumerator enumerator = createEnumerator(context, props)) {
-            enumerator.start();
-            assertThat(context.getPeriodicCallables()).isEmpty();
         }
     }
 
@@ -677,9 +689,13 @@ public class KafkaSourceEnumeratorTest {
     }
 
     private KafkaSourceEnumerator createEnumerator(
-            MockSplitEnumeratorContext<KafkaPartitionSplit> enumContext, Properties properties) {
+            MockSplitEnumeratorContext<KafkaPartitionSplit> enumContext,
+            long partitionDiscoveryIntervalMs) {
         return createEnumerator(
-                enumContext, properties, EXCLUDE_DYNAMIC_TOPIC, OffsetsInitializer.earliest());
+                enumContext,
+                partitionDiscoveryIntervalMs,
+                EXCLUDE_DYNAMIC_TOPIC,
+                OffsetsInitializer.earliest());
     }
 
     private KafkaSourceEnumerator createEnumerator(
@@ -691,23 +707,20 @@ public class KafkaSourceEnumeratorTest {
         if (includeDynamicTopic) {
             topics.add(DYNAMIC_TOPIC_NAME);
         }
-        Properties props = new Properties();
-        props.setProperty(
-                KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(),
-                enablePeriodicPartitionDiscovery ? "1" : "-1");
         return createEnumerator(
                 enumContext,
+                enablePeriodicPartitionDiscovery ? 1 : -1,
                 startingOffsetsInitializer,
                 topics,
                 Collections.emptySet(),
                 Collections.emptySet(),
                 false,
-                props);
+                new Properties());
     }
 
     private KafkaSourceEnumerator createEnumerator(
             MockSplitEnumeratorContext<KafkaPartitionSplit> enumContext,
-            Properties props,
+            long partitionDiscoveryIntervalMs,
             boolean includeDynamicTopic,
             OffsetsInitializer startingOffsetsInitializer) {
         List<String> topics = new ArrayList<>(PRE_EXISTING_TOPICS);
@@ -716,12 +729,13 @@ public class KafkaSourceEnumeratorTest {
         }
         return createEnumerator(
                 enumContext,
+                partitionDiscoveryIntervalMs,
                 startingOffsetsInitializer,
                 topics,
                 Collections.emptySet(),
                 Collections.emptySet(),
                 false,
-                props);
+                new Properties());
     }
 
     /**
@@ -730,12 +744,35 @@ public class KafkaSourceEnumeratorTest {
      */
     private KafkaSourceEnumerator createEnumerator(
             MockSplitEnumeratorContext<KafkaPartitionSplit> enumContext,
+            long partitionDiscoveryIntervalMs,
             OffsetsInitializer startingOffsetsInitializer,
             Collection<String> topicsToSubscribe,
             Collection<KafkaPartitionSplit> assignedSplits,
             Collection<KafkaPartitionSplit> unassignedInitialSplits,
             boolean initialDiscoveryFinished,
             Properties overrideProperties) {
+        return createEnumerator(
+                enumContext,
+                partitionDiscoveryIntervalMs,
+                topicsToSubscribe,
+                assignedSplits,
+                unassignedInitialSplits,
+                overrideProperties,
+                startingOffsetsInitializer);
+    }
+
+    /**
+     * Create the enumerator. For the purpose of the tests in this class we don't care about the
+     * subscriber and stopping initializer, so just use arbitrary settings.
+     */
+    private KafkaSourceEnumerator createEnumerator(
+            MockSplitEnumeratorContext<KafkaPartitionSplit> enumContext,
+            long partitionDiscoveryIntervalMs,
+            Collection<String> topicsToSubscribe,
+            Collection<KafkaPartitionSplit> assignedSplits,
+            Collection<KafkaPartitionSplit> unassignedInitialSplits,
+            Properties overrideProperties,
+            OffsetsInitializer startingOffsetsInitializer) {
         // Use a TopicPatternSubscriber so that no exception if a subscribed topic hasn't been
         // created yet.
         StringJoiner topicNameJoiner = new StringJoiner("|");
@@ -748,6 +785,9 @@ public class KafkaSourceEnumeratorTest {
         Properties props =
                 new Properties(KafkaSourceTestEnv.getConsumerProperties(StringDeserializer.class));
         KafkaSourceEnumerator.deepCopyProperties(overrideProperties, props);
+        props.setProperty(
+                KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(),
+                String.valueOf(partitionDiscoveryIntervalMs));
 
         return new KafkaSourceEnumerator(
                 subscriber,
@@ -756,8 +796,7 @@ public class KafkaSourceEnumeratorTest {
                 props,
                 enumContext,
                 Boundedness.CONTINUOUS_UNBOUNDED,
-                new KafkaSourceEnumState(
-                        assignedSplits, unassignedInitialSplits, initialDiscoveryFinished));
+                new KafkaSourceEnumState(assignedSplits, unassignedInitialSplits, false));
     }
 
     // ---------------------
