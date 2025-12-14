@@ -31,6 +31,8 @@ from pyflink.util.java_utils import to_jarray, get_field, get_field_value
 __all__ = [
     'KafkaSource',
     'KafkaSourceBuilder',
+    'KafkaShareGroupSource',
+    'KafkaShareGroupSourceBuilder',
     'KafkaSink',
     'KafkaSinkBuilder',
     'KafkaTopicPartition',
@@ -351,6 +353,303 @@ class KafkaSourceBuilder(object):
 
         :param props: the properties to set for the KafkaSource.
         :return: this KafkaSourceBuilder.
+        """
+        gateway = get_gateway()
+        j_properties = gateway.jvm.java.util.Properties()
+        for key, value in props.items():
+            j_properties.setProperty(key, value)
+        self._j_builder.setProperties(j_properties)
+        return self
+
+
+# ---- KafkaShareGroupSource ----
+
+
+class KafkaShareGroupSource(Source):
+    """
+    The Source implementation of Kafka using share group semantics (KIP-932).
+
+    Share groups provide message-level distribution across consumers, enabling:
+
+    * Message-level distribution rather than partition-level
+    * Dynamic scaling beyond partition count limitations
+    * Automatic load balancing managed by Kafka broker
+    * Enhanced fault tolerance with automatic work redistribution
+
+    Please use a :class:`KafkaShareGroupSourceBuilder` to construct a
+    :class:`KafkaShareGroupSource`. The following example shows how to create a
+    KafkaShareGroupSource emitting records of String type.
+
+    ::
+
+        >>> source = KafkaShareGroupSource \\
+        ...     .builder() \\
+        ...     .set_bootstrap_servers('MY_BOOTSTRAP_SERVERS') \\
+        ...     .set_share_group_id('MY_SHARE_GROUP') \\
+        ...     .set_topics('TOPIC1', 'TOPIC2') \\
+        ...     .set_value_only_deserializer(SimpleStringSchema()) \\
+        ...     .set_starting_offsets(KafkaOffsetsInitializer.earliest()) \\
+        ...     .build()
+
+    Requirements:
+
+    * Kafka 4.1.0+ with share group support enabled
+    * Share group ID must be configured
+    * Topics and deserializer must be specified
+
+    .. versionadded:: 1.20.0
+    """
+
+    def __init__(self, j_kafka_share_group_source: JavaObject):
+        super().__init__(j_kafka_share_group_source)
+
+    @staticmethod
+    def builder() -> 'KafkaShareGroupSourceBuilder':
+        """
+        Get a KafkaShareGroupSourceBuilder to build a :class:`KafkaShareGroupSource`.
+
+        :return: a Kafka share group source builder.
+        """
+        return KafkaShareGroupSourceBuilder()
+
+
+class KafkaShareGroupSourceBuilder(object):
+    """
+    The builder class for :class:`KafkaShareGroupSource` to make it easier for users to
+    construct a :class:`KafkaShareGroupSource`.
+
+    The following example shows the minimum setup to create a KafkaShareGroupSource that
+    reads String values from a Kafka topic using share group semantics.
+
+    ::
+
+        >>> source = KafkaShareGroupSource.builder() \\
+        ...     .set_bootstrap_servers('MY_BOOTSTRAP_SERVERS') \\
+        ...     .set_share_group_id('MY_SHARE_GROUP') \\
+        ...     .set_topics('TOPIC1', 'TOPIC2') \\
+        ...     .set_value_only_deserializer(SimpleStringSchema()) \\
+        ...     .build()
+
+    The bootstrap servers, share group ID, topics/partitions to consume, and the record
+    deserializer are required fields that must be set.
+
+    To specify the starting offsets of the KafkaShareGroupSource, one can call
+    :meth:`set_starting_offsets`.
+
+    By default, the KafkaShareGroupSource runs in CONTINUOUS_UNBOUNDED mode and never
+    stops until the Flink job is canceled or fails.
+
+    Requirements:
+
+    * Kafka 4.1.0+ with share group support enabled
+
+    .. versionadded:: 1.20.0
+    """
+
+    def __init__(self):
+        self._j_builder = get_gateway().jvm.org.apache.flink.connector.kafka.source \
+            .KafkaShareGroupSource.builder()
+
+    def build(self) -> 'KafkaShareGroupSource':
+        """
+        Build the :class:`KafkaShareGroupSource`.
+
+        :return: a KafkaShareGroupSource with the configured properties.
+        """
+        return KafkaShareGroupSource(self._j_builder.build())
+
+    def set_bootstrap_servers(self, bootstrap_servers: str) -> 'KafkaShareGroupSourceBuilder':
+        """
+        Sets the bootstrap servers for the KafkaConsumer of the KafkaShareGroupSource.
+
+        :param bootstrap_servers: the bootstrap servers of the Kafka cluster.
+        :return: this KafkaShareGroupSourceBuilder.
+        """
+        self._j_builder.setBootstrapServers(bootstrap_servers)
+        return self
+
+    def set_share_group_id(self, share_group_id: str) -> 'KafkaShareGroupSourceBuilder':
+        """
+        Sets the share group ID for share group semantics. This is required for
+        share group-based consumption.
+
+        The share group ID is used to coordinate message distribution across multiple
+        consumers. Unlike traditional consumer groups, share groups distribute messages
+        at the individual message level rather than partition level.
+
+        :param share_group_id: the share group ID.
+        :return: this KafkaShareGroupSourceBuilder.
+        """
+        self._j_builder.setShareGroupId(share_group_id)
+        return self
+
+    def set_topics(self, *topics: str) -> 'KafkaShareGroupSourceBuilder':
+        """
+        Set a list of topics the KafkaShareGroupSource should consume from. All topics
+        in the list should exist in the Kafka cluster. Otherwise, an exception will be
+        thrown. To allow some topics to be created lazily, please use
+        :meth:`set_topic_pattern` instead.
+
+        :param topics: the list of topics to consume from.
+        :return: this KafkaShareGroupSourceBuilder.
+        """
+        self._j_builder.setTopics(to_jarray(get_gateway().jvm.java.lang.String, topics))
+        return self
+
+    def set_topic_pattern(self, topic_pattern: str) -> 'KafkaShareGroupSourceBuilder':
+        """
+        Set a topic pattern to consume from using Java Pattern. For grammar, check out
+        `JavaDoc <https://docs.oracle.com/javase/8/docs/api/java/util/regex/Pattern.html>`_.
+
+        :param topic_pattern: the pattern of the topic name to consume from.
+        :return: this KafkaShareGroupSourceBuilder.
+        """
+        self._j_builder.setTopicPattern(get_gateway().jvm.java.util.regex
+                                        .Pattern.compile(topic_pattern))
+        return self
+
+    def set_partitions(self, partitions: Set['KafkaTopicPartition']) -> 'KafkaShareGroupSourceBuilder':
+        """
+        Set a set of partitions to consume from.
+
+        Example:
+        ::
+
+            >>> KafkaShareGroupSource.builder().set_partitions({
+            ...     KafkaTopicPartition('TOPIC1', 0),
+            ...     KafkaTopicPartition('TOPIC1', 1),
+            ... })
+
+        :param partitions: the set of partitions to consume from.
+        :return: this KafkaShareGroupSourceBuilder.
+        """
+        j_set = get_gateway().jvm.java.util.HashSet()
+        for tp in partitions:
+            j_set.add(tp._to_j_topic_partition())
+        self._j_builder.setPartitions(j_set)
+        return self
+
+    def set_starting_offsets(self, starting_offsets_initializer: 'KafkaOffsetsInitializer') \
+            -> 'KafkaShareGroupSourceBuilder':
+        """
+        Specify from which offsets the KafkaShareGroupSource should start consuming by
+        providing a :class:`KafkaOffsetsInitializer`.
+
+        The following :class:`KafkaOffsetsInitializer` s are commonly used and provided
+        out of the box:
+
+        * :meth:`KafkaOffsetsInitializer.earliest` - starting from the earliest offsets.
+          This is also the default offset initializer for starting offsets.
+        * :meth:`KafkaOffsetsInitializer.latest` - starting from the latest offsets.
+        * :meth:`KafkaOffsetsInitializer.timestamp` - starting from the specified timestamp
+          for each partition.
+
+        :param starting_offsets_initializer: the :class:`KafkaOffsetsInitializer` setting
+            the starting offsets for the Source.
+        :return: this KafkaShareGroupSourceBuilder.
+        """
+        self._j_builder.setStartingOffsets(starting_offsets_initializer._j_initializer)
+        return self
+
+    def set_unbounded(self, stopping_offsets_initializer: 'KafkaOffsetsInitializer') \
+            -> 'KafkaShareGroupSourceBuilder':
+        """
+        By default, the KafkaShareGroupSource runs in CONTINUOUS_UNBOUNDED manner and
+        thus never stops until the Flink job fails or is canceled. To let the source
+        run as a streaming source but still stop at some point, one can set a
+        :class:`KafkaOffsetsInitializer` to specify the stopping offsets for each partition.
+
+        :param stopping_offsets_initializer: the :class:`KafkaOffsetsInitializer` to
+            specify the stopping offsets.
+        :return: this KafkaShareGroupSourceBuilder.
+        """
+        self._j_builder.setUnbounded(stopping_offsets_initializer._j_initializer)
+        return self
+
+    def set_bounded(self, stopping_offsets_initializer: 'KafkaOffsetsInitializer') \
+            -> 'KafkaShareGroupSourceBuilder':
+        """
+        By default, the KafkaShareGroupSource runs in CONTINUOUS_UNBOUNDED manner and
+        thus never stops until the Flink job fails or is canceled. To let the source
+        run in BOUNDED manner and stop at some point, one can set a
+        :class:`KafkaOffsetsInitializer` to specify the stopping offsets.
+
+        This method is different from :meth:`set_unbounded` in that after setting the
+        stopping offsets with this method, the source will be BOUNDED instead of
+        CONTINUOUS_UNBOUNDED.
+
+        :param stopping_offsets_initializer: the :class:`KafkaOffsetsInitializer` to
+            specify the stopping offsets.
+        :return: this KafkaShareGroupSourceBuilder.
+        """
+        self._j_builder.setBounded(stopping_offsets_initializer._j_initializer)
+        return self
+
+    def set_value_only_deserializer(self, deserialization_schema: DeserializationSchema) \
+            -> 'KafkaShareGroupSourceBuilder':
+        """
+        Sets the :class:`~pyflink.common.serialization.DeserializationSchema` for
+        deserializing the value of Kafka's ConsumerRecord. The other information
+        (e.g. key) in a ConsumerRecord will be ignored.
+
+        :param deserialization_schema: the :class:`DeserializationSchema` to use for
+            deserialization.
+        :return: this KafkaShareGroupSourceBuilder.
+        """
+        self._j_builder.setValueOnlyDeserializer(deserialization_schema._j_deserialization_schema)
+        return self
+
+    def set_client_id_prefix(self, prefix: str) -> 'KafkaShareGroupSourceBuilder':
+        """
+        Sets the client id prefix of this KafkaShareGroupSource.
+
+        :param prefix: the client id prefix to use for this KafkaShareGroupSource.
+        :return: this KafkaShareGroupSourceBuilder.
+        """
+        self._j_builder.setClientIdPrefix(prefix)
+        return self
+
+    def enable_share_group_metrics(self, enabled: bool) -> 'KafkaShareGroupSourceBuilder':
+        """
+        Enable or disable share group-specific metrics.
+
+        When enabled, the source will report additional metrics specific to share group
+        consumption, such as acknowledgment rates and message distribution statistics.
+
+        :param enabled: whether to enable share group metrics.
+        :return: this KafkaShareGroupSourceBuilder.
+        """
+        self._j_builder.enableShareGroupMetrics(enabled)
+        return self
+
+    def set_property(self, key: str, value: str) -> 'KafkaShareGroupSourceBuilder':
+        """
+        Set an arbitrary property for the KafkaShareGroupSource and KafkaConsumer.
+        The valid keys can be found in ConsumerConfig and KafkaSourceOptions.
+
+        Note that certain properties will be overridden by the builder for share group
+        semantics, including:
+
+        * ``group.type`` is set to 'share'
+        * ``group.id`` is set to the share group ID
+
+        :param key: the key of the property.
+        :param value: the value of the property.
+        :return: this KafkaShareGroupSourceBuilder.
+        """
+        self._j_builder.setProperty(key, value)
+        return self
+
+    def set_properties(self, props: Dict) -> 'KafkaShareGroupSourceBuilder':
+        """
+        Set arbitrary properties for the KafkaShareGroupSource and KafkaConsumer.
+        The valid keys can be found in ConsumerConfig and KafkaSourceOptions.
+
+        Note that certain properties will be overridden by the builder for share group
+        semantics.
+
+        :param props: the properties to set for the KafkaShareGroupSource.
+        :return: this KafkaShareGroupSourceBuilder.
         """
         gateway = get_gateway()
         j_properties = gateway.jvm.java.util.Properties()
