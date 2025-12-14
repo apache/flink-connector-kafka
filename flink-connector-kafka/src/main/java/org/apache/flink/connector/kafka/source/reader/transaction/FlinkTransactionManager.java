@@ -51,11 +51,11 @@ public class FlinkTransactionManager {
     private static final Logger LOG = LoggerFactory.getLogger(FlinkTransactionManager.class);
 
     private final String shareGroupId;
-    private ShareConsumer<?, ?> shareConsumer;
+    private ShareConsumer<byte[], byte[]> shareConsumer;
     private final Map<Long, TransactionState> checkpointTransactions;
     private final Map<Long, Set<RecordMetadata>> readyForAcknowledgment;
 
-    public FlinkTransactionManager(String shareGroupId, ShareConsumer<?, ?> shareConsumer) {
+    public FlinkTransactionManager(String shareGroupId, ShareConsumer<byte[], byte[]> shareConsumer) {
         this.shareGroupId = shareGroupId;
         this.shareConsumer = shareConsumer;
         this.checkpointTransactions = new ConcurrentHashMap<>();
@@ -65,7 +65,7 @@ public class FlinkTransactionManager {
     /**
      * Update share consumer reference (for lazy initialization).
      */
-    public void setShareConsumer(ShareConsumer<?, ?> shareConsumer) {
+    public void setShareConsumer(ShareConsumer<byte[], byte[]> shareConsumer) {
         this.shareConsumer = shareConsumer;
     }
 
