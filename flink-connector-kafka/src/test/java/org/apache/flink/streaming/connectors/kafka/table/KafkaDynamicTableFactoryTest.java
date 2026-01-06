@@ -264,6 +264,51 @@ public class KafkaDynamicTableFactoryTest {
     }
 
     @Test
+    public void testTableSourceWithCustomPartitionDiscoveryInterval() {
+        final String partitionDiscoveryInterval = "100 ms";
+        final long expectedPartitionDiscoveryInterval = 100;
+        final Map<String, String> modifiedOptions =
+                getModifiedOptions(
+                        getBasicSourceOptions(),
+                        options ->
+                                options.put(
+                                        "scan.topic-partition-discovery.interval",
+                                        partitionDiscoveryInterval));
+        final DynamicTableSource actualSource = createTableSource(SCHEMA, modifiedOptions);
+        final KafkaDynamicSource actualKafkaSource = (KafkaDynamicSource) actualSource;
+
+        final Map<TopicPartition, Long> specificOffsets = new HashMap<>();
+        specificOffsets.put(new TopicPartition(TOPIC, PARTITION_0), OFFSET_0);
+        specificOffsets.put(new TopicPartition(TOPIC, PARTITION_1), OFFSET_1);
+
+        final DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat =
+                new DecodingFormatMock(",", true);
+        final Properties properties = new Properties();
+        properties.putAll(KAFKA_SOURCE_PROPERTIES);
+        properties.setProperty(
+                "partition.discovery.interval.ms",
+                Long.toString(expectedPartitionDiscoveryInterval));
+
+        // Test scan source equals
+        final KafkaDynamicSource expectedKafkaSource =
+                createExpectedScanSource(
+                        SCHEMA_DATA_TYPE,
+                        null,
+                        valueDecodingFormat,
+                        new int[0],
+                        new int[] {0, 1, 2},
+                        null,
+                        Collections.singletonList(TOPIC),
+                        null,
+                        properties,
+                        StartupMode.SPECIFIC_OFFSETS,
+                        specificOffsets,
+                        0,
+                        null);
+        assertThat(actualKafkaSource).isEqualTo(expectedKafkaSource);
+    }
+
+    @Test
     public void testTableSourceWithPattern() {
         final Map<String, String> modifiedOptions =
                 getModifiedOptions(

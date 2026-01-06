@@ -40,6 +40,7 @@ import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.transformations.SourceTransformation;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
+import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanBoundedMode;
 import org.apache.flink.streaming.connectors.kafka.testutils.MockPartitionOffsetsRetriever;
 import org.apache.flink.streaming.runtime.operators.sink.SinkWriterOperatorFactory;
 import org.apache.flink.table.api.DataTypes;
@@ -135,9 +136,11 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
 
     private static final Properties UPSERT_KAFKA_SOURCE_PROPERTIES = new Properties();
     private static final Properties UPSERT_KAFKA_SINK_PROPERTIES = new Properties();
+    private static final String DISCOVERY_INTERVAL = "1000 ms";
 
     static {
         UPSERT_KAFKA_SOURCE_PROPERTIES.setProperty("bootstrap.servers", "dummy");
+        UPSERT_KAFKA_SOURCE_PROPERTIES.setProperty("partition.discovery.interval.ms", "1000");
 
         UPSERT_KAFKA_SINK_PROPERTIES.setProperty("bootstrap.servers", "dummy");
     }
@@ -839,6 +842,40 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                                 "sink.transactional-id-prefix must be specified when using DeliveryGuarantee.EXACTLY_ONCE."));
     }
 
+    @Test
+    public void testTableSourceWithCustomPartitionDiscoveryInterval() {
+        final String partitionDiscoveryInterval = "100 ms";
+        final long expectedPartitionDiscoveryInterval = 100;
+        final DataType producedDataType = SOURCE_SCHEMA.toPhysicalRowDataType();
+        // Construct table source using options and table source factory
+        final Map<String, String> modifiedOptions =
+                getModifiedOptions(
+                        getFullSourceOptions(),
+                        options ->
+                                options.put(
+                                        "scan.topic-partition-discovery.interval",
+                                        partitionDiscoveryInterval));
+        final DynamicTableSource actualSource = createTableSource(SOURCE_SCHEMA, modifiedOptions);
+        final Properties properties = new Properties();
+        properties.putAll(UPSERT_KAFKA_SOURCE_PROPERTIES);
+        properties.setProperty(
+                "partition.discovery.interval.ms",
+                Long.toString(expectedPartitionDiscoveryInterval));
+
+        final KafkaDynamicSource expectedSource =
+                createExpectedScanSource(
+                        producedDataType,
+                        keyDecodingFormat,
+                        valueDecodingFormat,
+                        SOURCE_KEY_FIELDS,
+                        SOURCE_VALUE_FIELDS,
+                        null,
+                        Collections.singletonList(SOURCE_TOPIC),
+                        properties,
+                        null);
+        assertThat(actualSource).isEqualTo(expectedSource);
+    }
+
     // --------------------------------------------------------------------------------------------
     // Utilities
     // --------------------------------------------------------------------------------------------
@@ -860,6 +897,8 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
         options.put("connector", UpsertKafkaDynamicTableFactory.IDENTIFIER);
         options.put("topic", SOURCE_TOPIC);
         options.put("properties.bootstrap.servers", "dummy");
+        options.put("scan.topic-partition-discovery.interval", DISCOVERY_INTERVAL);
+
         // key format options
         options.put("key.format", TestFormatFactory.IDENTIFIER);
         options.put(
