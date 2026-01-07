@@ -68,6 +68,7 @@ public class KafkaSubscriberTest {
         List<String> topics = Arrays.asList(TOPIC1, TOPIC2);
         KafkaSubscriber subscriber =
                 KafkaSubscriber.getTopicListSubscriber(Arrays.asList(TOPIC1, TOPIC2));
+        subscriber.open(new TestSubscriberInitContext());
         final Set<TopicPartition> subscribedPartitions =
                 subscriber.getSubscribedTopicPartitions(adminClient);
 
@@ -84,6 +85,7 @@ public class KafkaSubscriberTest {
         final KafkaSubscriber subscriber =
                 KafkaSubscriber.getTopicListSubscriber(
                         Collections.singletonList(NON_EXISTING_TOPIC.topic()));
+        subscriber.open(new TestSubscriberInitContext());
 
         assertThatThrownBy(() -> subscriber.getSubscribedTopicPartitions(adminClient))
                 .isInstanceOf(RuntimeException.class)
@@ -96,6 +98,7 @@ public class KafkaSubscriberTest {
         KafkaSubscriber subscriber = KafkaSubscriber.getTopicPatternSubscriber(pattern);
         final Set<TopicPartition> subscribedPartitions =
                 subscriber.getSubscribedTopicPartitions(adminClient);
+        subscriber.open(new TestSubscriberInitContext());
 
         final Set<TopicPartition> expectedSubscribedPartitions =
                 new HashSet<>(
@@ -114,6 +117,7 @@ public class KafkaSubscriberTest {
         partitions.remove(new TopicPartition(TOPIC1, 1));
 
         KafkaSubscriber subscriber = KafkaSubscriber.getPartitionSetSubscriber(partitions);
+        subscriber.open(new TestSubscriberInitContext());
 
         final Set<TopicPartition> subscribedPartitions =
                 subscriber.getSubscribedTopicPartitions(adminClient);
@@ -129,6 +133,7 @@ public class KafkaSubscriberTest {
         final KafkaSubscriber subscriber =
                 KafkaSubscriber.getPartitionSetSubscriber(
                         Collections.singleton(nonExistingPartition));
+        subscriber.open(new TestSubscriberInitContext());
 
         assertThatThrownBy(() -> subscriber.getSubscribedTopicPartitions(adminClient))
                 .isInstanceOf(RuntimeException.class)
@@ -137,4 +142,9 @@ public class KafkaSubscriberTest {
                                 "Partition '%s' does not exist on Kafka brokers",
                                 nonExistingPartition));
     }
+
+    private static class TestSubscriberInitContext implements KafkaSubscriber.InitializationContext {
+        private TestSubscriberInitContext() {}
+    }
+
 }

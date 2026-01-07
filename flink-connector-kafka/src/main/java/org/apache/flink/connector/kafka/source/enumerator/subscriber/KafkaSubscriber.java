@@ -48,12 +48,36 @@ import java.util.regex.Pattern;
 public interface KafkaSubscriber extends Serializable {
 
     /**
+     * Opens the subscriber. This lifecycle method will be called before {@link
+     * #getSubscribedTopicPartitions(AdminClient)} calls are made.
+     *
+     * <p>Implementations may override this method to initialize any additional resources (beyond
+     * the Kafka {@link AdminClient}) required for discovering topic partitions.
+     *
+     * @param initializationContext initialization context for the subscriber.
+     */
+    default void open(InitializationContext initializationContext) {}
+
+    /**
      * Get a set of subscribed {@link TopicPartition}s.
      *
      * @param adminClient The admin client used to retrieve subscribed topic partitions.
      * @return A set of subscribed {@link TopicPartition}s
      */
     Set<TopicPartition> getSubscribedTopicPartitions(AdminClient adminClient);
+
+    /**
+     * Closes the subscriber. This lifecycle method will be called after this {@link
+     * KafkaSubscriber} will no longer be used.
+     *
+     * <p>Any resources created in the {@link #open(InitializationContext)} method should be cleaned
+     * up here.
+     */
+    default void close() {}
+
+    /** Initialization context for the {@link KafkaSubscriber}. */
+    @PublicEvolving
+    interface InitializationContext {}
 
     // ----------------- factory methods --------------
 
