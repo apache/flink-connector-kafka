@@ -28,6 +28,7 @@ import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
+import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.util.FlinkRuntimeException;
 
 import org.apache.kafka.clients.admin.AdminClient;
@@ -94,6 +95,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 public class KafkaSourceEnumerator
         implements SplitEnumerator<KafkaPartitionSplit, KafkaSourceEnumState> {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaSourceEnumerator.class);
+    private static final String SUBSCRIBER_METRIC_GROUP = "KafkaSubscriber";
     private final KafkaSubscriber subscriber;
     private final OffsetsInitializer startingOffsetInitializer;
     private final OffsetsInitializer stoppingOffsetInitializer;
@@ -200,7 +202,7 @@ public class KafkaSourceEnumerator
             addPartitionSplitChangeToPendingAssignments(preinitializedSplits);
         }
 
-        subscriber.open(new KafkaSubscriberInitContext());
+        subscriber.open(new KafkaSubscriberInitContext(context.metricGroup().addGroup(SUBSCRIBER_METRIC_GROUP)));
 
         if (partitionDiscoveryIntervalMs > 0) {
             LOG.info(
@@ -566,7 +568,17 @@ public class KafkaSourceEnumerator
     // --------------- private class ---------------
 
     static class KafkaSubscriberInitContext implements KafkaSubscriber.InitializationContext {
-        private KafkaSubscriberInitContext() {}
+        private final MetricGroup subscriberMetricGroup;
+
+        private KafkaSubscriberInitContext(MetricGroup subscriberMetricGroup) {
+            this.subscriberMetricGroup = subscriberMetricGroup;
+        }
+
+        @Override
+        public MetricGroup getMetricGroup() {
+            return subscriberMetricGroup;
+        }
+
     }
 
     /** A container class to hold the newly added partitions and removed partitions. */

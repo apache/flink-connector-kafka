@@ -21,6 +21,7 @@ package org.apache.flink.connector.kafka.source.enumerator.subscriber;
 import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetIdentifier;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifierProvider;
 import org.apache.flink.connector.kafka.testutils.KafkaSourceTestEnv;
+import org.apache.flink.metrics.MetricGroup;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.common.TopicPartition;
@@ -143,8 +144,12 @@ public class KafkaSubscriberTest {
                                 nonExistingPartition));
     }
 
-    private static class TestSubscriberInitContext implements KafkaSubscriber.InitializationContext {
+    static class TestSubscriberInitContext implements KafkaSubscriber.InitializationContext {
         private TestSubscriberInitContext() {}
-    }
 
+        @Override
+        public MetricGroup getMetricGroup() {
+                throw new UnsupportedOperationException("Unimplemented method 'getMetricGroup'");
+        }
+    }
 }

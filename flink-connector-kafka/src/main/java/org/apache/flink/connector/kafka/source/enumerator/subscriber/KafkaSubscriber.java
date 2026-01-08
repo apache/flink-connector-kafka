@@ -19,6 +19,7 @@
 package org.apache.flink.connector.kafka.source.enumerator.subscriber;
 
 import org.apache.flink.annotation.PublicEvolving;
+import org.apache.flink.metrics.MetricGroup;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.common.TopicPartition;
@@ -77,7 +78,16 @@ public interface KafkaSubscriber extends Serializable {
 
     /** Initialization context for the {@link KafkaSubscriber}. */
     @PublicEvolving
-    interface InitializationContext {}
+    interface InitializationContext {
+        /**
+         * Returns the metric group for the subscriber instance.
+         *
+         * <p>Instances of this class can be used to register new metrics with Flink and to create a
+         * nested hierarchy based on the group names. See {@link MetricGroup} for more information
+         * for the metrics system.
+         */
+        MetricGroup getMetricGroup();
+    }
 
     // ----------------- factory methods --------------
 
