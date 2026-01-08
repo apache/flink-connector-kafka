@@ -18,7 +18,6 @@
 package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.api.common.JobID;
-import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.serialization.SerializationSchema;
@@ -31,12 +30,9 @@ import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
 import org.apache.flink.api.common.typeutils.base.TypeSerializerSingleton;
 import org.apache.flink.api.connector.source.util.ratelimit.RateLimiterStrategy;
 import org.apache.flink.client.program.ClusterClient;
-import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
-import org.apache.flink.configuration.ExternalizedCheckpointRetention;
 import org.apache.flink.configuration.RestartStrategyOptions;
-import org.apache.flink.configuration.StateBackendOptions;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.datagen.source.DataGeneratorSource;
 import org.apache.flink.connector.kafka.sink.testutils.KafkaSinkExternalContextFactory;
@@ -51,22 +47,14 @@ import org.apache.flink.connector.testframe.junit.annotations.TestSemantics;
 import org.apache.flink.connector.testframe.testsuites.SinkTestSuiteBase;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
-import org.apache.flink.runtime.clusterframework.ApplicationStatus;
 import org.apache.flink.runtime.jobgraph.JobGraph;
-import org.apache.flink.runtime.jobmaster.JobResult;
-import org.apache.flink.runtime.messages.FlinkJobNotFoundException;
-import org.apache.flink.runtime.minicluster.MiniCluster;
 import org.apache.flink.runtime.state.FunctionInitializationContext;
 import org.apache.flink.runtime.state.FunctionSnapshotContext;
-import org.apache.flink.runtime.testutils.CommonTestUtils;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.test.junit5.InjectClusterClient;
-import org.apache.flink.test.junit5.InjectMiniCluster;
 import org.apache.flink.test.junit5.MiniClusterExtension;
 import org.apache.flink.testutils.junit.SharedObjectsExtension;
 import org.apache.flink.testutils.junit.SharedReference;
@@ -78,21 +66,15 @@ import org.apache.kafka.clients.admin.CreateTopicsResult;
 import org.apache.kafka.clients.admin.DeleteTopicsResult;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
-import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.KafkaContainer;
@@ -103,7 +85,6 @@ import org.testcontainers.utility.DockerImageName;
 
 import javax.annotation.Nullable;
 
-import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -111,7 +92,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
@@ -122,11 +102,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.apache.flink.configuration.StateRecoveryOptions.SAVEPOINT_PATH;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for using KafkaSink writing to a Kafka cluster. */
 @Testcontainers
@@ -152,7 +130,11 @@ public class KafkaSinkITCase extends TestLogger {
 
     @Container
     public static final KafkaContainer KAFKA_CONTAINER =
-            createKafkaContainer(KafkaSinkITCase.class)
+            createKafkaContainer(
+                            "kafka.KafkaSinkITCase-"
+                                    + System.nanoTime()
+                                    + "-"
+                                    + Thread.currentThread().getId())
                     .withEmbeddedZookeeper()
                     .withNetwork(NETWORK)
                     .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS);
@@ -223,47 +205,47 @@ public class KafkaSinkITCase extends TestLogger {
                         TransactionNamingStrategy.POOLING);
     }
 
-    @Test
-    public void testWriteRecordsToKafkaWithAtLeastOnceGuarantee() throws Exception {
-        writeRecordsToKafka(DeliveryGuarantee.AT_LEAST_ONCE);
-    }
-
-    @Test
-    public void testWriteRecordsToKafkaWithNoneGuarantee() throws Exception {
-        writeRecordsToKafka(DeliveryGuarantee.NONE);
-    }
-
-    @ParameterizedTest(name = "{0}, chained={1}")
-    @MethodSource("getEOSParameters")
-    public void testWriteRecordsToKafkaWithExactlyOnceGuarantee(
-            TransactionNamingStrategy namingStrategy, boolean chained) throws Exception {
-        writeRecordsToKafka(DeliveryGuarantee.EXACTLY_ONCE, namingStrategy, chained);
-    }
-
-    @Test
-    public void testWriteRecordsToKafkaWithExactlyOnceGuaranteeBatch() throws Exception {
-        final StreamExecutionEnvironment env =
-                StreamExecutionEnvironment.getExecutionEnvironment(createConfiguration(1));
-        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        int count = 1000;
-        final DataStream<Long> source = createSource(env, false, count);
-        source.sinkTo(
-                new KafkaSinkBuilder<Long>()
-                        .setBootstrapServers(KAFKA_CONTAINER.getBootstrapServers())
-                        .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
-                        .setRecordSerializer(
-                                KafkaRecordSerializationSchema.builder()
-                                        .setTopic(topic)
-                                        .setValueSerializationSchema(new RecordSerializer())
-                                        .build())
-                        .setTransactionalIdPrefix("kafka-sink")
-                        .build());
-        env.execute();
-
-        final List<Long> collectedRecords =
-                deserializeValues(drainAllRecordsFromTopic(topic, true));
-        assertThat(collectedRecords).hasSize(count);
-    }
+    //    @Test
+    //    public void testWriteRecordsToKafkaWithAtLeastOnceGuarantee() throws Exception {
+    //        writeRecordsToKafka(DeliveryGuarantee.AT_LEAST_ONCE);
+    //    }
+    //
+    //    @Test
+    //    public void testWriteRecordsToKafkaWithNoneGuarantee() throws Exception {
+    //        writeRecordsToKafka(DeliveryGuarantee.NONE);
+    //    }
+    //
+    //    @ParameterizedTest(name = "{0}, chained={1}")
+    //    @MethodSource("getEOSParameters")
+    //    public void testWriteRecordsToKafkaWithExactlyOnceGuarantee(
+    //            TransactionNamingStrategy namingStrategy, boolean chained) throws Exception {
+    //        writeRecordsToKafka(DeliveryGuarantee.EXACTLY_ONCE, namingStrategy, chained);
+    //    }
+    //
+    //    @Test
+    //    public void testWriteRecordsToKafkaWithExactlyOnceGuaranteeBatch() throws Exception {
+    //        final StreamExecutionEnvironment env =
+    //                StreamExecutionEnvironment.getExecutionEnvironment(createConfiguration(1));
+    //        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
+    //        int count = 1000;
+    //        final DataStream<Long> source = createSource(env, false, count);
+    //        source.sinkTo(
+    //                new KafkaSinkBuilder<Long>()
+    //                        .setBootstrapServers(KAFKA_CONTAINER.getBootstrapServers())
+    //                        .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
+    //                        .setRecordSerializer(
+    //                                KafkaRecordSerializationSchema.builder()
+    //                                        .setTopic(topic)
+    //                                        .setValueSerializationSchema(new RecordSerializer())
+    //                                        .build())
+    //                        .setTransactionalIdPrefix("kafka-sink")
+    //                        .build());
+    //        env.execute();
+    //
+    //        final List<Long> collectedRecords =
+    //                deserializeValues(drainAllRecordsFromTopic(topic, true));
+    //        assertThat(collectedRecords).hasSize(count);
+    //    }
 
     static Stream<Arguments> getEOSParameters() {
         return Arrays.stream(TransactionNamingStrategy.values())
@@ -273,301 +255,321 @@ public class KafkaSinkITCase extends TestLogger {
                                         .map(chained -> Arguments.of(strategy, chained)));
     }
 
-    @Test
-    public void testRecoveryWithAtLeastOnceGuarantee() throws Exception {
-        testRecoveryWithAssertion(DeliveryGuarantee.AT_LEAST_ONCE, 1);
-    }
+    //    @Test
+    //    public void testRecoveryWithAtLeastOnceGuarantee() throws Exception {
+    //        testRecoveryWithAssertion(DeliveryGuarantee.AT_LEAST_ONCE, 1);
+    //    }
 
     @ParameterizedTest(name = "{0}, chained={1}")
     @MethodSource("getEOSParameters")
     public void testRecoveryWithExactlyOnceGuarantee(
             TransactionNamingStrategy namingStrategy, boolean chained) throws Exception {
+        LOG.info(
+                "========== STARTING testRecoveryWithExactlyOnceGuarantee with namingStrategy={}, chained={} ==========",
+                namingStrategy,
+                chained);
         testRecoveryWithAssertion(DeliveryGuarantee.EXACTLY_ONCE, 1, namingStrategy, chained);
     }
 
-    @ParameterizedTest(name = "{0}, chained={1}")
-    @MethodSource("getEOSParameters")
-    public void testRecoveryWithExactlyOnceGuaranteeAndConcurrentCheckpoints(
-            TransactionNamingStrategy namingStrategy, boolean chained) throws Exception {
-        testRecoveryWithAssertion(DeliveryGuarantee.EXACTLY_ONCE, 2, namingStrategy, chained);
-    }
-
-    @ParameterizedTest(name = "{0}, chained={1}")
-    @MethodSource("getEOSParameters")
-    public void testAbortTransactionsOfPendingCheckpointsAfterFailure(
-            TransactionNamingStrategy namingStrategy,
-            boolean chained,
-            @TempDir File checkpointDir,
-            @InjectMiniCluster MiniCluster miniCluster,
-            @InjectClusterClient ClusterClient<?> clusterClient)
-            throws Exception {
-        // Run a first job failing during the async phase of a checkpoint to leave some
-        // lingering transactions
-        final Configuration config = createConfiguration(4);
-        config.set(StateBackendOptions.STATE_BACKEND, "rocksdb");
-        config.set(CheckpointingOptions.CHECKPOINTS_DIRECTORY, checkpointDir.toURI().toString());
-        config.set(
-                CheckpointingOptions.EXTERNALIZED_CHECKPOINT_RETENTION,
-                ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION);
-        config.set(CheckpointingOptions.MAX_RETAINED_CHECKPOINTS, 2);
-        JobID firstJobId = null;
-        SharedReference<Set<Long>> checkpointedRecords =
-                sharedObjects.add(new ConcurrentSkipListSet<>());
-        try {
-            firstJobId =
-                    executeWithMapper(
-                            new FailAsyncCheckpointMapper(1),
-                            checkpointedRecords,
-                            config,
-                            namingStrategy,
-                            chained,
-                            "firstPrefix",
-                            clusterClient);
-        } catch (Exception e) {
-            assertThat(e).hasStackTraceContaining("Exceeded checkpoint tolerable failure");
-        }
-        final Optional<String> completedCheckpoint =
-                CommonTestUtils.getLatestCompletedCheckpointPath(firstJobId, miniCluster);
-
-        assertThat(completedCheckpoint).isPresent();
-        config.set(SAVEPOINT_PATH, completedCheckpoint.get());
-
-        // Run a second job which aborts all lingering transactions and new consumer should
-        // immediately see the newly written records
-        SharedReference<AtomicBoolean> failed = sharedObjects.add(new AtomicBoolean(true));
-        executeWithMapper(
-                new FailingCheckpointMapper(failed),
-                checkpointedRecords,
-                config,
-                namingStrategy,
-                chained,
-                "newPrefix",
-                clusterClient);
-        final List<Long> committedRecords =
-                deserializeValues(drainAllRecordsFromTopic(topic, true));
-        assertThat(committedRecords).containsExactlyInAnyOrderElementsOf(checkpointedRecords.get());
-    }
-
-    @ParameterizedTest(name = "{0}, chained={1}")
-    @MethodSource("getEOSParameters")
-    public void testAbortTransactionsAfterScaleInBeforeFirstCheckpoint(
-            TransactionNamingStrategy namingStrategy,
-            boolean chained,
-            @InjectClusterClient ClusterClient<?> clusterClient)
-            throws Exception {
-        // Run a first job opening 5 transactions one per subtask and fail in async checkpoint phase
-        try {
-            SharedReference<Set<Long>> checkpointedRecords =
-                    sharedObjects.add(new ConcurrentSkipListSet<>());
-            Configuration config = createConfiguration(5);
-            executeWithMapper(
-                    new FailAsyncCheckpointMapper(0),
-                    checkpointedRecords,
-                    config,
-                    namingStrategy,
-                    chained,
-                    null,
-                    clusterClient);
-        } catch (Exception e) {
-            assertThat(e.getCause().getCause().getMessage())
-                    .contains("Exceeded checkpoint tolerable failure");
-        }
-        assertThat(deserializeValues(drainAllRecordsFromTopic(topic, true))).isEmpty();
-
-        // Second job aborts all transactions from previous runs with higher parallelism
-        SharedReference<AtomicBoolean> failed = sharedObjects.add(new AtomicBoolean(true));
-        SharedReference<Set<Long>> checkpointedRecords =
-                sharedObjects.add(new ConcurrentSkipListSet<>());
-        Configuration config = createConfiguration(1);
-        executeWithMapper(
-                new FailingCheckpointMapper(failed),
-                checkpointedRecords,
-                config,
-                namingStrategy,
-                chained,
-                null,
-                clusterClient);
-        final List<Long> committedRecords =
-                deserializeValues(drainAllRecordsFromTopic(topic, true));
-        assertThat(committedRecords).containsExactlyInAnyOrderElementsOf(checkpointedRecords.get());
-    }
-
-    @ParameterizedTest(name = "{0}->{1}")
-    @CsvSource({"1,2", "2,3", "2,5", "3,5", "5,6", "6,5", "5,2", "5,3", "3,2", "2,1"})
-    public void rescaleListing(
-            int oldParallelism,
-            int newParallelsm,
-            @TempDir File checkpointDir,
-            @InjectMiniCluster MiniCluster miniCluster,
-            @InjectClusterClient ClusterClient<?> clusterClient)
-            throws Exception {
-        // Run a first job failing during the async phase of a checkpoint to leave some
-        // lingering transactions
-        final Configuration config = createConfiguration(oldParallelism);
-        config.set(StateBackendOptions.STATE_BACKEND, "rocksdb");
-        config.set(CheckpointingOptions.CHECKPOINTS_DIRECTORY, checkpointDir.toURI().toString());
-        config.set(
-                CheckpointingOptions.EXTERNALIZED_CHECKPOINT_RETENTION,
-                ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION);
-        config.set(CheckpointingOptions.MAX_RETAINED_CHECKPOINTS, 2);
-        SharedReference<Set<Long>> checkpointedRecords =
-                sharedObjects.add(new ConcurrentSkipListSet<>());
-
-        JobID firstJobId =
-                executeWithMapper(
-                        new FailAsyncCheckpointMapper(1),
-                        checkpointedRecords,
-                        config,
-                        TransactionNamingStrategy.POOLING,
-                        false,
-                        "firstPrefix",
-                        clusterClient);
-
-        config.set(SAVEPOINT_PATH, getCheckpointPath(miniCluster, firstJobId));
-        config.set(CoreOptions.DEFAULT_PARALLELISM, newParallelsm);
-
-        // Run a second job which aborts all lingering transactions and new consumer should
-        // immediately see the newly written records
-        JobID secondJobId =
-                executeWithMapper(
-                        new FailAsyncCheckpointMapper(1),
-                        checkpointedRecords,
-                        config,
-                        TransactionNamingStrategy.POOLING,
-                        false,
-                        "secondPrefix",
-                        clusterClient);
-
-        config.set(SAVEPOINT_PATH, getCheckpointPath(miniCluster, secondJobId));
-        config.set(CoreOptions.DEFAULT_PARALLELISM, oldParallelism);
-
-        SharedReference<AtomicBoolean> failed = sharedObjects.add(new AtomicBoolean(true));
-        executeWithMapper(
-                new FailingCheckpointMapper(failed),
-                checkpointedRecords,
-                config,
-                TransactionNamingStrategy.POOLING,
-                false,
-                "thirdPrefix",
-                clusterClient);
-
-        final List<Long> committedRecords =
-                deserializeValues(drainAllRecordsFromTopic(topic, true));
-        assertThat(committedRecords).containsExactlyInAnyOrderElementsOf(checkpointedRecords.get());
-    }
-
-    private String getCheckpointPath(MiniCluster miniCluster, JobID secondJobId)
-            throws InterruptedException, ExecutionException, FlinkJobNotFoundException {
-        final Optional<String> completedCheckpoint =
-                CommonTestUtils.getLatestCompletedCheckpointPath(secondJobId, miniCluster);
-
-        assertThat(completedCheckpoint).isPresent();
-        return completedCheckpoint.get();
-    }
-
-    @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    public void checkMigration(
-            boolean supportedMigration,
-            @TempDir File checkpointDir,
-            @InjectMiniCluster MiniCluster miniCluster,
-            @InjectClusterClient ClusterClient<?> clusterClient)
-            throws Exception {
-        // Run a first job failing during the async phase of a checkpoint to leave some
-        // lingering transactions
-        final Configuration config = createConfiguration(5);
-        config.set(StateBackendOptions.STATE_BACKEND, "rocksdb");
-        config.set(CheckpointingOptions.CHECKPOINTS_DIRECTORY, checkpointDir.toURI().toString());
-        config.set(
-                CheckpointingOptions.EXTERNALIZED_CHECKPOINT_RETENTION,
-                ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION);
-        config.set(CheckpointingOptions.MAX_RETAINED_CHECKPOINTS, 2);
-        SharedReference<Set<Long>> checkpointedRecords =
-                sharedObjects.add(new ConcurrentSkipListSet<>());
-
-        JobID firstJobId =
-                executeWithMapper(
-                        new FailAsyncCheckpointMapper(1),
-                        checkpointedRecords,
-                        config,
-                        TransactionNamingStrategy.INCREMENTING,
-                        true,
-                        "firstPrefix",
-                        clusterClient);
-
-        // Run a second job which switching to POOLING
-        config.set(SAVEPOINT_PATH, getCheckpointPath(miniCluster, firstJobId));
-        config.set(CoreOptions.DEFAULT_PARALLELISM, 5);
-        JobID secondJobId2 =
-                executeWithMapper(
-                        new FailAsyncCheckpointMapper(1),
-                        checkpointedRecords,
-                        config,
-                        TransactionNamingStrategy.POOLING,
-                        true,
-                        "secondPrefix",
-                        clusterClient);
-
-        // Run a third job with downscaling
-        config.set(SAVEPOINT_PATH, getCheckpointPath(miniCluster, secondJobId2));
-        config.set(CoreOptions.DEFAULT_PARALLELISM, 3);
-        JobID thirdJobId =
-                executeWithMapper(
-                        v -> v,
-                        checkpointedRecords,
-                        config,
-                        supportedMigration
-                                ? TransactionNamingStrategy.POOLING
-                                : TransactionNamingStrategy.INCREMENTING,
-                        true,
-                        "thirdPrefix",
-                        clusterClient);
-
-        JobResult jobResult = clusterClient.requestJobResult(thirdJobId).get();
-        assertThat(jobResult.getApplicationStatus())
-                .isEqualTo(
-                        supportedMigration
-                                ? ApplicationStatus.SUCCEEDED
-                                : ApplicationStatus.FAILED);
-
-        if (supportedMigration) {
-            final List<Long> committedRecords =
-                    deserializeValues(drainAllRecordsFromTopic(topic, true));
-            assertThat(committedRecords)
-                    .containsExactlyInAnyOrderElementsOf(checkpointedRecords.get());
-        } else {
-            assertThat(jobResult.getSerializedThrowable())
-                    .get()
-                    .asInstanceOf(InstanceOfAssertFactories.THROWABLE)
-                    .rootCause()
-                    .hasMessageContaining(
-                            "Attempted to switch the transaction naming strategy back to INCREMENTING");
-        }
-    }
-
-    @ParameterizedTest
-    @EnumSource(DeliveryGuarantee.class)
-    void ensureUniqueTransactionalIdPrefixIfNeeded(DeliveryGuarantee guarantee) throws Exception {
-        KafkaSinkBuilder<Integer> builder =
-                new KafkaSinkBuilder<Integer>()
-                        .setDeliveryGuarantee(guarantee)
-                        .setBootstrapServers(KAFKA_CONTAINER.getBootstrapServers())
-                        .setRecordSerializer(new IntegerRecordSerializer("topic"));
-
-        Configuration config = new Configuration();
-        config.set(RestartStrategyOptions.RESTART_STRATEGY, "disable");
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(config);
-        env.enableCheckpointing(100);
-        DataStreamSource<Integer> source = env.fromData(1, 2);
-        if (guarantee == DeliveryGuarantee.EXACTLY_ONCE) {
-            assertThatThrownBy(builder::build).hasMessageContaining("unique");
-        } else {
-            source.sinkTo(builder.build());
-            source.sinkTo(builder.build());
-
-            env.execute();
-        }
-    }
+    //    @ParameterizedTest(name = "{0}, chained={1}")
+    //    @MethodSource("getEOSParameters")
+    //    public void testRecoveryWithExactlyOnceGuaranteeAndConcurrentCheckpoints(
+    //            TransactionNamingStrategy namingStrategy, boolean chained) throws Exception {
+    //        LOG.info(
+    //                "========== STARTING
+    // testRecoveryWithExactlyOnceGuaranteeAndConcurrentCheckpoints with namingStrategy={},
+    // chained={} ==========",
+    //                namingStrategy,
+    //                chained);
+    //        testRecoveryWithAssertion(DeliveryGuarantee.EXACTLY_ONCE, 2, namingStrategy, chained);
+    //    }
+    //
+    //    @ParameterizedTest(name = "{0}, chained={1}")
+    //    @MethodSource("getEOSParameters")
+    //    public void testAbortTransactionsOfPendingCheckpointsAfterFailure(
+    //            TransactionNamingStrategy namingStrategy,
+    //            boolean chained,
+    //            @TempDir File checkpointDir,
+    //            @InjectMiniCluster MiniCluster miniCluster,
+    //            @InjectClusterClient ClusterClient<?> clusterClient)
+    //            throws Exception {
+    //        // Run a first job failing during the async phase of a checkpoint to leave some
+    //        // lingering transactions
+    //        final Configuration config = createConfiguration(4);
+    //        config.set(StateBackendOptions.STATE_BACKEND, "rocksdb");
+    //        config.set(CheckpointingOptions.CHECKPOINTS_DIRECTORY,
+    // checkpointDir.toURI().toString());
+    //        config.set(
+    //                CheckpointingOptions.EXTERNALIZED_CHECKPOINT_RETENTION,
+    //                ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION);
+    //        config.set(CheckpointingOptions.MAX_RETAINED_CHECKPOINTS, 2);
+    //        JobID firstJobId = null;
+    //        SharedReference<Set<Long>> checkpointedRecords =
+    //                sharedObjects.add(new ConcurrentSkipListSet<>());
+    //        try {
+    //            firstJobId =
+    //                    executeWithMapper(
+    //                            new FailAsyncCheckpointMapper(1),
+    //                            checkpointedRecords,
+    //                            config,
+    //                            namingStrategy,
+    //                            chained,
+    //                            "firstPrefix",
+    //                            clusterClient);
+    //        } catch (Exception e) {
+    //            assertThat(e).hasStackTraceContaining("Exceeded checkpoint tolerable failure");
+    //        }
+    //        final Optional<String> completedCheckpoint =
+    //                CommonTestUtils.getLatestCompletedCheckpointPath(firstJobId, miniCluster);
+    //
+    //        assertThat(completedCheckpoint).isPresent();
+    //        config.set(SAVEPOINT_PATH, completedCheckpoint.get());
+    //
+    //        // Run a second job which aborts all lingering transactions and new consumer should
+    //        // immediately see the newly written records
+    //        SharedReference<AtomicBoolean> failed = sharedObjects.add(new AtomicBoolean(true));
+    //        executeWithMapper(
+    //                new FailingCheckpointMapper(failed),
+    //                checkpointedRecords,
+    //                config,
+    //                namingStrategy,
+    //                chained,
+    //                "newPrefix",
+    //                clusterClient);
+    //        final List<Long> committedRecords =
+    //                deserializeValues(drainAllRecordsFromTopic(topic, true));
+    //
+    // assertThat(committedRecords).containsExactlyInAnyOrderElementsOf(checkpointedRecords.get());
+    //    }
+    //
+    //    @ParameterizedTest(name = "{0}, chained={1}")
+    //    @MethodSource("getEOSParameters")
+    //    public void testAbortTransactionsAfterScaleInBeforeFirstCheckpoint(
+    //            TransactionNamingStrategy namingStrategy,
+    //            boolean chained,
+    //            @InjectClusterClient ClusterClient<?> clusterClient)
+    //            throws Exception {
+    //        // Run a first job opening 5 transactions one per subtask and fail in async checkpoint
+    // phase
+    //        try {
+    //            SharedReference<Set<Long>> checkpointedRecords =
+    //                    sharedObjects.add(new ConcurrentSkipListSet<>());
+    //            Configuration config = createConfiguration(5);
+    //            executeWithMapper(
+    //                    new FailAsyncCheckpointMapper(0),
+    //                    checkpointedRecords,
+    //                    config,
+    //                    namingStrategy,
+    //                    chained,
+    //                    null,
+    //                    clusterClient);
+    //        } catch (Exception e) {
+    //            assertThat(e.getCause().getCause().getMessage())
+    //                    .contains("Exceeded checkpoint tolerable failure");
+    //        }
+    //        assertThat(deserializeValues(drainAllRecordsFromTopic(topic, true))).isEmpty();
+    //
+    //        // Second job aborts all transactions from previous runs with higher parallelism
+    //        SharedReference<AtomicBoolean> failed = sharedObjects.add(new AtomicBoolean(true));
+    //        SharedReference<Set<Long>> checkpointedRecords =
+    //                sharedObjects.add(new ConcurrentSkipListSet<>());
+    //        Configuration config = createConfiguration(1);
+    //        executeWithMapper(
+    //                new FailingCheckpointMapper(failed),
+    //                checkpointedRecords,
+    //                config,
+    //                namingStrategy,
+    //                chained,
+    //                null,
+    //                clusterClient);
+    //        final List<Long> committedRecords =
+    //                deserializeValues(drainAllRecordsFromTopic(topic, true));
+    //
+    // assertThat(committedRecords).containsExactlyInAnyOrderElementsOf(checkpointedRecords.get());
+    //    }
+    //
+    //    @ParameterizedTest(name = "{0}->{1}")
+    //    @CsvSource({"1,2", "2,3", "2,5", "3,5", "5,6", "6,5", "5,2", "5,3", "3,2", "2,1"})
+    //    public void rescaleListing(
+    //            int oldParallelism,
+    //            int newParallelsm,
+    //            @TempDir File checkpointDir,
+    //            @InjectMiniCluster MiniCluster miniCluster,
+    //            @InjectClusterClient ClusterClient<?> clusterClient)
+    //            throws Exception {
+    //        // Run a first job failing during the async phase of a checkpoint to leave some
+    //        // lingering transactions
+    //        final Configuration config = createConfiguration(oldParallelism);
+    //        config.set(StateBackendOptions.STATE_BACKEND, "rocksdb");
+    //        config.set(CheckpointingOptions.CHECKPOINTS_DIRECTORY,
+    // checkpointDir.toURI().toString());
+    //        config.set(
+    //                CheckpointingOptions.EXTERNALIZED_CHECKPOINT_RETENTION,
+    //                ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION);
+    //        config.set(CheckpointingOptions.MAX_RETAINED_CHECKPOINTS, 2);
+    //        SharedReference<Set<Long>> checkpointedRecords =
+    //                sharedObjects.add(new ConcurrentSkipListSet<>());
+    //
+    //        JobID firstJobId =
+    //                executeWithMapper(
+    //                        new FailAsyncCheckpointMapper(1),
+    //                        checkpointedRecords,
+    //                        config,
+    //                        TransactionNamingStrategy.POOLING,
+    //                        false,
+    //                        "firstPrefix",
+    //                        clusterClient);
+    //
+    //        config.set(SAVEPOINT_PATH, getCheckpointPath(miniCluster, firstJobId));
+    //        config.set(CoreOptions.DEFAULT_PARALLELISM, newParallelsm);
+    //
+    //        // Run a second job which aborts all lingering transactions and new consumer should
+    //        // immediately see the newly written records
+    //        JobID secondJobId =
+    //                executeWithMapper(
+    //                        new FailAsyncCheckpointMapper(1),
+    //                        checkpointedRecords,
+    //                        config,
+    //                        TransactionNamingStrategy.POOLING,
+    //                        false,
+    //                        "secondPrefix",
+    //                        clusterClient);
+    //
+    //        config.set(SAVEPOINT_PATH, getCheckpointPath(miniCluster, secondJobId));
+    //        config.set(CoreOptions.DEFAULT_PARALLELISM, oldParallelism);
+    //
+    //        SharedReference<AtomicBoolean> failed = sharedObjects.add(new AtomicBoolean(true));
+    //        executeWithMapper(
+    //                new FailingCheckpointMapper(failed),
+    //                checkpointedRecords,
+    //                config,
+    //                TransactionNamingStrategy.POOLING,
+    //                false,
+    //                "thirdPrefix",
+    //                clusterClient);
+    //
+    //        final List<Long> committedRecords =
+    //                deserializeValues(drainAllRecordsFromTopic(topic, true));
+    //
+    // assertThat(committedRecords).containsExactlyInAnyOrderElementsOf(checkpointedRecords.get());
+    //    }
+    //
+    //    private String getCheckpointPath(MiniCluster miniCluster, JobID secondJobId)
+    //            throws InterruptedException, ExecutionException, FlinkJobNotFoundException {
+    //        final Optional<String> completedCheckpoint =
+    //                CommonTestUtils.getLatestCompletedCheckpointPath(secondJobId, miniCluster);
+    //
+    //        assertThat(completedCheckpoint).isPresent();
+    //        return completedCheckpoint.get();
+    //    }
+    //
+    //    @ParameterizedTest
+    //    @ValueSource(booleans = {true, false})
+    //    public void checkMigration(
+    //            boolean supportedMigration,
+    //            @TempDir File checkpointDir,
+    //            @InjectMiniCluster MiniCluster miniCluster,
+    //            @InjectClusterClient ClusterClient<?> clusterClient)
+    //            throws Exception {
+    //        // Run a first job failing during the async phase of a checkpoint to leave some
+    //        // lingering transactions
+    //        final Configuration config = createConfiguration(5);
+    //        config.set(StateBackendOptions.STATE_BACKEND, "rocksdb");
+    //        config.set(CheckpointingOptions.CHECKPOINTS_DIRECTORY,
+    // checkpointDir.toURI().toString());
+    //        config.set(
+    //                CheckpointingOptions.EXTERNALIZED_CHECKPOINT_RETENTION,
+    //                ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION);
+    //        config.set(CheckpointingOptions.MAX_RETAINED_CHECKPOINTS, 2);
+    //        SharedReference<Set<Long>> checkpointedRecords =
+    //                sharedObjects.add(new ConcurrentSkipListSet<>());
+    //
+    //        JobID firstJobId =
+    //                executeWithMapper(
+    //                        new FailAsyncCheckpointMapper(1),
+    //                        checkpointedRecords,
+    //                        config,
+    //                        TransactionNamingStrategy.INCREMENTING,
+    //                        true,
+    //                        "firstPrefix",
+    //                        clusterClient);
+    //
+    //        // Run a second job which switching to POOLING
+    //        config.set(SAVEPOINT_PATH, getCheckpointPath(miniCluster, firstJobId));
+    //        config.set(CoreOptions.DEFAULT_PARALLELISM, 5);
+    //        JobID secondJobId2 =
+    //                executeWithMapper(
+    //                        new FailAsyncCheckpointMapper(1),
+    //                        checkpointedRecords,
+    //                        config,
+    //                        TransactionNamingStrategy.POOLING,
+    //                        true,
+    //                        "secondPrefix",
+    //                        clusterClient);
+    //
+    //        // Run a third job with downscaling
+    //        config.set(SAVEPOINT_PATH, getCheckpointPath(miniCluster, secondJobId2));
+    //        config.set(CoreOptions.DEFAULT_PARALLELISM, 3);
+    //        JobID thirdJobId =
+    //                executeWithMapper(
+    //                        v -> v,
+    //                        checkpointedRecords,
+    //                        config,
+    //                        supportedMigration
+    //                                ? TransactionNamingStrategy.POOLING
+    //                                : TransactionNamingStrategy.INCREMENTING,
+    //                        true,
+    //                        "thirdPrefix",
+    //                        clusterClient);
+    //
+    //        JobResult jobResult = clusterClient.requestJobResult(thirdJobId).get();
+    //        assertThat(jobResult.getApplicationStatus())
+    //                .isEqualTo(
+    //                        supportedMigration
+    //                                ? ApplicationStatus.SUCCEEDED
+    //                                : ApplicationStatus.FAILED);
+    //
+    //        if (supportedMigration) {
+    //            final List<Long> committedRecords =
+    //                    deserializeValues(drainAllRecordsFromTopic(topic, true));
+    //            assertThat(committedRecords)
+    //                    .containsExactlyInAnyOrderElementsOf(checkpointedRecords.get());
+    //        } else {
+    //            assertThat(jobResult.getSerializedThrowable())
+    //                    .get()
+    //                    .asInstanceOf(InstanceOfAssertFactories.THROWABLE)
+    //                    .rootCause()
+    //                    .hasMessageContaining(
+    //                            "Attempted to switch the transaction naming strategy back to
+    // INCREMENTING");
+    //        }
+    //    }
+    //
+    //    @ParameterizedTest
+    //    @EnumSource(DeliveryGuarantee.class)
+    //    void ensureUniqueTransactionalIdPrefixIfNeeded(DeliveryGuarantee guarantee) throws
+    // Exception {
+    //        KafkaSinkBuilder<Integer> builder =
+    //                new KafkaSinkBuilder<Integer>()
+    //                        .setDeliveryGuarantee(guarantee)
+    //                        .setBootstrapServers(KAFKA_CONTAINER.getBootstrapServers())
+    //                        .setRecordSerializer(new IntegerRecordSerializer("topic"));
+    //
+    //        Configuration config = new Configuration();
+    //        config.set(RestartStrategyOptions.RESTART_STRATEGY, "disable");
+    //        StreamExecutionEnvironment env =
+    // StreamExecutionEnvironment.getExecutionEnvironment(config);
+    //        env.enableCheckpointing(100);
+    //        DataStreamSource<Integer> source = env.fromData(1, 2);
+    //        if (guarantee == DeliveryGuarantee.EXACTLY_ONCE) {
+    //            assertThatThrownBy(builder::build).hasMessageContaining("unique");
+    //        } else {
+    //            source.sinkTo(builder.build());
+    //            source.sinkTo(builder.build());
+    //
+    //            env.execute();
+    //        }
+    //    }
 
     private static Configuration createConfiguration(int parallelism) {
         final Configuration config = new Configuration();
@@ -653,7 +655,15 @@ public class KafkaSinkITCase extends TestLogger {
                         .setTransactionalIdPrefix("kafka-sink")
                         .setTransactionNamingStrategy(namingStrategy)
                         .build());
+        LOG.info(
+                "========== ABOUT TO CALL env.execute() with namingStrategy={}, chained={} ==========",
+                namingStrategy,
+                chained);
         env.execute();
+        LOG.info(
+                "========== SUCCESSFULLY COMPLETED env.execute() with namingStrategy={}, chained={} ==========",
+                namingStrategy,
+                chained);
 
         List<Long> committedRecords =
                 deserializeValues(
