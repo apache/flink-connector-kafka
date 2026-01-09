@@ -27,16 +27,13 @@ import org.apache.flink.streaming.connectors.kafka.DynamicKafkaSourceTestHelper;
 import org.apache.flink.streaming.connectors.kafka.KafkaTestBase;
 
 import com.google.common.collect.ImmutableMap;
-import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -121,10 +118,8 @@ class SingleClusterTopicMetadataServiceTest {
 
     @Test
     void describeStreamsIncludesOffsetsInitializers() throws Exception {
-        OffsetsInitializer startingOffsetsInitializer =
-                new TestingOffsetsInitializer("start", OffsetResetStrategy.EARLIEST);
-        OffsetsInitializer stoppingOffsetsInitializer =
-                new TestingOffsetsInitializer("stop", OffsetResetStrategy.LATEST);
+        OffsetsInitializer startingOffsetsInitializer = OffsetsInitializer.earliest();
+        OffsetsInitializer stoppingOffsetsInitializer = OffsetsInitializer.latest();
 
         KafkaMetadataService metadataService =
                 new SingleClusterTopicMetadataService(
@@ -151,44 +146,4 @@ class SingleClusterTopicMetadataServiceTest {
         }
     }
 
-    private static final class TestingOffsetsInitializer implements OffsetsInitializer {
-        private static final long serialVersionUID = 1L;
-        private final String id;
-        private final OffsetResetStrategy offsetResetStrategy;
-
-        private TestingOffsetsInitializer(String id, OffsetResetStrategy offsetResetStrategy) {
-            this.id = id;
-            this.offsetResetStrategy = offsetResetStrategy;
-        }
-
-        @Override
-        public Map<org.apache.kafka.common.TopicPartition, Long> getPartitionOffsets(
-                Collection<org.apache.kafka.common.TopicPartition> partitions,
-                OffsetsInitializer.PartitionOffsetsRetriever partitionOffsetsRetriever) {
-            return Collections.emptyMap();
-        }
-
-        @Override
-        public OffsetResetStrategy getAutoOffsetResetStrategy() {
-            return offsetResetStrategy;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            TestingOffsetsInitializer that = (TestingOffsetsInitializer) o;
-            return Objects.equals(id, that.id)
-                    && Objects.equals(offsetResetStrategy, that.offsetResetStrategy);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(id, offsetResetStrategy);
-        }
-    }
 }
