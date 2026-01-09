@@ -145,5 +145,4 @@ class SingleClusterTopicMetadataServiceTest {
             metadataService.close();
         }
     }
-
 }
