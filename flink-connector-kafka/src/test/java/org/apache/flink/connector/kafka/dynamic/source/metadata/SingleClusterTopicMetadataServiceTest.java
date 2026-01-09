@@ -22,6 +22,7 @@ import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
 import org.apache.flink.connector.kafka.dynamic.metadata.SingleClusterTopicMetadataService;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.connectors.kafka.DynamicKafkaSourceTestHelper;
 import org.apache.flink.streaming.connectors.kafka.KafkaTestBase;
 
@@ -113,5 +114,35 @@ class SingleClusterTopicMetadataServiceTest {
                                         Collections.singleton("unknown-stream")))
                 .as("the stream topic cannot be found in kafka and we rethrow")
                 .hasRootCauseInstanceOf(UnknownTopicOrPartitionException.class);
+    }
+
+    @Test
+    void describeStreamsIncludesOffsetsInitializers() throws Exception {
+        OffsetsInitializer startingOffsetsInitializer = OffsetsInitializer.earliest();
+        OffsetsInitializer stoppingOffsetsInitializer = OffsetsInitializer.latest();
+
+        KafkaMetadataService metadataService =
+                new SingleClusterTopicMetadataService(
+                        kafkaClusterTestEnvMetadata0.getKafkaClusterId(),
+                        kafkaClusterTestEnvMetadata0.getStandardProperties(),
+                        startingOffsetsInitializer,
+                        stoppingOffsetsInitializer);
+
+        try {
+            Map<String, KafkaStream> streamMap =
+                    metadataService.describeStreams(Collections.singleton(TOPIC0));
+            ClusterMetadata clusterMetadata =
+                    streamMap
+                            .get(TOPIC0)
+                            .getClusterMetadataMap()
+                            .get(kafkaClusterTestEnvMetadata0.getKafkaClusterId());
+
+            assertThat(clusterMetadata.getStartingOffsetsInitializer())
+                    .isSameAs(startingOffsetsInitializer);
+            assertThat(clusterMetadata.getStoppingOffsetsInitializer())
+                    .isSameAs(stoppingOffsetsInitializer);
+        } finally {
+            metadataService.close();
+        }
     }
 }

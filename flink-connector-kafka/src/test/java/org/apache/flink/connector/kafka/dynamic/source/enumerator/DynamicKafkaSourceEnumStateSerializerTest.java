@@ -23,11 +23,13 @@ import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
 import org.apache.flink.connector.kafka.source.enumerator.AssignmentStatus;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
 import org.apache.flink.connector.kafka.source.enumerator.SplitAndAssignmentStatus;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Test;
 
@@ -56,6 +58,10 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
         propertiesForCluster1.setProperty(
                 CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster1:9092");
 
+        OffsetsInitializer cluster0StartingOffsetsInitializer = OffsetsInitializer.earliest();
+        OffsetsInitializer cluster0StoppingOffsetsInitializer =
+                OffsetsInitializer.committedOffsets(OffsetResetStrategy.LATEST);
+
         Set<KafkaStream> kafkaStreams =
                 ImmutableSet.of(
                         new KafkaStream(
@@ -64,7 +70,9 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
                                         "cluster0",
                                         new ClusterMetadata(
                                                 ImmutableSet.of("topic0", "topic1"),
-                                                propertiesForCluster0),
+                                                propertiesForCluster0,
+                                                cluster0StartingOffsetsInitializer,
+                                                cluster0StoppingOffsetsInitializer),
                                         "cluster1",
                                         new ClusterMetadata(
                                                 ImmutableSet.of("topic2", "topic3"),
@@ -98,7 +106,7 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
 
         DynamicKafkaSourceEnumState dynamicKafkaSourceEnumStateAfterSerde =
                 dynamicKafkaSourceEnumStateSerializer.deserialize(
-                        1,
+                        dynamicKafkaSourceEnumStateSerializer.getVersion(),
                         dynamicKafkaSourceEnumStateSerializer.serialize(
                                 dynamicKafkaSourceEnumState));
 
