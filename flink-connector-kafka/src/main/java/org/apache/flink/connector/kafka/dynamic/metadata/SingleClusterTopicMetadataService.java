@@ -21,9 +21,12 @@ package org.apache.flink.connector.kafka.dynamic.metadata;
 import org.apache.flink.annotation.Experimental;
 import org.apache.flink.connector.kafka.source.KafkaPropertiesUtil;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -43,6 +46,8 @@ public class SingleClusterTopicMetadataService implements KafkaMetadataService {
 
     private final String kafkaClusterId;
     private final Properties properties;
+    @Nullable private final OffsetsInitializer startingOffsetsInitializer;
+    @Nullable private final OffsetsInitializer stoppingOffsetsInitializer;
     private transient AdminClient adminClient;
 
     /**
@@ -52,8 +57,26 @@ public class SingleClusterTopicMetadataService implements KafkaMetadataService {
      * @param properties the properties of the Kafka cluster.
      */
     public SingleClusterTopicMetadataService(String kafkaClusterId, Properties properties) {
+        this(kafkaClusterId, properties, null, null);
+    }
+
+    /**
+     * Create a {@link SingleClusterTopicMetadataService} with per-cluster offsets initializers.
+     *
+     * @param kafkaClusterId the id of the Kafka cluster.
+     * @param properties the properties of the Kafka cluster.
+     * @param startingOffsetsInitializer the starting offsets initializer for the cluster.
+     * @param stoppingOffsetsInitializer the stopping offsets initializer for the cluster.
+     */
+    public SingleClusterTopicMetadataService(
+            String kafkaClusterId,
+            Properties properties,
+            @Nullable OffsetsInitializer startingOffsetsInitializer,
+            @Nullable OffsetsInitializer stoppingOffsetsInitializer) {
         this.kafkaClusterId = kafkaClusterId;
         this.properties = properties;
+        this.startingOffsetsInitializer = startingOffsetsInitializer;
+        this.stoppingOffsetsInitializer = stoppingOffsetsInitializer;
     }
 
     /** {@inheritDoc} */
@@ -82,7 +105,11 @@ public class SingleClusterTopicMetadataService implements KafkaMetadataService {
 
     private KafkaStream createKafkaStream(String topic) {
         ClusterMetadata clusterMetadata =
-                new ClusterMetadata(Collections.singleton(topic), properties);
+                new ClusterMetadata(
+                        Collections.singleton(topic),
+                        properties,
+                        startingOffsetsInitializer,
+                        stoppingOffsetsInitializer);
 
         return new KafkaStream(topic, Collections.singletonMap(kafkaClusterId, clusterMetadata));
     }

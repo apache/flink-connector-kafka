@@ -23,14 +23,20 @@ import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
 import org.apache.flink.connector.kafka.source.enumerator.AssignmentStatus;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
 import org.apache.flink.connector.kafka.source.enumerator.SplitAndAssignmentStatus;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
 
@@ -56,6 +62,11 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
         propertiesForCluster1.setProperty(
                 CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster1:9092");
 
+        OffsetsInitializer cluster0StartingOffsetsInitializer =
+                new TestingOffsetsInitializer("cluster0-start", OffsetResetStrategy.EARLIEST);
+        OffsetsInitializer cluster0StoppingOffsetsInitializer =
+                new TestingOffsetsInitializer("cluster0-stop", OffsetResetStrategy.LATEST);
+
         Set<KafkaStream> kafkaStreams =
                 ImmutableSet.of(
                         new KafkaStream(
@@ -64,7 +75,9 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
                                         "cluster0",
                                         new ClusterMetadata(
                                                 ImmutableSet.of("topic0", "topic1"),
-                                                propertiesForCluster0),
+                                                propertiesForCluster0,
+                                                cluster0StartingOffsetsInitializer,
+                                                cluster0StoppingOffsetsInitializer),
                                         "cluster1",
                                         new ClusterMetadata(
                                                 ImmutableSet.of("topic2", "topic3"),
@@ -98,7 +111,7 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
 
         DynamicKafkaSourceEnumState dynamicKafkaSourceEnumStateAfterSerde =
                 dynamicKafkaSourceEnumStateSerializer.deserialize(
-                        1,
+                        dynamicKafkaSourceEnumStateSerializer.getVersion(),
                         dynamicKafkaSourceEnumStateSerializer.serialize(
                                 dynamicKafkaSourceEnumState));
 
@@ -111,5 +124,46 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
             String topic, int partition, AssignmentStatus assignStatus) {
         return new SplitAndAssignmentStatus(
                 new KafkaPartitionSplit(new TopicPartition(topic, partition), 0), assignStatus);
+    }
+
+    private static final class TestingOffsetsInitializer implements OffsetsInitializer {
+        private static final long serialVersionUID = 1L;
+        private final String id;
+        private final OffsetResetStrategy offsetResetStrategy;
+
+        private TestingOffsetsInitializer(String id, OffsetResetStrategy offsetResetStrategy) {
+            this.id = id;
+            this.offsetResetStrategy = offsetResetStrategy;
+        }
+
+        @Override
+        public Map<TopicPartition, Long> getPartitionOffsets(
+                Collection<TopicPartition> partitions,
+                OffsetsInitializer.PartitionOffsetsRetriever partitionOffsetsRetriever) {
+            return Collections.emptyMap();
+        }
+
+        @Override
+        public OffsetResetStrategy getAutoOffsetResetStrategy() {
+            return offsetResetStrategy;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            TestingOffsetsInitializer that = (TestingOffsetsInitializer) o;
+            return Objects.equals(id, that.id)
+                    && Objects.equals(offsetResetStrategy, that.offsetResetStrategy);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(id, offsetResetStrategy);
+        }
     }
 }

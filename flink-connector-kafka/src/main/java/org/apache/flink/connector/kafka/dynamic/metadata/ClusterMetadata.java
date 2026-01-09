@@ -19,6 +19,9 @@
 package org.apache.flink.connector.kafka.dynamic.metadata;
 
 import org.apache.flink.annotation.Experimental;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
+
+import javax.annotation.Nullable;
 
 import java.io.Serializable;
 import java.util.Objects;
@@ -26,13 +29,15 @@ import java.util.Properties;
 import java.util.Set;
 
 /**
- * {@link ClusterMetadata} provides readers information about a cluster on what topics to read and
- * how to connect to a cluster.
+ * {@link ClusterMetadata} provides readers information about a cluster on what topics to read,
+ * how to connect to a cluster, and optional offsets initializers.
  */
 @Experimental
 public class ClusterMetadata implements Serializable {
     private final Set<String> topics;
     private final Properties properties;
+    @Nullable private final OffsetsInitializer startingOffsetsInitializer;
+    @Nullable private final OffsetsInitializer stoppingOffsetsInitializer;
 
     /**
      * Constructs the {@link ClusterMetadata} with the required properties.
@@ -41,8 +46,26 @@ public class ClusterMetadata implements Serializable {
      * @param properties the properties to access a cluster.
      */
     public ClusterMetadata(Set<String> topics, Properties properties) {
+        this(topics, properties, null, null);
+    }
+
+    /**
+     * Constructs the {@link ClusterMetadata} with the required properties and offsets.
+     *
+     * @param topics the topics belonging to a cluster.
+     * @param properties the properties to access a cluster.
+     * @param startingOffsetsInitializer the starting offsets initializer for the cluster.
+     * @param stoppingOffsetsInitializer the stopping offsets initializer for the cluster.
+     */
+    public ClusterMetadata(
+            Set<String> topics,
+            Properties properties,
+            @Nullable OffsetsInitializer startingOffsetsInitializer,
+            @Nullable OffsetsInitializer stoppingOffsetsInitializer) {
         this.topics = topics;
         this.properties = properties;
+        this.startingOffsetsInitializer = startingOffsetsInitializer;
+        this.stoppingOffsetsInitializer = stoppingOffsetsInitializer;
     }
 
     /**
@@ -63,9 +86,38 @@ public class ClusterMetadata implements Serializable {
         return properties;
     }
 
+    /**
+     * Get the starting offsets initializer for the cluster.
+     *
+     * @return the starting offsets initializer, or null to use the source default.
+     */
+    @Nullable
+    public OffsetsInitializer getStartingOffsetsInitializer() {
+        return startingOffsetsInitializer;
+    }
+
+    /**
+     * Get the stopping offsets initializer for the cluster.
+     *
+     * @return the stopping offsets initializer, or null to use the source default.
+     */
+    @Nullable
+    public OffsetsInitializer getStoppingOffsetsInitializer() {
+        return stoppingOffsetsInitializer;
+    }
+
     @Override
     public String toString() {
-        return "ClusterMetadata{" + "topics=" + topics + ", properties=" + properties + '}';
+        return "ClusterMetadata{"
+                + "topics="
+                + topics
+                + ", properties="
+                + properties
+                + ", startingOffsetsInitializer="
+                + startingOffsetsInitializer
+                + ", stoppingOffsetsInitializer="
+                + stoppingOffsetsInitializer
+                + '}';
     }
 
     @Override
@@ -77,11 +129,15 @@ public class ClusterMetadata implements Serializable {
             return false;
         }
         ClusterMetadata that = (ClusterMetadata) o;
-        return Objects.equals(topics, that.topics) && Objects.equals(properties, that.properties);
+        return Objects.equals(topics, that.topics)
+                && Objects.equals(properties, that.properties)
+                && Objects.equals(startingOffsetsInitializer, that.startingOffsetsInitializer)
+                && Objects.equals(stoppingOffsetsInitializer, that.stoppingOffsetsInitializer);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(topics, properties);
+        return Objects.hash(
+                topics, properties, startingOffsetsInitializer, stoppingOffsetsInitializer);
     }
 }

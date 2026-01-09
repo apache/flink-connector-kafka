@@ -105,7 +105,7 @@ public class DynamicKafkaSourceBuilder<T> {
 
     /**
      * Set the source in bounded mode and specify what offsets to end at. This is used for all
-     * clusters.
+     * clusters unless overridden by cluster metadata.
      *
      * @param stoppingOffsetsInitializer the {@link OffsetsInitializer}.
      * @return the builder.
@@ -141,7 +141,8 @@ public class DynamicKafkaSourceBuilder<T> {
     }
 
     /**
-     * Set the starting offsets of the stream. This will be applied to all clusters.
+     * Set the starting offsets of the stream. This will be applied to all clusters unless
+     * overridden by cluster metadata.
      *
      * @param startingOffsetsInitializer the {@link OffsetsInitializer}.
      * @return the builder.
