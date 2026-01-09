@@ -241,7 +241,8 @@ public class DynamicKafkaSourceEnumStateSerializer
     }
 
     @Nullable
-    private static OffsetsInitializer readOffsetsInitializer(DataInputStream in) throws IOException {
+    private static OffsetsInitializer readOffsetsInitializer(DataInputStream in)
+            throws IOException {
         boolean hasOffsetsInitializer = in.readBoolean();
         if (!hasOffsetsInitializer) {
             return null;

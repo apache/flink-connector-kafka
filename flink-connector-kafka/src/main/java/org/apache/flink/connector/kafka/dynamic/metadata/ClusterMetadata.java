@@ -29,8 +29,8 @@ import java.util.Properties;
 import java.util.Set;
 
 /**
- * {@link ClusterMetadata} provides readers information about a cluster on what topics to read,
- * how to connect to a cluster, and optional offsets initializers.
+ * {@link ClusterMetadata} provides readers information about a cluster on what topics to read, how
+ * to connect to a cluster, and optional offsets initializers.
  */
 @Experimental
 public class ClusterMetadata implements Serializable {

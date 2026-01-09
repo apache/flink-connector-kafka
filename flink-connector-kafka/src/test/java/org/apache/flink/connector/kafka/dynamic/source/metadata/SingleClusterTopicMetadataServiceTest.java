@@ -137,7 +137,8 @@ class SingleClusterTopicMetadataServiceTest {
             Map<String, KafkaStream> streamMap =
                     metadataService.describeStreams(Collections.singleton(TOPIC0));
             ClusterMetadata clusterMetadata =
-                    streamMap.get(TOPIC0)
+                    streamMap
+                            .get(TOPIC0)
                             .getClusterMetadataMap()
                             .get(kafkaClusterTestEnvMetadata0.getKafkaClusterId());
 
