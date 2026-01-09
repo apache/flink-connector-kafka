@@ -120,5 +120,4 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
         return new SplitAndAssignmentStatus(
                 new KafkaPartitionSplit(new TopicPartition(topic, partition), 0), assignStatus);
     }
-
 }
