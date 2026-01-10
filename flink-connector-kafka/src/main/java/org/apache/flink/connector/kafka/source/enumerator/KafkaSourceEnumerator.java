@@ -32,6 +32,8 @@ import org.apache.flink.util.FlinkRuntimeException;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.KafkaAdminClient;
+
+import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsOptions;
 import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsSpec;
 import org.apache.kafka.clients.admin.ListOffsetsResult;
 import org.apache.kafka.clients.admin.OffsetSpec;
@@ -633,21 +635,25 @@ public class KafkaSourceEnumerator
 
         @Override
         public Map<TopicPartition, Long> committedOffsets(Collection<TopicPartition> partitions) {
-            ListConsumerGroupOffsetsSpec offsetsSpec =
-                    new ListConsumerGroupOffsetsSpec().topicPartitions(partitions);
+            ListConsumerGroupOffsetsSpec groupSpec = 
+                    new ListConsumerGroupOffsetsSpec()
+                            .topicPartitions(new ArrayList<>(partitions));
+            Map<String, ListConsumerGroupOffsetsSpec> groupSpecs = Collections.singletonMap(groupId, groupSpec);
+            ListConsumerGroupOffsetsOptions options = new ListConsumerGroupOffsetsOptions();
             try {
                 return adminClient
-                        .listConsumerGroupOffsets(Collections.singletonMap(groupId, offsetsSpec))
-                        .partitionsToOffsetAndMetadata()
+                        .listConsumerGroupOffsets(groupSpecs, options)
+                        .all()
                         .thenApply(
                                 result -> {
                                     Map<TopicPartition, Long> offsets = new HashMap<>();
-                                    result.forEach(
-                                            (tp, oam) -> {
-                                                if (oam != null) {
-                                                    offsets.put(tp, oam.offset());
-                                                }
-                                            });
+                                    result.get(groupId)
+                                            .forEach(
+                                                    (tp, oam) -> {
+                                                        if (oam != null) {
+                                                            offsets.put(tp, oam.offset());
+                                                        }
+                                                    });
                                     return offsets;
                                 })
                         .get();

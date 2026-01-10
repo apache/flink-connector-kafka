@@ -26,8 +26,9 @@ from pyflink.common.typeinfo import Types
 from pyflink.common.types import Row
 from pyflink.common.watermark_strategy import WatermarkStrategy
 from pyflink.datastream.connectors.base import DeliveryGuarantee
-from pyflink.datastream.connectors.kafka import KafkaSource, KafkaTopicPartition, \
-    KafkaOffsetsInitializer, KafkaOffsetResetStrategy, KafkaRecordSerializationSchema, KafkaSink
+from pyflink.datastream.connectors.kafka import KafkaSource, KafkaShareGroupSource, \
+    KafkaTopicPartition, KafkaOffsetsInitializer, KafkaOffsetResetStrategy, \
+    KafkaRecordSerializationSchema, KafkaSink
 from pyflink.datastream.formats.avro import AvroRowDeserializationSchema, AvroRowSerializationSchema
 from pyflink.datastream.formats.csv import CsvRowDeserializationSchema, CsvRowSerializationSchema
 from pyflink.datastream.formats.json import JsonRowDeserializationSchema, JsonRowSerializationSchema
@@ -618,3 +619,271 @@ class MockDataStream(data_stream.DataStream):
         if isinstance(sink, SupportsPreprocessing) and sink.get_transformer() is not None:
             ds = sink.get_transformer().apply(self)
         return ds
+
+
+class KafkaShareGroupSourceTests(PyFlinkStreamingTestCase):
+    """Tests for KafkaShareGroupSource Python bindings."""
+
+    def test_compiling(self):
+        """Test that a basic KafkaShareGroupSource can be compiled and added to a job."""
+        source = KafkaShareGroupSource.builder() \
+            .set_bootstrap_servers('localhost:9092') \
+            .set_share_group_id('test_share_group') \
+            .set_topics('test_topic') \
+            .set_value_only_deserializer(SimpleStringSchema()) \
+            .build()
+
+        ds = self.env.from_source(
+            source=source,
+            watermark_strategy=WatermarkStrategy.for_monotonous_timestamps(),
+            source_name='kafka share group source'
+        )
+        ds.print()
+        plan = json.loads(self.env.get_execution_plan())
+        self.assertEqual('Source: kafka share group source', plan['nodes'][0]['type'])
+
+    def test_set_share_group_id(self):
+        """Test that share group ID is properly configured."""
+        source = KafkaShareGroupSource.builder() \
+            .set_bootstrap_servers('localhost:9092') \
+            .set_share_group_id('my_share_group') \
+            .set_topics('test_topic') \
+            .set_value_only_deserializer(SimpleStringSchema()) \
+            .build()
+
+        share_group_id = get_field_value(source.get_java_function(), 'shareGroupId')
+        self.assertEqual(share_group_id, 'my_share_group')
+
+    def test_set_properties(self):
+        """Test that properties are properly configured."""
+        source = KafkaShareGroupSource.builder() \
+            .set_bootstrap_servers('localhost:9092') \
+            .set_share_group_id('test_share_group') \
+            .set_client_id_prefix('test_client_id_prefix') \
+            .set_property('test_property', 'test_value') \
+            .set_topics('test_topic') \
+            .set_value_only_deserializer(SimpleStringSchema()) \
+            .build()
+        conf = self._get_kafka_share_group_source_configuration(source)
+        self.assertEqual(conf.get_string('bootstrap.servers', ''), 'localhost:9092')
+        self.assertEqual(conf.get_string('test_property', ''), 'test_value')
+
+    def test_set_topics(self):
+        """Test topic list subscription."""
+        source = KafkaShareGroupSource.builder() \
+            .set_bootstrap_servers('localhost:9092') \
+            .set_share_group_id('test_share_group') \
+            .set_topics('test_topic1', 'test_topic2') \
+            .set_value_only_deserializer(SimpleStringSchema()) \
+            .build()
+        kafka_subscriber = get_field_value(source.get_java_function(), 'subscriber')
+        self.assertEqual(
+            kafka_subscriber.getClass().getCanonicalName(),
+            'org.apache.flink.connector.kafka.source.enumerator.subscriber.TopicListSubscriber'
+        )
+        topics = get_field_value(kafka_subscriber, 'topics')
+        self.assertTrue(is_instance_of(topics, get_gateway().jvm.java.util.List))
+        self.assertEqual(topics.size(), 2)
+        self.assertEqual(topics[0], 'test_topic1')
+        self.assertEqual(topics[1], 'test_topic2')
+
+    def test_set_topic_pattern(self):
+        """Test topic pattern subscription."""
+        source = KafkaShareGroupSource.builder() \
+            .set_bootstrap_servers('localhost:9092') \
+            .set_share_group_id('test_share_group') \
+            .set_topic_pattern('test_topic*') \
+            .set_value_only_deserializer(SimpleStringSchema()) \
+            .build()
+        kafka_subscriber = get_field_value(source.get_java_function(), 'subscriber')
+        self.assertEqual(
+            kafka_subscriber.getClass().getCanonicalName(),
+            'org.apache.flink.connector.kafka.source.enumerator.subscriber.TopicPatternSubscriber'
+        )
+        topic_pattern = get_field_value(kafka_subscriber, 'topicPattern')
+        self.assertTrue(is_instance_of(topic_pattern, get_gateway().jvm.java.util.regex.Pattern))
+        self.assertEqual(topic_pattern.toString(), 'test_topic*')
+
+    def test_set_partitions(self):
+        """Test partition set subscription."""
+        topic_partition_1 = KafkaTopicPartition('test_topic', 1)
+        topic_partition_2 = KafkaTopicPartition('test_topic', 2)
+        source = KafkaShareGroupSource.builder() \
+            .set_bootstrap_servers('localhost:9092') \
+            .set_share_group_id('test_share_group') \
+            .set_partitions({topic_partition_1, topic_partition_2}) \
+            .set_value_only_deserializer(SimpleStringSchema()) \
+            .build()
+        kafka_subscriber = get_field_value(source.get_java_function(), 'subscriber')
+        self.assertEqual(
+            kafka_subscriber.getClass().getCanonicalName(),
+            'org.apache.flink.connector.kafka.source.enumerator.subscriber.PartitionSetSubscriber'
+        )
+        partitions = get_field_value(kafka_subscriber, 'subscribedPartitions')
+        self.assertTrue(is_instance_of(partitions, get_gateway().jvm.java.util.Set))
+        self.assertTrue(topic_partition_1._to_j_topic_partition() in partitions)
+        self.assertTrue(topic_partition_2._to_j_topic_partition() in partitions)
+
+    def test_set_starting_offsets(self):
+        """Test starting offsets configuration."""
+        def _build_source(initializer: KafkaOffsetsInitializer):
+            return KafkaShareGroupSource.builder() \
+                .set_bootstrap_servers('localhost:9092') \
+                .set_share_group_id('test_share_group') \
+                .set_topics('test_topic') \
+                .set_value_only_deserializer(SimpleStringSchema()) \
+                .set_starting_offsets(initializer) \
+                .build()
+
+        # Test latest offsets
+        source = _build_source(KafkaOffsetsInitializer.latest())
+        self._check_latest_offsets_initializer(source)
+
+        # Test earliest offsets
+        source = _build_source(KafkaOffsetsInitializer.earliest())
+        self._check_reader_handled_offsets_initializer(
+            source, -2, KafkaOffsetResetStrategy.EARLIEST
+        )
+
+        # Test timestamp offsets
+        source = _build_source(KafkaOffsetsInitializer.timestamp(100))
+        self._check_timestamp_offsets_initializer(source, 100)
+
+    def test_bounded(self):
+        """Test bounded source configuration."""
+        source = KafkaShareGroupSource.builder() \
+            .set_bootstrap_servers('localhost:9092') \
+            .set_share_group_id('test_share_group') \
+            .set_topics('test_topic') \
+            .set_value_only_deserializer(SimpleStringSchema()) \
+            .set_bounded(KafkaOffsetsInitializer.latest()) \
+            .build()
+
+        self.assertEqual(
+            get_field_value(source.get_java_function(), 'boundedness').toString(),
+            'BOUNDED'
+        )
+
+    def test_unbounded(self):
+        """Test unbounded source with stopping offsets."""
+        source = KafkaShareGroupSource.builder() \
+            .set_bootstrap_servers('localhost:9092') \
+            .set_share_group_id('test_share_group') \
+            .set_topics('test_topic') \
+            .set_value_only_deserializer(SimpleStringSchema()) \
+            .set_unbounded(KafkaOffsetsInitializer.latest()) \
+            .build()
+
+        self.assertEqual(
+            get_field_value(source.get_java_function(), 'boundedness').toString(),
+            'CONTINUOUS_UNBOUNDED'
+        )
+
+    def test_enable_share_group_metrics(self):
+        """Test share group metrics configuration."""
+        source = KafkaShareGroupSource.builder() \
+            .set_bootstrap_servers('localhost:9092') \
+            .set_share_group_id('test_share_group') \
+            .set_topics('test_topic') \
+            .set_value_only_deserializer(SimpleStringSchema()) \
+            .enable_share_group_metrics(True) \
+            .build()
+
+        metrics_enabled = get_field_value(source.get_java_function(), 'shareGroupMetricsEnabled')
+        self.assertTrue(metrics_enabled)
+
+    def test_set_value_only_deserializer(self):
+        """Test value-only deserializer configuration."""
+        def _check(schema: DeserializationSchema, class_name: str):
+            source = KafkaShareGroupSource.builder() \
+                .set_bootstrap_servers('localhost:9092') \
+                .set_share_group_id('test_share_group') \
+                .set_topics('test_topic') \
+                .set_value_only_deserializer(schema) \
+                .build()
+            deserialization_schema_wrapper = get_field_value(
+                source.get_java_function(), 'deserializationSchema'
+            )
+            self.assertEqual(
+                deserialization_schema_wrapper.getClass().getCanonicalName(),
+                'org.apache.flink.connector.kafka.source.reader.deserializer'
+                '.KafkaValueOnlyDeserializationSchemaWrapper'
+            )
+            deserialization_schema = get_field_value(
+                deserialization_schema_wrapper, 'deserializationSchema'
+            )
+            self.assertEqual(deserialization_schema.getClass().getCanonicalName(), class_name)
+
+        _check(SimpleStringSchema(),
+               'org.apache.flink.api.common.serialization.SimpleStringSchema')
+        _check(
+            JsonRowDeserializationSchema.builder().type_info(Types.ROW([Types.STRING()])).build(),
+            'org.apache.flink.formats.json.JsonRowDeserializationSchema'
+        )
+
+    def _check_reader_handled_offsets_initializer(self,
+                                                  source,
+                                                  offset: int,
+                                                  reset_strategy: KafkaOffsetResetStrategy,
+                                                  is_start: bool = True):
+        if is_start:
+            field_name = 'startingOffsetsInitializer'
+        else:
+            field_name = 'stoppingOffsetsInitializer'
+        offsets_initializer = get_field_value(source.get_java_function(), field_name)
+        self.assertEqual(
+            offsets_initializer.getClass().getCanonicalName(),
+            'org.apache.flink.connector.kafka.source.enumerator.initializer'
+            '.ReaderHandledOffsetsInitializer'
+        )
+
+        starting_offset = get_field_value(offsets_initializer, 'startingOffset')
+        self.assertEqual(starting_offset, offset)
+
+        offset_reset_strategy = get_field_value(offsets_initializer, 'offsetResetStrategy')
+        self.assertTrue(
+            offset_reset_strategy.equals(reset_strategy._to_j_offset_reset_strategy())
+        )
+
+    def _check_latest_offsets_initializer(self,
+                                          source,
+                                          is_start: bool = True):
+        if is_start:
+            field_name = 'startingOffsetsInitializer'
+        else:
+            field_name = 'stoppingOffsetsInitializer'
+        offsets_initializer = get_field_value(source.get_java_function(), field_name)
+        self.assertEqual(
+            offsets_initializer.getClass().getCanonicalName(),
+            'org.apache.flink.connector.kafka.source.enumerator.initializer'
+            '.LatestOffsetsInitializer'
+        )
+
+    def _check_timestamp_offsets_initializer(self,
+                                             source,
+                                             timestamp: int,
+                                             is_start: bool = True):
+        if is_start:
+            field_name = 'startingOffsetsInitializer'
+        else:
+            field_name = 'stoppingOffsetsInitializer'
+        offsets_initializer = get_field_value(source.get_java_function(), field_name)
+        self.assertEqual(
+            offsets_initializer.getClass().getCanonicalName(),
+            'org.apache.flink.connector.kafka.source.enumerator.initializer'
+            '.TimestampOffsetsInitializer'
+        )
+
+        starting_timestamp = get_field_value(offsets_initializer, 'startingTimestamp')
+        self.assertEqual(starting_timestamp, timestamp)
+
+    @staticmethod
+    def _get_kafka_share_group_source_configuration(source):
+        jvm = get_gateway().jvm
+        j_source = source.get_java_function()
+        j_to_configuration = j_source.getClass().getDeclaredMethod(
+            'getConfiguration', to_jarray(jvm.java.lang.Class, [])
+        )
+        j_to_configuration.setAccessible(True)
+        j_configuration = j_to_configuration.invoke(j_source, to_jarray(jvm.java.lang.Object, []))
+        return Configuration(j_configuration=j_configuration)
