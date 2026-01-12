@@ -84,6 +84,48 @@ both bounded and unbounded sources, while stopping offsets only take effect when
 bounded mode. Cluster metadata may optionally include per-cluster starting or stopping offsets
 initializers; if present, they override the global defaults for that cluster.
 
+Example: override offsets for specific clusters via metadata.
+
+{{< tabs "DynamicKafkaSourceOffsets" >}}
+{{< tab "Java" >}}
+```java
+Properties cluster0Props = new Properties();
+cluster0Props.setProperty(
+    CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster0:9092");
+Properties cluster1Props = new Properties();
+cluster1Props.setProperty(
+    CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster1:9092");
+
+KafkaStream stream =
+    new KafkaStream(
+        "input-stream",
+        Map.of(
+            "cluster0",
+            new ClusterMetadata(
+                Set.of("topic-a"),
+                cluster0Props,
+                OffsetsInitializer.earliest(),
+                OffsetsInitializer.latest()),
+            "cluster1",
+            new ClusterMetadata(
+                Set.of("topic-b"),
+                cluster1Props,
+                OffsetsInitializer.latest(),
+                null)));
+
+DynamicKafkaSource<String> source =
+    DynamicKafkaSource.<String>builder()
+        .setStreamIds(Set.of(stream.getStreamId()))
+        .setKafkaMetadataService(new MockKafkaMetadataService(Set.of(stream)))
+        .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(StringDeserializer.class))
+        // Overridden by per-cluster starting offsets in metadata when present.
+        .setStartingOffsets(OffsetsInitializer.earliest())
+        .setBounded(OffsetsInitializer.latest())
+        .build();
+```
+{{< /tab >}}
+{{< /tabs >}}
+
 ### Kafka Stream Subscription
 The Dynamic Kafka Source provides 2 ways of subscribing to Kafka stream(s).
 * A set of Kafka stream ids. For example:

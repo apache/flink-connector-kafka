@@ -81,6 +81,48 @@ Deserializer to parse Kafka messages, see the [Kafka Source Documentation]({{< r
 
 可以通过 builder 配置全局的起始/停止 offsets。起始 offsets 同时适用于有界与无界模式；停止 offsets 仅在有界模式下生效。Cluster metadata 可以可选地携带每个集群的起始/停止 offsets initializer；如果存在，将覆盖全局默认配置。
 
+示例：在元数据中为不同集群设置偏移量初始化规则。
+
+{{< tabs "DynamicKafkaSourceOffsets" >}}
+{{< tab "Java" >}}
+```java
+Properties cluster0Props = new Properties();
+cluster0Props.setProperty(
+    CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster0:9092");
+Properties cluster1Props = new Properties();
+cluster1Props.setProperty(
+    CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster1:9092");
+
+KafkaStream stream =
+    new KafkaStream(
+        "input-stream",
+        Map.of(
+            "cluster0",
+            new ClusterMetadata(
+                Set.of("topic-a"),
+                cluster0Props,
+                OffsetsInitializer.earliest(),
+                OffsetsInitializer.latest()),
+            "cluster1",
+            new ClusterMetadata(
+                Set.of("topic-b"),
+                cluster1Props,
+                OffsetsInitializer.latest(),
+                null)));
+
+DynamicKafkaSource<String> source =
+    DynamicKafkaSource.<String>builder()
+        .setStreamIds(Set.of(stream.getStreamId()))
+        .setKafkaMetadataService(new MockKafkaMetadataService(Set.of(stream)))
+        .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(StringDeserializer.class))
+        // 如果元数据中包含每个集群的起始 offsets，将覆盖此处设置。
+        .setStartingOffsets(OffsetsInitializer.earliest())
+        .setBounded(OffsetsInitializer.latest())
+        .build();
+```
+{{< /tab >}}
+{{< /tabs >}}
+
 ### Kafka Stream Subscription
 The Dynamic Kafka Source provides 2 ways of subscribing to Kafka stream(s).
 * A set of Kafka stream ids. For example:
