@@ -145,4 +145,57 @@ class SingleClusterTopicMetadataServiceTest {
             metadataService.close();
         }
     }
+
+    @Test
+    void describeStreamsAllowsNullOffsetsInitializers() throws Exception {
+        assertOffsetsInitializers(null, null);
+    }
+
+    @Test
+    void describeStreamsAllowsStartingOffsetsOnly() throws Exception {
+        assertOffsetsInitializers(OffsetsInitializer.earliest(), null);
+    }
+
+    @Test
+    void describeStreamsAllowsStoppingOffsetsOnly() throws Exception {
+        assertOffsetsInitializers(null, OffsetsInitializer.latest());
+    }
+
+    private void assertOffsetsInitializers(
+            OffsetsInitializer startingOffsetsInitializer,
+            OffsetsInitializer stoppingOffsetsInitializer)
+            throws Exception {
+        KafkaMetadataService metadataService =
+                new SingleClusterTopicMetadataService(
+                        kafkaClusterTestEnvMetadata0.getKafkaClusterId(),
+                        kafkaClusterTestEnvMetadata0.getStandardProperties(),
+                        startingOffsetsInitializer,
+                        stoppingOffsetsInitializer);
+
+        try {
+            Map<String, KafkaStream> streamMap =
+                    metadataService.describeStreams(Collections.singleton(TOPIC0));
+            ClusterMetadata clusterMetadata =
+                    streamMap
+                            .get(TOPIC0)
+                            .getClusterMetadataMap()
+                            .get(kafkaClusterTestEnvMetadata0.getKafkaClusterId());
+
+            if (startingOffsetsInitializer == null) {
+                assertThat(clusterMetadata.getStartingOffsetsInitializer()).isNull();
+            } else {
+                assertThat(clusterMetadata.getStartingOffsetsInitializer())
+                        .isSameAs(startingOffsetsInitializer);
+            }
+
+            if (stoppingOffsetsInitializer == null) {
+                assertThat(clusterMetadata.getStoppingOffsetsInitializer()).isNull();
+            } else {
+                assertThat(clusterMetadata.getStoppingOffsetsInitializer())
+                        .isSameAs(stoppingOffsetsInitializer);
+            }
+        } finally {
+            metadataService.close();
+        }
+    }
 }
