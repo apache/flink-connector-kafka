@@ -190,8 +190,7 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
                 dynamicKafkaSourceEnumStateSerializer.deserialize(1, serializedState);
 
         assertThat(dynamicKafkaSourceEnumState.getClusterEnumeratorStates()).isEmpty();
-        KafkaStream kafkaStream =
-                dynamicKafkaSourceEnumState.getKafkaStreams().iterator().next();
+        KafkaStream kafkaStream = dynamicKafkaSourceEnumState.getKafkaStreams().iterator().next();
         assertThat(kafkaStream.getStreamId()).isEqualTo("stream0");
         ClusterMetadata clusterMetadata = kafkaStream.getClusterMetadataMap().get("cluster0");
         assertThat(clusterMetadata.getTopics()).containsExactlyInAnyOrder("topic0", "topic1");

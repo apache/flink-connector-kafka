@@ -466,10 +466,7 @@ public class DynamicKafkaSourceITTest extends TestLogger {
 
             byte[] serializedState =
                     DynamicKafkaSourceEnumStateTestUtils.serializeV1State(
-                            streamId,
-                            clusterId,
-                            Collections.singleton(topic),
-                            bootstrapServers);
+                            streamId, clusterId, Collections.singleton(topic), bootstrapServers);
             DynamicKafkaSourceEnumState restoredState =
                     new DynamicKafkaSourceEnumStateSerializer().deserialize(1, serializedState);
 
@@ -515,7 +512,8 @@ public class DynamicKafkaSourceITTest extends TestLogger {
                 assertThat(assignedSplits).isNotEmpty();
                 assertThat(assignedSplits)
                         .allSatisfy(
-                                split -> assertThat(split.getKafkaClusterId()).isEqualTo(clusterId));
+                                split ->
+                                        assertThat(split.getKafkaClusterId()).isEqualTo(clusterId));
                 assertThat(assignedSplits)
                         .allSatisfy(
                                 split ->

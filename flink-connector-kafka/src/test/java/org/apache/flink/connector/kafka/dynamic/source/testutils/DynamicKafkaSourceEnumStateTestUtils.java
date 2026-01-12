@@ -30,10 +30,7 @@ public final class DynamicKafkaSourceEnumStateTestUtils {
     private DynamicKafkaSourceEnumStateTestUtils() {}
 
     public static byte[] serializeV1State(
-            String streamId,
-            String clusterId,
-            Set<String> topics,
-            String bootstrapServers)
+            String streamId, String clusterId, Set<String> topics, String bootstrapServers)
             throws IOException {
         KafkaSourceEnumStateSerializer kafkaSourceEnumStateSerializer =
                 new KafkaSourceEnumStateSerializer();
