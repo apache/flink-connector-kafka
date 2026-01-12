@@ -77,6 +77,13 @@ The Kafka metadata service, configured by setKafkaMetadataService(KafkaMetadataS
 The stream ids to subscribe, see the following Kafka stream subscription section for more details.
 Deserializer to parse Kafka messages, see the [Kafka Source Documentation]({{< ref "docs/connectors/datastream/kafka" >}}#deserializer) for more details.
 
+### Offsets Initialization
+
+You can configure starting and stopping offsets globally via the builder. Starting offsets apply to
+both bounded and unbounded sources, while stopping offsets only take effect when the source runs in
+bounded mode. Cluster metadata may optionally include per-cluster starting or stopping offsets
+initializers; if present, they override the global defaults for that cluster.
+
 ### Kafka Stream Subscription
 The Dynamic Kafka Source provides 2 ways of subscribing to Kafka stream(s).
 * A set of Kafka stream ids. For example:
@@ -107,6 +114,9 @@ This source achieves its dynamic characteristic by periodically polling this Kaf
 for any changes to the Kafka stream(s) and reconciling the reader tasks to subscribe to the new 
 Kafka metadata returned by the service. For example, in the case of a Kafka migration, the source would 
 swap from one cluster to the new cluster when the service makes that change in the Kafka stream metadata.
+
+Cluster metadata can optionally carry per-cluster starting and stopping offsets initializers. These
+override the global builder configuration for the affected cluster.
 
 ### Additional Properties
 There are configuration options in DynamicKafkaSourceOptions that can be configured in the properties through the builder:
