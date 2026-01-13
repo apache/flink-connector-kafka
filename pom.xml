@@ -53,7 +53,7 @@ under the License.
 
 		<!-- Main Dependencies -->
 		<confluent.version>7.9.2</confluent.version>
-		<flink.version>2.1.0</flink.version>
+		<flink.version>1.19.3</flink.version>
 		<kafka.version>4.1.0</kafka.version>
 
 		<!-- Other Dependencies -->
