@@ -70,6 +70,23 @@ DynamicKafkaSource<String> source = DynamicKafkaSource.<String>builder()
 env.fromSource(source, WatermarkStrategy.noWatermarks(), "Dynamic Kafka Source");
 ```
 {{< /tab >}}
+{{< tab "Python" >}}
+```python
+metadata_service = SingleClusterTopicMetadataService(
+    "cluster-a",
+    {"bootstrap.servers": "localhost:9092"})
+
+source = DynamicKafkaSource.builder() \
+    .set_kafka_metadata_service(metadata_service) \
+    .set_stream_ids({"input-stream"}) \
+    .set_starting_offsets(KafkaOffsetsInitializer.earliest()) \
+    .set_value_only_deserializer(SimpleStringSchema()) \
+    .set_properties(properties) \
+    .build()
+
+env.from_source(source, WatermarkStrategy.no_watermarks(), "Dynamic Kafka Source")
+```
+{{< /tab >}}
 {{< /tabs >}}
 The following properties are **required** for building a DynamicKafkaSource:
 
@@ -135,12 +152,22 @@ The Dynamic Kafka Source provides 2 ways of subscribing to Kafka stream(s).
   DynamicKafkaSource.builder().setStreamIds(Set.of("stream-a", "stream-b"));
   ```
   {{< /tab >}}
+  {{< tab "Python" >}}
+  ```python
+  DynamicKafkaSource.builder().set_stream_ids({"stream-a", "stream-b"})
+  ```
+  {{< /tab >}}
   {{< /tabs >}}
 * A regex pattern that subscribes to all Kafka stream ids that match the provided regex. For example:
   {{< tabs "DynamicKafkaSource#setStreamPattern" >}}
   {{< tab "Java" >}}
   ```java
   DynamicKafkaSource.builder().setStreamPattern(Pattern.of("stream.*"));
+  ```
+  {{< /tab >}}
+  {{< tab "Python" >}}
+  ```python
+  DynamicKafkaSource.builder().set_stream_pattern("stream.*")
   ```
   {{< /tab >}}
   {{< /tabs >}}
