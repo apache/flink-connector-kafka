@@ -19,13 +19,24 @@
 package org.apache.flink.connector.kafka.dynamic.source;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.connector.source.Boundedness;
+import org.apache.flink.api.connector.source.ReaderInfo;
+import org.apache.flink.api.connector.source.SplitsAssignment;
+import org.apache.flink.api.connector.source.mocks.MockSplitEnumeratorContext;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
 import org.apache.flink.connector.kafka.dynamic.metadata.SingleClusterTopicMetadataService;
+import org.apache.flink.connector.kafka.dynamic.source.enumerator.DynamicKafkaSourceEnumState;
+import org.apache.flink.connector.kafka.dynamic.source.enumerator.DynamicKafkaSourceEnumStateSerializer;
+import org.apache.flink.connector.kafka.dynamic.source.enumerator.DynamicKafkaSourceEnumerator;
+import org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.KafkaStreamSetSubscriber;
+import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
+import org.apache.flink.connector.kafka.dynamic.source.testutils.DynamicKafkaSourceEnumStateTestUtils;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.NoStoppingOffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.connector.kafka.testutils.DynamicKafkaSourceExternalContextFactory;
@@ -53,8 +64,10 @@ import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.util.TestLogger;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.IntegerDeserializer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -248,6 +261,279 @@ public class DynamicKafkaSourceITTest extends TestLogger {
                             IntStream.range(0, NUM_PARTITIONS * NUM_RECORDS_PER_SPLIT)
                                     .boxed()
                                     .collect(Collectors.toList()));
+        }
+
+        @Test
+        void testPerClusterOffsetsInitializersInUnboundedMode() throws Throwable {
+            String topic = "test-per-cluster-unbounded-offsets";
+            DynamicKafkaSourceTestHelper.createTopic(0, topic, NUM_PARTITIONS);
+            DynamicKafkaSourceTestHelper.createTopic(1, topic, NUM_PARTITIONS);
+
+            int cluster0Start = 0;
+            int cluster0End =
+                    DynamicKafkaSourceTestHelper.produceToKafka(
+                            0, topic, NUM_PARTITIONS, NUM_RECORDS_PER_SPLIT, cluster0Start);
+            int cluster1Start = cluster0End + 1000;
+            int cluster1InitialEnd =
+                    DynamicKafkaSourceTestHelper.produceToKafka(
+                            1, topic, NUM_PARTITIONS, NUM_RECORDS_PER_SPLIT, cluster1Start);
+            int cluster1ExtraStart = cluster1InitialEnd + 1000;
+            AtomicInteger cluster1ExtraEnd = new AtomicInteger(-1);
+
+            StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+            env.setParallelism(2);
+
+            Properties properties = new Properties();
+            properties.setProperty(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "0");
+            properties.setProperty(
+                    DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "0");
+
+            KafkaStream kafkaStream =
+                    new KafkaStream(
+                            "test-per-cluster-unbounded-stream",
+                            ImmutableMap.of(
+                                    kafkaClusterTestEnvMetadata0.getKafkaClusterId(),
+                                    new ClusterMetadata(
+                                            Collections.singleton(topic),
+                                            kafkaClusterTestEnvMetadata0.getStandardProperties(),
+                                            OffsetsInitializer.earliest(),
+                                            null),
+                                    kafkaClusterTestEnvMetadata1.getKafkaClusterId(),
+                                    new ClusterMetadata(
+                                            Collections.singleton(topic),
+                                            kafkaClusterTestEnvMetadata1.getStandardProperties(),
+                                            OffsetsInitializer.latest(),
+                                            null)));
+
+            MockKafkaMetadataService mockKafkaMetadataService =
+                    new MockKafkaMetadataService(Collections.singleton(kafkaStream));
+
+            DynamicKafkaSource<Integer> dynamicKafkaSource =
+                    DynamicKafkaSource.<Integer>builder()
+                            .setStreamIds(Collections.singleton(kafkaStream.getStreamId()))
+                            .setKafkaMetadataService(mockKafkaMetadataService)
+                            .setDeserializer(
+                                    KafkaRecordDeserializationSchema.valueOnly(
+                                            IntegerDeserializer.class))
+                            .setStartingOffsets(OffsetsInitializer.earliest())
+                            .setProperties(properties)
+                            .build();
+
+            DataStreamSource<Integer> stream =
+                    env.fromSource(
+                            dynamicKafkaSource,
+                            WatermarkStrategy.noWatermarks(),
+                            "dynamic-kafka-src");
+
+            List<Integer> results = new ArrayList<>();
+            try (CloseableIterator<Integer> iterator = stream.executeAndCollect()) {
+                CommonTestUtils.waitUtil(
+                        () -> {
+                            try {
+                                results.add(iterator.next());
+                                if (cluster1ExtraEnd.get() < 0) {
+                                    cluster1ExtraEnd.set(
+                                            DynamicKafkaSourceTestHelper.produceToKafka(
+                                                    1,
+                                                    topic,
+                                                    NUM_PARTITIONS,
+                                                    NUM_RECORDS_PER_SPLIT,
+                                                    cluster1ExtraStart));
+                                }
+                            } catch (NoSuchElementException e) {
+                                // swallow and wait
+                            } catch (Throwable e) {
+                                throw new RuntimeException(e);
+                            }
+
+                            if (cluster1ExtraEnd.get() < 0) {
+                                return false;
+                            }
+
+                            int expectedCount =
+                                    (cluster0End - cluster0Start)
+                                            + (cluster1ExtraEnd.get() - cluster1ExtraStart);
+                            return results.size() == expectedCount;
+                        },
+                        Duration.ofSeconds(15),
+                        "Could not obtain the required records within the timeout");
+            }
+
+            List<Integer> expectedResults =
+                    Stream.concat(
+                                    IntStream.range(cluster0Start, cluster0End).boxed(),
+                                    IntStream.range(cluster1ExtraStart, cluster1ExtraEnd.get())
+                                            .boxed())
+                            .collect(Collectors.toList());
+            assertThat(results).containsExactlyInAnyOrderElementsOf(expectedResults);
+        }
+
+        @Test
+        void testPerClusterOffsetsInitializersInBoundedMode() throws Throwable {
+            String topic = "test-per-cluster-offsets-initializers";
+            DynamicKafkaSourceTestHelper.createTopic(0, topic, NUM_PARTITIONS);
+            DynamicKafkaSourceTestHelper.createTopic(1, topic, NUM_PARTITIONS);
+
+            int cluster0Start = 0;
+            int cluster0End =
+                    DynamicKafkaSourceTestHelper.produceToKafka(
+                            0, topic, NUM_PARTITIONS, NUM_RECORDS_PER_SPLIT, cluster0Start);
+            int cluster1Start = cluster0End + 1000;
+            DynamicKafkaSourceTestHelper.produceToKafka(
+                    1, topic, NUM_PARTITIONS, NUM_RECORDS_PER_SPLIT, cluster1Start);
+
+            StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+            env.setParallelism(2);
+
+            Properties properties = new Properties();
+            properties.setProperty(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "0");
+            properties.setProperty(
+                    DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "0");
+
+            Map<TopicPartition, Long> cluster1StoppingOffsets =
+                    IntStream.range(0, NUM_PARTITIONS)
+                            .boxed()
+                            .collect(
+                                    Collectors.toMap(
+                                            partition -> new TopicPartition(topic, partition),
+                                            partition -> 0L));
+
+            KafkaStream kafkaStream =
+                    new KafkaStream(
+                            "test-per-cluster-offsets-stream",
+                            ImmutableMap.of(
+                                    kafkaClusterTestEnvMetadata0.getKafkaClusterId(),
+                                    new ClusterMetadata(
+                                            Collections.singleton(topic),
+                                            kafkaClusterTestEnvMetadata0.getStandardProperties(),
+                                            OffsetsInitializer.earliest(),
+                                            OffsetsInitializer.latest()),
+                                    kafkaClusterTestEnvMetadata1.getKafkaClusterId(),
+                                    new ClusterMetadata(
+                                            Collections.singleton(topic),
+                                            kafkaClusterTestEnvMetadata1.getStandardProperties(),
+                                            OffsetsInitializer.earliest(),
+                                            OffsetsInitializer.offsets(cluster1StoppingOffsets))));
+
+            MockKafkaMetadataService mockKafkaMetadataService =
+                    new MockKafkaMetadataService(Collections.singleton(kafkaStream));
+
+            DynamicKafkaSource<Integer> dynamicKafkaSource =
+                    DynamicKafkaSource.<Integer>builder()
+                            .setStreamIds(Collections.singleton(kafkaStream.getStreamId()))
+                            .setKafkaMetadataService(mockKafkaMetadataService)
+                            .setDeserializer(
+                                    KafkaRecordDeserializationSchema.valueOnly(
+                                            IntegerDeserializer.class))
+                            .setStartingOffsets(OffsetsInitializer.earliest())
+                            .setBounded(OffsetsInitializer.latest())
+                            .setProperties(properties)
+                            .build();
+
+            DataStreamSource<Integer> stream =
+                    env.fromSource(
+                            dynamicKafkaSource,
+                            WatermarkStrategy.noWatermarks(),
+                            "dynamic-kafka-src");
+
+            List<Integer> results = new ArrayList<>();
+            try (CloseableIterator<Integer> iterator = stream.executeAndCollect()) {
+                while (iterator.hasNext()) {
+                    results.add(iterator.next());
+                }
+            }
+
+            assertThat(results)
+                    .containsExactlyInAnyOrderElementsOf(
+                            IntStream.range(cluster0Start, cluster0End)
+                                    .boxed()
+                                    .collect(Collectors.toList()));
+        }
+
+        @Test
+        void testRestoreFromV1EnumeratorState() throws Throwable {
+            String topic = "test-v1-enum-state-restore";
+            DynamicKafkaSourceTestHelper.createTopic(0, topic, NUM_PARTITIONS);
+            DynamicKafkaSourceTestHelper.produceToKafka(
+                    0, topic, NUM_PARTITIONS, NUM_RECORDS_PER_SPLIT, 0);
+
+            String streamId = "test-v1-enum-stream";
+            String clusterId = kafkaClusterTestEnvMetadata0.getKafkaClusterId();
+            Properties clusterProperties = kafkaClusterTestEnvMetadata0.getStandardProperties();
+            String bootstrapServers = kafkaClusterTestEnvMetadata0.getBrokerConnectionStrings();
+            clusterProperties.setProperty(
+                    CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+
+            byte[] serializedState =
+                    DynamicKafkaSourceEnumStateTestUtils.serializeV1State(
+                            streamId, clusterId, Collections.singleton(topic), bootstrapServers);
+            DynamicKafkaSourceEnumState restoredState =
+                    new DynamicKafkaSourceEnumStateSerializer().deserialize(1, serializedState);
+
+            Properties properties = new Properties();
+            properties.setProperty(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "0");
+            properties.setProperty(
+                    DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "0");
+
+            KafkaStream kafkaStream =
+                    new KafkaStream(
+                            streamId,
+                            Collections.singletonMap(
+                                    clusterId,
+                                    new ClusterMetadata(
+                                            Collections.singleton(topic), clusterProperties)));
+            MockKafkaMetadataService mockKafkaMetadataService =
+                    new MockKafkaMetadataService(Collections.singleton(kafkaStream));
+
+            try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                            new MockSplitEnumeratorContext<>(2);
+                    DynamicKafkaSourceEnumerator enumerator =
+                            new DynamicKafkaSourceEnumerator(
+                                    new KafkaStreamSetSubscriber(Collections.singleton(streamId)),
+                                    mockKafkaMetadataService,
+                                    context,
+                                    OffsetsInitializer.earliest(),
+                                    new NoStoppingOffsetsInitializer(),
+                                    properties,
+                                    Boundedness.CONTINUOUS_UNBOUNDED,
+                                    restoredState)) {
+                enumerator.start();
+                registerReader(context, enumerator, 0);
+                registerReader(context, enumerator, 1);
+                runAllOneTimeCallables(context);
+
+                List<DynamicKafkaSourceSplit> assignedSplits =
+                        context.getSplitsAssignmentSequence().stream()
+                                .map(SplitsAssignment::assignment)
+                                .flatMap(assignments -> assignments.values().stream())
+                                .flatMap(Collection::stream)
+                                .collect(Collectors.toList());
+
+                assertThat(assignedSplits).isNotEmpty();
+                assertThat(assignedSplits)
+                        .allSatisfy(
+                                split ->
+                                        assertThat(split.getKafkaClusterId()).isEqualTo(clusterId));
+                assertThat(assignedSplits)
+                        .allSatisfy(
+                                split ->
+                                        assertThat(
+                                                        split.getKafkaPartitionSplit()
+                                                                .getTopicPartition()
+                                                                .topic())
+                                                .isEqualTo(topic));
+
+                DynamicKafkaSourceEnumState snapshot = enumerator.snapshotState(1L);
+                ClusterMetadata snapshotMetadata =
+                        snapshot.getKafkaStreams().stream()
+                                .filter(stream -> stream.getStreamId().equals(streamId))
+                                .findFirst()
+                                .orElseThrow()
+                                .getClusterMetadataMap()
+                                .get(clusterId);
+                assertThat(snapshotMetadata.getStartingOffsetsInitializer()).isNull();
+                assertThat(snapshotMetadata.getStoppingOffsetsInitializer()).isNull();
+            }
         }
 
         @Test
@@ -793,6 +1079,22 @@ public class DynamicKafkaSourceITTest extends TestLogger {
             return inMemoryReporter.getMetricsByGroup(groups.get()).keySet().stream()
                     .map(metricName -> groups.get().getMetricIdentifier(metricName))
                     .collect(Collectors.toSet());
+        }
+
+        private void registerReader(
+                MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context,
+                DynamicKafkaSourceEnumerator enumerator,
+                int readerId) {
+            context.registerReader(new ReaderInfo(readerId, "location " + readerId));
+            enumerator.addReader(readerId);
+            enumerator.handleSourceEvent(readerId, new GetMetadataUpdateEvent());
+        }
+
+        private void runAllOneTimeCallables(
+                MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context) throws Throwable {
+            while (!context.getOneTimeCallables().isEmpty()) {
+                context.runNextOneTimeCallable();
+            }
         }
 
         private Set<KafkaStream> getKafkaStreams(

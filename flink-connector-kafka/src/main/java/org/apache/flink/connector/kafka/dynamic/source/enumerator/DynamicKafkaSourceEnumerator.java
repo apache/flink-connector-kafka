@@ -41,6 +41,7 @@ import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscr
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.util.Preconditions;
 
+import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.KafkaException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -161,10 +162,21 @@ public class DynamicKafkaSourceEnumerator
         this.latestKafkaStreams = dynamicKafkaSourceEnumState.getKafkaStreams();
 
         Map<String, Properties> clusterProperties = new HashMap<>();
+        Map<String, OffsetsInitializer> clusterStartingOffsets = new HashMap<>();
+        Map<String, OffsetsInitializer> clusterStoppingOffsets = new HashMap<>();
         for (KafkaStream kafkaStream : latestKafkaStreams) {
             for (Entry<String, ClusterMetadata> entry :
                     kafkaStream.getClusterMetadataMap().entrySet()) {
-                clusterProperties.put(entry.getKey(), entry.getValue().getProperties());
+                ClusterMetadata clusterMetadata = entry.getValue();
+                clusterProperties.put(entry.getKey(), clusterMetadata.getProperties());
+                if (clusterMetadata.getStartingOffsetsInitializer() != null) {
+                    clusterStartingOffsets.put(
+                            entry.getKey(), clusterMetadata.getStartingOffsetsInitializer());
+                }
+                if (clusterMetadata.getStoppingOffsetsInitializer() != null) {
+                    clusterStoppingOffsets.put(
+                            entry.getKey(), clusterMetadata.getStoppingOffsetsInitializer());
+                }
             }
         }
 
@@ -181,7 +193,9 @@ public class DynamicKafkaSourceEnumerator
                     clusterEnumState.getKey(),
                     this.latestClusterTopicsMap.get(clusterEnumState.getKey()),
                     clusterEnumState.getValue(),
-                    clusterProperties.get(clusterEnumState.getKey()));
+                    clusterProperties.get(clusterEnumState.getKey()),
+                    clusterStartingOffsets.get(clusterEnumState.getKey()),
+                    clusterStoppingOffsets.get(clusterEnumState.getKey()));
         }
     }
 
@@ -238,6 +252,8 @@ public class DynamicKafkaSourceEnumerator
 
         Map<String, Set<String>> newClustersTopicsMap = new HashMap<>();
         Map<String, Properties> clusterProperties = new HashMap<>();
+        Map<String, OffsetsInitializer> clusterStartingOffsets = new HashMap<>();
+        Map<String, OffsetsInitializer> clusterStoppingOffsets = new HashMap<>();
         for (KafkaStream kafkaStream : handledFetchKafkaStreams) {
             for (Entry<String, ClusterMetadata> entry :
                     kafkaStream.getClusterMetadataMap().entrySet()) {
@@ -248,6 +264,14 @@ public class DynamicKafkaSourceEnumerator
                         .computeIfAbsent(kafkaClusterId, (unused) -> new HashSet<>())
                         .addAll(clusterMetadata.getTopics());
                 clusterProperties.put(kafkaClusterId, clusterMetadata.getProperties());
+                if (clusterMetadata.getStartingOffsetsInitializer() != null) {
+                    clusterStartingOffsets.put(
+                            kafkaClusterId, clusterMetadata.getStartingOffsetsInitializer());
+                }
+                if (clusterMetadata.getStoppingOffsetsInitializer() != null) {
+                    clusterStoppingOffsets.put(
+                            kafkaClusterId, clusterMetadata.getStoppingOffsetsInitializer());
+                }
             }
         }
 
@@ -308,7 +332,9 @@ public class DynamicKafkaSourceEnumerator
                     activeClusterTopics.getKey(),
                     activeClusterTopics.getValue(),
                     newKafkaSourceEnumState,
-                    clusterProperties.get(activeClusterTopics.getKey()));
+                    clusterProperties.get(activeClusterTopics.getKey()),
+                    clusterStartingOffsets.get(activeClusterTopics.getKey()),
+                    clusterStoppingOffsets.get(activeClusterTopics.getKey()));
         }
 
         startAllEnumerators();
@@ -356,7 +382,18 @@ public class DynamicKafkaSourceEnumerator
             String kafkaClusterId,
             Set<String> topics,
             KafkaSourceEnumState kafkaSourceEnumState,
-            Properties fetchedProperties) {
+            Properties fetchedProperties,
+            @Nullable OffsetsInitializer clusterStartingOffsetsInitializer,
+            @Nullable OffsetsInitializer clusterStoppingOffsetsInitializer) {
+        OffsetsInitializer effectiveStartingOffsetsInitializer =
+                clusterStartingOffsetsInitializer != null
+                        ? clusterStartingOffsetsInitializer
+                        : startingOffsetsInitializer;
+        OffsetsInitializer effectiveStoppingOffsetsInitializer =
+                clusterStoppingOffsetsInitializer != null
+                        ? clusterStoppingOffsetsInitializer
+                        : stoppingOffsetInitializer;
+
         final Runnable signalNoMoreSplitsCallback;
         if (Boundedness.BOUNDED.equals(boundedness)) {
             signalNoMoreSplitsCallback = this::handleNoMoreSplits;
@@ -375,12 +412,18 @@ public class DynamicKafkaSourceEnumerator
         KafkaPropertiesUtil.copyProperties(fetchedProperties, consumerProps);
         KafkaPropertiesUtil.copyProperties(properties, consumerProps);
         KafkaPropertiesUtil.setClientIdPrefix(consumerProps, kafkaClusterId);
+        consumerProps.setProperty(
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                effectiveStartingOffsetsInitializer
+                        .getAutoOffsetResetStrategy()
+                        .name()
+                        .toLowerCase());
 
         KafkaSourceEnumerator enumerator =
                 new KafkaSourceEnumerator(
                         KafkaSubscriber.getTopicListSubscriber(new ArrayList<>(topics)),
-                        startingOffsetsInitializer,
-                        stoppingOffsetInitializer,
+                        effectiveStartingOffsetsInitializer,
+                        effectiveStoppingOffsetsInitializer,
                         consumerProps,
                         context,
                         boundedness,
@@ -484,7 +527,8 @@ public class DynamicKafkaSourceEnumerator
     /**
      * Besides for checkpointing, this method is used in the restart sequence to retain the relevant
      * assigned splits so that there is no reader duplicate split assignment. See {@link
-     * #createEnumeratorWithAssignedTopicPartitions(String, Set, KafkaSourceEnumState, Properties)}}
+     * #createEnumeratorWithAssignedTopicPartitions(String, Set, KafkaSourceEnumState, Properties,
+     * OffsetsInitializer, OffsetsInitializer)}}
      */
     @Override
     public DynamicKafkaSourceEnumState snapshotState(long checkpointId) throws Exception {

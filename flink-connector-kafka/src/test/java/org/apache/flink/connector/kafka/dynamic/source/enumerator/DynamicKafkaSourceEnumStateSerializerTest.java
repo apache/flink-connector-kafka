@@ -20,17 +20,21 @@ package org.apache.flink.connector.kafka.dynamic.source.enumerator;
 
 import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
+import org.apache.flink.connector.kafka.dynamic.source.testutils.DynamicKafkaSourceEnumStateTestUtils;
 import org.apache.flink.connector.kafka.source.enumerator.AssignmentStatus;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
 import org.apache.flink.connector.kafka.source.enumerator.SplitAndAssignmentStatus;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
 import java.util.Properties;
 import java.util.Set;
 
@@ -56,6 +60,10 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
         propertiesForCluster1.setProperty(
                 CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster1:9092");
 
+        OffsetsInitializer cluster0StartingOffsetsInitializer = OffsetsInitializer.earliest();
+        OffsetsInitializer cluster0StoppingOffsetsInitializer =
+                OffsetsInitializer.committedOffsets(OffsetResetStrategy.LATEST);
+
         Set<KafkaStream> kafkaStreams =
                 ImmutableSet.of(
                         new KafkaStream(
@@ -64,7 +72,9 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
                                         "cluster0",
                                         new ClusterMetadata(
                                                 ImmutableSet.of("topic0", "topic1"),
-                                                propertiesForCluster0),
+                                                propertiesForCluster0,
+                                                cluster0StartingOffsetsInitializer,
+                                                cluster0StoppingOffsetsInitializer),
                                         "cluster1",
                                         new ClusterMetadata(
                                                 ImmutableSet.of("topic2", "topic3"),
@@ -98,13 +108,99 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
 
         DynamicKafkaSourceEnumState dynamicKafkaSourceEnumStateAfterSerde =
                 dynamicKafkaSourceEnumStateSerializer.deserialize(
-                        1,
+                        dynamicKafkaSourceEnumStateSerializer.getVersion(),
                         dynamicKafkaSourceEnumStateSerializer.serialize(
                                 dynamicKafkaSourceEnumState));
 
         assertThat(dynamicKafkaSourceEnumState)
                 .usingRecursiveComparison()
                 .isEqualTo(dynamicKafkaSourceEnumStateAfterSerde);
+    }
+
+    @Test
+    public void testSerdeWithPartialOffsetsInitializers() throws Exception {
+        DynamicKafkaSourceEnumStateSerializer dynamicKafkaSourceEnumStateSerializer =
+                new DynamicKafkaSourceEnumStateSerializer();
+
+        Properties propertiesForCluster0 = new Properties();
+        propertiesForCluster0.setProperty(
+                CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster0:9092");
+        Properties propertiesForCluster1 = new Properties();
+        propertiesForCluster1.setProperty(
+                CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster1:9092");
+
+        OffsetsInitializer startingOffsetsInitializer = OffsetsInitializer.earliest();
+        OffsetsInitializer stoppingOffsetsInitializer = OffsetsInitializer.latest();
+
+        Set<KafkaStream> kafkaStreams =
+                ImmutableSet.of(
+                        new KafkaStream(
+                                "stream0",
+                                ImmutableMap.of(
+                                        "cluster0",
+                                        new ClusterMetadata(
+                                                ImmutableSet.of("topic0"),
+                                                propertiesForCluster0,
+                                                startingOffsetsInitializer,
+                                                null),
+                                        "cluster1",
+                                        new ClusterMetadata(
+                                                ImmutableSet.of("topic1"),
+                                                propertiesForCluster1,
+                                                null,
+                                                stoppingOffsetsInitializer))));
+
+        DynamicKafkaSourceEnumState dynamicKafkaSourceEnumState =
+                new DynamicKafkaSourceEnumState(kafkaStreams, Collections.emptyMap());
+
+        DynamicKafkaSourceEnumState dynamicKafkaSourceEnumStateAfterSerde =
+                dynamicKafkaSourceEnumStateSerializer.deserialize(
+                        dynamicKafkaSourceEnumStateSerializer.getVersion(),
+                        dynamicKafkaSourceEnumStateSerializer.serialize(
+                                dynamicKafkaSourceEnumState));
+
+        KafkaStream kafkaStream =
+                dynamicKafkaSourceEnumStateAfterSerde.getKafkaStreams().iterator().next();
+        ClusterMetadata cluster0Metadata = kafkaStream.getClusterMetadataMap().get("cluster0");
+        assertThat(cluster0Metadata.getStartingOffsetsInitializer()).isNotNull();
+        assertThat(cluster0Metadata.getStartingOffsetsInitializer().getAutoOffsetResetStrategy())
+                .isEqualTo(OffsetResetStrategy.EARLIEST);
+        assertThat(cluster0Metadata.getStoppingOffsetsInitializer()).isNull();
+
+        ClusterMetadata cluster1Metadata = kafkaStream.getClusterMetadataMap().get("cluster1");
+        assertThat(cluster1Metadata.getStartingOffsetsInitializer()).isNull();
+        assertThat(cluster1Metadata.getStoppingOffsetsInitializer()).isNotNull();
+        assertThat(cluster1Metadata.getStoppingOffsetsInitializer().getAutoOffsetResetStrategy())
+                .isEqualTo(OffsetResetStrategy.LATEST);
+    }
+
+    @Test
+    public void testDeserializeV1State() throws Exception {
+        DynamicKafkaSourceEnumStateSerializer dynamicKafkaSourceEnumStateSerializer =
+                new DynamicKafkaSourceEnumStateSerializer();
+
+        byte[] serializedState =
+                DynamicKafkaSourceEnumStateTestUtils.serializeV1State(
+                        "stream0",
+                        "cluster0",
+                        ImmutableSet.of("topic0", "topic1"),
+                        "cluster0:9092");
+
+        DynamicKafkaSourceEnumState dynamicKafkaSourceEnumState =
+                dynamicKafkaSourceEnumStateSerializer.deserialize(1, serializedState);
+
+        assertThat(dynamicKafkaSourceEnumState.getClusterEnumeratorStates()).isEmpty();
+        KafkaStream kafkaStream = dynamicKafkaSourceEnumState.getKafkaStreams().iterator().next();
+        assertThat(kafkaStream.getStreamId()).isEqualTo("stream0");
+        ClusterMetadata clusterMetadata = kafkaStream.getClusterMetadataMap().get("cluster0");
+        assertThat(clusterMetadata.getTopics()).containsExactlyInAnyOrder("topic0", "topic1");
+        assertThat(
+                        clusterMetadata
+                                .getProperties()
+                                .getProperty(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG))
+                .isEqualTo("cluster0:9092");
+        assertThat(clusterMetadata.getStartingOffsetsInitializer()).isNull();
+        assertThat(clusterMetadata.getStoppingOffsetsInitializer()).isNull();
     }
 
     private static SplitAndAssignmentStatus getSplitAssignment(
