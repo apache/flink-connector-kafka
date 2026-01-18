@@ -21,6 +21,7 @@ package org.apache.flink.streaming.connectors.kafka.table;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.connector.kafka.testutils.KafkaUtil;
+import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.test.util.AbstractTestBase;
@@ -41,7 +42,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -66,9 +66,8 @@ abstract class KafkaTableTestBase extends AbstractTestBase {
     private static final int zkTimeoutMills = 30000;
 
     @Container
-    public static final KafkaContainer KAFKA_CONTAINER =
+    public static final TestKafkaContainer KAFKA_CONTAINER =
             KafkaUtil.createKafkaContainer(KafkaTableTestBase.class)
-                    .withEmbeddedZookeeper()
                     .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS)
                     .withEnv(
                             "KAFKA_TRANSACTION_MAX_TIMEOUT_MS",

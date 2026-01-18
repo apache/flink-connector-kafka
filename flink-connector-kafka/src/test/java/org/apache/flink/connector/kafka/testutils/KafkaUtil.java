@@ -27,7 +27,6 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.utility.DockerImageName;
 
@@ -52,28 +51,26 @@ public class KafkaUtil {
     private KafkaUtil() {}
 
     /** This method helps to set commonly used Kafka configurations and sets up the logger. */
-    public static KafkaContainer createKafkaContainer(Class<?> testCase) {
+    public static TestKafkaContainer createKafkaContainer(Class<?> testCase) {
         return createKafkaContainer(getContainerName("kafka", testCase));
     }
 
     /** This method helps to set commonly used Kafka configurations and sets up the logger. */
-    public static KafkaContainer createKafkaContainer(String containerName) {
+    public static TestKafkaContainer createKafkaContainer(String containerName) {
         Logger logger = getLogger(containerName);
 
         String logLevel = inferLogLevel(logger);
 
         Slf4jLogConsumer logConsumer = new Slf4jLogConsumer(logger, true);
-        return new KafkaContainer(DockerImageName.parse(DockerImageVersions.KAFKA))
+        return new TestKafkaContainer(DockerImageName.parse(DockerImageVersions.KAFKA))
                 .withEnv("KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR", "1")
                 .withEnv("KAFKA_TRANSACTION_STATE_LOG_MIN_ISR", "1")
                 .withEnv("KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR", "1")
-                .withEnv("KAFKA_LOG4J_ROOT_LOGLEVEL", logLevel)
-                .withEnv("KAFKA_LOG4J_LOGGERS", "state.change.logger=" + logLevel)
+                .withKafkaLogLevel(logLevel)
                 .withEnv("KAFKA_CONFLUENT_SUPPORT_METRICS_ENABLE", "false")
                 .withEnv(
                         "KAFKA_TRANSACTION_MAX_TIMEOUT_MS",
                         String.valueOf(Duration.ofHours(2).toMillis()))
-                .withEnv("KAFKA_LOG4J_TOOLS_ROOT_LOGLEVEL", logLevel)
                 .withLogConsumer(logConsumer);
     }
 

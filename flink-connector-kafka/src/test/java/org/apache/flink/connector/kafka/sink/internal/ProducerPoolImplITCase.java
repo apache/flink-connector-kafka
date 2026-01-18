@@ -19,6 +19,7 @@
 package org.apache.flink.connector.kafka.sink.internal;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.test.junit5.MiniClusterExtension;
 
@@ -29,7 +30,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -59,8 +59,8 @@ class ProducerPoolImplITCase {
     public static final String TRANSACTIONAL_ID = "test-transactional-id";
 
     @Container
-    public static final KafkaContainer KAFKA_CONTAINER =
-            createKafkaContainer(ProducerPoolImplITCase.class).withEmbeddedZookeeper();
+    public static final TestKafkaContainer KAFKA_CONTAINER =
+            createKafkaContainer(ProducerPoolImplITCase.class);
 
     @AfterEach
     void checkLeak() {

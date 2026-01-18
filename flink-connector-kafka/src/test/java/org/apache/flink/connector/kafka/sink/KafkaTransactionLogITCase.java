@@ -19,9 +19,10 @@ package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.sink.KafkaTransactionLog.TransactionRecord;
+import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.test.junit5.MiniClusterExtension;
-import org.apache.flink.util.TestLogger;
+import org.apache.flink.util.TestLoggerExtension;
 
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
@@ -29,11 +30,12 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.IntegerSerializer;
-import org.junit.After;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
-import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -51,7 +53,9 @@ import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaCo
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link KafkaTransactionLog} to retrieve abortable Kafka transactions. */
-public class KafkaTransactionLogITCase extends TestLogger {
+@Testcontainers
+@ExtendWith(TestLoggerExtension.class)
+class KafkaTransactionLogITCase {
 
     private static final String TOPIC_NAME = "kafkaTransactionLogTest";
     private static final String TRANSACTIONAL_ID_PREFIX = "kafka-log";
@@ -65,14 +69,14 @@ public class KafkaTransactionLogITCase extends TestLogger {
                             .setConfiguration(new Configuration())
                             .build());
 
-    @ClassRule
-    public static final KafkaContainer KAFKA_CONTAINER =
-            createKafkaContainer(KafkaTransactionLogITCase.class).withEmbeddedZookeeper();
+    @Container
+    public static final TestKafkaContainer KAFKA_CONTAINER =
+            createKafkaContainer(KafkaTransactionLogITCase.class);
 
     private final List<Producer<byte[], Integer>> openProducers = new ArrayList<>();
 
-    @After
-    public void tearDown() {
+    @AfterEach
+    void tearDown() {
         openProducers.forEach(Producer::close);
         checkProducerLeak();
     }

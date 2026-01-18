@@ -21,6 +21,7 @@ package org.apache.flink.tests.util.kafka;
 import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 import org.apache.flink.connector.kafka.sink.testutils.KafkaSinkExternalContextFactory;
 import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
+import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.connector.testframe.container.FlinkContainerTestEnvironment;
 import org.apache.flink.connector.testframe.external.DefaultContainerizedExternalSystem;
 import org.apache.flink.connector.testframe.junit.annotations.TestContext;
@@ -31,8 +32,7 @@ import org.apache.flink.connector.testframe.testsuites.SinkTestSuiteBase;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.test.resources.ResourceTestUtils;
 
-import org.testcontainers.containers.KafkaContainer;
-import org.testcontainers.utility.DockerImageName;
+import org.testcontainers.containers.GenericContainer;
 
 import java.util.Arrays;
 
@@ -50,13 +50,15 @@ public class KafkaSinkE2ECase extends SinkTestSuiteBase<String> {
     // Defines TestEnvironment
     @TestEnv FlinkContainerTestEnvironment flink = new FlinkContainerTestEnvironment(1, 6);
 
+    private final TestKafkaContainer kafkaContainer =
+            new TestKafkaContainer(DockerImageVersions.KAFKA).withNetworkAliases(KAFKA_HOSTNAME);
+
     // Defines ConnectorExternalSystem
+    @SuppressWarnings({"rawtypes", "unchecked"})
     @TestExternalSystem
-    DefaultContainerizedExternalSystem<KafkaContainer> kafka =
+    DefaultContainerizedExternalSystem<?> kafka =
             DefaultContainerizedExternalSystem.builder()
-                    .fromContainer(
-                            new KafkaContainer(DockerImageName.parse(DockerImageVersions.KAFKA))
-                                    .withNetworkAliases(KAFKA_HOSTNAME))
+                    .fromContainer((GenericContainer) kafkaContainer.getContainer())
                     .bindWithFlinkContainer(flink.getFlinkContainers().getJobManager())
                     .build();
 
@@ -65,7 +67,7 @@ public class KafkaSinkE2ECase extends SinkTestSuiteBase<String> {
     @TestContext
     KafkaSinkExternalContextFactory incrementing =
             new KafkaSinkExternalContextFactory(
-                    kafka.getContainer(),
+                    kafkaContainer,
                     Arrays.asList(
                             ResourceTestUtils.getResource("kafka-connector.jar")
                                     .toAbsolutePath()
@@ -84,7 +86,7 @@ public class KafkaSinkE2ECase extends SinkTestSuiteBase<String> {
     @TestContext
     KafkaSinkExternalContextFactory pooling =
             new KafkaSinkExternalContextFactory(
-                    kafka.getContainer(),
+                    kafkaContainer,
                     Arrays.asList(
                             ResourceTestUtils.getResource("kafka-connector.jar")
                                     .toAbsolutePath()

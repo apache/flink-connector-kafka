@@ -28,6 +28,4 @@ public class DockerImageVersions {
     public static final String APACHE_KAFKA = "apache/kafka:4.1.1";
 
     public static final String SCHEMA_REGISTRY = "confluentinc/cp-schema-registry:7.9.2";
-
-    public static final String ZOOKEEPER = "zookeeper:3.8.4";
 }

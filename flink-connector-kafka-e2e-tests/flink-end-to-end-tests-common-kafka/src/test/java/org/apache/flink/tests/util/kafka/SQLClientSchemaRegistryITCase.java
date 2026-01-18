@@ -21,6 +21,7 @@ package org.apache.flink.tests.util.kafka;
 import org.apache.flink.api.common.time.Deadline;
 import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
 import org.apache.flink.connector.kafka.testutils.KafkaUtil;
+import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.connector.testframe.container.FlinkContainers;
 import org.apache.flink.connector.testframe.container.TestcontainersSettings;
 import org.apache.flink.test.resources.ResourceTestUtils;
@@ -36,13 +37,13 @@ import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
 import org.apache.avro.generic.GenericRecordBuilder;
 import org.apache.kafka.common.serialization.StringDeserializer;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.ClassRule;
-import org.junit.Test;
-import org.junit.rules.Timeout;
-import org.testcontainers.containers.KafkaContainer;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.testcontainers.containers.Network;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.nio.file.Path;
@@ -53,11 +54,12 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
-import static org.hamcrest.CoreMatchers.equalTo;
-import static org.junit.Assert.assertThat;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** End-to-end test for SQL client using Avro Confluent Registry format. */
-public class SQLClientSchemaRegistryITCase {
+@Testcontainers
+@Timeout(value = 10, unit = TimeUnit.MINUTES)
+class SQLClientSchemaRegistryITCase {
     public static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
     public static final String INTER_CONTAINER_REGISTRY_ALIAS = "registry";
     private static final Path sqlAvroJar = ResourceTestUtils.getResource(".*avro.jar");
@@ -65,29 +67,27 @@ public class SQLClientSchemaRegistryITCase {
             ResourceTestUtils.getResource(".*avro-confluent.jar");
     private final Path sqlConnectorKafkaJar = ResourceTestUtils.getResource(".*kafka.jar");
 
-    @ClassRule public static final Network NETWORK = Network.newNetwork();
+    public static final Network NETWORK = Network.newNetwork();
 
-    @ClassRule public static final Timeout TIMEOUT = new Timeout(10, TimeUnit.MINUTES);
-
-    @ClassRule
-    public static final KafkaContainer KAFKA =
+    @Container
+    public static final TestKafkaContainer KAFKA_CONTAINER =
             KafkaUtil.createKafkaContainer(SQLClientSchemaRegistryITCase.class)
                     .withNetwork(NETWORK)
                     .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS);
 
-    @ClassRule
+    @Container
     public static final SchemaRegistryContainer REGISTRY =
             new SchemaRegistryContainer(DockerImageName.parse(DockerImageVersions.SCHEMA_REGISTRY))
-                    .withKafka(INTER_CONTAINER_KAFKA_ALIAS + ":9092")
+                    .withKafka(INTER_CONTAINER_KAFKA_ALIAS + ":9093")
                     .withNetwork(NETWORK)
                     .withNetworkAliases(INTER_CONTAINER_REGISTRY_ALIAS)
-                    .dependsOn(KAFKA);
+                    .dependsOn(KAFKA_CONTAINER.getContainer());
 
     public final TestcontainersSettings testcontainersSettings =
             TestcontainersSettings.builder()
                     .network(NETWORK)
                     .logger(KafkaUtil.getLogger("flink", SQLClientSchemaRegistryITCase.class))
-                    .dependsOn(KAFKA)
+                    .dependsOn(KAFKA_CONTAINER.getContainer())
                     .build();
 
     public final FlinkContainers flink =
@@ -96,14 +96,14 @@ public class SQLClientSchemaRegistryITCase {
     private KafkaContainerClient kafkaClient;
     private CachedSchemaRegistryClient registryClient;
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         flink.start();
-        kafkaClient = new KafkaContainerClient(KAFKA);
+        kafkaClient = new KafkaContainerClient(KAFKA_CONTAINER);
         registryClient = new CachedSchemaRegistryClient(REGISTRY.getSchemaRegistryUrl(), 10);
     }
 
-    @After
+    @AfterEach
     public void tearDown() {
         flink.stop();
     }
@@ -140,7 +140,7 @@ public class SQLClientSchemaRegistryITCase {
                         " 'connector' = 'kafka',",
                         " 'properties.bootstrap.servers' = '"
                                 + INTER_CONTAINER_KAFKA_ALIAS
-                                + ":9092',",
+                                + ":9093',",
                         " 'topic' = '" + testCategoryTopic + "',",
                         " 'scan.startup.mode' = 'earliest-offset',",
                         " 'properties.group.id' = 'test-group',",
@@ -158,7 +158,7 @@ public class SQLClientSchemaRegistryITCase {
                         " 'connector' = 'kafka',",
                         " 'properties.bootstrap.servers' = '"
                                 + INTER_CONTAINER_KAFKA_ALIAS
-                                + ":9092',",
+                                + ":9093',",
                         " 'properties.group.id' = 'test-group',",
                         " 'topic' = '" + testResultsTopic + "',",
                         " 'format' = 'csv',",
@@ -171,7 +171,7 @@ public class SQLClientSchemaRegistryITCase {
         List<String> categories =
                 kafkaClient.readMessages(
                         1, "test-group", testResultsTopic, new StringDeserializer());
-        assertThat(categories, equalTo(Collections.singletonList("1,electronics,null")));
+        assertThat(categories).isEqualTo(Collections.singletonList("1,electronics,null"));
     }
 
     @Test
@@ -193,7 +193,7 @@ public class SQLClientSchemaRegistryITCase {
                         " 'connector' = 'kafka',",
                         " 'properties.bootstrap.servers' = '"
                                 + INTER_CONTAINER_KAFKA_ALIAS
-                                + ":9092',",
+                                + ":9093',",
                         " 'topic' = '" + testUserBehaviorTopic + "',",
                         " 'format' = 'avro-confluent',",
                         " 'avro-confluent.url' = 'http://"
@@ -207,7 +207,7 @@ public class SQLClientSchemaRegistryITCase {
         executeSqlStatements(sqlLines);
 
         List<Integer> versions = getAllVersions(behaviourSubject);
-        assertThat(versions.size(), equalTo(1));
+        assertThat(versions).hasSize(1);
         List<Object> userBehaviors =
                 kafkaClient.readMessages(
                         1,
@@ -219,9 +219,8 @@ public class SQLClientSchemaRegistryITCase {
                 registryClient.getByVersion(behaviourSubject, versions.get(0), false).getSchema();
         Schema userBehaviorSchema = new Schema.Parser().parse(schemaString);
         GenericRecordBuilder recordBuilder = new GenericRecordBuilder(userBehaviorSchema);
-        assertThat(
-                userBehaviors,
-                equalTo(
+        assertThat(userBehaviors)
+                .isEqualTo(
                         Collections.singletonList(
                                 recordBuilder
                                         .set("user_id", 1L)
@@ -229,7 +228,7 @@ public class SQLClientSchemaRegistryITCase {
                                         .set("category_id", 1L)
                                         .set("behavior", "buy")
                                         .set("ts", 1234000L)
-                                        .build())));
+                                        .build()));
     }
 
     private List<Integer> getAllVersions(String behaviourSubject) throws Exception {

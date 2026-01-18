@@ -32,6 +32,7 @@ import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDe
 import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
 import org.apache.flink.connector.kafka.testutils.KafkaSourceExternalContextFactory;
 import org.apache.flink.connector.kafka.testutils.KafkaSourceTestEnv;
+import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.connector.testframe.environment.MiniClusterTestEnvironment;
 import org.apache.flink.connector.testframe.external.DefaultContainerizedExternalSystem;
 import org.apache.flink.connector.testframe.junit.annotations.TestContext;
@@ -64,7 +65,7 @@ import org.junit.jupiter.api.TestInstance.Lifecycle;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import java.io.IOException;
@@ -419,13 +420,15 @@ public class KafkaSourceITCase {
         @TestEnv
         MiniClusterTestEnvironment flink = new MiniClusterTestEnvironment();
 
+        private final TestKafkaContainer kafkaContainer =
+                new TestKafkaContainer(DockerImageName.parse(DockerImageVersions.KAFKA));
+
         // Defines external system
+        @SuppressWarnings({"rawtypes", "unchecked"})
         @TestExternalSystem
-        DefaultContainerizedExternalSystem<KafkaContainer> kafka =
+        DefaultContainerizedExternalSystem<?> kafka =
                 DefaultContainerizedExternalSystem.builder()
-                        .fromContainer(
-                                new KafkaContainer(
-                                        DockerImageName.parse(DockerImageVersions.KAFKA)))
+                        .fromContainer((GenericContainer) kafkaContainer.getContainer())
                         .build();
 
         // Defines 2 External context Factories, so test cases will be invoked twice using these two
@@ -434,13 +437,13 @@ public class KafkaSourceITCase {
         @TestContext
         KafkaSourceExternalContextFactory singleTopic =
                 new KafkaSourceExternalContextFactory(
-                        kafka.getContainer(), Collections.emptyList(), PARTITION);
+                        kafkaContainer, Collections.emptyList(), PARTITION);
 
         @SuppressWarnings("unused")
         @TestContext
         KafkaSourceExternalContextFactory multipleTopic =
                 new KafkaSourceExternalContextFactory(
-                        kafka.getContainer(), Collections.emptyList(), TOPIC);
+                        kafkaContainer, Collections.emptyList(), TOPIC);
     }
 
     // -----------------

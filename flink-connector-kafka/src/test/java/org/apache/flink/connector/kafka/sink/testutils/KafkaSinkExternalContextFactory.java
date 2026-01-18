@@ -19,9 +19,8 @@
 package org.apache.flink.connector.kafka.sink.testutils;
 
 import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
+import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.connector.testframe.external.ExternalContextFactory;
-
-import org.testcontainers.containers.KafkaContainer;
 
 import java.net.URL;
 import java.util.List;
@@ -31,12 +30,12 @@ import java.util.stream.Collectors;
 public class KafkaSinkExternalContextFactory
         implements ExternalContextFactory<KafkaSinkExternalContext> {
 
-    private final KafkaContainer kafkaContainer;
+    private final TestKafkaContainer kafkaContainer;
     private final List<URL> connectorJars;
     private final TransactionNamingStrategy transactionNamingStrategy;
 
     public KafkaSinkExternalContextFactory(
-            KafkaContainer kafkaContainer,
+            TestKafkaContainer kafkaContainer,
             List<URL> connectorJars,
             TransactionNamingStrategy transactionNamingStrategy) {
         this.kafkaContainer = kafkaContainer;
@@ -47,7 +46,7 @@ public class KafkaSinkExternalContextFactory
     private String getBootstrapServer() {
         final String internalEndpoints =
                 kafkaContainer.getNetworkAliases().stream()
-                        .map(host -> String.join(":", host, Integer.toString(9092)))
+                        .map(host -> String.join(":", host, Integer.toString(9093)))
                         .collect(Collectors.joining(","));
         return String.join(",", kafkaContainer.getBootstrapServers(), internalEndpoints);
     }
