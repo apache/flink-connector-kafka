@@ -62,7 +62,7 @@ public class KafkaUtil {
         String logLevel = inferLogLevel(logger);
 
         Slf4jLogConsumer logConsumer = new Slf4jLogConsumer(logger, true);
-        return new TestKafkaContainer(DockerImageName.parse(DockerImageVersions.KAFKA))
+        return new TestKafkaContainer(DockerImageName.parse(DockerImageVersions.CP_KAFKA))
                 .withEnv("KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR", "1")
                 .withEnv("KAFKA_TRANSACTION_STATE_LOG_MIN_ISR", "1")
                 .withEnv("KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR", "1")

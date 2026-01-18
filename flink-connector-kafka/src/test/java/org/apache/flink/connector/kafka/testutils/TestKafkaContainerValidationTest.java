@@ -27,7 +27,7 @@ class TestKafkaContainerValidationTest {
 
     @Test
     void testConfluentImageIsAccepted() {
-        assertThatCode(() -> new TestKafkaContainer(DockerImageVersions.KAFKA))
+        assertThatCode(() -> new TestKafkaContainer(DockerImageVersions.CP_KAFKA))
                 .doesNotThrowAnyException();
     }
 

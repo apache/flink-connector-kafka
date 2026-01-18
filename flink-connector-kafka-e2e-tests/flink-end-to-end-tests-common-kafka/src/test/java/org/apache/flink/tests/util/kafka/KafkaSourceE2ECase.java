@@ -34,7 +34,7 @@ import org.testcontainers.containers.GenericContainer;
 
 import java.util.Arrays;
 
-import static org.apache.flink.connector.kafka.testutils.DockerImageVersions.KAFKA;
+import static org.apache.flink.connector.kafka.testutils.DockerImageVersions.CP_KAFKA;
 import static org.apache.flink.connector.kafka.testutils.KafkaSourceExternalContext.SplitMappingMode.PARTITION;
 import static org.apache.flink.connector.kafka.testutils.KafkaSourceExternalContext.SplitMappingMode.TOPIC;
 
@@ -49,7 +49,7 @@ public class KafkaSourceE2ECase extends SourceTestSuiteBase<String> {
     @TestEnv FlinkContainerTestEnvironment flink = new FlinkContainerTestEnvironment(1, 6);
 
     TestKafkaContainer kafkaContainer =
-            new TestKafkaContainer(KAFKA).withNetworkAliases(KAFKA_HOSTNAME);
+            new TestKafkaContainer(CP_KAFKA).withNetworkAliases(KAFKA_HOSTNAME);
 
     // Defines ConnectorExternalSystem
     @SuppressWarnings({"rawtypes", "unchecked"})
