@@ -20,8 +20,6 @@ package org.apache.flink.connector.kafka.testutils;
 
 import org.apache.flink.connector.testframe.external.ExternalContextFactory;
 
-import org.testcontainers.containers.KafkaContainer;
-
 import java.net.URL;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -30,12 +28,12 @@ import java.util.stream.Collectors;
 public class KafkaSourceExternalContextFactory
         implements ExternalContextFactory<KafkaSourceExternalContext> {
 
-    private final KafkaContainer kafkaContainer;
+    private final TestKafkaContainer kafkaContainer;
     private final List<URL> connectorJars;
     private final KafkaSourceExternalContext.SplitMappingMode splitMappingMode;
 
     public KafkaSourceExternalContextFactory(
-            KafkaContainer kafkaContainer,
+            TestKafkaContainer kafkaContainer,
             List<URL> connectorJars,
             KafkaSourceExternalContext.SplitMappingMode splitMappingMode) {
         this.kafkaContainer = kafkaContainer;
@@ -46,7 +44,7 @@ public class KafkaSourceExternalContextFactory
     protected String getBootstrapServer() {
         final String internalEndpoints =
                 kafkaContainer.getNetworkAliases().stream()
-                        .map(host -> String.join(":", host, Integer.toString(9092)))
+                        .map(host -> String.join(":", host, Integer.toString(9093)))
                         .collect(Collectors.joining(","));
         return String.join(",", kafkaContainer.getBootstrapServers(), internalEndpoints);
     }

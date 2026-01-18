@@ -19,6 +19,7 @@ package org.apache.flink.streaming.connectors.kafka;
 
 import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
 import org.apache.flink.connector.kafka.testutils.KafkaUtil;
+import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.core.testutils.CommonTestUtils;
 
 import org.apache.kafka.clients.admin.AdminClient;
@@ -31,10 +32,7 @@ import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.DockerClientFactory;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.Network;
-import org.testcontainers.utility.DockerImageName;
 
 import javax.annotation.Nullable;
 
@@ -58,28 +56,20 @@ public class KafkaTestEnvironmentImpl extends KafkaTestEnvironment {
 
     protected static final Logger LOG = LoggerFactory.getLogger(KafkaTestEnvironmentImpl.class);
 
-    private static final String ZOOKEEPER_HOSTNAME = "zookeeper";
-    private static final int ZOOKEEPER_PORT = 2181;
-
-    private final Map<Integer, KafkaContainer> brokers = new HashMap<>();
+    private final Map<Integer, TestKafkaContainer> brokers = new HashMap<>();
     private final Set<Integer> pausedBroker = new HashSet<>();
-    private @Nullable GenericContainer<?> zookeeper;
     private @Nullable Network network;
     private String brokerConnectionString = "";
     private Properties standardProps;
-    // 6 seconds is default. Seems to be too small for travis. 30 seconds
-    private int zkTimeout = 30000;
     private Config config;
     private static final int REQUEST_TIMEOUT_SECONDS = 30;
 
     @Override
     public void prepare(Config config) throws Exception {
-        // increase the timeout since in Travis ZK connection takes long time for secure connection.
         if (config.isSecureMode()) {
-            // run only one kafka server to avoid multiple ZK connections from many instances -
-            // Travis timeout
+            // run only one kafka server to avoid multiple connections from many instances - Travis
+            // timeout
             config.setKafkaServersNumber(1);
-            zkTimeout = zkTimeout * 15;
         }
         this.config = config;
         brokers.clear();
@@ -92,8 +82,6 @@ public class KafkaTestEnvironmentImpl extends KafkaTestEnvironment {
         standardProps.setProperty("bootstrap.servers", brokerConnectionString);
         standardProps.setProperty("group.id", "flink-tests");
         standardProps.setProperty("enable.auto.commit", "false");
-        standardProps.setProperty("zookeeper.session.timeout.ms", String.valueOf(zkTimeout));
-        standardProps.setProperty("zookeeper.connection.timeout.ms", String.valueOf(zkTimeout));
         standardProps.setProperty("auto.offset.reset", "earliest"); // read from the beginning.
         standardProps.setProperty(
                 "max.partition.fetch.bytes",
@@ -198,10 +186,6 @@ public class KafkaTestEnvironmentImpl extends KafkaTestEnvironment {
             prop.put("security.inter.broker.protocol", "SASL_PLAINTEXT");
             prop.put("security.protocol", "SASL_PLAINTEXT");
             prop.put("sasl.kerberos.service.name", "kafka");
-
-            // add special timeout for Travis
-            prop.setProperty("zookeeper.session.timeout.ms", String.valueOf(zkTimeout));
-            prop.setProperty("zookeeper.connection.timeout.ms", String.valueOf(zkTimeout));
             prop.setProperty("metadata.fetch.timeout.ms", "120000");
         }
         return prop;
@@ -251,12 +235,8 @@ public class KafkaTestEnvironmentImpl extends KafkaTestEnvironment {
 
     @Override
     public void shutdown() throws Exception {
-        brokers.values().forEach(GenericContainer::stop);
+        brokers.values().forEach(TestKafkaContainer::stop);
         brokers.clear();
-
-        if (zookeeper != null) {
-            zookeeper.stop();
-        }
 
         if (network != null) {
             network.close();
@@ -307,62 +287,34 @@ public class KafkaTestEnvironmentImpl extends KafkaTestEnvironment {
     }
 
     private void startKafkaContainerCluster(int numBrokers) {
-        if (numBrokers > 1) {
-            network = Network.newNetwork();
-            zookeeper = createZookeeperContainer(network);
-            zookeeper.start();
-            LOG.info("Zookeeper container started");
-        }
+        network = Network.newNetwork();
         for (int brokerID = 0; brokerID < numBrokers; brokerID++) {
-            KafkaContainer broker = createKafkaContainer(brokerID, zookeeper);
+            TestKafkaContainer broker = createKafkaContainer(brokerID);
             brokers.put(brokerID, broker);
         }
-        new ArrayList<>(brokers.values()).parallelStream().forEach(GenericContainer::start);
+        new ArrayList<>(brokers.values()).parallelStream().forEach(TestKafkaContainer::start);
         LOG.info("{} brokers started", numBrokers);
         brokerConnectionString =
                 brokers.values().stream()
-                        .map(KafkaContainer::getBootstrapServers)
-                        // Here we have URL like "PLAINTEXT://127.0.0.1:15213", and we only keep the
-                        // "127.0.0.1:15213" part in broker connection string
-                        .map(server -> server.split("://")[1])
+                        .map(TestKafkaContainer::getBootstrapServers)
+                        // Here we have URL like "PLAINTEXT://127.0.0.1:15213" (Confluent Kafka),
+                        // and we only keep the "127.0.0.1:15213" part.
+                        // Apache Kafka may return "host:port" directly without protocol prefix,
+                        // so we handle both cases.
+                        .map(server -> server.contains("://") ? server.split("://", 2)[1] : server)
                         .collect(Collectors.joining(","));
+        LOG.info("Broker connection string: {}", brokerConnectionString);
     }
 
-    private GenericContainer<?> createZookeeperContainer(Network network) {
-        return new GenericContainer<>(DockerImageName.parse(DockerImageVersions.ZOOKEEPER))
-                .withNetwork(network)
-                .withNetworkAliases(ZOOKEEPER_HOSTNAME)
-                .withEnv("ZOOKEEPER_CLIENT_PORT", String.valueOf(ZOOKEEPER_PORT));
-    }
-
-    private KafkaContainer createKafkaContainer(
-            int brokerID, @Nullable GenericContainer<?> zookeeper) {
+    private TestKafkaContainer createKafkaContainer(int brokerID) {
         String brokerName = String.format("Kafka-%d", brokerID);
-        KafkaContainer broker =
-                KafkaUtil.createKafkaContainer(brokerName)
-                        .withNetworkAliases(brokerName)
-                        .withEnv("KAFKA_BROKER_ID", String.valueOf(brokerID))
-                        .withEnv("KAFKA_MESSAGE_MAX_BYTES", String.valueOf(50 * 1024 * 1024))
-                        .withEnv("KAFKA_REPLICA_FETCH_MAX_BYTES", String.valueOf(50 * 1024 * 1024))
-                        .withEnv(
-                                "KAFKA_TRANSACTION_MAX_TIMEOUT_MS",
-                                Integer.toString(1000 * 60 * 60 * 2))
-                        // Disable log deletion to prevent records from being deleted during test
-                        // run
-                        .withEnv("KAFKA_LOG_RETENTION_MS", "-1")
-                        .withEnv("KAFKA_ZOOKEEPER_SESSION_TIMEOUT_MS", String.valueOf(zkTimeout))
-                        .withEnv(
-                                "KAFKA_ZOOKEEPER_CONNECTION_TIMEOUT_MS", String.valueOf(zkTimeout));
-
-        if (zookeeper != null) {
-            broker.dependsOn(zookeeper)
-                    .withNetwork(zookeeper.getNetwork())
-                    .withExternalZookeeper(
-                            String.format("%s:%d", ZOOKEEPER_HOSTNAME, ZOOKEEPER_PORT));
-        } else {
-            broker.withEmbeddedZookeeper();
-        }
-        return broker;
+        return KafkaUtil.createKafkaContainer(brokerName)
+                .withNetworkAliases(brokerName)
+                .withEnv("KAFKA_INTER_BROKER_LISTENER_NAME", "BROKER")
+                .withEnv("KAFKA_MESSAGE_MAX_BYTES", String.valueOf(50 * 1024 * 1024))
+                .withEnv("KAFKA_REPLICA_FETCH_MAX_BYTES", String.valueOf(50 * 1024 * 1024))
+                .withEnv("KAFKA_TRANSACTION_MAX_TIMEOUT_MS", Integer.toString(1000 * 60 * 60 * 2))
+                .withEnv("KAFKA_LOG_RETENTION_MS", "-1");
     }
 
     private void pause(int brokerId) {

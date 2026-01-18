@@ -22,7 +22,6 @@ import org.apache.flink.connector.kafka.dynamic.source.DynamicKafkaSource;
 import org.apache.flink.connector.testframe.external.ExternalContextFactory;
 
 import com.google.common.collect.ImmutableList;
-import org.testcontainers.containers.KafkaContainer;
 
 import java.net.URL;
 import java.util.List;
@@ -32,13 +31,13 @@ import java.util.stream.Collectors;
 public class DynamicKafkaSourceExternalContextFactory
         implements ExternalContextFactory<DynamicKafkaSourceExternalContext> {
 
-    private final KafkaContainer kafkaContainer0;
-    private final KafkaContainer kafkaContainer1;
+    private final TestKafkaContainer kafkaContainer0;
+    private final TestKafkaContainer kafkaContainer1;
     private final List<URL> connectorJars;
 
     public DynamicKafkaSourceExternalContextFactory(
-            KafkaContainer kafkaContainer0,
-            KafkaContainer kafkaContainer1,
+            TestKafkaContainer kafkaContainer0,
+            TestKafkaContainer kafkaContainer1,
             List<URL> connectorJars) {
         this.kafkaContainer0 = kafkaContainer0;
         this.kafkaContainer1 = kafkaContainer1;
@@ -53,10 +52,10 @@ public class DynamicKafkaSourceExternalContextFactory
                 connectorJars);
     }
 
-    private static String getBootstrapServers(KafkaContainer kafkaContainer) {
+    private static String getBootstrapServers(TestKafkaContainer kafkaContainer) {
         final String internalEndpoints =
                 kafkaContainer.getNetworkAliases().stream()
-                        .map(host -> String.join(":", host, Integer.toString(9092)))
+                        .map(host -> String.join(":", host, Integer.toString(9093)))
                         .collect(Collectors.joining(","));
         return String.join(",", kafkaContainer.getBootstrapServers(), internalEndpoints);
     }

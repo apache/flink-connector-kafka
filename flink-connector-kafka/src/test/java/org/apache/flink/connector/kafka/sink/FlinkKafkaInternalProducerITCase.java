@@ -19,6 +19,7 @@ package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
+import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.test.junit5.MiniClusterExtension;
 import org.apache.flink.util.TestLoggerExtension;
@@ -42,7 +43,6 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -73,8 +73,8 @@ class FlinkKafkaInternalProducerITCase {
                             .build());
 
     @Container
-    private static final KafkaContainer KAFKA_CONTAINER =
-            createKafkaContainer(FlinkKafkaInternalProducerITCase.class).withEmbeddedZookeeper();
+    private static final TestKafkaContainer KAFKA_CONTAINER =
+            createKafkaContainer(FlinkKafkaInternalProducerITCase.class);
 
     @AfterEach
     public void check() {

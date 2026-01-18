@@ -22,6 +22,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.configuration.TaskManagerOptions;
 import org.apache.flink.connector.kafka.testutils.KafkaUtil;
+import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.connector.testframe.container.FlinkContainers;
 import org.apache.flink.connector.testframe.container.FlinkContainersSettings;
 import org.apache.flink.connector.testframe.container.TestcontainersSettings;
@@ -45,7 +46,6 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -74,16 +74,15 @@ class SmokeKafkaITCase {
     private static final String EXAMPLE_JAR_MATCHER = "flink-streaming-kafka-test.*";
 
     @Container
-    public static final KafkaContainer KAFKA_CONTAINER =
+    public static final TestKafkaContainer KAFKA_CONTAINER =
             createKafkaContainer(SmokeKafkaITCase.class)
-                    .withEmbeddedZookeeper()
                     .withNetwork(NETWORK)
                     .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS);
 
     public static final TestcontainersSettings TESTCONTAINERS_SETTINGS =
             TestcontainersSettings.builder()
                     .logger(KafkaUtil.getLogger("flink", SmokeKafkaITCase.class))
-                    .dependsOn(KAFKA_CONTAINER)
+                    .dependsOn(KAFKA_CONTAINER.getContainer())
                     .build();
 
     @RegisterExtension
@@ -174,7 +173,7 @@ class SmokeKafkaITCase {
                                                                 String.join(
                                                                         ":",
                                                                         host,
-                                                                        Integer.toString(9092)))
+                                                                        Integer.toString(9093)))
                                                 .collect(Collectors.joining(","))))
                         .addArgument("--group.id", "myconsumer")
                         .addArgument("--auto.offset.reset", "earliest")

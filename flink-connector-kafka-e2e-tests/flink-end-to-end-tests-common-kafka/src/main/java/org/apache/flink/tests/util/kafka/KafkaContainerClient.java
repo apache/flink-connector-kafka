@@ -19,6 +19,7 @@
 package org.apache.flink.tests.util.kafka;
 
 import org.apache.flink.api.common.time.Deadline;
+import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.core.testutils.CommonTestUtils;
 
 import org.apache.kafka.clients.CommonClientConfigs;
@@ -42,7 +43,6 @@ import org.apache.kafka.common.serialization.Serializer;
 import org.apache.kafka.common.utils.Bytes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testcontainers.containers.KafkaContainer;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -53,12 +53,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
-/** A utility class that exposes common methods over a {@link KafkaContainer}. */
+/** A utility class that exposes common methods over a {@link TestKafkaContainer}. */
 public class KafkaContainerClient {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaContainerClient.class);
-    private final KafkaContainer container;
+    private final TestKafkaContainer container;
 
-    public KafkaContainerClient(KafkaContainer container) {
+    public KafkaContainerClient(TestKafkaContainer container) {
         this.container = container;
     }
 

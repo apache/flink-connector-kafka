@@ -19,18 +19,17 @@
 package org.apache.flink.connector.kafka.testutils;
 
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.utility.DockerImageName;
 
 /** Wraps 2 Kafka containers into one for test utilities that only accept one container. */
 public class TwoKafkaContainers extends GenericContainer<TwoKafkaContainers> {
-    private final KafkaContainer kafka0;
-    private final KafkaContainer kafka1;
+    private final TestKafkaContainer kafka0;
+    private final TestKafkaContainer kafka1;
 
     public TwoKafkaContainers() {
         DockerImageName dockerImageName = DockerImageName.parse(DockerImageVersions.KAFKA);
-        this.kafka0 = new KafkaContainer(dockerImageName);
-        this.kafka1 = new KafkaContainer(dockerImageName);
+        this.kafka0 = new TestKafkaContainer(dockerImageName);
+        this.kafka1 = new TestKafkaContainer(dockerImageName);
     }
 
     @Override
@@ -50,11 +49,11 @@ public class TwoKafkaContainers extends GenericContainer<TwoKafkaContainers> {
         kafka1.stop();
     }
 
-    public KafkaContainer getKafka0() {
+    public TestKafkaContainer getKafka0() {
         return kafka0;
     }
 
-    public KafkaContainer getKafka1() {
+    public TestKafkaContainer getKafka1() {
         return kafka1;
     }
 }

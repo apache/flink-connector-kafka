@@ -18,8 +18,8 @@
 
 package org.apache.flink.tests.util.kafka;
 
-import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
 import org.apache.flink.connector.kafka.testutils.KafkaSourceExternalContextFactory;
+import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.connector.testframe.container.FlinkContainerTestEnvironment;
 import org.apache.flink.connector.testframe.external.DefaultContainerizedExternalSystem;
 import org.apache.flink.connector.testframe.junit.annotations.TestContext;
@@ -30,11 +30,11 @@ import org.apache.flink.connector.testframe.testsuites.SourceTestSuiteBase;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.test.resources.ResourceTestUtils;
 
-import org.testcontainers.containers.KafkaContainer;
-import org.testcontainers.utility.DockerImageName;
+import org.testcontainers.containers.GenericContainer;
 
 import java.util.Arrays;
 
+import static org.apache.flink.connector.kafka.testutils.DockerImageVersions.KAFKA;
 import static org.apache.flink.connector.kafka.testutils.KafkaSourceExternalContext.SplitMappingMode.PARTITION;
 import static org.apache.flink.connector.kafka.testutils.KafkaSourceExternalContext.SplitMappingMode.TOPIC;
 
@@ -48,13 +48,15 @@ public class KafkaSourceE2ECase extends SourceTestSuiteBase<String> {
     // Defines TestEnvironment
     @TestEnv FlinkContainerTestEnvironment flink = new FlinkContainerTestEnvironment(1, 6);
 
+    TestKafkaContainer kafkaContainer =
+            new TestKafkaContainer(KAFKA).withNetworkAliases(KAFKA_HOSTNAME);
+
     // Defines ConnectorExternalSystem
+    @SuppressWarnings({"rawtypes", "unchecked"})
     @TestExternalSystem
-    DefaultContainerizedExternalSystem<KafkaContainer> kafka =
+    DefaultContainerizedExternalSystem<?> kafka =
             DefaultContainerizedExternalSystem.builder()
-                    .fromContainer(
-                            new KafkaContainer(DockerImageName.parse(DockerImageVersions.KAFKA))
-                                    .withNetworkAliases(KAFKA_HOSTNAME))
+                    .fromContainer((GenericContainer) kafkaContainer.getContainer())
                     .bindWithFlinkContainer(flink.getFlinkContainers().getJobManager())
                     .build();
 
@@ -64,7 +66,7 @@ public class KafkaSourceE2ECase extends SourceTestSuiteBase<String> {
     @TestContext
     KafkaSourceExternalContextFactory singleTopic =
             new KafkaSourceExternalContextFactory(
-                    kafka.getContainer(),
+                    kafkaContainer,
                     Arrays.asList(
                             ResourceTestUtils.getResource("kafka-connector.jar").toUri().toURL(),
                             ResourceTestUtils.getResource("kafka-clients.jar").toUri().toURL()),
@@ -74,7 +76,7 @@ public class KafkaSourceE2ECase extends SourceTestSuiteBase<String> {
     @TestContext
     KafkaSourceExternalContextFactory multipleTopic =
             new KafkaSourceExternalContextFactory(
-                    kafka.getContainer(),
+                    kafkaContainer,
                     Arrays.asList(
                             ResourceTestUtils.getResource("kafka-connector.jar").toUri().toURL(),
                             ResourceTestUtils.getResource("kafka-clients.jar").toUri().toURL()),

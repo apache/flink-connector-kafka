@@ -42,6 +42,7 @@ import org.apache.flink.connector.datagen.source.DataGeneratorSource;
 import org.apache.flink.connector.kafka.sink.testutils.KafkaSinkExternalContextFactory;
 import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
 import org.apache.flink.connector.kafka.testutils.KafkaUtil;
+import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.connector.testframe.environment.MiniClusterTestEnvironment;
 import org.apache.flink.connector.testframe.external.DefaultContainerizedExternalSystem;
 import org.apache.flink.connector.testframe.junit.annotations.TestContext;
@@ -95,7 +96,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -151,9 +152,8 @@ public class KafkaSinkITCase extends TestLogger {
                             .build());
 
     @Container
-    public static final KafkaContainer KAFKA_CONTAINER =
+    public static final TestKafkaContainer KAFKA_CONTAINER =
             createKafkaContainer(KafkaSinkITCase.class)
-                    .withEmbeddedZookeeper()
                     .withNetwork(NETWORK)
                     .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS);
 
@@ -193,13 +193,15 @@ public class KafkaSinkITCase extends TestLogger {
         // Defines test environment on Flink MiniCluster
         @TestEnv MiniClusterTestEnvironment flink = new MiniClusterTestEnvironment();
 
+        private final TestKafkaContainer kafkaContainer =
+                new TestKafkaContainer(DockerImageName.parse(DockerImageVersions.KAFKA));
+
         // Defines external system
+        @SuppressWarnings({"rawtypes", "unchecked"})
         @TestExternalSystem
-        DefaultContainerizedExternalSystem<KafkaContainer> kafka =
+        DefaultContainerizedExternalSystem<?> kafka =
                 DefaultContainerizedExternalSystem.builder()
-                        .fromContainer(
-                                new KafkaContainer(
-                                        DockerImageName.parse(DockerImageVersions.KAFKA)))
+                        .fromContainer((GenericContainer) kafkaContainer.getContainer())
                         .build();
 
         @TestSemantics
@@ -211,16 +213,14 @@ public class KafkaSinkITCase extends TestLogger {
         @TestContext
         KafkaSinkExternalContextFactory incrementing =
                 new KafkaSinkExternalContextFactory(
-                        kafka.getContainer(),
+                        kafkaContainer,
                         Collections.emptyList(),
                         TransactionNamingStrategy.INCREMENTING);
 
         @TestContext
         KafkaSinkExternalContextFactory pooling =
                 new KafkaSinkExternalContextFactory(
-                        kafka.getContainer(),
-                        Collections.emptyList(),
-                        TransactionNamingStrategy.POOLING);
+                        kafkaContainer, Collections.emptyList(), TransactionNamingStrategy.POOLING);
     }
 
     @Test
