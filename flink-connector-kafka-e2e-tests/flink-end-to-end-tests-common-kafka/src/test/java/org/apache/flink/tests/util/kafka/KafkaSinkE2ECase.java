@@ -51,7 +51,7 @@ public class KafkaSinkE2ECase extends SinkTestSuiteBase<String> {
     @TestEnv FlinkContainerTestEnvironment flink = new FlinkContainerTestEnvironment(1, 6);
 
     private final TestKafkaContainer kafkaContainer =
-            new TestKafkaContainer(DockerImageVersions.KAFKA).withNetworkAliases(KAFKA_HOSTNAME);
+            new TestKafkaContainer(DockerImageVersions.CP_KAFKA).withNetworkAliases(KAFKA_HOSTNAME);
 
     // Defines ConnectorExternalSystem
     @SuppressWarnings({"rawtypes", "unchecked"})

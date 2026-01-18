@@ -54,7 +54,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.flink.connector.kafka.testutils.DockerImageVersions.APACHE_KAFKA;
-import static org.apache.flink.connector.kafka.testutils.DockerImageVersions.KAFKA;
+import static org.apache.flink.connector.kafka.testutils.DockerImageVersions.CP_KAFKA;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -86,7 +86,7 @@ class FlinkKafkaIntegrationCompatibilityTest {
      * <p>This is adapted from {@code KafkaSourceITCase.testValueOnlyDeserializer}.
      */
     @ParameterizedTest
-    @ValueSource(strings = {KAFKA, APACHE_KAFKA})
+    @ValueSource(strings = {CP_KAFKA, APACHE_KAFKA})
     void testFlinkKafkaSourceIntegration(String dockerImage) throws Exception {
         // Start Kafka container
         kafkaContainer = new TestKafkaContainer(dockerImage);
@@ -181,7 +181,7 @@ class FlinkKafkaIntegrationCompatibilityTest {
      * <p>This is adapted from {@code KafkaSinkITCase.testWriteRecordsToKafkaWithNoneGuarantee}.
      */
     @ParameterizedTest
-    @ValueSource(strings = {KAFKA, APACHE_KAFKA})
+    @ValueSource(strings = {CP_KAFKA, APACHE_KAFKA})
     void testFlinkKafkaSinkIntegration(String dockerImage) throws Exception {
         // Start Kafka container
         kafkaContainer = new TestKafkaContainer(dockerImage);

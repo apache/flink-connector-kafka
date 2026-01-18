@@ -198,7 +198,7 @@ public class KafkaTestEnvironmentImpl extends KafkaTestEnvironment {
 
     @Override
     public String getVersion() {
-        return DockerImageVersions.KAFKA;
+        return DockerImageVersions.CP_KAFKA;
     }
 
     @Override

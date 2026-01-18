@@ -421,7 +421,7 @@ public class KafkaSourceITCase {
         MiniClusterTestEnvironment flink = new MiniClusterTestEnvironment();
 
         private final TestKafkaContainer kafkaContainer =
-                new TestKafkaContainer(DockerImageName.parse(DockerImageVersions.KAFKA));
+                new TestKafkaContainer(DockerImageName.parse(DockerImageVersions.CP_KAFKA));
 
         // Defines external system
         @SuppressWarnings({"rawtypes", "unchecked"})
