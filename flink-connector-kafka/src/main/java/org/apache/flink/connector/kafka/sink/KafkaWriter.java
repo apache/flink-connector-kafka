@@ -92,7 +92,7 @@ class KafkaWriter<IN>
     private Metric byteOutMetric;
     protected FlinkKafkaInternalProducer<byte[], byte[]> currentProducer;
 
-    private boolean closed = false;
+    private volatile boolean closed = false;
     private long lastSync = System.currentTimeMillis();
 
     /**
@@ -306,6 +306,12 @@ class KafkaWriter<IN>
         @Override
         public void onCompletion(RecordMetadata metadata, Exception exception) {
             if (exception != null) {
+                if (closed) {
+                    LOG.debug(
+                            "Completed exceptionally, but shutdown was already initiated",
+                            exception);
+                    return;
+                }
                 FlinkKafkaInternalProducer<byte[], byte[]> producer =
                         KafkaWriter.this.currentProducer;
 
