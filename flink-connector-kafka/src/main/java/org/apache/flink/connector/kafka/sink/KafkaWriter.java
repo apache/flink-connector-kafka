@@ -312,8 +312,6 @@ class KafkaWriter<IN>
                             exception);
                     return;
                 }
-                FlinkKafkaInternalProducer<byte[], byte[]> producer =
-                        KafkaWriter.this.currentProducer;
 
                 // Propagate the first exception since amount of exceptions could be large. Need to
                 // do this in Producer IO thread since flush() guarantees that the future will
@@ -321,18 +319,21 @@ class KafkaWriter<IN>
                 // executor e.g. mailbox executor. flush() needs to have the exception immediately
                 // available to fail the checkpoint.
                 if (asyncProducerException == null) {
-                    asyncProducerException = decorateException(metadata, exception, producer);
-                }
 
-                // Checking for exceptions from previous writes
-                // Notice: throwing exception in mailboxExecutor thread is not safe enough for
-                // triggering global fail over, which has been fixed in [FLINK-31305].
-                mailboxExecutor.execute(
-                        () -> {
-                            // Checking for exceptions from previous writes
-                            checkAsyncException();
-                        },
-                        "Update error metric");
+                    FlinkKafkaInternalProducer<byte[], byte[]> producer =
+                            KafkaWriter.this.currentProducer;
+                    asyncProducerException = decorateException(metadata, exception, producer);
+
+                    // Checking for exceptions from previous writes
+                    // Notice: throwing exception in mailboxExecutor thread is not safe enough for
+                    // triggering global fail over, which has been fixed in [FLINK-31305].
+                    mailboxExecutor.execute(
+                            () -> {
+                                // Checking for exceptions from previous writes
+                                checkAsyncException();
+                            },
+                            "Update error metric");
+                }
             }
 
             if (metadataConsumer != null) {
