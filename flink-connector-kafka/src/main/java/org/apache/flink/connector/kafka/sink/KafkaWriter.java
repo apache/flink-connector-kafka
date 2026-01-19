@@ -82,6 +82,9 @@ class KafkaWriter<IN>
     private final Map<String, KafkaMetricMutableWrapper> previouslyCreatedMetrics = new HashMap<>();
     private final SinkWriterMetricGroup metricGroup;
     private final boolean disabledMetrics;
+    // num records actually sent and acked by kafka; not volatile to prevent performance
+    // degradation
+    private long numRecordsSent;
     private final Counter numRecordsOutCounter;
     private final Counter numBytesOutCounter;
     private final Counter numRecordsOutErrorsCounter;
@@ -320,6 +323,12 @@ class KafkaWriter<IN>
                 // available to fail the checkpoint.
                 if (asyncProducerException == null) {
 
+                    LOG.warn(
+                            "Kafka request failed, sent records: {}, out records: {}",
+                            numRecordsSent,
+                            numRecordsOutCounter.getCount(),
+                            exception);
+
                     FlinkKafkaInternalProducer<byte[], byte[]> producer =
                             KafkaWriter.this.currentProducer;
                     asyncProducerException = decorateException(metadata, exception, producer);
@@ -334,6 +343,8 @@ class KafkaWriter<IN>
                             },
                             "Update error metric");
                 }
+            } else {
+                numRecordsSent++;
             }
 
             if (metadataConsumer != null) {
