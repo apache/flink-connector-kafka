@@ -82,6 +82,9 @@ class KafkaWriter<IN>
     private final Map<String, KafkaMetricMutableWrapper> previouslyCreatedMetrics = new HashMap<>();
     private final SinkWriterMetricGroup metricGroup;
     private final boolean disabledMetrics;
+    // num records actually sent and acked by kafka; not volatile to prevent performance
+    // degradation
+    private long numRecordsSent;
     private final Counter numRecordsOutCounter;
     private final Counter numBytesOutCounter;
     private final Counter numRecordsOutErrorsCounter;
@@ -92,7 +95,7 @@ class KafkaWriter<IN>
     private Metric byteOutMetric;
     protected FlinkKafkaInternalProducer<byte[], byte[]> currentProducer;
 
-    private boolean closed = false;
+    private volatile boolean closed = false;
     private long lastSync = System.currentTimeMillis();
 
     /**
@@ -306,8 +309,12 @@ class KafkaWriter<IN>
         @Override
         public void onCompletion(RecordMetadata metadata, Exception exception) {
             if (exception != null) {
-                FlinkKafkaInternalProducer<byte[], byte[]> producer =
-                        KafkaWriter.this.currentProducer;
+                if (closed) {
+                    LOG.debug(
+                            "Completed exceptionally, but shutdown was already initiated",
+                            exception);
+                    return;
+                }
 
                 // Propagate the first exception since amount of exceptions could be large. Need to
                 // do this in Producer IO thread since flush() guarantees that the future will
@@ -315,18 +322,29 @@ class KafkaWriter<IN>
                 // executor e.g. mailbox executor. flush() needs to have the exception immediately
                 // available to fail the checkpoint.
                 if (asyncProducerException == null) {
-                    asyncProducerException = decorateException(metadata, exception, producer);
-                }
 
-                // Checking for exceptions from previous writes
-                // Notice: throwing exception in mailboxExecutor thread is not safe enough for
-                // triggering global fail over, which has been fixed in [FLINK-31305].
-                mailboxExecutor.execute(
-                        () -> {
-                            // Checking for exceptions from previous writes
-                            checkAsyncException();
-                        },
-                        "Update error metric");
+                    LOG.warn(
+                            "Kafka request failed, sent records: {}, out records: {}",
+                            numRecordsSent,
+                            numRecordsOutCounter.getCount(),
+                            exception);
+
+                    FlinkKafkaInternalProducer<byte[], byte[]> producer =
+                            KafkaWriter.this.currentProducer;
+                    asyncProducerException = decorateException(metadata, exception, producer);
+
+                    // Checking for exceptions from previous writes
+                    // Notice: throwing exception in mailboxExecutor thread is not safe enough for
+                    // triggering global fail over, which has been fixed in [FLINK-31305].
+                    mailboxExecutor.execute(
+                            () -> {
+                                // Checking for exceptions from previous writes
+                                checkAsyncException();
+                            },
+                            "Update error metric");
+                }
+            } else {
+                numRecordsSent++;
             }
 
             if (metadataConsumer != null) {
