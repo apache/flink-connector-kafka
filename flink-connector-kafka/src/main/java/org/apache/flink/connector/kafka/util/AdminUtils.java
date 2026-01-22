@@ -72,7 +72,17 @@ public class AdminUtils {
     public static Map<String, TopicDescription> getTopicMetadata(
             Admin admin, Collection<String> topicNames) {
         try {
-            return admin.describeTopics(topicNames).allTopicNames().get();
+            // Add timeout to prevent infinite hang during recovery with POOLING strategy +
+            // chained=false
+            return admin.describeTopics(topicNames)
+                    .allTopicNames()
+                    .get(30, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Timeout while getting metadata for topics %s. This may indicate network issues or slow Kafka responses during recovery.",
+                            topicNames),
+                    e);
         } catch (Exception e) {
             checkIfInterrupted(e);
             throw new RuntimeException(
@@ -83,7 +93,17 @@ public class AdminUtils {
     public static Map<TopicPartition, DescribeProducersResult.PartitionProducerState>
             getProducerStates(Admin admin, Collection<String> topicNames) {
         try {
-            return admin.describeProducers(getTopicPartitions(admin, topicNames)).all().get();
+            // Add timeout to prevent infinite hang during recovery with POOLING strategy +
+            // chained=false
+            return admin.describeProducers(getTopicPartitions(admin, topicNames))
+                    .all()
+                    .get(30, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Timeout while getting producers for topics %s. This may indicate network issues or slow Kafka responses during recovery.",
+                            topicNames),
+                    e);
         } catch (Exception e) {
             checkIfInterrupted(e);
             throw new RuntimeException(
@@ -103,12 +123,20 @@ public class AdminUtils {
     public static Collection<TransactionListing> getOpenTransactionsForTopics(
             Admin admin, Collection<String> topicNames) {
         try {
+            // Add timeout to prevent infinite hang during recovery with POOLING strategy +
+            // chained=false
             return admin.listTransactions(
                             new ListTransactionsOptions()
                                     .filterProducerIds(getProducerIds(admin, topicNames))
                                     .filterStates(List.of(TransactionState.ONGOING)))
                     .all()
-                    .get();
+                    .get(30, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Timeout while getting open transactions for topics %s. This may indicate network issues or slow Kafka responses during recovery.",
+                            topicNames),
+                    e);
         } catch (Exception e) {
             checkIfInterrupted(e);
             throw new RuntimeException(

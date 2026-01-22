@@ -26,7 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
-import javax.annotation.concurrent.NotThreadSafe;
+import javax.annotation.concurrent.ThreadSafe;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -68,10 +68,9 @@ import static org.apache.flink.util.Preconditions.checkState;
  *       pool is still in the transaction or not.
  * </ul>
  *
- * <p>This pool is not thread-safe and is only intended to be accessed from the writer, which owns
- * it.
+ * <p>This pool is thread-safe and can be accessed concurrently by multiple threads.
  */
-@NotThreadSafe
+@ThreadSafe
 @Internal
 public class ProducerPoolImpl implements ProducerPool {
     private static final Logger LOG = LoggerFactory.getLogger(ProducerPoolImpl.class);
@@ -116,7 +115,7 @@ public class ProducerPoolImpl implements ProducerPool {
     }
 
     @Override
-    public void recycleByTransactionId(String transactionalId, boolean success) {
+    public synchronized void recycleByTransactionId(String transactionalId, boolean success) {
         ProducerEntry producerEntry = producerByTransactionalId.remove(transactionalId);
         LOG.debug("Transaction {} finished, producer {}", transactionalId, producerEntry);
 
@@ -169,7 +168,7 @@ public class ProducerPoolImpl implements ProducerPool {
     }
 
     @Override
-    public void recycle(FlinkKafkaInternalProducer<byte[], byte[]> producer) {
+    public synchronized void recycle(FlinkKafkaInternalProducer<byte[], byte[]> producer) {
         recycleProducer(producer);
         ProducerEntry producerEntry =
                 producerByTransactionalId.remove(producer.getTransactionalId());
@@ -218,7 +217,7 @@ public class ProducerPoolImpl implements ProducerPool {
     }
 
     @Override
-    public FlinkKafkaInternalProducer<byte[], byte[]> getTransactionalProducer(
+    public synchronized FlinkKafkaInternalProducer<byte[], byte[]> getTransactionalProducer(
             String transactionalId, long checkpointId) {
         FlinkKafkaInternalProducer<byte[], byte[]> producer = producerPool.poll();
         if (producer == null) {
@@ -249,17 +248,17 @@ public class ProducerPoolImpl implements ProducerPool {
     }
 
     @Override
-    public Collection<CheckpointTransaction> getOngoingTransactions() {
+    public synchronized Collection<CheckpointTransaction> getOngoingTransactions() {
         return new ArrayList<>(transactionalIdsByCheckpoint.keySet());
     }
 
     @VisibleForTesting
-    public Collection<FlinkKafkaInternalProducer<byte[], byte[]>> getProducers() {
-        return producerPool;
+    public synchronized Collection<FlinkKafkaInternalProducer<byte[], byte[]>> getProducers() {
+        return new ArrayList<>(producerPool);
     }
 
     @Override
-    public void close() throws Exception {
+    public synchronized void close() throws Exception {
         LOG.debug(
                 "Closing used producers {} and free producers {}",
                 producerByTransactionalId,

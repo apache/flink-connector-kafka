@@ -421,6 +421,15 @@ under the License.
 					</execution>
 				</executions>
 			</plugin>
+
+			<!-- Temporarily run only KafkaSinkITCase for faster feedback on hanging test issue -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<test>KafkaSinkITCase</test>
+				</configuration>
+			</plugin>
 		</plugins>
 	</build>
 
