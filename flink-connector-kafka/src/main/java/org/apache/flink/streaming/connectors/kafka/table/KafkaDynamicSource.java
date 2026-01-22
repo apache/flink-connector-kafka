@@ -227,7 +227,8 @@ public class KafkaDynamicSource
         this.valueFormatMetadataKeys = Collections.emptyList();
         this.metadataKeys = Collections.emptyList();
         this.watermarkStrategy = null;
-        this.projectedPhysicalFields = physicalDataTypeProjectedFields(physicalDataType);
+        this.projectedPhysicalFields =
+                Decoder.identityProjection((RowType) physicalDataType.getLogicalType());
         // Kafka-specific attributes
         Preconditions.checkArgument(
                 (topics != null && topicPattern == null)
@@ -473,16 +474,6 @@ public class KafkaDynamicSource
     }
 
     // --------------------------------------------------------------------------------------------
-
-    private static int[][] physicalDataTypeProjectedFields(final DataType tableDataType) {
-        final RowType rowType = (RowType) tableDataType.getLogicalType();
-        final int tableSchemaSize = rowType.getFieldCount();
-        final int[][] projectedFields = new int[tableSchemaSize][];
-        for (int i = 0; i < tableSchemaSize; i++) {
-            projectedFields[i] = new int[] {i};
-        }
-        return projectedFields;
-    }
 
     private boolean pushProjectionsIntoDecodingFormat(
             final FormatProjectionPushdownLevel formatProjectionPushdownLevel) {

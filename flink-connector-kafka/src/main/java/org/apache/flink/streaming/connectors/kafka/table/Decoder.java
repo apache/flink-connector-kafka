@@ -27,6 +27,7 @@ import org.apache.flink.table.connector.source.DynamicTableSource.Context;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
@@ -136,6 +137,21 @@ public class Decoder {
     /** @return a {@link Projector}. */
     public Projector getProjector() {
         return projector;
+    }
+
+    /**
+     * Creates an identity projection array where each field in the row type maps to itself.
+     *
+     * @param rowType the row type representing the table schema
+     * @return an int[][] with one entry per field in the row type, where entry i is {i}
+     */
+    public static int[][] identityProjection(final RowType rowType) {
+        final int tableSchemaSize = rowType.getFieldCount();
+        final int[][] projectedFields = new int[tableSchemaSize][];
+        for (int i = 0; i < tableSchemaSize; i++) {
+            projectedFields[i] = new int[] {i};
+        }
+        return projectedFields;
     }
 
     private static Decoder noDeserializationOrProjection() {
