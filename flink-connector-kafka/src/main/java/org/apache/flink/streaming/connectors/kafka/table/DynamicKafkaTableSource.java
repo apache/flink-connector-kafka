@@ -36,7 +36,6 @@ import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.streaming.connectors.kafka.table.DynamicKafkaDeserializationSchema.MetadataConverter;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.connector.ChangelogMode;
-import org.apache.flink.table.connector.Projection;
 import org.apache.flink.table.connector.ProviderContext;
 import org.apache.flink.table.connector.format.DecodingFormat;
 import org.apache.flink.table.connector.source.DataStreamScanProvider;
@@ -49,6 +48,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -73,7 +73,6 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 /** A {@link ScanTableSource} for {@link DynamicKafkaSource}. */
@@ -92,6 +91,12 @@ public class DynamicKafkaTableSource
 
     /** Metadata that is appended at the end of a physical source row. */
     protected List<String> metadataKeys;
+
+    /** Value format metadata keys. */
+    protected List<String> valueFormatMetadataKeys;
+
+    /** Indices that determine the physical fields and their positions in the produced row. */
+    protected int[][] projectedPhysicalFields;
 
     /** Watermark strategy that is used to generate per-partition watermark. */
     protected @Nullable WatermarkStrategy<RowData> watermarkStrategy;
@@ -212,6 +217,9 @@ public class DynamicKafkaTableSource
         // Mutable attributes
         this.producedDataType = physicalDataType;
         this.metadataKeys = Collections.emptyList();
+        this.valueFormatMetadataKeys = Collections.emptyList();
+        this.projectedPhysicalFields =
+                Decoder.identityProjection((RowType) physicalDataType.getLogicalType());
         this.watermarkStrategy = null;
         // Dynamic Kafka specific attributes
         Preconditions.checkArgument(
@@ -248,18 +256,33 @@ public class DynamicKafkaTableSource
 
     @Override
     public ScanRuntimeProvider getScanRuntimeProvider(ScanContext context) {
-        final DeserializationSchema<RowData> keyDeserialization =
-                createDeserialization(context, keyDecodingFormat, keyProjection, keyPrefix);
+        final Decoder keyDecoder =
+                Decoder.create(
+                        context,
+                        keyDecodingFormat,
+                        physicalDataType,
+                        keyProjection,
+                        keyPrefix,
+                        projectedPhysicalFields,
+                        Collections.emptyList(),
+                        false);
 
-        final DeserializationSchema<RowData> valueDeserialization =
-                createDeserialization(context, valueDecodingFormat, valueProjection, null);
+        final Decoder valueDecoder =
+                Decoder.create(
+                        context,
+                        valueDecodingFormat,
+                        physicalDataType,
+                        valueProjection,
+                        null,
+                        projectedPhysicalFields,
+                        valueFormatMetadataKeys,
+                        false);
 
         final TypeInformation<RowData> producedTypeInfo =
                 context.createTypeInformation(producedDataType);
 
         final DynamicKafkaSource<RowData> kafkaSource =
-                createDynamicKafkaSource(
-                        keyDeserialization, valueDeserialization, producedTypeInfo);
+                createDynamicKafkaSource(keyDecoder, valueDecoder, producedTypeInfo);
 
         return new DataStreamScanProvider() {
             @Override
@@ -311,25 +334,16 @@ public class DynamicKafkaTableSource
 
     @Override
     public void applyReadableMetadata(List<String> metadataKeys, DataType producedDataType) {
-        // separate connector and format metadata
-        final List<String> formatMetadataKeys =
-                metadataKeys.stream()
-                        .filter(k -> k.startsWith(VALUE_METADATA_PREFIX))
-                        .collect(Collectors.toList());
-        final List<String> connectorMetadataKeys = new ArrayList<>(metadataKeys);
-        connectorMetadataKeys.removeAll(formatMetadataKeys);
-
-        // push down format metadata
-        final Map<String, DataType> formatMetadata = valueDecodingFormat.listReadableMetadata();
-        if (formatMetadata.size() > 0) {
-            final List<String> requestedFormatMetadataKeys =
-                    formatMetadataKeys.stream()
-                            .map(k -> k.substring(VALUE_METADATA_PREFIX.length()))
-                            .collect(Collectors.toList());
-            valueDecodingFormat.applyReadableMetadata(requestedFormatMetadataKeys);
+        this.valueFormatMetadataKeys = new ArrayList<>();
+        this.metadataKeys = new ArrayList<>();
+        for (final String key : metadataKeys) {
+            if (key.startsWith(VALUE_METADATA_PREFIX)) {
+                final String formatMetadataKey = key.substring(VALUE_METADATA_PREFIX.length());
+                this.valueFormatMetadataKeys.add(formatMetadataKey);
+            } else {
+                this.metadataKeys.add(key);
+            }
         }
-
-        this.metadataKeys = connectorMetadataKeys;
         this.producedDataType = producedDataType;
     }
 
@@ -368,6 +382,8 @@ public class DynamicKafkaTableSource
                         parallelism);
         copy.producedDataType = producedDataType;
         copy.metadataKeys = metadataKeys;
+        copy.valueFormatMetadataKeys = valueFormatMetadataKeys;
+        copy.projectedPhysicalFields = projectedPhysicalFields;
         copy.watermarkStrategy = watermarkStrategy;
         return copy;
     }
@@ -388,6 +404,8 @@ public class DynamicKafkaTableSource
         final DynamicKafkaTableSource that = (DynamicKafkaTableSource) o;
         return Objects.equals(producedDataType, that.producedDataType)
                 && Objects.equals(metadataKeys, that.metadataKeys)
+                && Objects.equals(valueFormatMetadataKeys, that.valueFormatMetadataKeys)
+                && Arrays.deepEquals(projectedPhysicalFields, that.projectedPhysicalFields)
                 && Objects.equals(physicalDataType, that.physicalDataType)
                 && Objects.equals(keyDecodingFormat, that.keyDecodingFormat)
                 && Objects.equals(valueDecodingFormat, that.valueDecodingFormat)
@@ -415,6 +433,8 @@ public class DynamicKafkaTableSource
         return Objects.hash(
                 producedDataType,
                 metadataKeys,
+                valueFormatMetadataKeys,
+                Arrays.deepHashCode(projectedPhysicalFields),
                 physicalDataType,
                 keyDecodingFormat,
                 valueDecodingFormat,
@@ -440,13 +460,10 @@ public class DynamicKafkaTableSource
     // --------------------------------------------------------------------------------------------
 
     protected DynamicKafkaSource<RowData> createDynamicKafkaSource(
-            DeserializationSchema<RowData> keyDeserialization,
-            DeserializationSchema<RowData> valueDeserialization,
-            TypeInformation<RowData> producedTypeInfo) {
+            Decoder keyDecoder, Decoder valueDecoder, TypeInformation<RowData> producedTypeInfo) {
 
         final KafkaRecordDeserializationSchema<RowData> kafkaDeserializer =
-                createKafkaDeserializationSchema(
-                        keyDeserialization, valueDeserialization, producedTypeInfo);
+                createKafkaDeserializationSchema(keyDecoder, valueDecoder, producedTypeInfo);
 
         final DynamicKafkaSourceBuilder<RowData> dynamicKafkaSourceBuilder =
                 DynamicKafkaSource.builder();
@@ -528,9 +545,7 @@ public class DynamicKafkaTableSource
     }
 
     private KafkaRecordDeserializationSchema<RowData> createKafkaDeserializationSchema(
-            DeserializationSchema<RowData> keyDeserialization,
-            DeserializationSchema<RowData> valueDeserialization,
-            TypeInformation<RowData> producedTypeInfo) {
+            Decoder keyDecoder, Decoder valueDecoder, TypeInformation<RowData> producedTypeInfo) {
         final MetadataConverter[] metadataConverters =
                 metadataKeys.stream()
                         .map(
@@ -549,41 +564,16 @@ public class DynamicKafkaTableSource
         final int adjustedPhysicalArity =
                 DataType.getFieldDataTypes(producedDataType).size() - metadataKeys.size();
 
-        // adjust value format projection to include value format's metadata columns at the end
-        final int[] adjustedValueProjection =
-                IntStream.concat(
-                                IntStream.of(valueProjection),
-                                IntStream.range(
-                                        keyProjection.length + valueProjection.length,
-                                        adjustedPhysicalArity))
-                        .toArray();
-
         return new DynamicKafkaDeserializationSchema(
                 adjustedPhysicalArity,
-                keyDeserialization,
-                keyProjection,
-                valueDeserialization,
-                adjustedValueProjection,
+                keyDecoder.getDeserializationSchema(),
+                keyDecoder.getProjector(),
+                valueDecoder.getDeserializationSchema(),
+                valueDecoder.getProjector(),
                 hasMetadata,
                 metadataConverters,
                 producedTypeInfo,
                 upsertMode);
-    }
-
-    private @Nullable DeserializationSchema<RowData> createDeserialization(
-            DynamicTableSource.Context context,
-            @Nullable DecodingFormat<DeserializationSchema<RowData>> format,
-            int[] projection,
-            @Nullable String prefix) {
-        if (format == null) {
-            return null;
-        }
-        DataType physicalFormatDataType = Projection.of(projection).project(this.physicalDataType);
-        if (prefix != null) {
-            physicalFormatDataType =
-                    TableDataTypeUtils.stripRowPrefix(physicalFormatDataType, prefix);
-        }
-        return format.createRuntimeDecoder(context, physicalFormatDataType);
     }
 
     // --------------------------------------------------------------------------------------------
