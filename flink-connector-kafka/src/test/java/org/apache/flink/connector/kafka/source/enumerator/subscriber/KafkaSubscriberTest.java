@@ -143,8 +143,8 @@ public class KafkaSubscriberTest {
                                 nonExistingPartition));
     }
 
-    private static class TestSubscriberInitContext implements KafkaSubscriber.InitializationContext {
+    private static class TestSubscriberInitContext
+            implements KafkaSubscriber.InitializationContext {
         private TestSubscriberInitContext() {}
     }
-
 }
