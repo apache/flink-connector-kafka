@@ -33,9 +33,9 @@ import org.apache.flink.table.runtime.connector.sink.SinkRuntimeProviderContext;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -48,6 +48,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ScheduledFuture;
+import java.util.stream.Stream;
 
 import static org.apache.flink.types.RowKind.DELETE;
 import static org.apache.flink.types.RowKind.INSERT;
@@ -55,11 +56,10 @@ import static org.apache.flink.types.RowKind.UPDATE_AFTER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ReducingUpsertWriter}. */
-@RunWith(Parameterized.class)
 public class ReducingUpsertWriterTest {
-    @Parameterized.Parameters(name = "object reuse = {0}")
-    public static Object[] enableObjectReuse() {
-        return new Boolean[] {true, false};
+
+    static Stream<Boolean> enableObjectReuse() {
+        return Stream.of(true, false);
     }
 
     private static final ResolvedSchema SCHEMA =
@@ -143,23 +143,19 @@ public class ReducingUpsertWriterTest {
                 TimestampData.fromInstant(Instant.parse("2021-03-30T21:00:00Z")))
     };
 
-    private final boolean enableObjectReuse;
-
-    public ReducingUpsertWriterTest(boolean enableObjectReuse) {
-        this.enableObjectReuse = enableObjectReuse;
-    }
-
-    @Test
-    public void testWriteData() throws Exception {
+    @ParameterizedTest(name = "object reuse = {0}")
+    @MethodSource("enableObjectReuse")
+    public void testWriteData(boolean enableObjectReuse) throws Exception {
         final MockedSinkWriter writer = new MockedSinkWriter();
-        final ReducingUpsertWriter<?, ?> bufferedWriter = createBufferedWriter(writer);
+        final ReducingUpsertWriter<?, ?> bufferedWriter =
+                createBufferedWriter(writer, enableObjectReuse);
 
         // write 4 records which doesn't trigger batch size
-        writeData(bufferedWriter, new ReusableIterator(0, 4));
+        writeData(bufferedWriter, new ReusableIterator(0, 4, enableObjectReuse));
         assertThat(writer.rowDataCollectors).isEmpty();
 
         // write one more record, and should flush the buffer
-        writeData(bufferedWriter, new ReusableIterator(7, 1));
+        writeData(bufferedWriter, new ReusableIterator(7, 1, enableObjectReuse));
 
         HashMap<Integer, List<RowData>> expected = new HashMap<>();
         expected.put(
@@ -212,16 +208,18 @@ public class ReducingUpsertWriterTest {
 
         writer.rowDataCollectors.clear();
         // write remaining data, and they are still buffered
-        writeData(bufferedWriter, new ReusableIterator(4, 3));
+        writeData(bufferedWriter, new ReusableIterator(4, 3, enableObjectReuse));
         assertThat(writer.rowDataCollectors).isEmpty();
     }
 
-    @Test
-    public void testFlushDataWhenCheckpointing() throws Exception {
+    @ParameterizedTest(name = "object reuse = {0}")
+    @MethodSource("enableObjectReuse")
+    public void testFlushDataWhenCheckpointing(boolean enableObjectReuse) throws Exception {
         final MockedSinkWriter writer = new MockedSinkWriter();
-        final ReducingUpsertWriter<?, ?> bufferedWriter = createBufferedWriter(writer);
+        final ReducingUpsertWriter<?, ?> bufferedWriter =
+                createBufferedWriter(writer, enableObjectReuse);
         // write all data, there should be 3 records are still buffered
-        writeData(bufferedWriter, new ReusableIterator(0, 4));
+        writeData(bufferedWriter, new ReusableIterator(0, 4, enableObjectReuse));
         // snapshot should flush the buffer
         bufferedWriter.flush(true);
         assertThat(writer.flushed).isTrue();
@@ -267,7 +265,7 @@ public class ReducingUpsertWriterTest {
     @Test
     public void testWriteDataWithNullTimestamp() throws Exception {
         final MockedSinkWriter writer = new MockedSinkWriter();
-        final ReducingUpsertWriter<?, ?> bufferedWriter = createBufferedWriter(writer);
+        final ReducingUpsertWriter<?, ?> bufferedWriter = createBufferedWriter(writer, false);
 
         bufferedWriter.write(
                 GenericRowData.ofKind(
@@ -345,7 +343,8 @@ public class ReducingUpsertWriterTest {
     }
 
     @SuppressWarnings("unchecked")
-    private ReducingUpsertWriter<?, ?> createBufferedWriter(MockedSinkWriter sinkWriter) {
+    private ReducingUpsertWriter<?, ?> createBufferedWriter(
+            MockedSinkWriter sinkWriter, boolean enableObjectReuse) {
         TypeInformation<RowData> typeInformation =
                 (TypeInformation<RowData>)
                         new SinkRuntimeProviderContext(false)
@@ -421,13 +420,15 @@ public class ReducingUpsertWriterTest {
         private final RowDataSerializer serializer =
                 InternalTypeInfo.of(SCHEMA.toSinkRowDataType().getLogicalType()).toRowSerializer();
         private final RowData reusedRow = new GenericRowData(SCHEMA.getColumnCount());
+        private final boolean enableObjectReuse;
 
         private int begin;
         private final int end;
 
-        ReusableIterator(int begin, int size) {
+        ReusableIterator(int begin, int size, boolean enableObjectReuse) {
             this.begin = begin;
             this.end = begin + size;
+            this.enableObjectReuse = enableObjectReuse;
         }
 
         @Override

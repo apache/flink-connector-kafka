@@ -30,24 +30,25 @@ import org.apache.flink.test.util.SuccessException;
 import org.apache.flink.testutils.junit.RetryOnFailure;
 import org.apache.flink.testutils.junit.RetryRule;
 import org.apache.flink.util.InstantiationUtil;
-import org.apache.flink.util.TestLogger;
+import org.apache.flink.util.TestLoggerExtension;
 
 import com.google.common.base.MoreObjects;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Rule;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.parallel.ResourceLock;
-import org.junit.rules.TemporaryFolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -74,7 +75,8 @@ import java.util.concurrent.atomic.AtomicReference;
 @SuppressWarnings("serial")
 @RetryOnFailure(times = 3)
 @ResourceLock("KafkaTestBase")
-public abstract class KafkaTestBase extends TestLogger {
+@ExtendWith(TestLoggerExtension.class)
+public abstract class KafkaTestBase {
 
     public static final Logger LOG = LoggerFactory.getLogger(KafkaTestBase.class);
 
@@ -89,17 +91,17 @@ public abstract class KafkaTestBase extends TestLogger {
 
     public static List<KafkaClusterTestEnvMetadata> kafkaClusters = new ArrayList<>();
 
-    @ClassRule public static TemporaryFolder tempFolder = new TemporaryFolder();
+    @TempDir public static File tempFolder;
 
     public static Properties secureProps = new Properties();
 
-    @Rule public final RetryRule retryRule = new RetryRule();
+    @RegisterExtension public final RetryRule retryRule = new RetryRule();
 
     // ------------------------------------------------------------------------
     //  Setup and teardown of the mini clusters
     // ------------------------------------------------------------------------
 
-    @BeforeClass
+    @BeforeAll
     public static void prepare() throws Exception {
         LOG.info("-------------------------------------------------------------------------");
         LOG.info("    Starting KafkaTestBase ");
@@ -108,7 +110,7 @@ public abstract class KafkaTestBase extends TestLogger {
         startClusters(false, numKafkaClusters);
     }
 
-    @AfterClass
+    @AfterAll
     public static void shutDownServices() throws Exception {
 
         LOG.info("-------------------------------------------------------------------------");

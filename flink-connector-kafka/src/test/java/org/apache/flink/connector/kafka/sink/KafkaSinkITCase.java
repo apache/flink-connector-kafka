@@ -71,7 +71,7 @@ import org.apache.flink.test.junit5.InjectMiniCluster;
 import org.apache.flink.test.junit5.MiniClusterExtension;
 import org.apache.flink.testutils.junit.SharedObjectsExtension;
 import org.apache.flink.testutils.junit.SharedReference;
-import org.apache.flink.util.TestLogger;
+import org.apache.flink.util.TestLoggerExtension;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -86,6 +86,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -131,7 +132,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for using KafkaSink writing to a Kafka cluster. */
 @Testcontainers
-public class KafkaSinkITCase extends TestLogger {
+@ExtendWith(TestLoggerExtension.class)
+public class KafkaSinkITCase {
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaSinkITCase.class);
     private static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
