@@ -5,9 +5,10 @@ import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
-import org.apache.flink.util.TestLogger;
+import org.apache.flink.util.TestLoggerExtension;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -22,7 +23,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link DynamicKafkaRecordSerializationSchema}. */
-public class DynamicKafkaRecordSerializationSchemaTest extends TestLogger {
+@ExtendWith(TestLoggerExtension.class)
+public class DynamicKafkaRecordSerializationSchemaTest {
     private static final List<String> MULTIPLE_TOPICS = Arrays.asList("topic1", "topic2");
     private static final String SINGLE_TOPIC = "topic";
     private static final Pattern TOPIC_PATTERN = Pattern.compile("topic*");

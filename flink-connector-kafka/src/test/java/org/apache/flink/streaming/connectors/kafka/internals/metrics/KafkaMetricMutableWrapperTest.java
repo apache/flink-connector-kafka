@@ -42,8 +42,8 @@ import java.util.stream.Stream;
 
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 
-@Testcontainers
 @ExtendWith(TestLoggerExtension.class)
+@Testcontainers
 class KafkaMetricMutableWrapperTest {
 
     private static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
