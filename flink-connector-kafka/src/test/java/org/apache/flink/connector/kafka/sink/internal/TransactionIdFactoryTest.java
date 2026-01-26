@@ -18,15 +18,11 @@
 
 package org.apache.flink.connector.kafka.sink.internal;
 
-import org.apache.flink.util.TestLoggerExtension;
-
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link TransactionalIdFactory}. */
-@ExtendWith(TestLoggerExtension.class)
 public class TransactionIdFactoryTest {
 
     @Test
