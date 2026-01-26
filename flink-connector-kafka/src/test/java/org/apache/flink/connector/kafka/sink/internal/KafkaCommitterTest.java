@@ -21,7 +21,6 @@ package org.apache.flink.connector.kafka.sink.internal;
 import org.apache.flink.api.connector.sink2.mocks.MockCommitRequest;
 import org.apache.flink.connector.kafka.sink.KafkaCommittable;
 import org.apache.flink.testutils.logging.LoggerAuditingExtension;
-import org.apache.flink.util.TestLoggerExtension;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -30,7 +29,6 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.assertj.core.api.Condition;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -49,7 +47,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.slf4j.event.Level.ERROR;
 
 /** Tests for {@link KafkaCommitter}. */
-@ExtendWith({TestLoggerExtension.class})
 class KafkaCommitterTest {
 
     private static final int PRODUCER_ID = 0;

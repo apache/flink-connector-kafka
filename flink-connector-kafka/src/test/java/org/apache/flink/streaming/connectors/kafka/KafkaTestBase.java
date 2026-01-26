@@ -30,7 +30,6 @@ import org.apache.flink.test.util.SuccessException;
 import org.apache.flink.testutils.junit.RetryOnFailure;
 import org.apache.flink.testutils.junit.RetryRule;
 import org.apache.flink.util.InstantiationUtil;
-import org.apache.flink.util.TestLoggerExtension;
 
 import com.google.common.base.MoreObjects;
 import org.apache.kafka.clients.producer.Callback;
@@ -39,7 +38,6 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.parallel.ResourceLock;
@@ -75,7 +73,6 @@ import java.util.concurrent.atomic.AtomicReference;
 @SuppressWarnings("serial")
 @RetryOnFailure(times = 3)
 @ResourceLock("KafkaTestBase")
-@ExtendWith(TestLoggerExtension.class)
 public abstract class KafkaTestBase {
 
     public static final Logger LOG = LoggerFactory.getLogger(KafkaTestBase.class);
