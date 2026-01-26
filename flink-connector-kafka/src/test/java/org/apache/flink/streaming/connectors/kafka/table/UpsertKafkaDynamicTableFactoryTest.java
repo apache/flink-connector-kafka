@@ -95,7 +95,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link UpsertKafkaDynamicTableFactory}. */
-public class UpsertKafkaDynamicTableFactoryTest {
+class UpsertKafkaDynamicTableFactoryTest {
 
     private static final String SOURCE_TOPIC = "sourceTopic_1";
 
@@ -155,7 +155,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
                     ",", true, ChangelogMode.insertOnly(), Collections.emptyMap());
 
     @Test
-    public void testTableSource() {
+    void testTableSource() {
         final DataType producedDataType = SOURCE_SCHEMA.toPhysicalRowDataType();
         // Construct table source using options and table source factory
         final DynamicTableSource actualSource =
@@ -181,7 +181,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testTableSourceWithParallelism() {
+    void testTableSourceWithParallelism() {
         final DataType producedDataType = SOURCE_SCHEMA.toPhysicalRowDataType();
         // Construct table source using options and table source factory
         final Map<String, String> modifiedOptions =
@@ -213,7 +213,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testTableSourceWithTopicList() {
+    void testTableSourceWithTopicList() {
         final Map<String, String> modifiedOptions =
                 getModifiedOptions(
                         getFullSourceOptions(),
@@ -245,7 +245,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testTableSink() {
+    void testTableSink() {
         // Construct table sink using options and table sink factory.
         final Map<String, String> modifiedOptions =
                 getModifiedOptions(
@@ -287,7 +287,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testTableSinkWithTopicList() {
+    void testTableSinkWithTopicList() {
         // Construct table sink using options and table sink factory.
         final Map<String, String> modifiedOptions =
                 getModifiedOptions(
@@ -331,7 +331,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
 
     @SuppressWarnings("rawtypes")
     @Test
-    public void testBufferedTableSink() {
+    void testBufferedTableSink() {
         // Construct table sink using options and table sink factory.
         final DynamicTableSink actualSink =
                 createTableSink(
@@ -390,7 +390,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testTableSinkWithParallelism() {
+    void testTableSinkWithParallelism() {
         final Map<String, String> modifiedOptions =
                 getModifiedOptions(
                         getFullSinkOptions(),
@@ -428,7 +428,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testTableSinkStrategyTranslation() {
+    void testTableSinkStrategyTranslation() {
         for (TransactionNamingStrategy namingStrategy : TransactionNamingStrategy.values()) {
             final EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat =
                     new TestFormatFactory.EncodingFormatMock(",");
@@ -463,7 +463,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testTableSinkAutoCompleteSchemaRegistrySubject() {
+    void testTableSinkAutoCompleteSchemaRegistrySubject() {
         // value.format + key.format
         verifyEncoderSubject(
                 options -> {
@@ -573,7 +573,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     // --------------------------------------------------------------------------------------------
 
     @Test
-    public void testBoundedSpecificOffsetsValidate() {
+    void testBoundedSpecificOffsetsValidate() {
         final Map<String, String> options = getFullSourceOptions();
         options.put(
                 KafkaConnectorOptions.SCAN_BOUNDED_MODE.key(),
@@ -587,7 +587,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testBoundedSpecificOffsets() {
+    void testBoundedSpecificOffsets() {
         testBoundedOffsets(
                 ScanBoundedMode.SPECIFIC_OFFSETS,
                 options -> {
@@ -609,7 +609,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testBoundedLatestOffset() {
+    void testBoundedLatestOffset() {
         testBoundedOffsets(
                 ScanBoundedMode.LATEST_OFFSET,
                 options -> {},
@@ -633,7 +633,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testBoundedGroupOffsets() {
+    void testBoundedGroupOffsets() {
         testBoundedOffsets(
                 ScanBoundedMode.GROUP_OFFSETS,
                 options -> {
@@ -655,7 +655,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testBoundedTimestamp() {
+    void testBoundedTimestamp() {
         testBoundedOffsets(
                 ScanBoundedMode.TIMESTAMP,
                 options -> {
@@ -705,7 +705,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     // --------------------------------------------------------------------------------------------
 
     @Test
-    public void testCreateSourceTableWithoutPK() {
+    void testCreateSourceTableWithoutPK() {
         ResolvedSchema illegalSchema =
                 ResolvedSchema.of(
                         Column.physical("window_start", DataTypes.STRING()),
@@ -723,7 +723,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testCreateSinkTableWithoutPK() {
+    void testCreateSinkTableWithoutPK() {
         ResolvedSchema illegalSchema =
                 ResolvedSchema.of(
                         Column.physical("region", DataTypes.STRING()),
@@ -740,7 +740,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testSerWithCDCFormatAsValue() {
+    void testSerWithCDCFormatAsValue() {
         assertThatThrownBy(
                         () ->
                                 createTableSink(
@@ -769,7 +769,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testDeserWithCDCFormatAsValue() {
+    void testDeserWithCDCFormatAsValue() {
         assertThatThrownBy(
                         () ->
                                 createTableSource(
@@ -798,7 +798,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testInvalidSinkBufferFlush() {
+    void testInvalidSinkBufferFlush() {
         assertThatThrownBy(
                         () ->
                                 createTableSink(
@@ -819,7 +819,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testExactlyOnceGuaranteeWithoutTransactionalIdPrefix() {
+    void testExactlyOnceGuaranteeWithoutTransactionalIdPrefix() {
         final Map<String, String> modifiedOptions =
                 getModifiedOptions(
                         getFullSinkOptions(),
@@ -838,7 +838,7 @@ public class UpsertKafkaDynamicTableFactoryTest {
     }
 
     @Test
-    public void testTableSourceWithCustomPartitionDiscoveryInterval() {
+    void testTableSourceWithCustomPartitionDiscoveryInterval() {
         final String partitionDiscoveryInterval = "100 ms";
         final long expectedPartitionDiscoveryInterval = 100;
         final DataType producedDataType = SOURCE_SCHEMA.toPhysicalRowDataType();

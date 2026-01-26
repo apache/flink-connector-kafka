@@ -56,7 +56,7 @@ import static org.apache.flink.types.RowKind.UPDATE_AFTER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ReducingUpsertWriter}. */
-public class ReducingUpsertWriterTest {
+class ReducingUpsertWriterTest {
 
     static Stream<Boolean> enableObjectReuse() {
         return Stream.of(true, false);
@@ -263,7 +263,7 @@ public class ReducingUpsertWriterTest {
     }
 
     @Test
-    public void testWriteDataWithNullTimestamp() throws Exception {
+    void testWriteDataWithNullTimestamp() throws Exception {
         final MockedSinkWriter writer = new MockedSinkWriter();
         final ReducingUpsertWriter<?, ?> bufferedWriter = createBufferedWriter(writer, false);
 
