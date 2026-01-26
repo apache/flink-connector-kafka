@@ -31,12 +31,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Tests for serializing and deserialzing {@link KafkaWriterState} with {@link
  * KafkaWriterStateSerializer}.
  */
-public class KafkaWriterStateSerializerTest {
+class KafkaWriterStateSerializerTest {
 
     private static final KafkaWriterStateSerializer SERIALIZER = new KafkaWriterStateSerializer();
 
     @Test
-    public void testStateSerDe() throws IOException {
+    void testStateSerDe() throws IOException {
         final KafkaWriterState state =
                 new KafkaWriterState(
                         "idPrefix",

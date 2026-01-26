@@ -21,14 +21,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link DynamicKafkaRecordSerializationSchema}. */
-public class DynamicKafkaRecordSerializationSchemaTest {
+class DynamicKafkaRecordSerializationSchemaTest {
     private static final List<String> MULTIPLE_TOPICS = Arrays.asList("topic1", "topic2");
     private static final String SINGLE_TOPIC = "topic";
     private static final Pattern TOPIC_PATTERN = Pattern.compile("topic*");
 
     @ParameterizedTest
     @MethodSource("provideTopicMetadataTestParameters")
-    public void testTopicMetadata(
+    void testTopicMetadata(
             List<String> topics, Pattern topicPattern, String rowTopic, String expectedTopic) {
         GenericRowData rowData = createRowData(rowTopic);
         DynamicKafkaRecordSerializationSchema schema = createSchema(topics, topicPattern);
@@ -43,7 +43,7 @@ public class DynamicKafkaRecordSerializationSchemaTest {
 
     @ParameterizedTest
     @MethodSource("provideInvalidTopicMetadataTestParameters")
-    public void testInvalidTopicMetadata(
+    void testInvalidTopicMetadata(
             List<String> topics, Pattern topicPattern, String rowTopic, String expectedError) {
         GenericRowData rowData = createRowData(rowTopic);
         DynamicKafkaRecordSerializationSchema schema = createSchema(topics, topicPattern);

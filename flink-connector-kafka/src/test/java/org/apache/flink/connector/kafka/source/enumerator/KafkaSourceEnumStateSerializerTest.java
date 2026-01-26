@@ -37,14 +37,14 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link KafkaSourceEnumStateSerializer}. */
-public class KafkaSourceEnumStateSerializerTest {
+class KafkaSourceEnumStateSerializerTest {
 
     private static final int NUM_READERS = 10;
     private static final String TOPIC_PREFIX = "topic-";
     private static final int NUM_PARTITIONS_PER_TOPIC = 10;
 
     @Test
-    public void testEnumStateSerde() throws IOException {
+    void testEnumStateSerde() throws IOException {
         final KafkaSourceEnumState state =
                 new KafkaSourceEnumState(
                         constructTopicSplits(0),
@@ -65,7 +65,7 @@ public class KafkaSourceEnumStateSerializerTest {
     }
 
     @Test
-    public void testBackwardCompatibility() throws IOException {
+    void testBackwardCompatibility() throws IOException {
 
         final Set<KafkaPartitionSplit> splits = constructTopicSplits(0);
         final Map<Integer, Collection<KafkaPartitionSplit>> splitAssignments =
