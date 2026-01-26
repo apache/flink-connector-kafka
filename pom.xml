@@ -81,7 +81,7 @@ under the License.
 
 		<!-- Test Dependencies -->
 		<archunit.version>1.4.1</archunit.version>
-		<assertj.version>3.27.3</assertj.version>
+		<assertj.version>3.27.7</assertj.version>
 		<docker-java-api.version>3.5.2</docker-java-api.version>
 		<guava.version>33.4.8-jre</guava.version>
 		<hamcrest.version>1.3</hamcrest.version>
