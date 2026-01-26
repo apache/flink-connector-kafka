@@ -39,7 +39,6 @@ import org.apache.flink.test.junit5.MiniClusterExtension;
 import org.apache.flink.testutils.junit.SharedObjectsExtension;
 import org.apache.flink.testutils.junit.SharedReference;
 import org.apache.flink.util.Collector;
-import org.apache.flink.util.TestLogger;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -69,7 +68,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** The test for creation savepoint for migration tests for the Kafka Sink. */
 @Testcontainers
 @ResourceLock("KafkaTestBase")
-public class KafkaSourceMigrationITCase extends TestLogger {
+class KafkaSourceMigrationITCase {
     public static final String KAFKA_SOURCE_UID = "kafka-source-operator-uid";
     // Directory to store the savepoints in src/test/resources
     private static final Path KAFKA_SOURCE_SAVEPOINT_PATH =

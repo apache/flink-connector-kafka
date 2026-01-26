@@ -71,7 +71,6 @@ import org.apache.flink.test.junit5.InjectMiniCluster;
 import org.apache.flink.test.junit5.MiniClusterExtension;
 import org.apache.flink.testutils.junit.SharedObjectsExtension;
 import org.apache.flink.testutils.junit.SharedReference;
-import org.apache.flink.util.TestLogger;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -131,7 +130,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for using KafkaSink writing to a Kafka cluster. */
 @Testcontainers
-public class KafkaSinkITCase extends TestLogger {
+class KafkaSinkITCase {
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaSinkITCase.class);
     private static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
@@ -175,13 +174,13 @@ public class KafkaSinkITCase extends TestLogger {
     }
 
     @BeforeEach
-    public void setUp() throws ExecutionException, InterruptedException {
+    void setUp() throws ExecutionException, InterruptedException {
         topic = UUID.randomUUID().toString();
         createTestTopic(topic, 1, TOPIC_REPLICATION_FACTOR);
     }
 
     @AfterEach
-    public void tearDown() throws ExecutionException, InterruptedException, TimeoutException {
+    void tearDown() throws ExecutionException, InterruptedException, TimeoutException {
         checkProducerLeak();
         deleteTestTopic(topic);
     }
@@ -224,12 +223,12 @@ public class KafkaSinkITCase extends TestLogger {
     }
 
     @Test
-    public void testWriteRecordsToKafkaWithAtLeastOnceGuarantee() throws Exception {
+    void testWriteRecordsToKafkaWithAtLeastOnceGuarantee() throws Exception {
         writeRecordsToKafka(DeliveryGuarantee.AT_LEAST_ONCE);
     }
 
     @Test
-    public void testWriteRecordsToKafkaWithNoneGuarantee() throws Exception {
+    void testWriteRecordsToKafkaWithNoneGuarantee() throws Exception {
         writeRecordsToKafka(DeliveryGuarantee.NONE);
     }
 
@@ -241,7 +240,7 @@ public class KafkaSinkITCase extends TestLogger {
     }
 
     @Test
-    public void testWriteRecordsToKafkaWithExactlyOnceGuaranteeBatch() throws Exception {
+    void testWriteRecordsToKafkaWithExactlyOnceGuaranteeBatch() throws Exception {
         final StreamExecutionEnvironment env =
                 StreamExecutionEnvironment.getExecutionEnvironment(createConfiguration(1));
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
@@ -274,7 +273,7 @@ public class KafkaSinkITCase extends TestLogger {
     }
 
     @Test
-    public void testRecoveryWithAtLeastOnceGuarantee() throws Exception {
+    void testRecoveryWithAtLeastOnceGuarantee() throws Exception {
         testRecoveryWithAssertion(DeliveryGuarantee.AT_LEAST_ONCE, 1);
     }
 

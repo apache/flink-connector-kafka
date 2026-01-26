@@ -28,7 +28,6 @@ import org.apache.flink.connector.testframe.container.FlinkContainersSettings;
 import org.apache.flink.connector.testframe.container.TestcontainersSettings;
 import org.apache.flink.test.resources.ResourceTestUtils;
 import org.apache.flink.test.util.JobSubmission;
-import org.apache.flink.util.TestLoggerExtension;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -44,7 +43,6 @@ import org.apache.kafka.common.serialization.VoidSerializer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.testcontainers.containers.Network;
 import org.testcontainers.junit.jupiter.Container;
@@ -65,7 +63,6 @@ import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaCo
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** smoke test for the kafka connectors. */
-@ExtendWith({TestLoggerExtension.class})
 @Testcontainers
 class SmokeKafkaITCase {
 

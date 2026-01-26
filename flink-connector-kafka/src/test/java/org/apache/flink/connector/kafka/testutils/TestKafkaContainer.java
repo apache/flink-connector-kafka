@@ -17,9 +17,6 @@
 
 package org.apache.flink.connector.kafka.testutils;
 
-import org.junit.rules.TestRule;
-import org.junit.runner.Description;
-import org.junit.runners.model.Statement;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.output.OutputFrame;
@@ -48,11 +45,10 @@ import java.util.function.Consumer;
  *
  * <p>The wrapper delegates all operations to the underlying testcontainers implementation.
  *
- * <p>This class implements both {@link Startable} (for JUnit 5's {@code @Container}) and {@link
- * TestRule} (for JUnit 4's {@code @ClassRule}), ensuring proper lifecycle management and preventing
- * orphan containers in both testing frameworks.
+ * <p>This class implements {@link Startable} for JUnit 5's {@code @Container}, ensuring proper
+ * lifecycle management and preventing orphan containers.
  */
-public class TestKafkaContainer implements AutoCloseable, Startable, TestRule {
+public class TestKafkaContainer implements AutoCloseable, Startable {
 
     private final GenericContainer<?> delegate;
     private final boolean isConfluentImage;
@@ -158,25 +154,6 @@ public class TestKafkaContainer implements AutoCloseable, Startable, TestRule {
     @Override
     public void stop() {
         delegate.stop();
-    }
-
-    /**
-     * Implements TestRule for JUnit 4 @ClassRule support. This ensures proper lifecycle management
-     * when used with JUnit 4 tests.
-     */
-    @Override
-    public Statement apply(Statement base, Description description) {
-        return new Statement() {
-            @Override
-            public void evaluate() throws Throwable {
-                start();
-                try {
-                    base.evaluate();
-                } finally {
-                    stop();
-                }
-            }
-        };
     }
 
     /** Closes the container. Delegates to {@link #stop()}. */
