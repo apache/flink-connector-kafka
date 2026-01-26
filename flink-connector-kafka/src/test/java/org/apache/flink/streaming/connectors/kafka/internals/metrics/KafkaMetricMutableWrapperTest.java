@@ -20,7 +20,6 @@ package org.apache.flink.streaming.connectors.kafka.internals.metrics;
 
 import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.metrics.Gauge;
-import org.apache.flink.util.TestLoggerExtension;
 
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
@@ -28,7 +27,6 @@ import org.apache.kafka.common.Metric;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.testcontainers.containers.Network;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -42,7 +40,6 @@ import java.util.stream.Stream;
 
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 
-@ExtendWith(TestLoggerExtension.class)
 @Testcontainers
 class KafkaMetricMutableWrapperTest {
 
