@@ -19,10 +19,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link TableDataTypeUtils}. */
-public class TableDataTypeUtilsTest {
+class TableDataTypeUtilsTest {
 
     @Test
-    public void testStripRowPrefix() {
+    void testStripRowPrefix() {
         DataType rowDataType =
                 ROW(
                         FIELD("prefix_name", STRING()),
@@ -38,7 +38,7 @@ public class TableDataTypeUtilsTest {
     }
 
     @Test
-    public void testStripRowPrefixWithNoMatch() {
+    void testStripRowPrefixWithNoMatch() {
         // Create a test row data type with no matching prefixes
         DataType rowDataType =
                 ROW(FIELD("name", STRING()), FIELD("age", INT()), FIELD("address", STRING()));
@@ -53,7 +53,7 @@ public class TableDataTypeUtilsTest {
     }
 
     @Test
-    public void testStripRowPrefixInvalidType() {
+    void testStripRowPrefixInvalidType() {
         // Create a non-row data type
         DataType nonRowType = STRING();
 
@@ -64,7 +64,7 @@ public class TableDataTypeUtilsTest {
     }
 
     @Test
-    public void testRenameRowFields() {
+    void testRenameRowFields() {
         List<RowType.RowField> fields =
                 Arrays.asList(
                         new RowType.RowField("oldName1", new VarCharType(), null),
@@ -85,7 +85,7 @@ public class TableDataTypeUtilsTest {
     }
 
     @Test
-    public void testRenameRowFieldsInvalidLength() {
+    void testRenameRowFieldsInvalidLength() {
         List<RowType.RowField> fields =
                 Arrays.asList(
                         new RowType.RowField("oldName1", new VarCharType(), null),

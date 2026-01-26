@@ -41,7 +41,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Unit tests for {@link OffsetsInitializer}. */
 @ResourceLock("KafkaTestBase")
-public class OffsetsInitializerTest {
+class OffsetsInitializerTest {
     private static final String TOPIC = "topic";
     private static final String TOPIC2 = "topic2";
     private static final String EMPTY_TOPIC3 = "topic3";
@@ -65,7 +65,7 @@ public class OffsetsInitializerTest {
     }
 
     @Test
-    public void testEarliestOffsetsInitializer() {
+    void testEarliestOffsetsInitializer() {
         OffsetsInitializer initializer = OffsetsInitializer.earliest();
         List<TopicPartition> partitions = KafkaSourceTestEnv.getPartitionsForTopic(TOPIC);
         Map<TopicPartition, Long> offsets = initializer.getPartitionOffsets(partitions, retriever);
@@ -79,7 +79,7 @@ public class OffsetsInitializerTest {
     }
 
     @Test
-    public void testLatestOffsetsInitializer() {
+    void testLatestOffsetsInitializer() {
         OffsetsInitializer initializer = OffsetsInitializer.latest();
         List<TopicPartition> partitions = KafkaSourceTestEnv.getPartitionsForTopic(TOPIC);
         Map<TopicPartition, Long> offsets = initializer.getPartitionOffsets(partitions, retriever);
@@ -92,7 +92,7 @@ public class OffsetsInitializerTest {
     }
 
     @Test
-    public void testCommittedGroupOffsetsInitializer() {
+    void testCommittedGroupOffsetsInitializer() {
         OffsetsInitializer initializer = OffsetsInitializer.committedOffsets();
         List<TopicPartition> partitions = KafkaSourceTestEnv.getPartitionsForTopic(TOPIC);
         Map<TopicPartition, Long> offsets = initializer.getPartitionOffsets(partitions, retriever);
@@ -104,7 +104,7 @@ public class OffsetsInitializerTest {
     }
 
     @Test
-    public void testTimestampOffsetsInitializer() {
+    void testTimestampOffsetsInitializer() {
         OffsetsInitializer initializer = OffsetsInitializer.timestamp(2001);
         List<TopicPartition> partitions = KafkaSourceTestEnv.getPartitionsForTopic(TOPIC);
         Map<TopicPartition, Long> offsets = initializer.getPartitionOffsets(partitions, retriever);
@@ -117,7 +117,7 @@ public class OffsetsInitializerTest {
     }
 
     @Test
-    public void testTimestampOffsetsInitializerForEmptyPartitions() {
+    void testTimestampOffsetsInitializerForEmptyPartitions() {
         OffsetsInitializer initializer = OffsetsInitializer.timestamp(2001);
         List<TopicPartition> partitions = KafkaSourceTestEnv.getPartitionsForTopic(EMPTY_TOPIC3);
         Map<TopicPartition, Long> expectedOffsets =
@@ -129,7 +129,7 @@ public class OffsetsInitializerTest {
     }
 
     @Test
-    public void testSpecificOffsetsInitializer() {
+    void testSpecificOffsetsInitializer() {
         Map<TopicPartition, Long> specifiedOffsets = new HashMap<>();
         List<TopicPartition> partitions = KafkaSourceTestEnv.getPartitionsForTopic(TOPIC);
         Map<TopicPartition, OffsetAndMetadata> committedOffsets =
@@ -164,7 +164,7 @@ public class OffsetsInitializerTest {
     }
 
     @Test
-    public void testSpecifiedOffsetsInitializerWithoutOffsetResetStrategy() {
+    void testSpecifiedOffsetsInitializerWithoutOffsetResetStrategy() {
         OffsetsInitializer initializer =
                 OffsetsInitializer.offsets(Collections.emptyMap(), OffsetResetStrategy.NONE);
         assertThatThrownBy(

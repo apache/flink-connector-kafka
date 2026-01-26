@@ -31,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link KafkaSinkBuilder}. */
-public class KafkaSinkBuilderTest {
+class KafkaSinkBuilderTest {
 
     private static final String[] DEFAULT_KEYS =
             new String[] {

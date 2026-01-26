@@ -39,7 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 /** Tests for {@link DynamicKafkaTableFactory}. */
-public class DynamicKafkaTableFactoryTest {
+class DynamicKafkaTableFactoryTest {
 
     private static final ResolvedSchema SCHEMA =
             new ResolvedSchema(
@@ -50,7 +50,7 @@ public class DynamicKafkaTableFactoryTest {
                     null);
 
     @Test
-    public void testTableSourceWithSingleClusterMetadataService() {
+    void testTableSourceWithSingleClusterMetadataService() {
         final DynamicTableSource actualSource =
                 createTableSource(SCHEMA, getSingleClusterSourceOptions());
         assertThat(actualSource).isInstanceOf(DynamicKafkaTableSource.class);
@@ -67,7 +67,7 @@ public class DynamicKafkaTableFactoryTest {
     }
 
     @Test
-    public void testInvalidStreamOptions() {
+    void testInvalidStreamOptions() {
         final Map<String, String> options = getSingleClusterSourceOptions();
         options.put("stream-pattern", "stream-.*");
 

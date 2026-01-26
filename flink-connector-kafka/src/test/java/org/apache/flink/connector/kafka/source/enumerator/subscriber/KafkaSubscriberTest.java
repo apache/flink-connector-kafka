@@ -43,7 +43,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Unit tests for {@link KafkaSubscriber}. */
 @ResourceLock("KafkaTestBase")
-public class KafkaSubscriberTest {
+class KafkaSubscriberTest {
     private static final String TOPIC1 = "topic1";
     private static final String TOPIC2 = "pattern-topic";
     private static final TopicPartition NON_EXISTING_TOPIC = new TopicPartition("removed", 0);
@@ -64,7 +64,7 @@ public class KafkaSubscriberTest {
     }
 
     @Test
-    public void testTopicListSubscriber() {
+    void testTopicListSubscriber() {
         List<String> topics = Arrays.asList(TOPIC1, TOPIC2);
         KafkaSubscriber subscriber =
                 KafkaSubscriber.getTopicListSubscriber(Arrays.asList(TOPIC1, TOPIC2));
@@ -81,7 +81,7 @@ public class KafkaSubscriberTest {
     }
 
     @Test
-    public void testNonExistingTopic() {
+    void testNonExistingTopic() {
         final KafkaSubscriber subscriber =
                 KafkaSubscriber.getTopicListSubscriber(
                         Collections.singletonList(NON_EXISTING_TOPIC.topic()));
@@ -93,7 +93,7 @@ public class KafkaSubscriberTest {
     }
 
     @Test
-    public void testTopicPatternSubscriber() {
+    void testTopicPatternSubscriber() {
         Pattern pattern = Pattern.compile("pattern.*");
         KafkaSubscriber subscriber = KafkaSubscriber.getTopicPatternSubscriber(pattern);
         final Set<TopicPartition> subscribedPartitions =
@@ -110,7 +110,7 @@ public class KafkaSubscriberTest {
     }
 
     @Test
-    public void testPartitionSetSubscriber() {
+    void testPartitionSetSubscriber() {
         List<String> topics = Arrays.asList(TOPIC1, TOPIC2);
         Set<TopicPartition> partitions =
                 new HashSet<>(KafkaSourceTestEnv.getPartitionsForTopics(topics));
@@ -128,7 +128,7 @@ public class KafkaSubscriberTest {
     }
 
     @Test
-    public void testNonExistingPartition() {
+    void testNonExistingPartition() {
         TopicPartition nonExistingPartition = new TopicPartition(TOPIC1, Integer.MAX_VALUE);
         final KafkaSubscriber subscriber =
                 KafkaSubscriber.getPartitionSetSubscriber(
