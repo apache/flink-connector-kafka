@@ -65,10 +65,7 @@ class DynamicKafkaTableITCase extends KafkaTableTestBase {
                                 + "  'properties.group.id' = '%s',\n"
                                 + "  'format' = 'csv'\n"
                                 + ")",
-                        KafkaDynamicTableFactory.IDENTIFIER,
-                        topic,
-                        bootstraps,
-                        groupId);
+                        KafkaDynamicTableFactory.IDENTIFIER, topic, bootstraps, groupId);
 
         final String createSourceTable =
                 String.format(
@@ -85,19 +82,12 @@ class DynamicKafkaTableITCase extends KafkaTableTestBase {
                                 + "  'scan.startup.mode' = 'earliest-offset',\n"
                                 + "  'format' = 'csv'\n"
                                 + ")",
-                        DynamicKafkaTableFactory.IDENTIFIER,
-                        topic,
-                        bootstraps,
-                        groupId);
+                        DynamicKafkaTableFactory.IDENTIFIER, topic, bootstraps, groupId);
 
         tEnv.executeSql(createSinkTable);
         tEnv.executeSql(createSourceTable);
 
-        tEnv.executeSql(
-                        "INSERT INTO kafka_sink VALUES "
-                                + "(1, 'a'), "
-                                + "(2, 'b'), "
-                                + "(3, 'c')")
+        tEnv.executeSql("INSERT INTO kafka_sink VALUES " + "(1, 'a'), " + "(2, 'b'), " + "(3, 'c')")
                 .await();
 
         Table result = tEnv.sqlQuery("SELECT id, payload FROM dynamic_kafka");
@@ -127,5 +117,4 @@ class DynamicKafkaTableITCase extends KafkaTableTestBase {
             assertThat(ex).satisfiesAnyOf(ignoreIf);
         }
     }
-
 }
