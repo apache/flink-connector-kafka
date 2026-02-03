@@ -28,6 +28,7 @@ import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.clients.admin.TopicListing;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -164,7 +165,15 @@ public class KafkaTestEnvironmentImpl extends KafkaTestEnvironment {
                             return false;
                         }
                         TopicDescription topicDescription = topicDescriptions.get(topic);
-                        return topicDescription.partitions().size() == numberOfPartitions;
+                        if (topicDescription.partitions().size() != numberOfPartitions) {
+                            return false;
+                        }
+                        // Ensure all partitions have a leader elected.
+                        return topicDescription.partitions().stream()
+                                .allMatch(
+                                        p ->
+                                                p.leader() != null
+                                                        && p.leader().id() != Node.noNode().id());
                     },
                     Duration.ofSeconds(30),
                     String.format("New topic \"%s\" is not ready within timeout", topicObj));
