@@ -1,16 +1,12 @@
 #
-#Sat Aug 10 18:37:22 PDT 2024
+#Tue Feb 03 14:34:47 CET 2026
 Return\ and\ argument\ types\ of\ methods\ annotated\ with\ @Public\ must\ be\ annotated\ with\ @Public.=690729ae-756f-4ccc-831b-2667db3fdae5
 Connector\ production\ code\ must\ not\ depend\ on\ non-public\ API\ outside\ of\ connector\ packages=3030609a-c417-456d-af43-1799a4445197
-Classes\ in\ API\ packages\ should\ have\ at\ least\ one\ API\ visibility\ annotation.=661bd4bd-792c-4ba4-af39-87b7d16dcf75
 ITCASE\ tests\ should\ use\ a\ MiniCluster\ resource\ or\ extension=86dfd459-67a9-4b26-9b5c-0b0bbf22681a
 Production\ code\ must\ not\ call\ methods\ annotated\ with\ @VisibleForTesting=27a0a5e4-29c2-4069-b381-952746c90862
+JUnit\ 4\ is\ forbidden\ in\ flink-connector-kafka.\ Please\ use\ JUnit\ 5\ (org.junit.jupiter.*)\ instead.=f902c3ff-48e5-424e-923f-3705c14930a0
 Options\ for\ connectors\ and\ formats\ should\ reside\ in\ a\ consistent\ package\ and\ be\ public\ API.=3b06cb2f-1036-4d54-a358-c37f163611ee
 Tests\ inheriting\ from\ AbstractTestBase\ should\ have\ name\ ending\ with\ ITCase=cdd3929e-b7bc-4541-a0ae-46ed4fbb2001
-Options\ for\ connectors\ and\ formats\ should\ reside\ in\ a\ consistent\ package\ and\ be\ public\ API.=3b06cb2f-1036-4d54-a358-c37f163611ee
-Connector\ production\ code\ must\ not\ depend\ on\ non-public\ API\ outside\ of\ connector\ packages=3030609a-c417-456d-af43-1799a4445197
-Production\ code\ must\ not\ call\ methods\ annotated\ with\ @VisibleForTesting=27a0a5e4-29c2-4069-b381-952746c90862
-Connector\ production\ code\ must\ depend\ only\ on\ public\ API\ when\ outside\ of\ connector\ packages=c0d94764-76a0-4c50-b617-70b1754c4612
-Return\ and\ argument\ types\ of\ methods\ annotated\ with\ @Public\ must\ be\ annotated\ with\ @Public.=690729ae-756f-4ccc-831b-2667db3fdae5
 Return\ and\ argument\ types\ of\ methods\ annotated\ with\ @PublicEvolving\ must\ be\ annotated\ with\ @Public(Evolving).=d853eb69-8c04-4246-9a5e-4f5911286b1d
 Classes\ in\ API\ packages\ should\ have\ at\ least\ one\ API\ visibility\ annotation.=661bd4bd-792c-4ba4-af39-87b7d16dcf75
+Connector\ production\ code\ must\ depend\ only\ on\ public\ API\ when\ outside\ of\ connector\ packages=c0d94764-76a0-4c50-b617-70b1754c4612
