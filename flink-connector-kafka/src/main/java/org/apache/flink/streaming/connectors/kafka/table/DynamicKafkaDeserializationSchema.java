@@ -21,9 +21,11 @@ package org.apache.flink.streaming.connectors.kafka.table;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.connector.kafka.dynamic.source.reader.KafkaClusterAwareDeserializer;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.StringData;
 import org.apache.flink.types.DeserializationException;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Collector;
@@ -40,7 +42,8 @@ import java.util.List;
 
 /** A specific {@link KafkaRecordDeserializationSchema} for {@link KafkaDynamicSource}. */
 @Internal
-class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSchema<RowData> {
+class DynamicKafkaDeserializationSchema
+        implements KafkaRecordDeserializationSchema<RowData>, KafkaClusterAwareDeserializer {
 
     private static final long serialVersionUID = 1L;
 
@@ -58,6 +61,14 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
 
     private final boolean upsertMode;
 
+    /*
+     * Mask aligned with metadataConverters. When true at position i, the metadata field
+     * is filled with the dynamic Kafka cluster id instead of reading from ConsumerRecord.
+     * This enables per-cluster metadata injection in DynamicKafkaSource without changing
+     * record-level metadata extraction.
+     */
+    private final boolean needsKafkaClusterId;
+
     DynamicKafkaDeserializationSchema(
             int physicalArity,
             @Nullable DeserializationSchema<RowData> keyDeserialization,
@@ -68,6 +79,30 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
             MetadataConverter[] metadataConverters,
             TypeInformation<RowData> producedTypeInfo,
             boolean upsertMode) {
+        this(
+                physicalArity,
+                keyDeserialization,
+                keyProjection,
+                valueDeserialization,
+                valueProjection,
+                hasMetadata,
+                metadataConverters,
+                producedTypeInfo,
+                upsertMode,
+                null);
+    }
+
+    DynamicKafkaDeserializationSchema(
+            int physicalArity,
+            @Nullable DeserializationSchema<RowData> keyDeserialization,
+            int[] keyProjection,
+            DeserializationSchema<RowData> valueDeserialization,
+            int[] valueProjection,
+            boolean hasMetadata,
+            MetadataConverter[] metadataConverters,
+            TypeInformation<RowData> producedTypeInfo,
+            boolean upsertMode,
+            @Nullable boolean[] clusterMetadataPositions) {
         if (upsertMode) {
             Preconditions.checkArgument(
                     keyDeserialization != null && keyProjection.length > 0,
@@ -83,9 +118,12 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
                         keyProjection,
                         valueProjection,
                         metadataConverters,
-                        upsertMode);
+                        upsertMode,
+                        clusterMetadataPositions);
         this.producedTypeInfo = producedTypeInfo;
         this.upsertMode = upsertMode;
+        // Presence of a mask indicates that at least one metadata column expects cluster id.
+        this.needsKafkaClusterId = clusterMetadataPositions != null;
     }
 
     @Override
@@ -127,6 +165,16 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
     @Override
     public TypeInformation<RowData> getProducedType() {
         return producedTypeInfo;
+    }
+
+    @Override
+    public boolean needsKafkaClusterId() {
+        return needsKafkaClusterId;
+    }
+
+    @Override
+    public void setKafkaClusterId(@Nullable String kafkaClusterId) {
+        this.outputCollector.kafkaClusterId = kafkaClusterId;
     }
 
     // --------------------------------------------------------------------------------------------
@@ -184,7 +232,15 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
 
         private final boolean upsertMode;
 
+        /*
+         * Same mask as the outer class: marks which metadata columns should be populated
+         * with the dynamic cluster id rather than per-record metadata converters.
+         */
+        private final @Nullable boolean[] clusterMetadataPositions;
+
         private transient ConsumerRecord<?, ?> inputRecord;
+
+        private transient @Nullable String kafkaClusterId;
 
         private transient List<RowData> physicalKeyRows;
 
@@ -195,12 +251,14 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
                 int[] keyProjection,
                 int[] valueProjection,
                 MetadataConverter[] metadataConverters,
-                boolean upsertMode) {
+                boolean upsertMode,
+                @Nullable boolean[] clusterMetadataPositions) {
             this.physicalArity = physicalArity;
             this.keyProjection = keyProjection;
             this.valueProjection = valueProjection;
             this.metadataConverters = metadataConverters;
             this.upsertMode = upsertMode;
+            this.clusterMetadataPositions = clusterMetadataPositions;
         }
 
         @Override
@@ -254,6 +312,16 @@ class DynamicKafkaDeserializationSchema implements KafkaRecordDeserializationSch
             }
 
             for (int metadataPos = 0; metadataPos < metadataArity; metadataPos++) {
+                // When the mask is set, emit the per-cluster id instead of ConsumerRecord metadata.
+                if (clusterMetadataPositions != null && clusterMetadataPositions[metadataPos]) {
+                    final String clusterId =
+                            Preconditions.checkNotNull(
+                                    kafkaClusterId,
+                                    "Kafka cluster id is missing for dynamic source metadata");
+                    producedRow.setField(
+                            physicalArity + metadataPos, StringData.fromString(clusterId));
+                    continue;
+                }
                 producedRow.setField(
                         physicalArity + metadataPos,
                         metadataConverters[metadataPos].read(inputRecord));
