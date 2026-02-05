@@ -27,14 +27,22 @@ import org.apache.flink.connector.kafka.sink.KafkaPartitioner;
 import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.execution.SavepointFormatType;
+import org.apache.flink.formats.json.JsonParseException;
 import org.apache.flink.runtime.messages.FlinkJobTerminatedWithoutCancellationException;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.legacy.SinkFunction;
+import org.apache.flink.streaming.connectors.kafka.config.FormatProjectionPushdownLevel;
+import org.apache.flink.table.api.Table;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.api.config.TableConfigOptions;
+import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.data.writer.BinaryRowWriter;
+import org.apache.flink.table.data.writer.BinaryWriter;
 import org.apache.flink.table.utils.EncodingUtils;
 import org.apache.flink.test.util.SuccessException;
 import org.apache.flink.types.Row;
@@ -47,6 +55,7 @@ import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.assertj.core.api.Assertions;
 import org.assertj.core.api.ThrowingConsumer;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
@@ -61,6 +70,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
@@ -78,6 +88,7 @@ import static org.apache.flink.table.utils.TableTestMatchers.deepEqualTo;
 import static org.apache.flink.util.CollectionUtil.entry;
 import static org.apache.flink.util.CollectionUtil.map;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.fail;
 import static org.assertj.core.api.HamcrestCondition.matching;
 
@@ -180,7 +191,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                         "+I(2019-12-12 00:00:05.000,2019-12-12,00:00:03,2019-12-12 00:00:04.004,3,50.00)",
                         "+I(2019-12-12 00:00:10.000,2019-12-12,00:00:05,2019-12-12 00:00:06.006,2,5.33)");
 
-        assertThat(TestingSinkFunction.rows).isEqualTo(expected);
+        assertThat(TestingSinkFunction.getStringRows()).isEqualTo(expected);
 
         // ------------- cleanup -------------------
 
@@ -660,8 +671,9 @@ class KafkaTableITCase extends KafkaTableTestBase {
             }
         }
         List<String> expected = Arrays.asList("+I(Dollar)", "+I(Dummy)", "+I(Euro)", "+I(Yen)");
-        TestingSinkFunction.rows.sort(Comparator.naturalOrder());
-        assertThat(TestingSinkFunction.rows).isEqualTo(expected);
+        List<String> rows = TestingSinkFunction.getStringRows();
+        rows.sort(Comparator.naturalOrder());
+        assertThat(rows).isEqualTo(expected);
 
         // ------------- cleanup -------------------
         topics.forEach(super::deleteTestTopic);
@@ -789,13 +801,17 @@ class KafkaTableITCase extends KafkaTableTestBase {
                                 + "  'properties.bootstrap.servers' = '%s',\n"
                                 + "  'properties.group.id' = '%s',\n"
                                 + "  'scan.startup.mode' = 'earliest-offset',\n"
-                                + "  'key.format' = '%s',\n"
+                                + "  %s,\n"
                                 + "  'key.fields' = 'k_event_id; k_user_id',\n"
                                 + "  'key.fields-prefix' = 'k_',\n"
-                                + "  'value.format' = '%s',\n"
+                                + "  %s,\n"
                                 + "  'value.fields-include' = 'EXCEPT_KEY'\n"
                                 + ")",
-                        topic, bootstraps, groupId, format, format);
+                        topic,
+                        bootstraps,
+                        groupId,
+                        keyFormatOptions(format),
+                        valueFormatOptions(format));
 
         tEnv.executeSql(createTable);
 
@@ -872,12 +888,16 @@ class KafkaTableITCase extends KafkaTableTestBase {
                                 + "  'properties.bootstrap.servers' = '%s',\n"
                                 + "  'properties.group.id' = '%s',\n"
                                 + "  'scan.startup.mode' = 'earliest-offset',\n"
-                                + "  'key.format' = '%s',\n"
+                                + "  %s,\n"
                                 + "  'key.fields' = 'event_id; user_id',\n"
-                                + "  'value.format' = '%s',\n"
+                                + "  %s,\n"
                                 + "  'value.fields-include' = 'ALL'\n"
                                 + ")",
-                        topic, bootstraps, groupId, format, format);
+                        topic,
+                        bootstraps,
+                        groupId,
+                        keyFormatOptions(format),
+                        valueFormatOptions(format));
 
         tEnv.executeSql(createTable);
 
@@ -959,9 +979,9 @@ class KafkaTableITCase extends KafkaTableTestBase {
                                 + "  'scan.startup.mode' = 'earliest-offset',\n"
                                 + "  'properties.bootstrap.servers' = '%s',\n"
                                 + "  'properties.group.id' = '%s',\n"
-                                + "  'format' = '%s'\n"
+                                + "  %s\n"
                                 + ")",
-                        orderTopic, bootstraps, groupId, format);
+                        orderTopic, bootstraps, groupId, formatOptions(format));
         tEnv.executeSql(orderTableDDL);
         String orderInitialValues =
                 "INSERT INTO ordersTable\n"
@@ -991,9 +1011,9 @@ class KafkaTableITCase extends KafkaTableTestBase {
                                 + "  'scan.startup.mode' = 'earliest-offset',\n"
                                 + "  'properties.bootstrap.servers' = '%s',\n"
                                 + "  'properties.group.id' = '%s',\n"
-                                + "  'value.format' = 'debezium-json'\n"
+                                + "  %s\n"
                                 + ")",
-                        productTopic, bootstraps, groupId);
+                        productTopic, bootstraps, groupId, valueFormatOptions("debezium-json"));
         tEnv.executeSql(productTableDDL);
 
         // use raw format to initial the changelog data
@@ -1091,9 +1111,13 @@ class KafkaTableITCase extends KafkaTableTestBase {
                                 + "  'properties.group.id' = '%s',\n"
                                 + "  'scan.startup.mode' = 'earliest-offset',\n"
                                 + "  'sink.partitioner' = '%s',\n"
-                                + "  'format' = '%s'\n"
+                                + "  %s\n"
                                 + ")",
-                        topic, bootstraps, groupId, TestPartitioner.class.getName(), format);
+                        topic,
+                        bootstraps,
+                        groupId,
+                        TestPartitioner.class.getName(),
+                        formatOptions(format));
 
         tEnv.executeSql(createTable);
 
@@ -1183,9 +1207,13 @@ class KafkaTableITCase extends KafkaTableTestBase {
                                 + "  'properties.group.id' = '%s',\n"
                                 + "  'scan.startup.mode' = 'earliest-offset',\n"
                                 + "  'sink.partitioner' = '%s',\n"
-                                + "  'format' = '%s'\n"
+                                + "  %s\n"
                                 + ")",
-                        topic, bootstraps, groupId, TestPartitioner.class.getName(), format);
+                        topic,
+                        bootstraps,
+                        groupId,
+                        TestPartitioner.class.getName(),
+                        formatOptions(format));
 
         tEnv.executeSql(createTable);
 
@@ -1258,9 +1286,13 @@ class KafkaTableITCase extends KafkaTableTestBase {
                                 + "  'properties.group.id' = '%s',\n"
                                 + "  'scan.startup.mode' = 'latest-offset',\n"
                                 + "  'sink.partitioner' = '%s',\n"
-                                + "  'format' = '%s'\n"
+                                + "  %s\n"
                                 + ")",
-                        topic, bootstraps, groupId, TestPartitioner.class.getName(), format);
+                        topic,
+                        bootstraps,
+                        groupId,
+                        TestPartitioner.class.getName(),
+                        formatOptions(format));
 
         tEnv.executeSql(createTable);
 
@@ -1439,7 +1471,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                         + "  'properties.auto.offset.reset' = '%s',\n"
                         + "  'properties.enable.auto.commit' = 'true',\n"
                         + "  'properties.auto.commit.interval.ms' = '1000',\n"
-                        + "  'format' = '%s'\n"
+                        + "  %s\n"
                         + ")";
         tEnv.executeSql(
                 String.format(
@@ -1449,7 +1481,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                         bootstraps,
                         groupId,
                         resetStrategy,
-                        format));
+                        formatOptions(format)));
 
         String initialValues =
                 "INSERT INTO "
@@ -1531,6 +1563,453 @@ class KafkaTableITCase extends KafkaTableTestBase {
         }
     }
 
+    private void projectionPushdownSetupData(final String format, final String topic)
+            throws Exception {
+        createTestTopic(topic, 1, 1);
+
+        String groupId = getStandardProps().getProperty("group.id");
+        String bootstraps = getBootstrapServers();
+
+        final String createTable =
+                String.format(
+                        "CREATE TABLE kafka (\n"
+                                + "  `a` STRING,\n"
+                                + "  `b` STRING,\n"
+                                + "  `topic` STRING NOT NULL METADATA VIRTUAL,\n"
+                                + "  `c` STRING,\n"
+                                + "  `partition` INT NOT NULL METADATA VIRTUAL,\n"
+                                + "  `d` STRING\n"
+                                + ") WITH (\n"
+                                + "  'connector' = 'kafka',\n"
+                                + "  'topic' = '%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'properties.group.id' = '%s',\n"
+                                + "  'scan.startup.mode' = 'earliest-offset',\n"
+                                + "  %s,\n"
+                                + "  'key.fields' = 'a; b',\n"
+                                + "  %s,\n"
+                                + "  'value.fields-include' = 'EXCEPT_KEY'\n"
+                                + ")",
+                        topic,
+                        bootstraps,
+                        groupId,
+                        keyFormatOptions(format),
+                        valueFormatOptions(format));
+        tEnv.executeSql(createTable);
+
+        final String initialValues = "INSERT INTO kafka (a, b, c, d) SELECT 'a', 'b', 'c', 'd'";
+        tEnv.executeSql(initialValues).await();
+    }
+
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    public void testProjectionPushdownSelectAllFields(final String format) throws Exception {
+        final String topic = "testProjectionPushdown_" + format + "_" + UUID.randomUUID();
+        projectionPushdownSetupData(format, topic);
+
+        assertQueryResult(
+                "SELECT * FROM kafka",
+                "== Optimized Execution Plan ==\n"
+                        + "Calc(select=[a, b, topic, c, partition, d])\n"
+                        + "+- TableSourceScan(table=[[default_catalog, default_database, kafka, metadata=[topic, partition]]], fields=[a, b, c, d, topic, partition])\n",
+                Collections.singletonList(String.format("+I(a,b,%s,c,%d,d)", topic, 0)));
+
+        cleanupTopic(topic);
+    }
+
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    public void testProjectionPushdownSelectSpecificPhysicalFields(final String format)
+            throws Exception {
+        final String topic = "testProjectionPushdown_" + format + "_" + UUID.randomUUID();
+        projectionPushdownSetupData(format, topic);
+
+        assertQueryResult(
+                "SELECT a, c FROM kafka",
+                "== Optimized Execution Plan ==\n"
+                        + "TableSourceScan(table=[[default_catalog, default_database, kafka, project=[a, c], metadata=[]]], fields=[a, c])\n",
+                Collections.singletonList("+I(a,c)"));
+
+        cleanupTopic(topic);
+    }
+
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    public void
+            testProjectionPushdownSelectNonContiguousPhysicalFieldsInDifferentOrderFromTableSchema(
+                    final String format) throws Exception {
+        final String topic = "testProjectionPushdown_" + format + "_" + UUID.randomUUID();
+        projectionPushdownSetupData(format, topic);
+
+        assertQueryResult(
+                "SELECT c, a FROM kafka",
+                "== Optimized Execution Plan ==\n"
+                        + "TableSourceScan(table=[[default_catalog, default_database, kafka, project=[c, a], metadata=[]]], fields=[c, a])\n",
+                Collections.singletonList("+I(c,a)"));
+
+        cleanupTopic(topic);
+    }
+
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    public void
+            testProjectionPushdownSelectSpecificPhysicalAndMetadataFieldsInDifferentOrderFromTableSchema(
+                    final String format) throws Exception {
+        final String topic = "testProjectionPushdown_" + format + "_" + UUID.randomUUID();
+        projectionPushdownSetupData(format, topic);
+
+        assertQueryResult(
+                "SELECT c, `partition`, a, topic FROM kafka",
+                "== Optimized Execution Plan ==\n"
+                        + "Calc(select=[c, partition, a, topic])\n"
+                        + "+- TableSourceScan(table=[[default_catalog, default_database, kafka, project=[c, a], metadata=[topic, partition]]], fields=[c, a, topic, partition])\n",
+                Collections.singletonList(String.format("+I(c,%s,a,%s)", 0, topic)));
+
+        cleanupTopic(topic);
+    }
+
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    public void testProjectionPushdownSelectSameColumnTwice(final String format) throws Exception {
+        final String topic = "testProjectionPushdown_" + format + "_" + UUID.randomUUID();
+        projectionPushdownSetupData(format, topic);
+
+        assertQueryResult(
+                "SELECT b AS b1, b AS b2 FROM kafka",
+                "== Optimized Execution Plan ==\n"
+                        + "Calc(select=[b AS b1, b AS b2])\n"
+                        + "+- TableSourceScan(table=[[default_catalog, default_database, kafka, project=[b], metadata=[]]], fields=[b])\n",
+                Collections.singletonList("+I(b,b)"));
+
+        cleanupTopic(topic);
+    }
+
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    public void testProjectionPushdownNestColumns(final String format) throws Exception {
+        final String topic = "testProjectionPushdown_" + format + "_" + UUID.randomUUID();
+        projectionPushdownSetupData(format, topic);
+
+        final String query = "SELECT ROW(b, a) AS nested FROM kafka";
+
+        final String expectedPlanEndsWith =
+                "== Optimized Execution Plan ==\n"
+                        + "Calc(select=[ROW(b, a) AS nested])\n"
+                        + "+- TableSourceScan(table=[[default_catalog, default_database, kafka, project=[b, a], metadata=[]]], fields=[b, a])\n";
+
+        final BinaryRowData nested = new BinaryRowData(2);
+        final BinaryWriter binaryWriter = new BinaryRowWriter(nested);
+        binaryWriter.writeString(0, StringData.fromString("b"));
+        binaryWriter.writeString(1, StringData.fromString("a"));
+        binaryWriter.complete();
+        final GenericRowData row = new GenericRowData(1);
+        row.setField(0, nested);
+        final List<RowData> expected = Collections.singletonList(row);
+
+        final Table table = tEnv.sqlQuery(query);
+
+        assertThat(table.explain()).endsWith(expectedPlanEndsWith);
+
+        final DataStream<RowData> result =
+                tEnv.toRetractStream(table, RowData.class).map(tuple -> tuple.f1);
+        final TestingSinkFunction sink = new TestingSinkFunction(expected.size());
+        result.addSink(sink).setParallelism(1);
+        try {
+            env.execute("Job_2");
+        } catch (Throwable e) {
+            if (!isCausedByJobFinished(e)) {
+                throw e;
+            }
+        }
+        assertThat(TestingSinkFunction.getRows()).isEqualTo(expected);
+
+        cleanupTopic(topic);
+    }
+
+    private void nestedProjectionPushdownSetupData(final String topic) throws Exception {
+        // Only JSON format supports nested projection pushdown currently
+        final String format = "json";
+
+        createTestTopic(topic, 1, 1);
+
+        String groupId = getStandardProps().getProperty("group.id");
+        String bootstraps = getBootstrapServers();
+
+        final String createTable =
+                String.format(
+                        "CREATE TABLE kafka (\n"
+                                + "  `a` ROW(a1 STRING, a2 STRING),\n"
+                                + "  `b` ROW(b1 STRING, b2 STRING),\n"
+                                + "  `topic` STRING NOT NULL METADATA VIRTUAL,\n"
+                                + "  `c` ROW(c1 STRING, c2 STRING),\n"
+                                + "  `partition` INT NOT NULL METADATA VIRTUAL,\n"
+                                + "  `d` ROW(d1 ROW(d2 STRING, d3 STRING))\n"
+                                + ") WITH (\n"
+                                + "  'connector' = 'kafka',\n"
+                                + "  'topic' = '%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'properties.group.id' = '%s',\n"
+                                + "  'scan.startup.mode' = 'earliest-offset',\n"
+                                + "  %s,\n"
+                                + "  'key.fields' = 'a; b',\n"
+                                + "  %s,\n"
+                                + "  'value.fields-include' = 'EXCEPT_KEY'\n"
+                                + ")",
+                        topic,
+                        bootstraps,
+                        groupId,
+                        keyFormatOptions(format),
+                        valueFormatOptions(format));
+        tEnv.executeSql(createTable);
+
+        tEnv.executeSql(
+                        "INSERT INTO kafka \n"
+                                + "SELECT \n"
+                                + "    ROW('a1', 'a2'), \n"
+                                + "    ROW('b1', 'b2'), \n"
+                                + "    ROW('c1', 'c2'), \n"
+                                + "    ROW(ROW('d2', 'd3'))")
+                .await();
+    }
+
+    @Test
+    public void testNestedProjectionPushdownSelectAllFields() throws Exception {
+        final String topic = "testNestedProjectionPushdown_" + "_" + UUID.randomUUID();
+        nestedProjectionPushdownSetupData(topic);
+
+        assertQueryResult(
+                "SELECT * FROM kafka",
+                "== Optimized Execution Plan ==\n"
+                        + "Calc(select=[a, b, topic, c, partition, d])\n"
+                        + "+- TableSourceScan(table=[[default_catalog, default_database, kafka, metadata=[topic, partition]]], fields=[a, b, c, d, topic, partition])\n",
+                Collections.singletonList(
+                        String.format(
+                                "+I(+I(a1,a2),+I(b1,b2),%s,+I(c1,c2),0,+I(+I(d2,d3)))", topic)));
+
+        cleanupTopic(topic);
+    }
+
+    @Test
+    public void testNestedProjectionPushdownSelectSpecificNestedPhysicalFields() throws Exception {
+        final String topic = "testNestedProjectionPushdown_" + "_" + UUID.randomUUID();
+        nestedProjectionPushdownSetupData(topic);
+
+        assertQueryResult(
+                "SELECT a.a1, d.d1.d3 FROM kafka",
+                "== Optimized Execution Plan ==\n"
+                        + "TableSourceScan(table=[[default_catalog, default_database, kafka, project=[a_a1, d_d1_d3], metadata=[]]], fields=[a_a1, d_d1_d3])\n",
+                Collections.singletonList("+I(a1,d3)"));
+
+        cleanupTopic(topic);
+    }
+
+    @Test
+    public void
+            testNestedProjectionPushdownSelectSpecificNestedPhysicalFieldsInDifferentOrderFromTableSchema()
+                    throws Exception {
+        final String topic = "testNestedProjectionPushdown_" + "_" + UUID.randomUUID();
+        nestedProjectionPushdownSetupData(topic);
+
+        assertQueryResult(
+                "SELECT d.d1.d3, a.a1 FROM kafka",
+                "== Optimized Execution Plan ==\n"
+                        + "TableSourceScan(table=[[default_catalog, default_database, kafka, project=[d_d1_d3, a_a1], metadata=[]]], fields=[d_d1_d3, a_a1])\n",
+                Collections.singletonList("+I(d3,a1)"));
+
+        cleanupTopic(topic);
+    }
+
+    @Test
+    public void
+            testNestedProjectionPushdownSelectSpecificNestedPhysicalAndMetadataFieldsInDifferentOrderFromTableSchema()
+                    throws Exception {
+        final String topic = "testNestedProjectionPushdown_" + "_" + UUID.randomUUID();
+        nestedProjectionPushdownSetupData(topic);
+
+        assertQueryResult(
+                "SELECT d.d1.d3, `partition`, a.a1, topic FROM kafka",
+                "== Optimized Execution Plan ==\n"
+                        + "Calc(select=[d_d1_d3 AS d3, partition, a_a1 AS a1, topic])\n"
+                        + "+- TableSourceScan(table=[[default_catalog, default_database, kafka, project=[d_d1_d3, a_a1], metadata=[topic, partition]]], fields=[d_d1_d3, a_a1, topic, partition])\n",
+                Collections.singletonList(String.format("+I(d3,%s,a1,%s)", 0, topic)));
+
+        cleanupTopic(topic);
+    }
+
+    @Test
+    public void
+            testNestedProjectionPushdownSelectSpecificNestedAndNonNestedPhysicalAndMetadataFieldsInDifferentOrderFromTableSchema()
+                    throws Exception {
+        final String topic = "testNestedProjectionPushdown_" + "_" + UUID.randomUUID();
+        nestedProjectionPushdownSetupData(topic);
+
+        assertQueryResult(
+                "SELECT d.d1.d3, d, `partition`, a.a1, topic FROM kafka",
+                "== Optimized Execution Plan ==\n"
+                        + "Calc(select=[d.d1.d3 AS d3, d, partition, a_a1 AS a1, topic])\n"
+                        + "+- TableSourceScan(table=[[default_catalog, default_database, kafka, project=[d, a_a1], metadata=[topic, partition]]], fields=[d, a_a1, topic, partition])\n",
+                Collections.singletonList(
+                        String.format("+I(d3,+I(+I(d2,d3)),%s,a1,%s)", 0, topic)));
+
+        cleanupTopic(topic);
+    }
+
+    @Test
+    public void testProjectionPushdownWithJsonFormatAndBreakingSchemaChange() throws Exception {
+        // Only self-contained formats like JSON can use projection pushdown to
+        // avoid deserializing fields that aren't needed for a query and thus avoid
+        // errors from breaking schema changes.
+        final String format = "json";
+
+        // Setup data
+
+        final String topic = "testProjectionPushdown_" + format + "_" + UUID.randomUUID();
+        createTestTopic(topic, 1, 1);
+
+        String groupId = getStandardProps().getProperty("group.id");
+        String bootstraps = getBootstrapServers();
+
+        final String originalCreateTable =
+                String.format(
+                        "CREATE TABLE kafka (\n"
+                                + "  `a` INT,\n" // `a` is originally an INT  field
+                                + "  `b` STRING\n"
+                                + ") WITH (\n"
+                                + "  'connector' = 'kafka',\n"
+                                + "  'topic' = '%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'properties.group.id' = '%s',\n"
+                                + "  'scan.startup.mode' = 'earliest-offset',\n"
+                                + "  %s,\n"
+                                + "  'key.fields' = 'a; b',\n"
+                                + "  %s,\n"
+                                + "  'value.fields-include' = 'EXCEPT_KEY'\n"
+                                + ")",
+                        topic,
+                        bootstraps,
+                        groupId,
+                        keyFormatOptions(format),
+                        valueFormatOptions(format));
+        tEnv.executeSql(originalCreateTable);
+        final int a1 = 1;
+        final String b1 = "b1";
+        tEnv.executeSql(
+                        String.format(
+                                "INSERT INTO kafka SELECT * FROM (VALUES (%d, '%s'))", a1, b1))
+                .await();
+        tEnv.executeSql("DROP TABLE kafka").await();
+
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE kafka (\n"
+                                + "  `a` STRING,\n" // `a` is now a STRING field
+                                + "  `b` STRING\n"
+                                + ") WITH (\n"
+                                + "  'connector' = 'kafka',\n"
+                                + "  'topic' = '%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'properties.group.id' = '%s',\n"
+                                + "  'scan.startup.mode' = 'earliest-offset',\n"
+                                + "  %s,\n"
+                                + "  'key.fields' = 'a; b',\n"
+                                + "  %s,\n"
+                                + "  'value.fields-include' = 'EXCEPT_KEY'\n"
+                                + ")",
+                        topic,
+                        bootstraps,
+                        groupId,
+                        keyFormatOptions(format),
+                        valueFormatOptions(format)));
+        final String a2 = "a2";
+        final String b2 = "b2";
+        tEnv.executeSql(
+                        String.format(
+                                "INSERT INTO kafka SELECT * FROM (VALUES ('%s', '%s'))", a2, b2))
+                .await();
+        tEnv.executeSql("DROP TABLE kafka").await();
+
+        // Read data using original create table statement where `a` is still typed as an INT
+        tEnv.executeSql(originalCreateTable);
+
+        // If you try to read all the fields, you naturally you get a deserialization exception
+        // because of the breaking schema change to field `a`
+        assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM kafka").await())
+                .hasRootCauseInstanceOf(JsonParseException.class)
+                .hasRootCauseMessage("Fail to deserialize at field: a.");
+
+        // If you try to read just the fields that didn't have any breaking schema changes
+        // the query will work because projection pushdown ensures that fields that aren't needed
+        // aren't deserialized
+        assertQueryResult(
+                "SELECT b FROM kafka",
+                "== Optimized Execution Plan ==\n"
+                        + "TableSourceScan(table=[[default_catalog, default_database, kafka, project=[b], metadata=[]]], fields=[b])\n",
+                Arrays.asList(String.format("+I(%s)", b1), String.format("+I(%s)", b2)));
+
+        // clean up
+        cleanupTopic(topic);
+    }
+
+    private void setupValueOnlyData(final String format, final String topic)
+            throws ExecutionException, InterruptedException {
+        createTestTopic(topic, 1, 1);
+
+        final String groupId = getStandardProps().getProperty("group.id");
+        final String bootstraps = getBootstrapServers();
+
+        final String createTable =
+                String.format(
+                        "CREATE TABLE kafka (\n"
+                                + "  `a` STRING,\n"
+                                + "  `b` STRING,\n"
+                                + "  `c` STRING \n"
+                                + ") WITH (\n"
+                                + "  'connector' = 'kafka',\n"
+                                + "  'topic' = '%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'properties.group.id' = '%s',\n"
+                                + "  'scan.startup.mode' = 'earliest-offset',\n"
+                                + "  %s\n"
+                                + ")",
+                        topic, bootstraps, groupId, valueFormatOptions(format));
+        tEnv.executeSql(createTable);
+
+        final String initialValues = "INSERT INTO kafka (a, b, c) SELECT 'a', 'b', 'c'";
+        tEnv.executeSql(initialValues).await();
+    }
+
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    public void testShortcutWhenNoKeyAndNoConnectorMetadataAndSelectingAllFields(
+            final String format) throws Exception {
+        final String topic = "testSelectAllFields_" + format + "_" + UUID.randomUUID();
+        setupValueOnlyData(format, topic);
+
+        assertQueryResult(
+                "SELECT * FROM kafka",
+                "== Optimized Execution Plan ==\n"
+                        + "TableSourceScan(table=[[default_catalog, default_database, kafka]], fields=[a, b, c])\n",
+                Collections.singletonList("+I(a,b,c)"));
+
+        cleanupTopic(topic);
+    }
+
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    public void testShortcutWhenNoKeyAndNoConnectorMetadataAndSelectingOnlyFirstField(
+            final String format) throws Exception {
+        final String topic = "testSelectFirstField_" + format + "_" + UUID.randomUUID();
+        setupValueOnlyData(format, topic);
+
+        assertQueryResult(
+                "SELECT a FROM kafka",
+                "== Optimized Execution Plan ==\n"
+                        + "TableSourceScan(table=[[default_catalog, default_database, kafka, project=[a], metadata=[]]], fields=[a])\n",
+                Collections.singletonList("+I(a)"));
+
+        cleanupTopic(topic);
+    }
+
     // --------------------------------------------------------------------------------------------
     // Utilities
     // --------------------------------------------------------------------------------------------
@@ -1548,14 +2027,62 @@ class KafkaTableITCase extends KafkaTableTestBase {
         }
     }
 
+    private static FormatProjectionPushdownLevel projectionPushdownLevel(final String format) {
+        if (Objects.equals(format, "avro")) {
+            return FormatProjectionPushdownLevel.NONE;
+        } else if (Objects.equals(format, "csv")) {
+            return FormatProjectionPushdownLevel.TOP_LEVEL;
+        } else if (Objects.equals(format, "json")) {
+            return FormatProjectionPushdownLevel.ALL;
+        } else if (Objects.equals(format, "debezium-json")) {
+            return FormatProjectionPushdownLevel.TOP_LEVEL;
+        } else {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "The level of support the %s format has for projection pushdown is unknown",
+                            format));
+        }
+    }
+
     private String formatOptions(final String format) {
-        return String.format("'format' = '%s'", format);
+        final FormatProjectionPushdownLevel formatProjectionPushdownLevel =
+                projectionPushdownLevel(format);
+
+        return String.format(
+                "'format' = '%s',\n" + "'%s' = '%s',\n" + "'%s' = '%s'",
+                format,
+                KafkaConnectorOptions.KEY_PROJECTION_PUSHDOWN_LEVEL.key(),
+                formatProjectionPushdownLevel,
+                KafkaConnectorOptions.VALUE_PROJECTION_PUSHDOWN_LEVEL.key(),
+                formatProjectionPushdownLevel);
+    }
+
+    private static String keyFormatOptions(final String format) {
+        final FormatProjectionPushdownLevel formatProjectionPushdownLevel =
+                projectionPushdownLevel(format);
+
+        return String.format(
+                "'key.format' = '%s',\n" + "'%s' = '%s'",
+                format,
+                KafkaConnectorOptions.KEY_PROJECTION_PUSHDOWN_LEVEL.key(),
+                formatProjectionPushdownLevel);
+    }
+
+    private static String valueFormatOptions(final String format) {
+        final FormatProjectionPushdownLevel formatProjectionPushdownLevel =
+                projectionPushdownLevel(format);
+
+        return String.format(
+                "'value.format' = '%s',\n" + "'%s' = '%s'",
+                format,
+                KafkaConnectorOptions.VALUE_PROJECTION_PUSHDOWN_LEVEL.key(),
+                formatProjectionPushdownLevel);
     }
 
     private static final class TestingSinkFunction implements SinkFunction<RowData> {
 
         private static final long serialVersionUID = 455430015321124493L;
-        private static List<String> rows = new ArrayList<>();
+        private static final List<RowData> rows = new ArrayList<>();
 
         private final int expectedSize;
 
@@ -1566,11 +2093,19 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
         @Override
         public void invoke(RowData value, Context context) {
-            rows.add(value.toString());
+            rows.add(value);
             if (rows.size() >= expectedSize) {
                 // job finish
                 throw new SuccessException();
             }
+        }
+
+        private static List<RowData> getRows() {
+            return rows;
+        }
+
+        private static List<String> getStringRows() {
+            return getRows().stream().map(RowData::toString).collect(Collectors.toList());
         }
     }
 
@@ -1611,5 +2146,26 @@ class KafkaTableITCase extends KafkaTableTestBase {
             // check if the exception is one of the ignored ones
             assertThat(ex).satisfiesAnyOf(ignoreIf);
         }
+    }
+
+    private void assertQueryResult(
+            final String query, final String expectedPlanEndsWith, final List<String> expected)
+            throws Exception {
+        final Table table = tEnv.sqlQuery(query);
+
+        assertThat(table.explain()).endsWith(expectedPlanEndsWith);
+
+        final DataStream<RowData> result =
+                tEnv.toRetractStream(table, RowData.class).map(tuple -> tuple.f1);
+        final TestingSinkFunction sink = new TestingSinkFunction(expected.size());
+        result.addSink(sink).setParallelism(1);
+        try {
+            env.execute("Job_2");
+        } catch (Throwable e) {
+            if (!isCausedByJobFinished(e)) {
+                throw e;
+            }
+        }
+        assertThat(TestingSinkFunction.getStringRows()).isEqualTo(expected);
     }
 }
