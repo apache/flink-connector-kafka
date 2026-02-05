@@ -22,6 +22,7 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 
+import java.util.Locale;
 import java.util.Properties;
 import java.util.function.Function;
 
@@ -33,6 +34,16 @@ import java.util.function.Function;
 public class DynamicKafkaSourceOptions {
 
     private DynamicKafkaSourceOptions() {}
+
+    /**
+     * Enumerator mode determines how discovered Kafka splits are assigned to source readers:
+     * cluster-local assignment (per-cluster behavior) or globally balanced assignment across
+     * clusters.
+     */
+    public enum EnumeratorMode {
+        PER_CLUSTER,
+        GLOBAL
+    }
 
     public static final ConfigOption<Long> STREAM_METADATA_DISCOVERY_INTERVAL_MS =
             ConfigOptions.key("stream-metadata-discovery-interval-ms")
@@ -51,10 +62,50 @@ public class DynamicKafkaSourceOptions {
                                     + "trigger jobmanager failure and global failover. The default is one to at least catch startup "
                                     + "failures.");
 
+    public static final ConfigOption<String> STREAM_ENUMERATOR_MODE =
+            ConfigOptions.key("stream-enumerator-mode")
+                    .stringType()
+                    .defaultValue(EnumeratorMode.PER_CLUSTER.name().toLowerCase(Locale.ROOT))
+                    .withDescription(
+                            "Enumerator implementation for dynamic Kafka split assignment. "
+                                    + "'per_cluster' keeps per-cluster assignment behavior, while "
+                                    + "'global' enables global load-balanced assignment across clusters.");
+
     @Internal
     public static <T> T getOption(
             Properties props, ConfigOption<?> configOption, Function<String, T> parser) {
         String value = props.getProperty(configOption.key());
-        return (T) (value == null ? configOption.defaultValue() : parser.apply(value));
+        if (value != null) {
+            return parser.apply(value);
+        }
+
+        Object defaultValue = configOption.defaultValue();
+        return defaultValue == null ? null : parser.apply(String.valueOf(defaultValue));
+    }
+
+    @Internal
+    public static EnumeratorMode getEnumeratorMode(Properties props) {
+        return getOption(
+                props,
+                STREAM_ENUMERATOR_MODE,
+                value -> {
+                    final String normalizedValue =
+                            value.trim().toUpperCase(Locale.ROOT).replace('-', '_');
+                    try {
+                        return EnumeratorMode.valueOf(normalizedValue);
+                    } catch (IllegalArgumentException e) {
+                        throw new IllegalArgumentException(
+                                String.format(
+                                        "Invalid %s='%s'. Supported values are: %s.",
+                                        STREAM_ENUMERATOR_MODE.key(),
+                                        value,
+                                        EnumeratorMode.PER_CLUSTER.name().toLowerCase(Locale.ROOT)
+                                                + ", "
+                                                + EnumeratorMode.GLOBAL
+                                                        .name()
+                                                        .toLowerCase(Locale.ROOT)),
+                                e);
+                    }
+                });
     }
 }

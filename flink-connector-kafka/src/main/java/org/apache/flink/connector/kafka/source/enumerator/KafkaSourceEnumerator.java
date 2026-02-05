@@ -46,6 +46,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -94,6 +95,17 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 public class KafkaSourceEnumerator
         implements SplitEnumerator<KafkaPartitionSplit, KafkaSourceEnumState> {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaSourceEnumerator.class);
+
+    /**
+     * Selects the target reader for a split while it is enqueued in pending assignments.
+     *
+     * <p>The selector is invoked on the coordinator thread.
+     */
+    @FunctionalInterface
+    public interface SplitOwnerSelector {
+        int getSplitOwner(KafkaPartitionSplit split, int numReaders);
+    }
+
     private final KafkaSubscriber subscriber;
     private final OffsetsInitializer startingOffsetInitializer;
     private final OffsetsInitializer stoppingOffsetInitializer;
@@ -117,6 +129,8 @@ public class KafkaSourceEnumerator
      */
     private final Map<Integer, Set<KafkaPartitionSplit>> pendingPartitionSplitAssignment =
             new HashMap<>();
+
+    private final SplitOwnerSelector splitOwnerSelector;
 
     /** The consumer group id used for this KafkaSource. */
     private final String consumerGroupId;
@@ -144,7 +158,8 @@ public class KafkaSourceEnumerator
                 properties,
                 context,
                 boundedness,
-                new KafkaSourceEnumState(Collections.emptySet(), false));
+                new KafkaSourceEnumState(Collections.emptySet(), false),
+                null);
     }
 
     public KafkaSourceEnumerator(
@@ -155,6 +170,26 @@ public class KafkaSourceEnumerator
             SplitEnumeratorContext<KafkaPartitionSplit> context,
             Boundedness boundedness,
             KafkaSourceEnumState kafkaSourceEnumState) {
+        this(
+                subscriber,
+                startingOffsetInitializer,
+                stoppingOffsetInitializer,
+                properties,
+                context,
+                boundedness,
+                kafkaSourceEnumState,
+                null);
+    }
+
+    public KafkaSourceEnumerator(
+            KafkaSubscriber subscriber,
+            OffsetsInitializer startingOffsetInitializer,
+            OffsetsInitializer stoppingOffsetInitializer,
+            Properties properties,
+            SplitEnumeratorContext<KafkaPartitionSplit> context,
+            Boundedness boundedness,
+            KafkaSourceEnumState kafkaSourceEnumState,
+            @Nullable SplitOwnerSelector splitOwnerSelector) {
         this.subscriber = subscriber;
         this.startingOffsetInitializer = startingOffsetInitializer;
         this.stoppingOffsetInitializer = stoppingOffsetInitializer;
@@ -162,6 +197,11 @@ public class KafkaSourceEnumerator
         this.properties = properties;
         this.context = context;
         this.boundedness = boundedness;
+        this.splitOwnerSelector =
+                splitOwnerSelector != null
+                        ? splitOwnerSelector
+                        : (split, numReaders) ->
+                                getSplitOwner(split.getTopicPartition(), numReaders);
 
         this.partitionDiscoveryIntervalMs =
                 KafkaSourceOptions.getOption(
@@ -403,8 +443,19 @@ public class KafkaSourceEnumerator
     private void addPartitionSplitChangeToPendingAssignments(
             Collection<KafkaPartitionSplit> newPartitionSplits) {
         int numReaders = context.currentParallelism();
-        for (KafkaPartitionSplit split : newPartitionSplits) {
-            int ownerReader = getSplitOwner(split.getTopicPartition(), numReaders);
+        List<KafkaPartitionSplit> sortedSplits = new ArrayList<>(newPartitionSplits);
+        sortedSplits.sort(
+                Comparator.comparing(
+                                (KafkaPartitionSplit split) -> split.getTopicPartition().topic())
+                        .thenComparingInt(split -> split.getTopicPartition().partition()));
+        for (KafkaPartitionSplit split : sortedSplits) {
+            int ownerReader = splitOwnerSelector.getSplitOwner(split, numReaders);
+            checkState(
+                    ownerReader >= 0 && ownerReader < numReaders,
+                    "Invalid split owner %s for split %s with current parallelism %s",
+                    ownerReader,
+                    split,
+                    numReaders);
             pendingPartitionSplitAssignment
                     .computeIfAbsent(ownerReader, r -> new HashSet<>())
                     .add(split);
