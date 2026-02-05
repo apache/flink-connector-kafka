@@ -531,16 +531,23 @@ public class DynamicKafkaTableSource
             DeserializationSchema<RowData> keyDeserialization,
             DeserializationSchema<RowData> valueDeserialization,
             TypeInformation<RowData> producedTypeInfo) {
-        final MetadataConverter[] metadataConverters =
-                metadataKeys.stream()
-                        .map(
-                                k ->
-                                        Stream.of(ReadableMetadata.values())
-                                                .filter(rm -> rm.key.equals(k))
-                                                .findFirst()
-                                                .orElseThrow(IllegalStateException::new))
-                        .map(m -> m.converter)
-                        .toArray(MetadataConverter[]::new);
+        final MetadataConverter[] metadataConverters = new MetadataConverter[metadataKeys.size()];
+        final boolean[] clusterMetadataPositions = new boolean[metadataKeys.size()];
+        boolean hasClusterMetadata = false;
+        for (int i = 0; i < metadataKeys.size(); i++) {
+            String key = metadataKeys.get(i);
+            ReadableMetadata metadata =
+                    Stream.of(ReadableMetadata.values())
+                            .filter(rm -> rm.key.equals(key))
+                            .findFirst()
+                            .orElseThrow(IllegalStateException::new);
+            metadataConverters[i] = metadata.converter;
+            if (metadata == ReadableMetadata.KAFKA_CLUSTER) {
+                clusterMetadataPositions[i] = true;
+                hasClusterMetadata = true;
+            }
+        }
+        final boolean[] clusterPositions = hasClusterMetadata ? clusterMetadataPositions : null;
 
         // check if connector metadata is used at all
         final boolean hasMetadata = metadataKeys.size() > 0;
@@ -567,7 +574,8 @@ public class DynamicKafkaTableSource
                 hasMetadata,
                 metadataConverters,
                 producedTypeInfo,
-                upsertMode);
+                upsertMode,
+                clusterPositions);
     }
 
     private @Nullable DeserializationSchema<RowData> createDeserialization(
@@ -591,6 +599,19 @@ public class DynamicKafkaTableSource
     // --------------------------------------------------------------------------------------------
 
     enum ReadableMetadata {
+        KAFKA_CLUSTER(
+                "kafka_cluster",
+                DataTypes.STRING().notNull(),
+                new MetadataConverter() {
+                    private static final long serialVersionUID = 1L;
+
+                    @Override
+                    public Object read(ConsumerRecord<?, ?> record) {
+                        throw new IllegalStateException(
+                                "Kafka cluster metadata should be populated by dynamic source.");
+                    }
+                }),
+
         TOPIC(
                 "topic",
                 DataTypes.STRING().notNull(),
