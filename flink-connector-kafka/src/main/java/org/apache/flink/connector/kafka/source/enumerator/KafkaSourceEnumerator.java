@@ -200,8 +200,6 @@ public class KafkaSourceEnumerator
             addPartitionSplitChangeToPendingAssignments(preinitializedSplits);
         }
 
-        subscriber.open(new KafkaSubscriberInitContext());
-
         if (partitionDiscoveryIntervalMs > 0) {
             LOG.info(
                     "Starting the KafkaSourceEnumerator for consumer group {} "
@@ -261,7 +259,6 @@ public class KafkaSourceEnumerator
         if (adminClient != null) {
             adminClient.close();
         }
-        subscriber.close();
     }
 
     // ----------------- private methods -------------------
@@ -564,10 +561,6 @@ public class KafkaSourceEnumerator
     }
 
     // --------------- private class ---------------
-
-    static class KafkaSubscriberInitContext implements KafkaSubscriber.InitializationContext {
-        private KafkaSubscriberInitContext() {}
-    }
 
     /** A container class to hold the newly added partitions and removed partitions. */
     @VisibleForTesting
