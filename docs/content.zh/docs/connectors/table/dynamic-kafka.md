@@ -50,6 +50,7 @@ CREATE TABLE DynamicKafkaTable (
   `user_id` BIGINT,
   `item_id` BIGINT,
   `behavior` STRING,
+  `kafka_cluster` STRING METADATA FROM 'kafka_cluster',
   `ts` TIMESTAMP_LTZ(3) METADATA FROM 'timestamp'
 ) WITH (
   'connector' = 'dynamic-kafka',
@@ -70,8 +71,33 @@ CREATE TABLE DynamicKafkaTable (
 可用元数据
 --------
 
-Dynamic Kafka 连接器暴露的元数据列与 Kafka 连接器一致。
-请参考 [Kafka SQL 连接器]({{< ref "docs/connectors/table/kafka" >}}#available-metadata)。
+Dynamic Kafka 连接器支持 Kafka 连接器的全部元数据列，并额外提供一个
+Dynamic Source 特有的元数据列：
+
+* `kafka_cluster`（`STRING NOT NULL`，只读）：该记录对应的 Kafka 集群 ID，由元数据服务解析并注入。
+
+其余通用元数据列请参考
+[Kafka SQL 连接器]({{< ref "docs/connectors/table/kafka" >}}#available-metadata)。
+
+示例：
+
+```sql
+CREATE TABLE DynamicKafkaTable (
+  `user_id` BIGINT,
+  `item_id` BIGINT,
+  `behavior` STRING,
+  `kafka_cluster` STRING METADATA FROM 'kafka_cluster' VIRTUAL
+) WITH (
+  'connector' = 'dynamic-kafka',
+  'stream-ids' = 'user_behavior;user_behavior_v2',
+  'metadata-service' = 'single-cluster',
+  'metadata-service.cluster-id' = 'cluster-0',
+  'properties.bootstrap.servers' = 'localhost:9092',
+  'properties.group.id' = 'testGroup',
+  'scan.startup.mode' = 'earliest-offset',
+  'format' = 'csv'
+);
+```
 
 连接器参数
 ---------

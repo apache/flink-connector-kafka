@@ -47,6 +47,7 @@ import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.metrics.Gauge;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.streaming.runtime.io.MultipleFuturesAvailabilityHelper;
+import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.UserCodeClassLoader;
 
@@ -446,7 +447,9 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         KafkaSourceReaderMetrics kafkaSourceReaderMetrics =
                 new KafkaSourceReaderMetrics(kafkaClusterMetricGroup);
 
-        deserializationSchema.open(
+        KafkaRecordDeserializationSchema<T> readerSchema =
+                createClusterDeserializationSchema(kafkaClusterId);
+        readerSchema.open(
                 new DeserializationSchema.InitializationContext() {
                     @Override
                     public MetricGroup getMetricGroup() {
@@ -463,7 +466,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                     }
                 });
 
-        KafkaRecordEmitter<T> recordEmitter = new KafkaRecordEmitter<>(deserializationSchema);
+        KafkaRecordEmitter<T> recordEmitter = new KafkaRecordEmitter<>(readerSchema);
         return new KafkaSourceReader<>(
                 elementsQueue,
                 new KafkaSourceFetcherManager(
@@ -479,6 +482,45 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                 toConfiguration(readerSpecificProperties),
                 readerContext,
                 kafkaSourceReaderMetrics);
+    }
+
+    private KafkaRecordDeserializationSchema<T> createClusterDeserializationSchema(
+            String kafkaClusterId) {
+        /*
+         * Only deserializers that explicitly opt in to cluster metadata should be
+         * wrapped with a per-cluster instance. This keeps the default path identical
+         * to the static source, and avoids cloning when the schema is cluster-agnostic.
+         */
+        if (!(deserializationSchema instanceof KafkaClusterAwareDeserializer)) {
+            return deserializationSchema;
+        }
+
+        KafkaClusterAwareDeserializer clusterAware =
+                (KafkaClusterAwareDeserializer) deserializationSchema;
+        /*
+         * The opt-in flag lets a deserializer declare whether it needs the cluster id
+         * injected at all (e.g., table deserializers can decide based on metadata mask).
+         */
+        if (!clusterAware.needsKafkaClusterId()) {
+            return deserializationSchema;
+        }
+
+        try {
+            /*
+             * Clone the schema to avoid sharing mutable state across clusters.
+             * The cloned instance is then bound to the cluster id before use.
+             */
+            KafkaRecordDeserializationSchema<T> readerSchema =
+                    InstantiationUtil.clone(
+                            deserializationSchema,
+                            readerContext.getUserCodeClassLoader().asClassLoader());
+            ((KafkaClusterAwareDeserializer) readerSchema).setKafkaClusterId(kafkaClusterId);
+            return readerSchema;
+        } catch (Exception error) {
+            throw new IllegalStateException(
+                    "Failed to clone Kafka deserialization schema for dynamic cluster metadata.",
+                    error);
+        }
     }
 
     /**
