@@ -52,6 +52,7 @@ CREATE TABLE DynamicKafkaTable (
   `user_id` BIGINT,
   `item_id` BIGINT,
   `behavior` STRING,
+  `kafka_cluster` STRING METADATA FROM 'kafka_cluster',
   `ts` TIMESTAMP_LTZ(3) METADATA FROM 'timestamp'
 ) WITH (
   'connector' = 'dynamic-kafka',
@@ -73,9 +74,34 @@ properties (all `properties.*` options) into the constructor when available.
 Available Metadata
 ------------------
 
-The Dynamic Kafka connector exposes the same metadata columns as the Kafka connector.
-See [Kafka SQL Connector]({{< ref "docs/connectors/table/kafka" >}}#available-metadata) for
-the full list.
+The Dynamic Kafka connector exposes all metadata columns from the Kafka connector and adds one
+dynamic-source-specific metadata column:
+
+* `kafka_cluster` (`STRING NOT NULL`, read-only): cluster id resolved by the metadata service for
+  the record.
+
+See [Kafka SQL Connector]({{< ref "docs/connectors/table/kafka" >}}#available-metadata) for the
+shared metadata columns.
+
+Example:
+
+```sql
+CREATE TABLE DynamicKafkaTable (
+  `user_id` BIGINT,
+  `item_id` BIGINT,
+  `behavior` STRING,
+  `kafka_cluster` STRING METADATA FROM 'kafka_cluster' VIRTUAL
+) WITH (
+  'connector' = 'dynamic-kafka',
+  'stream-ids' = 'user_behavior;user_behavior_v2',
+  'metadata-service' = 'single-cluster',
+  'metadata-service.cluster-id' = 'cluster-0',
+  'properties.bootstrap.servers' = 'localhost:9092',
+  'properties.group.id' = 'testGroup',
+  'scan.startup.mode' = 'earliest-offset',
+  'format' = 'csv'
+);
+```
 
 Connector Options
 ----------------
