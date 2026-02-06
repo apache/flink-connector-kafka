@@ -138,10 +138,10 @@ public class DynamicKafkaSource<T>
     }
 
     /**
-     * Create the {@link DynamicKafkaSourceEnumerator}.
+     * Create the configured split enumerator implementation.
      *
      * @param enumContext The {@link SplitEnumeratorContext context} for the split enumerator.
-     * @return the {@link DynamicKafkaSourceEnumerator}.
+     * @return the split enumerator.
      */
     @Internal
     @Override
@@ -159,12 +159,12 @@ public class DynamicKafkaSource<T>
     }
 
     /**
-     * Restore the {@link DynamicKafkaSourceEnumerator}.
+     * Restore the configured split enumerator implementation.
      *
      * @param enumContext The {@link SplitEnumeratorContext context} for the restored split
      *     enumerator.
      * @param checkpoint The checkpoint to restore the SplitEnumerator from.
-     * @return the {@link DynamicKafkaSourceEnumerator}.
+     * @return the split enumerator.
      */
     @Internal
     @Override

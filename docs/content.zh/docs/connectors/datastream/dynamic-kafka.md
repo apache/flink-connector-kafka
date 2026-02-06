@@ -60,14 +60,15 @@ corresponding to "input-stream".
 ```java
 
 DynamicKafkaSource<String> source = DynamicKafkaSource.<String>builder()
-        .setKafkaMetadataService(new MyKafkaMetadataService())
-        .setStreamIds(Collections.singleton("input-stream"))
-        .setStartingOffsets(OffsetsInitializer.earliest())
-        .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(StringDeserializer.class))
-        .setProperties(properties)
-        .build();
+    .setKafkaMetadataService(new MyKafkaMetadataService())
+    .setStreamIds(Collections.singleton("input-stream"))
+    .setEnumeratorMode(DynamicKafkaSourceOptions.EnumeratorMode.PER_CLUSTER)
+    .setStartingOffsets(OffsetsInitializer.earliest())
+    .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(StringDeserializer.class))
+    .setProperties(properties)
+    .build();
 
-        env.fromSource(source, WatermarkStrategy.noWatermarks(), "Dynamic Kafka Source");
+env.fromSource(source, WatermarkStrategy.noWatermarks(), "Dynamic Kafka Source");
 ```
 {{< /tab >}}
 {{< tab "Python" >}}
@@ -169,6 +170,32 @@ The Dynamic Kafka Source provides 2 ways of subscribing to Kafka stream(s).
   {{< /tab >}}
   {{< /tabs >}}
 
+### Split 分配模式
+
+Dynamic Kafka Source 支持两种 split 分配模式：
+
+* `per_cluster`（默认）：在每个 Kafka 集群内独立进行 split 分配。
+* `global`：在所有已发现的 Kafka 集群范围内统一做全局负载均衡分配。
+
+你可以通过 builder API 或 source properties 来配置该模式。
+
+在 `global` 模式下，均衡策略是**前向增量（forward-only）**的：分配时只考虑“当前已分配状态 + 新发现的 split”，
+不会回溯重排已经分配且仍在消费的 split。比如分区缩减后产生的“空洞”不会被主动填平，只有后续新增 split 会继续参与均衡分配。
+
+{{< tabs "DynamicKafkaSourceEnumeratorMode" >}}
+{{< tab "Java" >}}
+```java
+DynamicKafkaSource<String> source =
+    DynamicKafkaSource.<String>builder()
+        .setKafkaMetadataService(new MyKafkaMetadataService())
+        .setStreamIds(Set.of("input-stream"))
+        .setEnumeratorMode(DynamicKafkaSourceOptions.EnumeratorMode.GLOBAL)
+        .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(StringDeserializer.class))
+        .build();
+```
+{{< /tab >}}
+{{< /tabs >}}
+
 ### Kafka Metadata Service
 
 An interface is provided to resolve the logical Kafka stream(s) into the corresponding physical
@@ -209,6 +236,13 @@ There are configuration options in DynamicKafkaSourceOptions that can be configu
       <td style="word-wrap: break-word;">1</td>
       <td>Integer</td>
       <td>The number of consecutive failures before letting the exception from Kafka metadata service discovery trigger jobmanager failure and global failover. The default is one to at least catch startup failures.</td>
+    </tr>
+    <tr>
+      <td><h5>stream-enumerator-mode</h5></td>
+      <td>required</td>
+      <td style="word-wrap: break-word;">per_cluster</td>
+      <td>String</td>
+      <td>Dynamic Kafka split 分配所使用的 Enumerator 实现。支持 <code>per_cluster</code>（集群内独立分配）和 <code>global</code>（跨集群全局均衡分配）。</td>
     </tr>
     </tbody>
 </table>

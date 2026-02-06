@@ -77,6 +77,7 @@ public class DynamicKafkaSourceEnumerator
 
     // The mapping that the split enumerator context needs to be able to forward certain requests.
     private final Map<String, StoppableKafkaEnumContextProxy> clusterEnumContextMap;
+    private final SplitAssignmentStrategy splitAssignmentStrategy;
     private final KafkaStreamSubscriber kafkaStreamSubscriber;
     private final SplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext;
     private final KafkaMetadataService kafkaMetadataService;
@@ -155,6 +156,7 @@ public class DynamicKafkaSourceEnumerator
 
         this.kafkaMetadataService = kafkaMetadataService;
         this.stoppableKafkaEnumContextProxyFactory = stoppableKafkaEnumContextProxyFactory;
+        this.splitAssignmentStrategy = createSplitAssignmentStrategy(properties);
 
         // handle checkpoint state and rebuild contexts
         this.clusterEnumeratorMap = new HashMap<>();
@@ -181,6 +183,7 @@ public class DynamicKafkaSourceEnumerator
         }
 
         this.latestClusterTopicsMap = new HashMap<>();
+        Set<String> activeSplitIds = new HashSet<>();
         for (Entry<String, KafkaSourceEnumState> clusterEnumState :
                 dynamicKafkaSourceEnumState.getClusterEnumeratorStates().entrySet()) {
             this.latestClusterTopicsMap.put(
@@ -188,6 +191,15 @@ public class DynamicKafkaSourceEnumerator
                     clusterEnumState.getValue().assignedSplits().stream()
                             .map(KafkaPartitionSplit::getTopic)
                             .collect(Collectors.toSet()));
+            clusterEnumState
+                    .getValue()
+                    .splits()
+                    .forEach(
+                            splitStatus ->
+                                    activeSplitIds.add(
+                                            toDynamicSplitId(
+                                                    clusterEnumState.getKey(),
+                                                    splitStatus.split())));
 
             createEnumeratorWithAssignedTopicPartitions(
                     clusterEnumState.getKey(),
@@ -197,6 +209,7 @@ public class DynamicKafkaSourceEnumerator
                     clusterStartingOffsets.get(clusterEnumState.getKey()),
                     clusterStoppingOffsets.get(clusterEnumState.getKey()));
         }
+        splitAssignmentStrategy.onMetadataRefresh(activeSplitIds);
     }
 
     /**
@@ -303,6 +316,7 @@ public class DynamicKafkaSourceEnumerator
         sendMetadataUpdateEventToAvailableReaders();
 
         // create enumerators
+        Set<String> activeSplitIds = new HashSet<>();
         for (Entry<String, Set<String>> activeClusterTopics : latestClusterTopicsMap.entrySet()) {
             KafkaSourceEnumState kafkaSourceEnumState =
                     dynamicKafkaSourceEnumState
@@ -318,6 +332,12 @@ public class DynamicKafkaSourceEnumerator
                         kafkaSourceEnumState.splits().stream()
                                 .filter(tp -> activeTopics.contains(tp.split().getTopic()))
                                 .collect(Collectors.toSet());
+                partitions.forEach(
+                        splitStatus ->
+                                activeSplitIds.add(
+                                        toDynamicSplitId(
+                                                activeClusterTopics.getKey(),
+                                                splitStatus.split())));
 
                 newKafkaSourceEnumState =
                         new KafkaSourceEnumState(
@@ -337,6 +357,7 @@ public class DynamicKafkaSourceEnumerator
                     clusterStoppingOffsets.get(activeClusterTopics.getKey()));
         }
 
+        splitAssignmentStrategy.onMetadataRefresh(activeSplitIds);
         startAllEnumerators();
     }
 
@@ -407,6 +428,10 @@ public class DynamicKafkaSourceEnumerator
                         kafkaClusterId,
                         kafkaMetadataService,
                         signalNoMoreSplitsCallback);
+        KafkaSourceEnumerator.SplitOwnerSelector splitOwnerSelector =
+                splitAssignmentStrategy.createSplitOwnerSelector(kafkaClusterId);
+        SplitEnumeratorContext<KafkaPartitionSplit> assignmentContext =
+                splitAssignmentStrategy.createAssignmentContext(kafkaClusterId, context);
 
         Properties consumerProps = new Properties();
         KafkaPropertiesUtil.copyProperties(fetchedProperties, consumerProps);
@@ -425,9 +450,10 @@ public class DynamicKafkaSourceEnumerator
                         effectiveStartingOffsetsInitializer,
                         effectiveStoppingOffsetsInitializer,
                         consumerProps,
-                        context,
+                        assignmentContext,
                         boundedness,
-                        kafkaSourceEnumState);
+                        kafkaSourceEnumState,
+                        splitOwnerSelector);
 
         clusterEnumContextMap.put(kafkaClusterId, context);
         clusterEnumeratorMap.put(kafkaClusterId, enumerator);
@@ -489,6 +515,8 @@ public class DynamicKafkaSourceEnumerator
     @Override
     public void addSplitsBack(List<DynamicKafkaSourceSplit> splits, int subtaskId) {
         logger.debug("Adding splits back for {}", subtaskId);
+        splitAssignmentStrategy.onSplitsBack(splits, subtaskId);
+
         // separate splits by cluster
         Map<String, List<KafkaPartitionSplit>> kafkaPartitionSplits = new HashMap<>();
         for (DynamicKafkaSourceSplit split : splits) {
@@ -518,6 +546,8 @@ public class DynamicKafkaSourceEnumerator
     @Override
     public void addReader(int subtaskId) {
         logger.debug("Adding reader {}", subtaskId);
+        splitAssignmentStrategy.onReaderAdded(subtaskId);
+
         // assign pending splits from the sub enumerator
         clusterEnumeratorMap.forEach(
                 (cluster, subEnumerator) -> subEnumerator.addReader(subtaskId));
@@ -577,6 +607,88 @@ public class DynamicKafkaSourceEnumerator
             kafkaMetadataService.close();
         } catch (Exception e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    private SplitAssignmentStrategy createSplitAssignmentStrategy(Properties properties) {
+        DynamicKafkaSourceOptions.EnumeratorMode enumeratorMode =
+                DynamicKafkaSourceOptions.getEnumeratorMode(properties);
+        logger.info("Using dynamic Kafka split enumerator mode: {}", enumeratorMode);
+
+        switch (enumeratorMode) {
+            case GLOBAL:
+                return new GlobalSplitAssignmentStrategy();
+            case PER_CLUSTER:
+            default:
+                return new PerClusterSplitAssignmentStrategy();
+        }
+    }
+
+    private static String toDynamicSplitId(String kafkaClusterId, KafkaPartitionSplit split) {
+        return kafkaClusterId + "-" + split.splitId();
+    }
+
+    private interface SplitAssignmentStrategy {
+        @Nullable
+        default KafkaSourceEnumerator.SplitOwnerSelector createSplitOwnerSelector(
+                String kafkaClusterId) {
+            return null;
+        }
+
+        SplitEnumeratorContext<KafkaPartitionSplit> createAssignmentContext(
+                String kafkaClusterId, StoppableKafkaEnumContextProxy clusterContext);
+
+        default void onReaderAdded(int subtaskId) {}
+
+        default void onSplitsBack(List<DynamicKafkaSourceSplit> splits, int subtaskId) {}
+
+        default void onMetadataRefresh(Set<String> activeSplitIds) {}
+    }
+
+    private static class PerClusterSplitAssignmentStrategy implements SplitAssignmentStrategy {
+        @Override
+        public SplitEnumeratorContext<KafkaPartitionSplit> createAssignmentContext(
+                String kafkaClusterId, StoppableKafkaEnumContextProxy clusterContext) {
+            return clusterContext;
+        }
+    }
+
+    private static class GlobalSplitAssignmentStrategy implements SplitAssignmentStrategy {
+        private final GlobalSplitOwnerAssigner splitOwnerAssigner;
+
+        private GlobalSplitAssignmentStrategy() {
+            this.splitOwnerAssigner = new GlobalSplitOwnerAssigner();
+        }
+
+        @Override
+        public SplitEnumeratorContext<KafkaPartitionSplit> createAssignmentContext(
+                String kafkaClusterId, StoppableKafkaEnumContextProxy clusterContext) {
+            return clusterContext;
+        }
+
+        @Override
+        public KafkaSourceEnumerator.SplitOwnerSelector createSplitOwnerSelector(
+                String kafkaClusterId) {
+            return (split, numReaders) -> assignSplitOwner(kafkaClusterId, split, numReaders);
+        }
+
+        @Override
+        public void onReaderAdded(int subtaskId) {}
+
+        @Override
+        public void onSplitsBack(List<DynamicKafkaSourceSplit> splits, int subtaskId) {
+            splitOwnerAssigner.onSplitsBack(splits, subtaskId);
+        }
+
+        @Override
+        public void onMetadataRefresh(Set<String> activeSplitIds) {
+            splitOwnerAssigner.onMetadataRefresh(activeSplitIds);
+        }
+
+        private int assignSplitOwner(
+                String kafkaClusterId, KafkaPartitionSplit split, int numReaders) {
+            final String splitId = toDynamicSplitId(kafkaClusterId, split);
+            return splitOwnerAssigner.assignSplitOwner(splitId, numReaders);
         }
     }
 }

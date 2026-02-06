@@ -33,10 +33,16 @@ import org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.Kaf
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.connector.kafka.source.enumerator.AssignmentStatus;
+import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.NoStoppingOffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
+import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.connector.kafka.testutils.MockKafkaMetadataService;
 import org.apache.flink.mock.Whitebox;
+import org.apache.flink.runtime.checkpoint.RoundRobinOperatorStateRepartitioner;
+import org.apache.flink.runtime.state.OperatorStateHandle;
+import org.apache.flink.runtime.state.OperatorStreamStateHandle;
+import org.apache.flink.runtime.state.memory.ByteStreamStateHandle;
 import org.apache.flink.streaming.connectors.kafka.DynamicKafkaSourceTestHelper;
 
 import com.google.common.collect.ImmutableSet;
@@ -47,6 +53,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -72,6 +79,7 @@ public class DynamicKafkaSourceEnumeratorTest {
     private static final String TOPIC = "DynamicKafkaSourceEnumeratorTest";
     private static final int NUM_SPLITS_PER_CLUSTER = 3;
     private static final int NUM_RECORDS_PER_SPLIT = 5;
+    private static final String SOURCE_READER_SPLIT_STATE_NAME = "source-reader-splits";
 
     @BeforeAll
     public static void beforeAll() throws Throwable {
@@ -689,6 +697,511 @@ public class DynamicKafkaSourceEnumeratorTest {
     }
 
     @Test
+    public void testGlobalEnumeratorModeBalancesSplitsAcrossClusters() throws Throwable {
+        final int numSubtasks = 2;
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(numSubtasks);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                context,
+                                properties ->
+                                        properties.setProperty(
+                                                DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE
+                                                        .key(),
+                                                DynamicKafkaSourceOptions.EnumeratorMode.GLOBAL
+                                                        .name()
+                                                        .toLowerCase()))) {
+            enumerator.start();
+
+            for (int i = 0; i < numSubtasks; i++) {
+                mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, i);
+            }
+
+            runAllOneTimeCallables(context);
+
+            verifyAllSplitsHaveBeenAssigned(
+                    context.getSplitsAssignmentSequence(),
+                    DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC));
+
+            Map<Integer, Integer> assignedSplitCountByReader = new HashMap<>();
+            for (int readerId = 0; readerId < numSubtasks; readerId++) {
+                assignedSplitCountByReader.put(readerId, 0);
+            }
+            for (SplitsAssignment<DynamicKafkaSourceSplit> assignment :
+                    context.getSplitsAssignmentSequence()) {
+                for (Entry<Integer, List<DynamicKafkaSourceSplit>> entry :
+                        assignment.assignment().entrySet()) {
+                    assignedSplitCountByReader.merge(
+                            entry.getKey(), entry.getValue().size(), Integer::sum);
+                }
+            }
+            int minAssignedSplits = Collections.min(assignedSplitCountByReader.values());
+            int maxAssignedSplits = Collections.max(assignedSplitCountByReader.values());
+            assertThat(maxAssignedSplits - minAssignedSplits)
+                    .as(
+                            "global mode should keep per-reader split counts balanced, current assigned split count is "
+                                    + assignedSplitCountByReader.values())
+                    .isLessThanOrEqualTo(1);
+        }
+    }
+
+    @Test
+    public void testGlobalModeBalancesAssignmentsWithClusterAndPartitionExpansion()
+            throws Throwable {
+        final int numSubtasks = 4;
+        final String expandedTopic = TOPIC + "_expanded";
+        final int expandedTopicPartitions = NUM_SPLITS_PER_CLUSTER * 2;
+        DynamicKafkaSourceTestHelper.createTopic(expandedTopic, expandedTopicPartitions, 1);
+        DynamicKafkaSourceTestHelper.produceToKafka(
+                expandedTopic, expandedTopicPartitions, NUM_RECORDS_PER_SPLIT);
+
+        KafkaStream initialStream =
+                new KafkaStream(
+                        TOPIC, DynamicKafkaSourceTestHelper.getClusterMetadataMap(0, TOPIC));
+
+        Map<String, ClusterMetadata> expandedClusterMetadata = new HashMap<>();
+        expandedClusterMetadata.putAll(
+                DynamicKafkaSourceTestHelper.getClusterMetadataMap(0, TOPIC, expandedTopic));
+        expandedClusterMetadata.putAll(
+                DynamicKafkaSourceTestHelper.getClusterMetadataMap(1, TOPIC, expandedTopic));
+        KafkaStream expandedStream = new KafkaStream(TOPIC, expandedClusterMetadata);
+
+        MockKafkaMetadataService metadataService =
+                new MockKafkaMetadataService(Collections.singleton(initialStream));
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(numSubtasks);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                context,
+                                metadataService,
+                                properties -> {
+                                    properties.setProperty(
+                                            DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE.key(),
+                                            DynamicKafkaSourceOptions.EnumeratorMode.GLOBAL
+                                                    .name()
+                                                    .toLowerCase());
+                                    properties.setProperty(
+                                            DynamicKafkaSourceOptions
+                                                    .STREAM_METADATA_DISCOVERY_INTERVAL_MS
+                                                    .key(),
+                                            "1");
+                                })) {
+            enumerator.start();
+            context.runPeriodicCallable(0);
+            runAllOneTimeCallables(context);
+
+            for (int i = 0; i < numSubtasks; i++) {
+                mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, i);
+            }
+
+            verifyAllSplitsHaveBeenAssigned(context.getSplitsAssignmentSequence(), initialStream);
+
+            int assignmentsBeforeUpdate = context.getSplitsAssignmentSequence().size();
+
+            metadataService.setKafkaStreams(Collections.singleton(expandedStream));
+            context.runPeriodicCallable(0);
+            runAllOneTimeCallables(context);
+
+            Map<String, Map<String, Integer>> expectedPartitionsByClusterAndTopic = new HashMap<>();
+            Map<String, Integer> expectedTopicPartitions = new HashMap<>();
+            expectedTopicPartitions.put(TOPIC, NUM_SPLITS_PER_CLUSTER);
+            expectedTopicPartitions.put(expandedTopic, expandedTopicPartitions);
+            expectedPartitionsByClusterAndTopic.put(
+                    DynamicKafkaSourceTestHelper.getKafkaClusterId(0),
+                    new HashMap<>(expectedTopicPartitions));
+            expectedPartitionsByClusterAndTopic.put(
+                    DynamicKafkaSourceTestHelper.getKafkaClusterId(1),
+                    new HashMap<>(expectedTopicPartitions));
+            verifyExpectedTopicPartitions(
+                    context.getSplitsAssignmentSequence(), expectedPartitionsByClusterAndTopic);
+
+            List<SplitsAssignment<DynamicKafkaSourceSplit>> incrementalAssignments =
+                    context.getSplitsAssignmentSequence()
+                            .subList(
+                                    assignmentsBeforeUpdate,
+                                    context.getSplitsAssignmentSequence().size());
+            assertThat(incrementalAssignments)
+                    .as("metadata expansion should produce new split assignments")
+                    .isNotEmpty();
+            assertAssignmentsBalanced(incrementalAssignments, numSubtasks);
+        }
+    }
+
+    @Test
+    public void testGlobalModeClusterAndTopicShrinkThenRescaleRecovery() throws Throwable {
+        final int initialParallelism = 8;
+        final int restoredParallelism = 8;
+        final String expandedTopic = TOPIC + "_shrink_expand";
+        final int expandedTopicPartitions = NUM_SPLITS_PER_CLUSTER + 1;
+
+        DynamicKafkaSourceTestHelper.createTopic(expandedTopic, expandedTopicPartitions, 1);
+        DynamicKafkaSourceTestHelper.produceToKafka(
+                expandedTopic, expandedTopicPartitions, NUM_RECORDS_PER_SPLIT);
+
+        KafkaStream shrunkStream =
+                new KafkaStream(
+                        TOPIC, DynamicKafkaSourceTestHelper.getClusterMetadataMap(0, TOPIC));
+
+        Map<String, ClusterMetadata> expandedClusterMetadata = new HashMap<>();
+        expandedClusterMetadata.putAll(
+                DynamicKafkaSourceTestHelper.getClusterMetadataMap(0, TOPIC, expandedTopic));
+        expandedClusterMetadata.putAll(
+                DynamicKafkaSourceTestHelper.getClusterMetadataMap(1, TOPIC, expandedTopic));
+        KafkaStream expandedStream = new KafkaStream(TOPIC, expandedClusterMetadata);
+
+        DynamicKafkaSourceEnumState shrunkCheckpoint;
+        MockKafkaMetadataService metadataService =
+                new MockKafkaMetadataService(Collections.singleton(expandedStream));
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(initialParallelism);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                context,
+                                metadataService,
+                                properties -> {
+                                    properties.setProperty(
+                                            DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE.key(),
+                                            DynamicKafkaSourceOptions.EnumeratorMode.GLOBAL
+                                                    .name()
+                                                    .toLowerCase());
+                                    properties.setProperty(
+                                            DynamicKafkaSourceOptions
+                                                    .STREAM_METADATA_DISCOVERY_INTERVAL_MS
+                                                    .key(),
+                                            "1");
+                                })) {
+            enumerator.start();
+            context.runPeriodicCallable(0);
+            runAllOneTimeCallables(context);
+
+            for (int i = 0; i < initialParallelism; i++) {
+                mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, i);
+            }
+
+            Map<String, Map<String, Integer>> expandedExpectedPartitions = new HashMap<>();
+            Map<String, Integer> expandedExpectedTopicPartitions = new HashMap<>();
+            expandedExpectedTopicPartitions.put(TOPIC, NUM_SPLITS_PER_CLUSTER);
+            expandedExpectedTopicPartitions.put(expandedTopic, expandedTopicPartitions);
+            expandedExpectedPartitions.put(
+                    DynamicKafkaSourceTestHelper.getKafkaClusterId(0),
+                    new HashMap<>(expandedExpectedTopicPartitions));
+            expandedExpectedPartitions.put(
+                    DynamicKafkaSourceTestHelper.getKafkaClusterId(1),
+                    new HashMap<>(expandedExpectedTopicPartitions));
+            verifyExpectedTopicPartitions(
+                    context.getSplitsAssignmentSequence(), expandedExpectedPartitions);
+
+            Map<Integer, Set<String>> fullAssignmentsBeforeShrink =
+                    getReaderAssignmentsBySplitId(
+                            context.getSplitsAssignmentSequence(), initialParallelism);
+
+            int assignmentsBeforeShrink = context.getSplitsAssignmentSequence().size();
+            metadataService.setKafkaStreams(Collections.singleton(shrunkStream));
+            context.runPeriodicCallable(0);
+            runAllOneTimeCallables(context);
+            assertThat(context.getSplitsAssignmentSequence().size())
+                    .as("metadata shrink should not create new split assignments")
+                    .isEqualTo(assignmentsBeforeShrink);
+
+            shrunkCheckpoint = enumerator.snapshotState(-1);
+            Map<String, KafkaSourceEnumState> shrunkClusterStates =
+                    shrunkCheckpoint.getClusterEnumeratorStates();
+            String cluster0 = DynamicKafkaSourceTestHelper.getKafkaClusterId(0);
+            String cluster1 = DynamicKafkaSourceTestHelper.getKafkaClusterId(1);
+            assertThat(shrunkClusterStates)
+                    .as("checkpoint should only retain the still-active cluster")
+                    .containsOnlyKeys(cluster0);
+            assertThat(shrunkClusterStates.get(cluster0).assignedSplits())
+                    .as("only active topic partitions should remain after shrink")
+                    .hasSize(NUM_SPLITS_PER_CLUSTER)
+                    .allSatisfy(
+                            split ->
+                                    assertThat(split.getTopic())
+                                            .as("removed topics should not remain in checkpoint")
+                                            .isEqualTo(TOPIC));
+            assertThat(shrunkClusterStates).doesNotContainKey(cluster1);
+
+            Set<String> activeSplitIdsAfterShrink =
+                    shrunkClusterStates.get(cluster0).assignedSplits().stream()
+                            .map(split -> dynamicSplitId(cluster0, split))
+                            .collect(Collectors.toSet());
+            Map<Integer, Set<String>> activeAssignmentsAfterShrink =
+                    retainOnlyActiveSplits(fullAssignmentsBeforeShrink, activeSplitIdsAfterShrink);
+            long idleReadersAfterShrink =
+                    activeAssignmentsAfterShrink.values().stream().filter(Set::isEmpty).count();
+            assertThat(idleReadersAfterShrink)
+                    .as("shrink should leave reader holes without rebalancing existing assignments")
+                    .isGreaterThanOrEqualTo(initialParallelism - NUM_SPLITS_PER_CLUSTER);
+        }
+
+        MockKafkaMetadataService restoredMetadataService =
+                new MockKafkaMetadataService(Collections.singleton(shrunkStream));
+        Properties properties = new Properties();
+        properties.setProperty(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "0");
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "1");
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE.key(),
+                DynamicKafkaSourceOptions.EnumeratorMode.GLOBAL.name().toLowerCase());
+
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> restoredContext =
+                        new MockSplitEnumeratorContext<>(restoredParallelism);
+                DynamicKafkaSourceEnumerator restoredEnumerator =
+                        new DynamicKafkaSourceEnumerator(
+                                new KafkaStreamSetSubscriber(Collections.singleton(TOPIC)),
+                                restoredMetadataService,
+                                restoredContext,
+                                OffsetsInitializer.earliest(),
+                                new NoStoppingOffsetsInitializer(),
+                                properties,
+                                Boundedness.CONTINUOUS_UNBOUNDED,
+                                shrunkCheckpoint,
+                                new TestKafkaEnumContextProxyFactory())) {
+            restoredEnumerator.start();
+            for (int i = 0; i < restoredParallelism; i++) {
+                mockRegisterReaderAndSendReaderStartupEvent(restoredContext, restoredEnumerator, i);
+            }
+
+            restoredContext.runPeriodicCallable(0);
+            runAllOneTimeCallables(restoredContext);
+            int assignmentsBeforeRegrowth = restoredContext.getSplitsAssignmentSequence().size();
+
+            restoredMetadataService.setKafkaStreams(Collections.singleton(expandedStream));
+            restoredContext.runPeriodicCallable(0);
+            runAllOneTimeCallables(restoredContext);
+
+            List<SplitsAssignment<DynamicKafkaSourceSplit>> incrementalAssignments =
+                    restoredContext
+                            .getSplitsAssignmentSequence()
+                            .subList(
+                                    assignmentsBeforeRegrowth,
+                                    restoredContext.getSplitsAssignmentSequence().size());
+            assertThat(incrementalAssignments)
+                    .as("regrowth should assign only newly reintroduced cluster/topic splits")
+                    .isNotEmpty();
+            assertAssignmentsBalanced(incrementalAssignments, restoredParallelism);
+
+            DynamicKafkaSourceEnumState restoredSnapshot = restoredEnumerator.snapshotState(-1);
+            String cluster0 = DynamicKafkaSourceTestHelper.getKafkaClusterId(0);
+            String cluster1 = DynamicKafkaSourceTestHelper.getKafkaClusterId(1);
+            assertThat(restoredSnapshot.getClusterEnumeratorStates())
+                    .as("regrowth should restore both clusters in enumerator state")
+                    .containsKeys(cluster0, cluster1);
+
+            for (String clusterId : ImmutableSet.of(cluster0, cluster1)) {
+                KafkaSourceEnumState clusterState =
+                        restoredSnapshot.getClusterEnumeratorStates().get(clusterId);
+                assertThat(clusterState.assignedSplits())
+                        .as("each cluster should track expected assignments after regrowth")
+                        .hasSize(NUM_SPLITS_PER_CLUSTER + expandedTopicPartitions);
+
+                Set<TopicPartition> assignedTopicPartitions =
+                        clusterState.assignedSplits().stream()
+                                .map(KafkaPartitionSplit::getTopicPartition)
+                                .collect(Collectors.toSet());
+                for (int partition = 0; partition < NUM_SPLITS_PER_CLUSTER; partition++) {
+                    assertThat(assignedTopicPartitions)
+                            .contains(new TopicPartition(TOPIC, partition));
+                }
+                for (int partition = 0; partition < expandedTopicPartitions; partition++) {
+                    assertThat(assignedTopicPartitions)
+                            .contains(new TopicPartition(expandedTopic, partition));
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testGlobalModeShrinkRestoreAndRuntimeRepartitionAfterDownscale() throws Throwable {
+        // Expect runtime repartition to rebalance 10 active splits over p=4 as 3,3,2,2.
+        runGlobalModeShrinkRestoreAndRuntimeRepartitionScenario(
+                "downscale", 4, List.of(3, 3, 2, 2));
+    }
+
+    @Test
+    public void testGlobalModeShrinkRestoreAndRuntimeRepartitionAfterUpscale() throws Throwable {
+        // Expect runtime repartition to rebalance 10 active splits over p=8 as 2,2,1,1,1,1,1,1.
+        runGlobalModeShrinkRestoreAndRuntimeRepartitionScenario(
+                "upscale", 8, List.of(2, 2, 1, 1, 1, 1, 1, 1));
+    }
+
+    private void runGlobalModeShrinkRestoreAndRuntimeRepartitionScenario(
+            String scenarioName, int restoredParallelism, List<Integer> expectedRepartitionCounts)
+            throws Throwable {
+        // Scenario summary:
+        // 1) Start in global mode with 13 splits over p=5 and verify near-balance.
+        // 2) Shrink metadata so active splits become 10 and verify no immediate rebalance.
+        // 3) Simulate runtime restore repartition for new parallelism and verify balanced counts.
+        // 4) Restore enumerator from checkpoint and regrow metadata to verify incremental
+        // assignment.
+        final int initialParallelism = 5;
+        final String removedTopic = TOPIC + "_removed3_" + scenarioName;
+        final String retainedTopic = TOPIC + "_retained4_" + scenarioName;
+
+        DynamicKafkaSourceTestHelper.createTopic(removedTopic, NUM_SPLITS_PER_CLUSTER, 1);
+        DynamicKafkaSourceTestHelper.produceToKafka(
+                removedTopic, NUM_SPLITS_PER_CLUSTER, NUM_RECORDS_PER_SPLIT);
+        DynamicKafkaSourceTestHelper.createTopic(retainedTopic, NUM_SPLITS_PER_CLUSTER + 1, 1);
+        DynamicKafkaSourceTestHelper.produceToKafka(
+                retainedTopic, NUM_SPLITS_PER_CLUSTER + 1, NUM_RECORDS_PER_SPLIT);
+
+        Map<String, ClusterMetadata> initialClusterMetadata = new HashMap<>();
+        initialClusterMetadata.putAll(
+                DynamicKafkaSourceTestHelper.getClusterMetadataMap(0, TOPIC, removedTopic));
+        initialClusterMetadata.putAll(
+                DynamicKafkaSourceTestHelper.getClusterMetadataMap(1, TOPIC, retainedTopic));
+        KafkaStream initialStream = new KafkaStream(TOPIC, initialClusterMetadata);
+
+        Map<String, ClusterMetadata> shrunkClusterMetadata = new HashMap<>();
+        shrunkClusterMetadata.putAll(DynamicKafkaSourceTestHelper.getClusterMetadataMap(0, TOPIC));
+        shrunkClusterMetadata.putAll(
+                DynamicKafkaSourceTestHelper.getClusterMetadataMap(1, TOPIC, retainedTopic));
+        KafkaStream shrunkStream = new KafkaStream(TOPIC, shrunkClusterMetadata);
+
+        DynamicKafkaSourceEnumState shrunkCheckpoint;
+        MockKafkaMetadataService metadataService =
+                new MockKafkaMetadataService(Collections.singleton(initialStream));
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(initialParallelism);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                context,
+                                metadataService,
+                                properties -> {
+                                    properties.setProperty(
+                                            DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE.key(),
+                                            DynamicKafkaSourceOptions.EnumeratorMode.GLOBAL
+                                                    .name()
+                                                    .toLowerCase());
+                                    properties.setProperty(
+                                            DynamicKafkaSourceOptions
+                                                    .STREAM_METADATA_DISCOVERY_INTERVAL_MS
+                                                    .key(),
+                                            "1");
+                                })) {
+            enumerator.start();
+            context.runPeriodicCallable(0);
+            runAllOneTimeCallables(context);
+
+            for (int i = 0; i < initialParallelism; i++) {
+                mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, i);
+            }
+
+            Map<String, Map<String, Integer>> expectedInitialPartitions = new HashMap<>();
+            Map<String, Integer> cluster0TopicPartitions = new HashMap<>();
+            cluster0TopicPartitions.put(TOPIC, NUM_SPLITS_PER_CLUSTER);
+            cluster0TopicPartitions.put(removedTopic, NUM_SPLITS_PER_CLUSTER);
+            expectedInitialPartitions.put(
+                    DynamicKafkaSourceTestHelper.getKafkaClusterId(0), cluster0TopicPartitions);
+            Map<String, Integer> cluster1TopicPartitions = new HashMap<>();
+            cluster1TopicPartitions.put(TOPIC, NUM_SPLITS_PER_CLUSTER);
+            cluster1TopicPartitions.put(retainedTopic, NUM_SPLITS_PER_CLUSTER + 1);
+            expectedInitialPartitions.put(
+                    DynamicKafkaSourceTestHelper.getKafkaClusterId(1), cluster1TopicPartitions);
+            verifyExpectedTopicPartitions(
+                    context.getSplitsAssignmentSequence(), expectedInitialPartitions);
+
+            Map<Integer, Set<String>> fullAssignmentsBeforeShrink =
+                    getReaderAssignmentsBySplitId(
+                            context.getSplitsAssignmentSequence(), initialParallelism);
+            Map<Integer, Integer> countsBeforeShrink =
+                    getReaderSplitCounts(fullAssignmentsBeforeShrink, initialParallelism);
+            assertThat(
+                            Collections.max(countsBeforeShrink.values())
+                                    - Collections.min(countsBeforeShrink.values()))
+                    .as("initial global assignment should be near-balanced")
+                    .isLessThanOrEqualTo(1);
+
+            int assignmentsBeforeShrink = context.getSplitsAssignmentSequence().size();
+            metadataService.setKafkaStreams(Collections.singleton(shrunkStream));
+            context.runPeriodicCallable(0);
+            runAllOneTimeCallables(context);
+            assertThat(context.getSplitsAssignmentSequence().size())
+                    .as("metadata shrink should not create new split assignments")
+                    .isEqualTo(assignmentsBeforeShrink);
+
+            shrunkCheckpoint = enumerator.snapshotState(-1);
+            Set<String> activeSplitIdsAfterShrink =
+                    shrunkCheckpoint.getClusterEnumeratorStates().entrySet().stream()
+                            .flatMap(
+                                    entry ->
+                                            entry.getValue().assignedSplits().stream()
+                                                    .map(
+                                                            split ->
+                                                                    dynamicSplitId(
+                                                                            entry.getKey(), split)))
+                            .collect(Collectors.toSet());
+            assertThat(activeSplitIdsAfterShrink)
+                    .as("shrink scenario keeps exactly 10 active splits")
+                    .hasSize(10);
+
+            Map<Integer, Set<String>> activeAssignmentsAfterShrink =
+                    retainOnlyActiveSplits(fullAssignmentsBeforeShrink, activeSplitIdsAfterShrink);
+            Map<Integer, Integer> countsAfterShrink =
+                    getReaderSplitCounts(activeAssignmentsAfterShrink, initialParallelism);
+
+            List<Integer> countsAfterRuntimeRepartition =
+                    repartitionReaderStateCountsForRestore(countsAfterShrink, restoredParallelism);
+            assertThat(countsAfterRuntimeRepartition)
+                    .as("runtime repartition on restore should match expected balanced counts")
+                    .containsExactlyElementsOf(expectedRepartitionCounts);
+            assertThat(
+                            Collections.max(countsAfterRuntimeRepartition)
+                                    - Collections.min(countsAfterRuntimeRepartition))
+                    .as("runtime repartition keeps split-count skew within 1")
+                    .isLessThanOrEqualTo(1);
+        }
+
+        MockKafkaMetadataService restoredMetadataService =
+                new MockKafkaMetadataService(Collections.singleton(shrunkStream));
+        Properties properties = new Properties();
+        properties.setProperty(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "0");
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "1");
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE.key(),
+                DynamicKafkaSourceOptions.EnumeratorMode.GLOBAL.name().toLowerCase());
+
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> restoredContext =
+                        new MockSplitEnumeratorContext<>(restoredParallelism);
+                DynamicKafkaSourceEnumerator restoredEnumerator =
+                        new DynamicKafkaSourceEnumerator(
+                                new KafkaStreamSetSubscriber(Collections.singleton(TOPIC)),
+                                restoredMetadataService,
+                                restoredContext,
+                                OffsetsInitializer.earliest(),
+                                new NoStoppingOffsetsInitializer(),
+                                properties,
+                                Boundedness.CONTINUOUS_UNBOUNDED,
+                                shrunkCheckpoint,
+                                new TestKafkaEnumContextProxyFactory())) {
+            restoredEnumerator.start();
+            for (int i = 0; i < restoredParallelism; i++) {
+                mockRegisterReaderAndSendReaderStartupEvent(restoredContext, restoredEnumerator, i);
+            }
+
+            restoredContext.runPeriodicCallable(0);
+            runAllOneTimeCallables(restoredContext);
+            int assignmentsBeforeRegrowth = restoredContext.getSplitsAssignmentSequence().size();
+
+            restoredMetadataService.setKafkaStreams(Collections.singleton(initialStream));
+            restoredContext.runPeriodicCallable(0);
+            runAllOneTimeCallables(restoredContext);
+
+            List<SplitsAssignment<DynamicKafkaSourceSplit>> incrementalAssignments =
+                    restoredContext
+                            .getSplitsAssignmentSequence()
+                            .subList(
+                                    assignmentsBeforeRegrowth,
+                                    restoredContext.getSplitsAssignmentSequence().size());
+            assertThat(incrementalAssignments)
+                    .as("regrowth should assign only newly reintroduced splits")
+                    .isNotEmpty();
+            assertAssignmentsBalanced(incrementalAssignments, restoredParallelism);
+        }
+    }
+
+    @Test
     public void testEnumeratorDoesNotAssignDuplicateSplitsInMetadataUpdate() throws Throwable {
         KafkaStream kafkaStreamWithOneCluster = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
         kafkaStreamWithOneCluster
@@ -947,6 +1460,166 @@ public class DynamicKafkaSourceEnumeratorTest {
             }
         }
         return readerToSplits;
+    }
+
+    private Map<Integer, Set<String>> getReaderAssignmentsBySplitId(
+            List<SplitsAssignment<DynamicKafkaSourceSplit>> splitsAssignmentSequence,
+            int numReaders) {
+        Map<Integer, Set<String>> readerToSplitIds = new HashMap<>();
+        for (int readerId = 0; readerId < numReaders; readerId++) {
+            readerToSplitIds.put(readerId, new HashSet<>());
+        }
+        for (SplitsAssignment<DynamicKafkaSourceSplit> split : splitsAssignmentSequence) {
+            for (Entry<Integer, List<DynamicKafkaSourceSplit>> assignments :
+                    split.assignment().entrySet()) {
+                readerToSplitIds
+                        .computeIfAbsent(assignments.getKey(), ignored -> new HashSet<>())
+                        .addAll(
+                                assignments.getValue().stream()
+                                        .map(DynamicKafkaSourceSplit::splitId)
+                                        .collect(Collectors.toSet()));
+            }
+        }
+        return readerToSplitIds;
+    }
+
+    private Map<Integer, Set<String>> retainOnlyActiveSplits(
+            Map<Integer, Set<String>> readerToSplitIds, Set<String> activeSplitIds) {
+        Map<Integer, Set<String>> filtered = new HashMap<>();
+        for (Entry<Integer, Set<String>> entry : readerToSplitIds.entrySet()) {
+            Set<String> activeForReader =
+                    entry.getValue().stream()
+                            .filter(activeSplitIds::contains)
+                            .collect(Collectors.toCollection(HashSet::new));
+            filtered.put(entry.getKey(), activeForReader);
+        }
+        return filtered;
+    }
+
+    private static String dynamicSplitId(String clusterId, KafkaPartitionSplit split) {
+        return clusterId + "-" + split.splitId();
+    }
+
+    private void verifyExpectedTopicPartitions(
+            List<SplitsAssignment<DynamicKafkaSourceSplit>> splitsAssignmentSequence,
+            Map<String, Map<String, Integer>> expectedPartitionsByClusterAndTopic) {
+        Map<String, Map<String, Set<Integer>>> observedPartitionsByClusterAndTopic =
+                new HashMap<>();
+        for (SplitsAssignment<DynamicKafkaSourceSplit> split : splitsAssignmentSequence) {
+            for (Entry<Integer, List<DynamicKafkaSourceSplit>> assignments :
+                    split.assignment().entrySet()) {
+                for (DynamicKafkaSourceSplit assignment : assignments.getValue()) {
+                    observedPartitionsByClusterAndTopic
+                            .computeIfAbsent(
+                                    assignment.getKafkaClusterId(), ignored -> new HashMap<>())
+                            .computeIfAbsent(
+                                    assignment.getKafkaPartitionSplit().getTopic(),
+                                    ignored -> new HashSet<>())
+                            .add(assignment.getKafkaPartitionSplit().getPartition());
+                }
+            }
+        }
+
+        for (Entry<String, Map<String, Integer>> clusterExpected :
+                expectedPartitionsByClusterAndTopic.entrySet()) {
+            assertThat(observedPartitionsByClusterAndTopic)
+                    .as("expected cluster must have assigned splits")
+                    .containsKey(clusterExpected.getKey());
+            for (Entry<String, Integer> topicExpected : clusterExpected.getValue().entrySet()) {
+                Set<Integer> observedTopicPartitions =
+                        observedPartitionsByClusterAndTopic
+                                .get(clusterExpected.getKey())
+                                .get(topicExpected.getKey());
+                assertThat(observedTopicPartitions)
+                        .as("expected topic must have assigned splits")
+                        .isNotNull();
+                assertThat(observedTopicPartitions).hasSize(topicExpected.getValue());
+                for (int partition = 0; partition < topicExpected.getValue(); partition++) {
+                    assertThat(observedTopicPartitions).contains(partition);
+                }
+            }
+        }
+    }
+
+    private void assertAssignmentsBalanced(
+            List<SplitsAssignment<DynamicKafkaSourceSplit>> assignmentSequence, int numReaders) {
+        Map<Integer, Integer> assignedSplitCountByReader = new HashMap<>();
+        for (int readerId = 0; readerId < numReaders; readerId++) {
+            assignedSplitCountByReader.put(readerId, 0);
+        }
+        for (SplitsAssignment<DynamicKafkaSourceSplit> assignment : assignmentSequence) {
+            for (Entry<Integer, List<DynamicKafkaSourceSplit>> entry :
+                    assignment.assignment().entrySet()) {
+                assignedSplitCountByReader.merge(
+                        entry.getKey(), entry.getValue().size(), Integer::sum);
+            }
+        }
+
+        int minAssignedSplits = Collections.min(assignedSplitCountByReader.values());
+        int maxAssignedSplits = Collections.max(assignedSplitCountByReader.values());
+        assertThat(maxAssignedSplits - minAssignedSplits)
+                .as("global mode should keep per-reader split counts balanced")
+                .isLessThanOrEqualTo(1);
+    }
+
+    private Map<Integer, Integer> getReaderSplitCounts(
+            Map<Integer, Set<String>> assignmentsByReader, int numReaders) {
+        Map<Integer, Integer> splitCounts = new HashMap<>();
+        for (int readerId = 0; readerId < numReaders; readerId++) {
+            splitCounts.put(readerId, 0);
+        }
+        assignmentsByReader.forEach(
+                (readerId, splitIds) -> splitCounts.put(readerId, splitIds.size()));
+        return splitCounts;
+    }
+
+    private List<Integer> repartitionReaderStateCountsForRestore(
+            Map<Integer, Integer> splitCountsByOldSubtask, int restoredParallelism) {
+        final int oldParallelism = splitCountsByOldSubtask.size();
+        List<List<OperatorStateHandle>> previousState = new ArrayList<>();
+
+        long offsetSeed = 0L;
+        for (int subtask = 0; subtask < oldParallelism; subtask++) {
+            int splitCount = splitCountsByOldSubtask.getOrDefault(subtask, 0);
+            long[] offsets = new long[splitCount];
+            for (int i = 0; i < splitCount; i++) {
+                offsets[i] = offsetSeed++;
+            }
+
+            Map<String, OperatorStateHandle.StateMetaInfo> stateNameToMeta = new HashMap<>();
+            stateNameToMeta.put(
+                    SOURCE_READER_SPLIT_STATE_NAME,
+                    new OperatorStateHandle.StateMetaInfo(
+                            offsets, OperatorStateHandle.Mode.SPLIT_DISTRIBUTE));
+
+            previousState.add(
+                    Collections.singletonList(
+                            new OperatorStreamStateHandle(
+                                    stateNameToMeta,
+                                    new ByteStreamStateHandle(
+                                            "reader-state-" + subtask, new byte[0]))));
+        }
+
+        List<List<OperatorStateHandle>> repartitionedState =
+                RoundRobinOperatorStateRepartitioner.INSTANCE.repartitionState(
+                        previousState, oldParallelism, restoredParallelism);
+
+        List<Integer> splitCountsAfterRepartition = new ArrayList<>(repartitionedState.size());
+        for (List<OperatorStateHandle> subtaskStateHandles : repartitionedState) {
+            int splitCount = 0;
+            for (OperatorStateHandle stateHandle : subtaskStateHandles) {
+                splitCount +=
+                        stateHandle.getStateNameToPartitionOffsets().entrySet().stream()
+                                .filter(
+                                        entry ->
+                                                SOURCE_READER_SPLIT_STATE_NAME.equals(
+                                                        entry.getKey()))
+                                .mapToInt(entry -> entry.getValue().getOffsets().length)
+                                .sum();
+            }
+            splitCountsAfterRepartition.add(splitCount);
+        }
+        return splitCountsAfterRepartition;
     }
 
     private List<TopicPartition> getFilteredTopicPartitions(

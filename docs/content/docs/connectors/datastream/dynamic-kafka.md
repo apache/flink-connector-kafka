@@ -62,6 +62,7 @@ corresponding to "input-stream".
 DynamicKafkaSource<String> source = DynamicKafkaSource.<String>builder()
     .setKafkaMetadataService(new MyKafkaMetadataService())
     .setStreamIds(Collections.singleton("input-stream"))
+    .setEnumeratorMode(DynamicKafkaSourceOptions.EnumeratorMode.PER_CLUSTER)
     .setStartingOffsets(OffsetsInitializer.earliest())
     .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(StringDeserializer.class))
     .setProperties(properties)
@@ -143,6 +144,33 @@ DynamicKafkaSource<String> source =
 {{< /tab >}}
 {{< /tabs >}}
 
+### Split Assignment Mode
+
+Dynamic Kafka Source supports two split-assignment modes:
+
+* `per_cluster` (default): assigns splits within each Kafka cluster independently.
+* `global`: assigns splits across all discovered clusters using one global balancing strategy.
+
+You can configure the mode either with the builder API or with source properties.
+
+In `global` mode, balancing is **forward-looking**: newly discovered splits are assigned to keep
+future distribution balanced, while already assigned active splits are not proactively migrated only
+for rebalancing.
+
+{{< tabs "DynamicKafkaSourceEnumeratorMode" >}}
+{{< tab "Java" >}}
+```java
+DynamicKafkaSource<String> source =
+    DynamicKafkaSource.<String>builder()
+        .setKafkaMetadataService(new MyKafkaMetadataService())
+        .setStreamIds(Set.of("input-stream"))
+        .setEnumeratorMode(DynamicKafkaSourceOptions.EnumeratorMode.GLOBAL)
+        .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(StringDeserializer.class))
+        .build();
+```
+{{< /tab >}}
+{{< /tabs >}}
+
 ### Kafka Stream Subscription
 The Dynamic Kafka Source provides 2 ways of subscribing to Kafka stream(s).
 * A set of Kafka stream ids. For example:
@@ -213,6 +241,13 @@ There are configuration options in DynamicKafkaSourceOptions that can be configu
       <td style="word-wrap: break-word;">1</td>
       <td>Integer</td>
       <td>The number of consecutive failures before letting the exception from Kafka metadata service discovery trigger jobmanager failure and global failover. The default is one to at least catch startup failures.</td>
+    </tr>
+    <tr>
+      <td><h5>stream-enumerator-mode</h5></td>
+      <td>required</td>
+      <td style="word-wrap: break-word;">per_cluster</td>
+      <td>String</td>
+      <td>Enumerator implementation for dynamic Kafka split assignment. Supported values are <code>per_cluster</code> (cluster-local assignment) and <code>global</code> (globally balanced assignment across clusters).</td>
     </tr>
     </tbody>
 </table>

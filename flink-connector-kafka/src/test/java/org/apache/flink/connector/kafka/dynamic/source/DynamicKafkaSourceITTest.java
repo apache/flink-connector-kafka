@@ -21,6 +21,7 @@ package org.apache.flink.connector.kafka.dynamic.source;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.ReaderInfo;
+import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitsAssignment;
 import org.apache.flink.api.connector.source.mocks.MockSplitEnumeratorContext;
 import org.apache.flink.configuration.Configuration;
@@ -84,6 +85,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -211,6 +213,58 @@ class DynamicKafkaSourceITTest {
                                                     * NUM_RECORDS_PER_SPLIT)
                                     .boxed()
                                     .collect(Collectors.toList()));
+        }
+
+        @Test
+        void testGlobalEnumeratorModeBalancesAssignments() throws Throwable {
+            // This verifies the global mode wiring from DynamicKafkaSource builder -> enumerator.
+            // In global mode, split ownership should be balanced across all readers (not per
+            // cluster).
+            final int numSubtasks = 4;
+            Properties properties = new Properties();
+            properties.setProperty(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "0");
+            properties.setProperty(
+                    DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "0");
+            properties.setProperty(
+                    DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE.key(),
+                    DynamicKafkaSourceOptions.EnumeratorMode.GLOBAL.name().toLowerCase());
+
+            MockKafkaMetadataService metadataService =
+                    new MockKafkaMetadataService(
+                            Collections.singleton(
+                                    DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC)));
+
+            DynamicKafkaSource<Integer> source =
+                    DynamicKafkaSource.<Integer>builder()
+                            .setStreamIds(
+                                    metadataService.getAllStreams().stream()
+                                            .map(KafkaStream::getStreamId)
+                                            .collect(Collectors.toSet()))
+                            .setKafkaMetadataService(metadataService)
+                            .setDeserializer(
+                                    KafkaRecordDeserializationSchema.valueOnly(
+                                            IntegerDeserializer.class))
+                            .setStartingOffsets(OffsetsInitializer.earliest())
+                            .setProperties(properties)
+                            .build();
+
+            try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                            new MockSplitEnumeratorContext<>(numSubtasks);
+                    SplitEnumerator<DynamicKafkaSourceSplit, DynamicKafkaSourceEnumState>
+                            splitEnumerator = source.createEnumerator(context)) {
+                DynamicKafkaSourceEnumerator enumerator =
+                        (DynamicKafkaSourceEnumerator) splitEnumerator;
+                enumerator.start();
+
+                for (int readerId = 0; readerId < numSubtasks; readerId++) {
+                    registerReader(context, enumerator, readerId);
+                }
+                runAllOneTimeCallables(context);
+
+                verifyAllSplitsAssignedOnce(
+                        context.getSplitsAssignmentSequence(), metadataService.getAllStreams());
+                assertAssignmentsBalanced(context.getSplitsAssignmentSequence(), numSubtasks);
+            }
         }
 
         @Test
@@ -1094,6 +1148,46 @@ class DynamicKafkaSourceITTest {
             while (!context.getOneTimeCallables().isEmpty()) {
                 context.runNextOneTimeCallable();
             }
+        }
+
+        private void verifyAllSplitsAssignedOnce(
+                List<SplitsAssignment<DynamicKafkaSourceSplit>> assignments,
+                Set<KafkaStream> kafkaStreams) {
+            Map<String, Integer> assignmentFrequency = new HashMap<>();
+            for (SplitsAssignment<DynamicKafkaSourceSplit> step : assignments) {
+                for (List<DynamicKafkaSourceSplit> splits : step.assignment().values()) {
+                    for (DynamicKafkaSourceSplit split : splits) {
+                        assignmentFrequency.merge(split.splitId(), 1, Integer::sum);
+                    }
+                }
+            }
+
+            int expectedSplits =
+                    kafkaStreams.stream()
+                            .flatMap(stream -> stream.getClusterMetadataMap().entrySet().stream())
+                            .mapToInt(entry -> entry.getValue().getTopics().size() * NUM_PARTITIONS)
+                            .sum();
+            assertThat(assignmentFrequency).hasSize(expectedSplits);
+            assertThat(assignmentFrequency.values()).allMatch(count -> count == 1);
+        }
+
+        private void assertAssignmentsBalanced(
+                List<SplitsAssignment<DynamicKafkaSourceSplit>> assignments, int numReaders) {
+            Map<Integer, Integer> assignedSplitCountByReader = new HashMap<>();
+            for (int readerId = 0; readerId < numReaders; readerId++) {
+                assignedSplitCountByReader.put(readerId, 0);
+            }
+            for (SplitsAssignment<DynamicKafkaSourceSplit> assignment : assignments) {
+                for (Map.Entry<Integer, List<DynamicKafkaSourceSplit>> entry :
+                        assignment.assignment().entrySet()) {
+                    assignedSplitCountByReader.merge(
+                            entry.getKey(), entry.getValue().size(), Integer::sum);
+                }
+            }
+
+            int minAssignedSplits = Collections.min(assignedSplitCountByReader.values());
+            int maxAssignedSplits = Collections.max(assignedSplitCountByReader.values());
+            assertThat(maxAssignedSplits - minAssignedSplits).isLessThanOrEqualTo(1);
         }
 
         private Set<KafkaStream> getKafkaStreams(

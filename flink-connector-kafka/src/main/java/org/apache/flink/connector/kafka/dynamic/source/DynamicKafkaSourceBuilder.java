@@ -37,6 +37,7 @@ import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Locale;
 import java.util.Properties;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -178,6 +179,20 @@ public class DynamicKafkaSourceBuilder<T> {
     public DynamicKafkaSourceBuilder<T> setProperty(String key, String value) {
         this.props.setProperty(key, value);
         return this;
+    }
+
+    /**
+     * Set the enumerator mode used for split assignment.
+     *
+     * @param enumeratorMode split assignment mode.
+     * @return the builder.
+     */
+    public DynamicKafkaSourceBuilder<T> setEnumeratorMode(
+            DynamicKafkaSourceOptions.EnumeratorMode enumeratorMode) {
+        Preconditions.checkNotNull(enumeratorMode);
+        return setProperty(
+                DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE.key(),
+                enumeratorMode.name().toLowerCase(Locale.ROOT));
     }
 
     /**
