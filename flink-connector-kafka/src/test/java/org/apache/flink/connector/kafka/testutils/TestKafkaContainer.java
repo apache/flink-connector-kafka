@@ -20,6 +20,7 @@ package org.apache.flink.connector.kafka.testutils;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.output.OutputFrame;
+import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.kafka.ConfluentKafkaContainer;
 import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.lifecycle.Startable;
@@ -50,6 +51,8 @@ import java.util.function.Consumer;
  */
 public class TestKafkaContainer implements AutoCloseable, Startable {
 
+    private static final String CONTAINER_STARTUP_CHECK = "/bin/kafka-topics --list --bootstrap-server 0.0.0.0:9093 || exit 1";
+    private static final Duration CONTAINER_STARTUP_TIMEOUT = Duration.ofMinutes(1);
     private final GenericContainer<?> delegate;
     private final boolean isConfluentImage;
     private String networkAlias;
@@ -73,7 +76,8 @@ public class TestKafkaContainer implements AutoCloseable, Startable {
                             .withEnv(
                                     "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP",
                                     "PLAINTEXT:PLAINTEXT,BROKER:PLAINTEXT,CONTROLLER:PLAINTEXT")
-                            .withEnv("KAFKA_INTER_BROKER_LISTENER_NAME", "BROKER");
+                            .withEnv("KAFKA_INTER_BROKER_LISTENER_NAME", "BROKER")
+                            .waitingFor(Wait.forSuccessfulCommand(CONTAINER_STARTUP_CHECK).withStartupTimeout(CONTAINER_STARTUP_TIMEOUT));
         } else if (isApacheKafkaImage(dockerImageName)) {
             this.isConfluentImage = false;
             // Apache Kafka images use the new KafkaContainer from testcontainers
