@@ -37,8 +37,11 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
@@ -143,15 +146,7 @@ public class DynamicKafkaSourceEnumStateSerializer
                     out.writeUTF(topic);
                 }
 
-                // only write bootstrap server for now, can extend later to serialize the complete
-                // properties
-                out.writeUTF(
-                        Preconditions.checkNotNull(
-                                clusterMetadata
-                                        .getProperties()
-                                        .getProperty(
-                                                CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG,
-                                                "Bootstrap servers must be specified in properties")));
+                writeProperties(clusterMetadata.getProperties(), out);
                 writeOffsetsInitializer(clusterMetadata.getStartingOffsetsInitializer(), out);
                 writeOffsetsInitializer(clusterMetadata.getStoppingOffsetsInitializer(), out);
             }
@@ -203,10 +198,7 @@ public class DynamicKafkaSourceEnumStateSerializer
                     topics.add(in.readUTF());
                 }
 
-                String bootstrapServers = in.readUTF();
-                Properties properties = new Properties();
-                properties.setProperty(
-                        CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+                Properties properties = readProperties(in);
 
                 OffsetsInitializer startingOffsetsInitializer = readOffsetsInitializer(in);
                 OffsetsInitializer stoppingOffsetsInitializer = readOffsetsInitializer(in);
@@ -224,6 +216,26 @@ public class DynamicKafkaSourceEnumStateSerializer
         }
 
         return kafkaStreams;
+    }
+
+    private static void writeProperties(Properties properties, DataOutputStream out)
+            throws IOException {
+        out.writeInt(properties.size());
+        List<Map.Entry<Object, Object>> entries = new ArrayList<>(properties.entrySet());
+        entries.sort(Comparator.comparing(entry -> String.valueOf(entry.getKey())));
+        for (Map.Entry<Object, Object> entry : entries) {
+            out.writeUTF(String.valueOf(Preconditions.checkNotNull(entry.getKey())));
+            out.writeUTF(String.valueOf(Preconditions.checkNotNull(entry.getValue())));
+        }
+    }
+
+    private static Properties readProperties(DataInputStream in) throws IOException {
+        int propertiesSize = in.readInt();
+        Properties properties = new Properties();
+        for (int i = 0; i < propertiesSize; i++) {
+            properties.setProperty(in.readUTF(), in.readUTF());
+        }
+        return properties;
     }
 
     private static void writeOffsetsInitializer(

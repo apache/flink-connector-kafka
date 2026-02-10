@@ -49,6 +49,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class DynamicKafkaSourceEnumStateSerializerTest {
 
     @Test
+    public void testSerializerVersion() {
+        DynamicKafkaSourceEnumStateSerializer dynamicKafkaSourceEnumStateSerializer =
+                new DynamicKafkaSourceEnumStateSerializer();
+        assertThat(dynamicKafkaSourceEnumStateSerializer.getVersion()).isEqualTo(2);
+    }
+
+    @Test
     public void testSerde() throws Exception {
         DynamicKafkaSourceEnumStateSerializer dynamicKafkaSourceEnumStateSerializer =
                 new DynamicKafkaSourceEnumStateSerializer();
@@ -115,6 +122,56 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
         assertThat(dynamicKafkaSourceEnumState)
                 .usingRecursiveComparison()
                 .isEqualTo(dynamicKafkaSourceEnumStateAfterSerde);
+    }
+
+    @Test
+    public void testSerdePreservesClusterProperties() throws Exception {
+        DynamicKafkaSourceEnumStateSerializer dynamicKafkaSourceEnumStateSerializer =
+                new DynamicKafkaSourceEnumStateSerializer();
+
+        Properties propertiesForCluster0 = new Properties();
+        propertiesForCluster0.setProperty(
+                CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster0:9092");
+        propertiesForCluster0.setProperty(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL");
+        propertiesForCluster0.setProperty("sasl.mechanism", "SCRAM-SHA-512");
+        propertiesForCluster0.setProperty(
+                "sasl.jaas.config",
+                "org.apache.kafka.common.security.scram.ScramLoginModule required "
+                        + "username=\"user\" password=\"pass\";");
+
+        Set<KafkaStream> kafkaStreams =
+                ImmutableSet.of(
+                        new KafkaStream(
+                                "stream0",
+                                ImmutableMap.of(
+                                        "cluster0",
+                                        new ClusterMetadata(
+                                                ImmutableSet.of("topic0"),
+                                                propertiesForCluster0,
+                                                OffsetsInitializer.earliest(),
+                                                OffsetsInitializer.latest()))));
+
+        DynamicKafkaSourceEnumState dynamicKafkaSourceEnumState =
+                new DynamicKafkaSourceEnumState(kafkaStreams, Collections.emptyMap());
+
+        DynamicKafkaSourceEnumState dynamicKafkaSourceEnumStateAfterSerde =
+                dynamicKafkaSourceEnumStateSerializer.deserialize(
+                        dynamicKafkaSourceEnumStateSerializer.getVersion(),
+                        dynamicKafkaSourceEnumStateSerializer.serialize(
+                                dynamicKafkaSourceEnumState));
+
+        ClusterMetadata clusterMetadata =
+                dynamicKafkaSourceEnumStateAfterSerde.getKafkaStreams().iterator().next()
+                        .getClusterMetadataMap()
+                        .get("cluster0");
+        assertThat(clusterMetadata.getProperties())
+                .containsEntry(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster0:9092")
+                .containsEntry(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL")
+                .containsEntry("sasl.mechanism", "SCRAM-SHA-512")
+                .containsEntry(
+                        "sasl.jaas.config",
+                        "org.apache.kafka.common.security.scram.ScramLoginModule required "
+                                + "username=\"user\" password=\"pass\";");
     }
 
     @Test
@@ -201,6 +258,42 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
                 .isEqualTo("cluster0:9092");
         assertThat(clusterMetadata.getStartingOffsetsInitializer()).isNull();
         assertThat(clusterMetadata.getStoppingOffsetsInitializer()).isNull();
+    }
+
+    @Test
+    public void testDeserializeV2State() throws Exception {
+        DynamicKafkaSourceEnumStateSerializer dynamicKafkaSourceEnumStateSerializer =
+                new DynamicKafkaSourceEnumStateSerializer();
+        Properties properties = new Properties();
+        properties.setProperty(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster0:9092");
+        properties.setProperty(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL");
+        properties.setProperty("sasl.mechanism", "PLAIN");
+
+        byte[] serializedState =
+                DynamicKafkaSourceEnumStateTestUtils.serializeV2State(
+                        "stream0",
+                        "cluster0",
+                        ImmutableSet.of("topic0", "topic1"),
+                        properties,
+                        OffsetsInitializer.earliest(),
+                        OffsetsInitializer.latest());
+
+        DynamicKafkaSourceEnumState dynamicKafkaSourceEnumState =
+                dynamicKafkaSourceEnumStateSerializer.deserialize(2, serializedState);
+
+        assertThat(dynamicKafkaSourceEnumState.getClusterEnumeratorStates()).isEmpty();
+        KafkaStream kafkaStream = dynamicKafkaSourceEnumState.getKafkaStreams().iterator().next();
+        ClusterMetadata clusterMetadata = kafkaStream.getClusterMetadataMap().get("cluster0");
+        assertThat(clusterMetadata.getProperties())
+                .containsEntry(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster0:9092")
+                .containsEntry(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL")
+                .containsEntry("sasl.mechanism", "PLAIN");
+        assertThat(clusterMetadata.getStartingOffsetsInitializer()).isNotNull();
+        assertThat(clusterMetadata.getStartingOffsetsInitializer().getAutoOffsetResetStrategy())
+                .isEqualTo(OffsetResetStrategy.EARLIEST);
+        assertThat(clusterMetadata.getStoppingOffsetsInitializer()).isNotNull();
+        assertThat(clusterMetadata.getStoppingOffsetsInitializer().getAutoOffsetResetStrategy())
+                .isEqualTo(OffsetResetStrategy.LATEST);
     }
 
     private static SplitAndAssignmentStatus getSplitAssignment(
