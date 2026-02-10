@@ -29,6 +29,8 @@ import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.kafka.clients.CommonClientConfigs;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -50,6 +52,8 @@ import java.util.Set;
 @Internal
 public class DynamicKafkaSourceEnumStateSerializer
         implements SimpleVersionedSerializer<DynamicKafkaSourceEnumState> {
+    private static final Logger logger =
+            LoggerFactory.getLogger(DynamicKafkaSourceEnumStateSerializer.class);
 
     private static final int VERSION_1 = 1;
     private static final int VERSION_2 = 2;
@@ -67,6 +71,12 @@ public class DynamicKafkaSourceEnumStateSerializer
 
     @Override
     public byte[] serialize(DynamicKafkaSourceEnumState state) throws IOException {
+        String stateSummary = summarizeState(state);
+        logger.info(
+                "Serializing DynamicKafkaSourceEnumState with serializerVersion={} and {}",
+                getVersion(),
+                stateSummary);
+
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 DataOutputStream out = new DataOutputStream(baos)) {
 
@@ -92,7 +102,13 @@ public class DynamicKafkaSourceEnumStateSerializer
                 out.write(bytes);
             }
 
-            return baos.toByteArray();
+            byte[] serializedState = baos.toByteArray();
+            logger.info(
+                    "Serialized DynamicKafkaSourceEnumState into {} bytes with serializerVersion={} and {}",
+                    serializedState.length,
+                    getVersion(),
+                    stateSummary);
+            return serializedState;
         }
     }
 
@@ -107,6 +123,10 @@ public class DynamicKafkaSourceEnumStateSerializer
                             version, getVersion()));
         }
 
+        logger.info(
+                "Deserializing DynamicKafkaSourceEnumState from {} bytes with stateVersion={}",
+                serialized.length,
+                version);
         try (ByteArrayInputStream bais = new ByteArrayInputStream(serialized);
                 DataInputStream in = new DataInputStream(bais)) {
             Set<KafkaStream> kafkaStreams =
@@ -126,8 +146,77 @@ public class DynamicKafkaSourceEnumStateSerializer
                 clusterEnumeratorStates.put(kafkaClusterId, kafkaSourceEnumState);
             }
 
-            return new DynamicKafkaSourceEnumState(kafkaStreams, clusterEnumeratorStates);
+            DynamicKafkaSourceEnumState restoredState =
+                    new DynamicKafkaSourceEnumState(kafkaStreams, clusterEnumeratorStates);
+            String stateSummary = summarizeState(restoredState);
+            logger.info(
+                    "Deserialized DynamicKafkaSourceEnumState with stateVersion={}, subStateVersion={} and {}",
+                    version,
+                    kafkaSourceEnumStateSerializerVersion,
+                    stateSummary);
+            return restoredState;
         }
+    }
+
+    private static String summarizeState(DynamicKafkaSourceEnumState state) {
+        List<String> streamSummaries = new ArrayList<>();
+        for (KafkaStream kafkaStream : state.getKafkaStreams()) {
+            streamSummaries.add(summarizeKafkaStream(kafkaStream));
+        }
+        streamSummaries.sort(String::compareTo);
+
+        List<String> enumeratorStateSummaries = new ArrayList<>();
+        for (Map.Entry<String, KafkaSourceEnumState> entry :
+                state.getClusterEnumeratorStates().entrySet()) {
+            KafkaSourceEnumState enumState = entry.getValue();
+            enumeratorStateSummaries.add(
+                    String.format(
+                            "%s{assigned=%d,unassigned=%d,initialDiscoveryFinished=%s}",
+                            entry.getKey(),
+                            enumState.assignedSplits().size(),
+                            enumState.unassignedSplits().size(),
+                            enumState.initialDiscoveryFinished()));
+        }
+        enumeratorStateSummaries.sort(String::compareTo);
+
+        return String.format(
+                "kafkaStreams=%s, clusterEnumeratorStates=%s",
+                streamSummaries, enumeratorStateSummaries);
+    }
+
+    private static String summarizeKafkaStream(KafkaStream kafkaStream) {
+        List<String> clusterSummaries = new ArrayList<>();
+        for (Map.Entry<String, ClusterMetadata> clusterEntry :
+                kafkaStream.getClusterMetadataMap().entrySet()) {
+            ClusterMetadata clusterMetadata = clusterEntry.getValue();
+
+            List<String> sortedTopics = new ArrayList<>(clusterMetadata.getTopics());
+            sortedTopics.sort(String::compareTo);
+
+            List<String> sortedPropertyKeys =
+                    new ArrayList<>(clusterMetadata.getProperties().stringPropertyNames());
+            sortedPropertyKeys.sort(String::compareTo);
+
+            clusterSummaries.add(
+                    String.format(
+                            "%s{topics=%s,propertyKeys=%s,startingOffsetInitializer=%s,stoppingOffsetInitializer=%s}",
+                            clusterEntry.getKey(),
+                            sortedTopics,
+                            sortedPropertyKeys,
+                            getOffsetsInitializerName(
+                                    clusterMetadata.getStartingOffsetsInitializer()),
+                            getOffsetsInitializerName(
+                                    clusterMetadata.getStoppingOffsetsInitializer())));
+        }
+        clusterSummaries.sort(String::compareTo);
+
+        return String.format(
+                "%s{clusterMetadata=%s}", kafkaStream.getStreamId(), clusterSummaries);
+    }
+
+    private static String getOffsetsInitializerName(
+            @Nullable OffsetsInitializer offsetsInitializer) {
+        return offsetsInitializer == null ? "null" : offsetsInitializer.getClass().getSimpleName();
     }
 
     private void serializeV2(Set<KafkaStream> kafkaStreams, DataOutputStream out)
