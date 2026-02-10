@@ -70,6 +70,10 @@ service class must implement `KafkaMetadataService` and should either have a pub
 constructor or a constructor that accepts `Properties`. The connector will pass the Kafka
 properties (all `properties.*` options) into the constructor when available.
 
+When the metadata service provides per-cluster Kafka properties, Dynamic Kafka persists the full
+properties map in checkpointed enumerator state. This preserves custom client/security settings
+(for example SASL/SSL-related properties), not only `bootstrap.servers`, after recovery.
+
 Available Metadata
 ------------------
 

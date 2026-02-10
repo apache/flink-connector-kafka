@@ -183,6 +183,10 @@ swap from one cluster to the new cluster when the service makes that change in t
 
 Cluster metadata 可以包含每个集群的起始/停止 offsets initializer，用于覆盖全局 builder 配置。
 
+Dynamic Kafka Source 会在 checkpoint 时将每个集群完整的 Kafka `Properties` 持久化到
+enumerator state 中。这意味着恢复/故障转移后，不仅 `bootstrap.servers`，包括
+SASL/SSL 等自定义连接与安全配置也会被保留。
+
 ### Additional Properties
 There are configuration options in DynamicKafkaSourceOptions that can be configured in the properties through the builder:
 <table class="table table-bordered">

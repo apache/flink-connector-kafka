@@ -187,6 +187,10 @@ swap from one cluster to the new cluster when the service makes that change in t
 Cluster metadata can optionally carry per-cluster starting and stopping offsets initializers. These
 override the global builder configuration for the affected cluster.
 
+Dynamic Kafka Source persists the full per-cluster Kafka `Properties` in enumerator state during
+checkpointing. This means custom connection and security settings (for example SASL/SSL-related
+properties), not only `bootstrap.servers`, are preserved after restore/failover.
+
 ### Additional Properties
 There are configuration options in DynamicKafkaSourceOptions that can be configured in the properties through the builder:
 <table class="table table-bordered">
