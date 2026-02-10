@@ -161,7 +161,10 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
                                 dynamicKafkaSourceEnumState));
 
         ClusterMetadata clusterMetadata =
-                dynamicKafkaSourceEnumStateAfterSerde.getKafkaStreams().iterator().next()
+                dynamicKafkaSourceEnumStateAfterSerde
+                        .getKafkaStreams()
+                        .iterator()
+                        .next()
                         .getClusterMetadataMap()
                         .get("cluster0");
         assertThat(clusterMetadata.getProperties())
