@@ -67,7 +67,8 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
         Properties propertiesForCluster1 = new Properties();
         propertiesForCluster1.setProperty(
                 CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster1:9092");
-        propertiesForCluster1.setProperty(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "PLAINTEXT");
+        propertiesForCluster1.setProperty(
+                CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "PLAINTEXT");
 
         OffsetsInitializer cluster0StartingOffsetsInitializer = OffsetsInitializer.earliest();
         OffsetsInitializer cluster0StoppingOffsetsInitializer =
@@ -191,7 +192,8 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
         Properties propertiesForCluster1 = new Properties();
         propertiesForCluster1.setProperty(
                 CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster1:9092");
-        propertiesForCluster1.setProperty(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "PLAINTEXT");
+        propertiesForCluster1.setProperty(
+                CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "PLAINTEXT");
 
         OffsetsInitializer startingOffsetsInitializer = OffsetsInitializer.earliest();
         OffsetsInitializer stoppingOffsetsInitializer = OffsetsInitializer.latest();
@@ -256,7 +258,8 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
         Properties propertiesForCluster1 = new Properties();
         propertiesForCluster1.setProperty(
                 CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster1:9092");
-        propertiesForCluster1.setProperty(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "PLAINTEXT");
+        propertiesForCluster1.setProperty(
+                CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "PLAINTEXT");
         propertiesForCluster1.setProperty("client.id", "dynamic-kafka-source");
 
         Set<KafkaStream> kafkaStreams =

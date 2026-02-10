@@ -210,8 +210,7 @@ public class DynamicKafkaSourceEnumStateSerializer
         }
         clusterSummaries.sort(String::compareTo);
 
-        return String.format(
-                "%s{clusterMetadata=%s}", kafkaStream.getStreamId(), clusterSummaries);
+        return String.format("%s{clusterMetadata=%s}", kafkaStream.getStreamId(), clusterSummaries);
     }
 
     private static String getOffsetsInitializerName(
