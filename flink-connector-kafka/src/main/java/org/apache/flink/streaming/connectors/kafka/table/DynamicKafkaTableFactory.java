@@ -218,13 +218,6 @@ public class DynamicKafkaTableFactory implements DynamicTableSourceFactory {
                                                 .key(),
                                         Integer.toString(value)));
         tableOptions
-                .getOptional(IDLE_WATERMARK_DELAY_MS)
-                .ifPresent(
-                        value ->
-                                properties.setProperty(
-                                        KafkaSourceOptions.IDLE_WATERMARK_DELAY_MS.key(),
-                                        Long.toString(value)));
-        tableOptions
                 .getOptional(DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE)
                 .ifPresent(
                         value ->

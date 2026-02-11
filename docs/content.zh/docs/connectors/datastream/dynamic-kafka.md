@@ -179,8 +179,23 @@ Dynamic Kafka Source 支持两种 split 分配模式：
 
 你可以通过 builder API 或 source properties 来配置该模式。
 
-在 `global` 模式下，均衡策略是**前向增量（forward-only）**的：分配时只考虑“当前已分配状态 + 新发现的 split”，
-不会回溯重排已经分配且仍在消费的 split。比如分区缩减后产生的“空洞”不会被主动填平，只有后续新增 split 会继续参与均衡分配。
+新发现 split 的 owner 计算方式如下：
+
+* `per_cluster`：使用 `KafkaSourceEnumerator` 相同的 owner 逻辑。
+  对于 topic 分区 `(topic, partition)`，令 `numReaders = P`：
+  `startIndex = ((topic.hashCode() * 31) & 0x7FFFFFFF) % P`，
+  `owner = (startIndex + partition) % P`。
+* `global`：在所有集群共享一个全局 owner 游标：
+  `owner = knownActiveSplitIds.size() % numReaders`，
+  然后将该 split id 加入 `knownActiveSplitIds`。
+  （当 split 通过 `addSplitsBack` 返回时，若原 owner 仍然有效，则优先复用该 owner。）
+
+在 `global` 模式下，均衡策略是**前向增量（forward-only）**的：新发现 split 会尽量保证后续分配均衡，
+但不会仅为重平衡主动迁移已分配且仍在消费的 active split。
+
+如果因为缩容/移除导致 global 分配出现倾斜，enumerator 不会自行重排已在运行的 split。
+如需对已有 ownership 做重平衡，可通过并行度变化后的恢复流程（例如 savepoint/checkpoint + rescale restore），
+让 Flink Runtime 对 source reader 的 operator state 进行重分区。
 
 {{< tabs "DynamicKafkaSourceEnumeratorMode" >}}
 {{< tab "Java" >}}

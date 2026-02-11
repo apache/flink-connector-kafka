@@ -153,9 +153,25 @@ Dynamic Kafka Source supports two split-assignment modes:
 
 You can configure the mode either with the builder API or with source properties.
 
+How next owner is chosen for a newly discovered split:
+
+* `per_cluster`: uses the same owner logic as `KafkaSourceEnumerator`.
+  For topic partition `(topic, partition)`, with `numReaders = P`:
+  `startIndex = ((topic.hashCode() * 31) & 0x7FFFFFFF) % P`,
+  `owner = (startIndex + partition) % P`.
+* `global`: uses one global owner cursor across all clusters:
+  `owner = knownActiveSplitIds.size() % numReaders`,
+  then adds the split id into `knownActiveSplitIds`.
+  (When a split is returned via `addSplitsBack`, the preferred previous owner is reused when valid.)
+
 In `global` mode, balancing is **forward-looking**: newly discovered splits are assigned to keep
 future distribution balanced, while already assigned active splits are not proactively migrated only
 for rebalancing.
+
+If global assignment becomes skewed due to shrink/removal, the enumerator does not rebalance already
+active splits by itself. To rebalance existing ownership, use a restore with parallelism change
+(for example, savepoint/checkpoint restore after rescale), so Flink runtime repartitions source
+reader operator state.
 
 {{< tabs "DynamicKafkaSourceEnumeratorMode" >}}
 {{< tab "Java" >}}

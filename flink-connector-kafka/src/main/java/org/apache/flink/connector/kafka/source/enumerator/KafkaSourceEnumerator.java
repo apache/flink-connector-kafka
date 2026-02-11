@@ -60,6 +60,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.flink.util.CollectionUtil.newLinkedHashMapWithExpectedSize;
 import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.util.Preconditions.checkState;
 
 /**
  * The enumerator class for Kafka source.
