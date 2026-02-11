@@ -60,14 +60,15 @@ corresponding to "input-stream".
 ```java
 
 DynamicKafkaSource<String> source = DynamicKafkaSource.<String>builder()
-        .setKafkaMetadataService(new MyKafkaMetadataService())
-        .setStreamIds(Collections.singleton("input-stream"))
-        .setStartingOffsets(OffsetsInitializer.earliest())
-        .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(StringDeserializer.class))
-        .setProperties(properties)
-        .build();
+    .setKafkaMetadataService(new MyKafkaMetadataService())
+    .setStreamIds(Collections.singleton("input-stream"))
+    .setEnumeratorMode(DynamicKafkaSourceOptions.EnumeratorMode.PER_CLUSTER)
+    .setStartingOffsets(OffsetsInitializer.earliest())
+    .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(StringDeserializer.class))
+    .setProperties(properties)
+    .build();
 
-        env.fromSource(source, WatermarkStrategy.noWatermarks(), "Dynamic Kafka Source");
+env.fromSource(source, WatermarkStrategy.noWatermarks(), "Dynamic Kafka Source");
 ```
 {{< /tab >}}
 {{< tab "Python" >}}
@@ -169,6 +170,47 @@ The Dynamic Kafka Source provides 2 ways of subscribing to Kafka stream(s).
   {{< /tab >}}
   {{< /tabs >}}
 
+### Split 分配模式
+
+Dynamic Kafka Source 支持两种 split 分配模式：
+
+* `per_cluster`（默认）：在每个 Kafka 集群内独立进行 split 分配。
+* `global`：在所有已发现的 Kafka 集群范围内统一做全局负载均衡分配。
+
+你可以通过 builder API 或 source properties 来配置该模式。
+
+新发现 split 的 owner 计算方式如下：
+
+* `per_cluster`：使用 `KafkaSourceEnumerator` 相同的 owner 逻辑。
+  对于 topic 分区 `(topic, partition)`，令 `numReaders = P`：
+  `startIndex = ((topic.hashCode() * 31) & 0x7FFFFFFF) % P`，
+  `owner = (startIndex + partition) % P`。
+* `global`：在所有集群共享一个全局 owner 游标：
+  `owner = knownActiveSplitIds.size() % numReaders`，
+  然后将该 split id 加入 `knownActiveSplitIds`。
+  （当 split 通过 `addSplitsBack` 返回时，若原 owner 仍然有效，则优先复用该 owner。）
+
+在 `global` 模式下，均衡策略是**前向增量（forward-only）**的：新发现 split 会尽量保证后续分配均衡，
+但不会仅为重平衡主动迁移已分配且仍在消费的 active split。
+
+如果因为缩容/移除导致 global 分配出现倾斜，enumerator 不会自行重排已在运行的 split。
+如需对已有 ownership 做重平衡，可通过并行度变化后的恢复流程（例如 savepoint/checkpoint + rescale restore），
+让 Flink Runtime 对 source reader 的 operator state 进行重分区。
+
+{{< tabs "DynamicKafkaSourceEnumeratorMode" >}}
+{{< tab "Java" >}}
+```java
+DynamicKafkaSource<String> source =
+    DynamicKafkaSource.<String>builder()
+        .setKafkaMetadataService(new MyKafkaMetadataService())
+        .setStreamIds(Set.of("input-stream"))
+        .setEnumeratorMode(DynamicKafkaSourceOptions.EnumeratorMode.GLOBAL)
+        .setDeserializer(KafkaRecordDeserializationSchema.valueOnly(StringDeserializer.class))
+        .build();
+```
+{{< /tab >}}
+{{< /tabs >}}
+
 ### Kafka Metadata Service
 
 An interface is provided to resolve the logical Kafka stream(s) into the corresponding physical
@@ -209,6 +251,13 @@ There are configuration options in DynamicKafkaSourceOptions that can be configu
       <td style="word-wrap: break-word;">1</td>
       <td>Integer</td>
       <td>The number of consecutive failures before letting the exception from Kafka metadata service discovery trigger jobmanager failure and global failover. The default is one to at least catch startup failures.</td>
+    </tr>
+    <tr>
+      <td><h5>stream-enumerator-mode</h5></td>
+      <td>required</td>
+      <td style="word-wrap: break-word;">per_cluster</td>
+      <td>String</td>
+      <td>Dynamic Kafka split 分配所使用的 Enumerator 实现。支持 <code>per_cluster</code>（集群内独立分配）和 <code>global</code>（跨集群全局均衡分配）。</td>
     </tr>
     </tbody>
 </table>
