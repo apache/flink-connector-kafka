@@ -32,6 +32,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Properties;
+import java.util.Random;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.apache.flink.util.Preconditions.checkState;
@@ -192,6 +193,17 @@ public class KafkaSinkBuilder<IN> {
         return setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
     }
 
+    /**
+     * Sets the client id prefix of this KafkaSink. The prefix is used to generate unique Kafka
+     * producer client IDs per subtask in the format {@code {prefix}-{subtaskId}}.
+     *
+     * @param prefix the client id prefix to use for this KafkaSink.
+     * @return {@link KafkaSinkBuilder}
+     */
+    public KafkaSinkBuilder<IN> setClientIdPrefix(String prefix) {
+        return setProperty(KafkaSinkOptions.CLIENT_ID_PREFIX.key(), prefix);
+    }
+
     private void sanityCheck() {
         checkNotNull(
                 kafkaProducerConfig.getProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG),
@@ -217,11 +229,38 @@ public class KafkaSinkBuilder<IN> {
      */
     public KafkaSink<IN> build() {
         sanityCheck();
+        parseAndSetRequiredProperties();
         return new KafkaSink<>(
                 deliveryGuarantee,
                 kafkaProducerConfig,
                 transactionalIdPrefix,
                 recordSerializer,
                 transactionNamingStrategy);
+    }
+
+    private void parseAndSetRequiredProperties() {
+        // If the client id prefix is not set, reuse the transactional id prefix as the client id
+        // prefix, or generate a random string if transactional id prefix is not specified.
+        maybeOverride(
+                KafkaSinkOptions.CLIENT_ID_PREFIX.key(),
+                transactionalIdPrefix != null
+                        ? transactionalIdPrefix
+                        : "KafkaSink-" + new Random().nextLong(),
+                false);
+    }
+
+    private void maybeOverride(String key, String value, boolean override) {
+        String userValue = kafkaProducerConfig.getProperty(key);
+        if (userValue != null) {
+            if (override) {
+                LOG.warn(
+                        String.format(
+                                "Property %s is provided but will be overridden from %s to %s",
+                                key, userValue, value));
+                kafkaProducerConfig.setProperty(key, value);
+            }
+        } else {
+            kafkaProducerConfig.setProperty(key, value);
+        }
     }
 }

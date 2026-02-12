@@ -88,6 +88,54 @@ class KafkaSinkBuilderTest {
     }
 
     @Test
+    void testClientIdPrefixSetting() {
+        validateProducerConfig(
+                getBasicBuilder().setClientIdPrefix("my-producer"),
+                p -> {
+                    assertThat(p)
+                            .containsEntry(
+                                    KafkaSinkOptions.CLIENT_ID_PREFIX.key(), "my-producer");
+                });
+    }
+
+    @Test
+    void testDefaultClientIdPrefixGenerated() {
+        validateProducerConfig(
+                getBasicBuilder(),
+                p -> {
+                    String prefix = p.getProperty(KafkaSinkOptions.CLIENT_ID_PREFIX.key());
+                    assertThat(prefix).isNotNull().startsWith("KafkaSink-");
+                });
+    }
+
+    @Test
+    void testDefaultClientIdPrefixUsesTransactionalIdPrefix() {
+        validateProducerConfig(
+                getBasicBuilder()
+                        .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
+                        .setTransactionalIdPrefix("my-txn-prefix"),
+                p -> {
+                    assertThat(p)
+                            .containsEntry(
+                                    KafkaSinkOptions.CLIENT_ID_PREFIX.key(), "my-txn-prefix");
+                });
+    }
+
+    @Test
+    void testClientIdPrefixPreservesUserValue() {
+        validateProducerConfig(
+                getBasicBuilder()
+                        .setClientIdPrefix("user-prefix")
+                        .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
+                        .setTransactionalIdPrefix("my-txn-prefix"),
+                p -> {
+                    assertThat(p)
+                            .containsEntry(
+                                    KafkaSinkOptions.CLIENT_ID_PREFIX.key(), "user-prefix");
+                });
+    }
+
+    @Test
     void testTransactionalIdSanityCheck() {
         assertThatThrownBy(
                         () ->
