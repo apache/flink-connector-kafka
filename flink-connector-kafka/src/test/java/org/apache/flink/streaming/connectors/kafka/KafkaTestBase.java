@@ -27,8 +27,6 @@ import org.apache.flink.runtime.client.JobExecutionException;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.util.TestStreamEnvironment;
 import org.apache.flink.test.util.SuccessException;
-import org.apache.flink.testutils.junit.RetryOnFailure;
-import org.apache.flink.testutils.junit.RetryRule;
 import org.apache.flink.util.InstantiationUtil;
 
 import com.google.common.base.MoreObjects;
@@ -38,7 +36,6 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.slf4j.Logger;
@@ -66,12 +63,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * href="https://github.com/sakserv/hadoop-mini-clusters">
  * https://github.com/sakserv/hadoop-mini-clusters</a> (ASL licensed), as per commit
  * <i>bc6b2b2d5f6424d5f377aa6c0871e82a956462ef</i>
- *
- * <p>Tests inheriting from this class are known to be unstable due to the test setup. All tests
- * implemented in subclasses will be retried on failures.
  */
 @SuppressWarnings("serial")
-@RetryOnFailure(times = 3)
 @ResourceLock("KafkaTestBase")
 public abstract class KafkaTestBase {
 
@@ -91,8 +84,6 @@ public abstract class KafkaTestBase {
     @TempDir public static File tempFolder;
 
     public static Properties secureProps = new Properties();
-
-    @RegisterExtension public final RetryRule retryRule = new RetryRule();
 
     // ------------------------------------------------------------------------
     //  Setup and teardown of the mini clusters
