@@ -89,7 +89,7 @@ under the License.
 		<mockito.version>5.18.0</mockito.version>
 		<powermock.version>2.0.9</powermock.version>
 		<snakeyaml.version>2.4</snakeyaml.version>
-		<testcontainers.version>1.21.3</testcontainers.version>
+		<testcontainers.version>1.21.4</testcontainers.version>
 
 		<!-- Plugins -->
 		<japicmp.referenceVersion>1.17.0</japicmp.referenceVersion>
