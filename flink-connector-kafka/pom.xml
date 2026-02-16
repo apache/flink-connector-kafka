@@ -269,12 +269,6 @@ under the License.
 			<type>test-jar</type>
 		</dependency>
 
-		<dependency>
-			<groupId>org.apache.flink</groupId>
-			<artifactId>flink-metrics-jmx</artifactId>
-			<scope>test</scope>
-		</dependency>
-
 		<!-- Kafka table factory testing -->
 		<dependency>
 			<groupId>org.apache.flink</groupId>
