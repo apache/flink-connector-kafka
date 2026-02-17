@@ -67,6 +67,10 @@ CREATE TABLE DynamicKafkaTable (
 `KafkaMetadataService`，并且需要提供无参构造函数或接收 `Properties` 参数的构造函数。
 连接器会将所有 `properties.*` 选项作为 Kafka 属性传入构造函数。
 
+当元数据服务返回每个集群的 Kafka 属性时，Dynamic Kafka 会将完整属性映射持久化到
+checkpoint 的 enumerator state 中。恢复后不仅会保留 `bootstrap.servers`，也会保留
+SASL/SSL 等自定义客户端安全配置。
+
 可用元数据
 --------
 

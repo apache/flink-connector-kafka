@@ -49,6 +49,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class DynamicKafkaSourceEnumStateSerializerTest {
 
     @Test
+    public void testSerializerVersion() {
+        DynamicKafkaSourceEnumStateSerializer dynamicKafkaSourceEnumStateSerializer =
+                new DynamicKafkaSourceEnumStateSerializer();
+        assertThat(dynamicKafkaSourceEnumStateSerializer.getVersion()).isEqualTo(2);
+    }
+
+    @Test
     public void testSerde() throws Exception {
         DynamicKafkaSourceEnumStateSerializer dynamicKafkaSourceEnumStateSerializer =
                 new DynamicKafkaSourceEnumStateSerializer();
@@ -56,9 +63,12 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
         Properties propertiesForCluster0 = new Properties();
         propertiesForCluster0.setProperty(
                 CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster0:9092");
+        propertiesForCluster0.setProperty(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL");
         Properties propertiesForCluster1 = new Properties();
         propertiesForCluster1.setProperty(
                 CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster1:9092");
+        propertiesForCluster1.setProperty(
+                CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "PLAINTEXT");
 
         OffsetsInitializer cluster0StartingOffsetsInitializer = OffsetsInitializer.earliest();
         OffsetsInitializer cluster0StoppingOffsetsInitializer =
@@ -118,6 +128,59 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
     }
 
     @Test
+    public void testSerdePreservesClusterProperties() throws Exception {
+        DynamicKafkaSourceEnumStateSerializer dynamicKafkaSourceEnumStateSerializer =
+                new DynamicKafkaSourceEnumStateSerializer();
+
+        Properties propertiesForCluster0 = new Properties();
+        propertiesForCluster0.setProperty(
+                CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster0:9092");
+        propertiesForCluster0.setProperty(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL");
+        propertiesForCluster0.setProperty("sasl.mechanism", "SCRAM-SHA-512");
+        propertiesForCluster0.setProperty(
+                "sasl.jaas.config",
+                "org.apache.kafka.common.security.scram.ScramLoginModule required "
+                        + "username=\"user\" password=\"pass\";");
+
+        Set<KafkaStream> kafkaStreams =
+                ImmutableSet.of(
+                        new KafkaStream(
+                                "stream0",
+                                ImmutableMap.of(
+                                        "cluster0",
+                                        new ClusterMetadata(
+                                                ImmutableSet.of("topic0"),
+                                                propertiesForCluster0,
+                                                OffsetsInitializer.earliest(),
+                                                OffsetsInitializer.latest()))));
+
+        DynamicKafkaSourceEnumState dynamicKafkaSourceEnumState =
+                new DynamicKafkaSourceEnumState(kafkaStreams, Collections.emptyMap());
+
+        DynamicKafkaSourceEnumState dynamicKafkaSourceEnumStateAfterSerde =
+                dynamicKafkaSourceEnumStateSerializer.deserialize(
+                        dynamicKafkaSourceEnumStateSerializer.getVersion(),
+                        dynamicKafkaSourceEnumStateSerializer.serialize(
+                                dynamicKafkaSourceEnumState));
+
+        ClusterMetadata clusterMetadata =
+                dynamicKafkaSourceEnumStateAfterSerde
+                        .getKafkaStreams()
+                        .iterator()
+                        .next()
+                        .getClusterMetadataMap()
+                        .get("cluster0");
+        assertThat(clusterMetadata.getProperties())
+                .containsEntry(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster0:9092")
+                .containsEntry(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL")
+                .containsEntry("sasl.mechanism", "SCRAM-SHA-512")
+                .containsEntry(
+                        "sasl.jaas.config",
+                        "org.apache.kafka.common.security.scram.ScramLoginModule required "
+                                + "username=\"user\" password=\"pass\";");
+    }
+
+    @Test
     public void testSerdeWithPartialOffsetsInitializers() throws Exception {
         DynamicKafkaSourceEnumStateSerializer dynamicKafkaSourceEnumStateSerializer =
                 new DynamicKafkaSourceEnumStateSerializer();
@@ -125,9 +188,12 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
         Properties propertiesForCluster0 = new Properties();
         propertiesForCluster0.setProperty(
                 CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster0:9092");
+        propertiesForCluster0.setProperty(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL");
         Properties propertiesForCluster1 = new Properties();
         propertiesForCluster1.setProperty(
                 CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster1:9092");
+        propertiesForCluster1.setProperty(
+                CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "PLAINTEXT");
 
         OffsetsInitializer startingOffsetsInitializer = OffsetsInitializer.earliest();
         OffsetsInitializer stoppingOffsetsInitializer = OffsetsInitializer.latest();
@@ -162,16 +228,91 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
         KafkaStream kafkaStream =
                 dynamicKafkaSourceEnumStateAfterSerde.getKafkaStreams().iterator().next();
         ClusterMetadata cluster0Metadata = kafkaStream.getClusterMetadataMap().get("cluster0");
+        assertThat(cluster0Metadata.getProperties())
+                .containsEntry(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL");
         assertThat(cluster0Metadata.getStartingOffsetsInitializer()).isNotNull();
         assertThat(cluster0Metadata.getStartingOffsetsInitializer().getAutoOffsetResetStrategy())
                 .isEqualTo(OffsetResetStrategy.EARLIEST);
         assertThat(cluster0Metadata.getStoppingOffsetsInitializer()).isNull();
 
         ClusterMetadata cluster1Metadata = kafkaStream.getClusterMetadataMap().get("cluster1");
+        assertThat(cluster1Metadata.getProperties())
+                .containsEntry(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "PLAINTEXT");
         assertThat(cluster1Metadata.getStartingOffsetsInitializer()).isNull();
         assertThat(cluster1Metadata.getStoppingOffsetsInitializer()).isNotNull();
         assertThat(cluster1Metadata.getStoppingOffsetsInitializer().getAutoOffsetResetStrategy())
                 .isEqualTo(OffsetResetStrategy.LATEST);
+    }
+
+    @Test
+    public void testSerdePreservesPropertiesAndOffsetsForMultipleClusters() throws Exception {
+        DynamicKafkaSourceEnumStateSerializer dynamicKafkaSourceEnumStateSerializer =
+                new DynamicKafkaSourceEnumStateSerializer();
+
+        Properties propertiesForCluster0 = new Properties();
+        propertiesForCluster0.setProperty(
+                CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster0:9092");
+        propertiesForCluster0.setProperty(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL");
+        propertiesForCluster0.setProperty("sasl.mechanism", "SCRAM-SHA-512");
+
+        Properties propertiesForCluster1 = new Properties();
+        propertiesForCluster1.setProperty(
+                CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster1:9092");
+        propertiesForCluster1.setProperty(
+                CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "PLAINTEXT");
+        propertiesForCluster1.setProperty("client.id", "dynamic-kafka-source");
+
+        Set<KafkaStream> kafkaStreams =
+                ImmutableSet.of(
+                        new KafkaStream(
+                                "stream0",
+                                ImmutableMap.of(
+                                        "cluster0",
+                                        new ClusterMetadata(
+                                                ImmutableSet.of("topic0", "topic1"),
+                                                propertiesForCluster0,
+                                                OffsetsInitializer.earliest(),
+                                                OffsetsInitializer.latest()),
+                                        "cluster1",
+                                        new ClusterMetadata(
+                                                ImmutableSet.of("topic2"),
+                                                propertiesForCluster1,
+                                                OffsetsInitializer.committedOffsets(
+                                                        OffsetResetStrategy.EARLIEST),
+                                                null))));
+
+        DynamicKafkaSourceEnumState dynamicKafkaSourceEnumState =
+                new DynamicKafkaSourceEnumState(kafkaStreams, Collections.emptyMap());
+
+        DynamicKafkaSourceEnumState dynamicKafkaSourceEnumStateAfterSerde =
+                dynamicKafkaSourceEnumStateSerializer.deserialize(
+                        dynamicKafkaSourceEnumStateSerializer.getVersion(),
+                        dynamicKafkaSourceEnumStateSerializer.serialize(
+                                dynamicKafkaSourceEnumState));
+
+        KafkaStream kafkaStream =
+                dynamicKafkaSourceEnumStateAfterSerde.getKafkaStreams().iterator().next();
+        ClusterMetadata cluster0Metadata = kafkaStream.getClusterMetadataMap().get("cluster0");
+        assertThat(cluster0Metadata.getProperties())
+                .containsEntry(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster0:9092")
+                .containsEntry(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL")
+                .containsEntry("sasl.mechanism", "SCRAM-SHA-512");
+        assertThat(cluster0Metadata.getStartingOffsetsInitializer()).isNotNull();
+        assertThat(cluster0Metadata.getStartingOffsetsInitializer().getAutoOffsetResetStrategy())
+                .isEqualTo(OffsetResetStrategy.EARLIEST);
+        assertThat(cluster0Metadata.getStoppingOffsetsInitializer()).isNotNull();
+        assertThat(cluster0Metadata.getStoppingOffsetsInitializer().getAutoOffsetResetStrategy())
+                .isEqualTo(OffsetResetStrategy.LATEST);
+
+        ClusterMetadata cluster1Metadata = kafkaStream.getClusterMetadataMap().get("cluster1");
+        assertThat(cluster1Metadata.getProperties())
+                .containsEntry(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster1:9092")
+                .containsEntry(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "PLAINTEXT")
+                .containsEntry("client.id", "dynamic-kafka-source");
+        assertThat(cluster1Metadata.getStartingOffsetsInitializer()).isNotNull();
+        assertThat(cluster1Metadata.getStartingOffsetsInitializer().getAutoOffsetResetStrategy())
+                .isEqualTo(OffsetResetStrategy.EARLIEST);
+        assertThat(cluster1Metadata.getStoppingOffsetsInitializer()).isNull();
     }
 
     @Test
@@ -201,6 +342,42 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
                 .isEqualTo("cluster0:9092");
         assertThat(clusterMetadata.getStartingOffsetsInitializer()).isNull();
         assertThat(clusterMetadata.getStoppingOffsetsInitializer()).isNull();
+    }
+
+    @Test
+    public void testDeserializeV2State() throws Exception {
+        DynamicKafkaSourceEnumStateSerializer dynamicKafkaSourceEnumStateSerializer =
+                new DynamicKafkaSourceEnumStateSerializer();
+        Properties properties = new Properties();
+        properties.setProperty(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster0:9092");
+        properties.setProperty(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL");
+        properties.setProperty("sasl.mechanism", "PLAIN");
+
+        byte[] serializedState =
+                DynamicKafkaSourceEnumStateTestUtils.serializeV2State(
+                        "stream0",
+                        "cluster0",
+                        ImmutableSet.of("topic0", "topic1"),
+                        properties,
+                        OffsetsInitializer.earliest(),
+                        OffsetsInitializer.latest());
+
+        DynamicKafkaSourceEnumState dynamicKafkaSourceEnumState =
+                dynamicKafkaSourceEnumStateSerializer.deserialize(2, serializedState);
+
+        assertThat(dynamicKafkaSourceEnumState.getClusterEnumeratorStates()).isEmpty();
+        KafkaStream kafkaStream = dynamicKafkaSourceEnumState.getKafkaStreams().iterator().next();
+        ClusterMetadata clusterMetadata = kafkaStream.getClusterMetadataMap().get("cluster0");
+        assertThat(clusterMetadata.getProperties())
+                .containsEntry(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, "cluster0:9092")
+                .containsEntry(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL")
+                .containsEntry("sasl.mechanism", "PLAIN");
+        assertThat(clusterMetadata.getStartingOffsetsInitializer()).isNotNull();
+        assertThat(clusterMetadata.getStartingOffsetsInitializer().getAutoOffsetResetStrategy())
+                .isEqualTo(OffsetResetStrategy.EARLIEST);
+        assertThat(clusterMetadata.getStoppingOffsetsInitializer()).isNotNull();
+        assertThat(clusterMetadata.getStoppingOffsetsInitializer().getAutoOffsetResetStrategy())
+                .isEqualTo(OffsetResetStrategy.LATEST);
     }
 
     private static SplitAndAssignmentStatus getSplitAssignment(

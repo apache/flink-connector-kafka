@@ -19,10 +19,16 @@
 package org.apache.flink.connector.kafka.dynamic.source.testutils;
 
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumStateSerializer;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
+import org.apache.flink.util.InstantiationUtil;
+
+import javax.annotation.Nullable;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 
 /** Test utilities for DynamicKafkaSource enum state serialization. */
@@ -49,5 +55,52 @@ public final class DynamicKafkaSourceEnumStateTestUtils {
             out.writeInt(0);
             return baos.toByteArray();
         }
+    }
+
+    public static byte[] serializeV2State(
+            String streamId,
+            String clusterId,
+            Set<String> topics,
+            Properties properties,
+            @Nullable OffsetsInitializer startingOffsetsInitializer,
+            @Nullable OffsetsInitializer stoppingOffsetsInitializer)
+            throws IOException {
+        KafkaSourceEnumStateSerializer kafkaSourceEnumStateSerializer =
+                new KafkaSourceEnumStateSerializer();
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                DataOutputStream out = new DataOutputStream(baos)) {
+            out.writeInt(1);
+            out.writeUTF(streamId);
+            out.writeInt(1);
+            out.writeUTF(clusterId);
+            out.writeInt(topics.size());
+            for (String topic : topics) {
+                out.writeUTF(topic);
+            }
+            out.writeInt(properties.size());
+            for (Map.Entry<Object, Object> entry : properties.entrySet()) {
+                out.writeUTF(String.valueOf(entry.getKey()));
+                out.writeUTF(String.valueOf(entry.getValue()));
+            }
+            writeOffsetsInitializer(startingOffsetsInitializer, out);
+            writeOffsetsInitializer(stoppingOffsetsInitializer, out);
+            out.writeInt(kafkaSourceEnumStateSerializer.getVersion());
+            out.writeInt(0);
+            return baos.toByteArray();
+        }
+    }
+
+    private static void writeOffsetsInitializer(
+            @Nullable OffsetsInitializer offsetsInitializer, DataOutputStream out)
+            throws IOException {
+        if (offsetsInitializer == null) {
+            out.writeBoolean(false);
+            return;
+        }
+
+        out.writeBoolean(true);
+        byte[] serializedOffsets = InstantiationUtil.serializeObject(offsetsInitializer);
+        out.writeInt(serializedOffsets.length);
+        out.write(serializedOffsets);
     }
 }
