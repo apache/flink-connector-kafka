@@ -17,18 +17,7 @@
 
 package org.apache.flink.streaming.connectors.kafka;
 
-import org.apache.flink.client.program.ProgramInvocationException;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.MemorySize;
-import org.apache.flink.configuration.MetricOptions;
-import org.apache.flink.configuration.TaskManagerOptions;
-import org.apache.flink.metrics.jmx.JMXReporterFactory;
-import org.apache.flink.runtime.client.JobExecutionException;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.util.TestStreamEnvironment;
-import org.apache.flink.test.util.SuccessException;
-import org.apache.flink.testutils.junit.RetryOnFailure;
-import org.apache.flink.testutils.junit.RetryRule;
 import org.apache.flink.util.InstantiationUtil;
 
 import com.google.common.base.MoreObjects;
@@ -36,17 +25,12 @@ import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.extension.RegisterExtension;
-import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -54,24 +38,14 @@ import java.util.Properties;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * The base for the Kafka tests. It brings up:
- *
- * <ul>
- *   <li>A ZooKeeper mini cluster
- *   <li>Three Kafka Brokers (mini clusters)
- *   <li>A Flink mini cluster
- * </ul>
+ * The base for the Kafka tests. It brings up a Kafka cluster using Testcontainers.
  *
  * <p>Code in this test is based on the following GitHub repository: <a
  * href="https://github.com/sakserv/hadoop-mini-clusters">
  * https://github.com/sakserv/hadoop-mini-clusters</a> (ASL licensed), as per commit
  * <i>bc6b2b2d5f6424d5f377aa6c0871e82a956462ef</i>
- *
- * <p>Tests inheriting from this class are known to be unstable due to the test setup. All tests
- * implemented in subclasses will be retried on failures.
  */
 @SuppressWarnings("serial")
-@RetryOnFailure(times = 3)
 @ResourceLock("KafkaTestBase")
 public abstract class KafkaTestBase {
 
@@ -88,17 +62,12 @@ public abstract class KafkaTestBase {
 
     public static List<KafkaClusterTestEnvMetadata> kafkaClusters = new ArrayList<>();
 
-    @TempDir public static File tempFolder;
-
     public static Properties secureProps = new Properties();
-
-    @RegisterExtension public final RetryRule retryRule = new RetryRule();
 
     // ------------------------------------------------------------------------
     //  Setup and teardown of the mini clusters
     // ------------------------------------------------------------------------
 
-    @BeforeAll
     public static void prepare() throws Exception {
         LOG.info("-------------------------------------------------------------------------");
         LOG.info("    Starting KafkaTestBase ");
@@ -107,7 +76,6 @@ public abstract class KafkaTestBase {
         startClusters(false, numKafkaClusters);
     }
 
-    @AfterAll
     public static void shutDownServices() throws Exception {
 
         LOG.info("-------------------------------------------------------------------------");
@@ -121,14 +89,6 @@ public abstract class KafkaTestBase {
         LOG.info("-------------------------------------------------------------------------");
         LOG.info("    KafkaTestBase finished");
         LOG.info("-------------------------------------------------------------------------");
-    }
-
-    public static Configuration getFlinkConfiguration() {
-        Configuration flinkConfig = new Configuration();
-        flinkConfig.set(TaskManagerOptions.MANAGED_MEMORY_SIZE, MemorySize.parse("16m"));
-        MetricOptions.forReporter(flinkConfig, "my_reporter")
-                .set(MetricOptions.REPORTER_FACTORY_CLASS, JMXReporterFactory.class.getName());
-        return flinkConfig;
     }
 
     public static void startClusters() throws Exception {
@@ -202,32 +162,9 @@ public abstract class KafkaTestBase {
     //  Execution utilities
     // ------------------------------------------------------------------------
 
-    public static void tryExecutePropagateExceptions(StreamExecutionEnvironment see, String name)
-            throws Exception {
-        try {
-            see.execute(name);
-        } catch (ProgramInvocationException | JobExecutionException root) {
-            Throwable cause = root.getCause();
-
-            // search for nested SuccessExceptions
-            int depth = 0;
-            while (!(cause instanceof SuccessException)) {
-                if (cause == null || depth++ == 20) {
-                    throw root;
-                } else {
-                    cause = cause.getCause();
-                }
-            }
-        }
-    }
-
     public static void createTestTopic(
             String topic, int numberOfPartitions, int replicationFactor) {
         kafkaServer.createTestTopic(topic, numberOfPartitions, replicationFactor);
-    }
-
-    public static void deleteTestTopic(String topic) {
-        kafkaServer.deleteTestTopic(topic);
     }
 
     public static <K, V> void produceToKafka(
@@ -313,10 +250,6 @@ public abstract class KafkaTestBase {
 
         public String getBrokerConnectionStrings() {
             return brokerConnectionStrings;
-        }
-
-        public Properties getSecureProperties() {
-            return secureProperties;
         }
 
         @Override
