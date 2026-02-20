@@ -872,6 +872,34 @@ class UpsertKafkaDynamicTableFactoryTest {
         assertThat(actualSource).isEqualTo(expectedSource);
     }
 
+    @Test
+    public void testTableSourceWithProjectionPushdownLevel() {
+        final DataType producedDataType = SOURCE_SCHEMA.toPhysicalRowDataType();
+        final Map<String, String> modifiedOptions =
+                getModifiedOptions(
+                        getFullSourceOptions(),
+                        options -> {
+                            options.put("key.format-projection-pushdown-level", "TOP_LEVEL");
+                            options.put("value.format-projection-pushdown-level", "TOP_LEVEL");
+                        });
+        final DynamicTableSource actualSource = createTableSource(SOURCE_SCHEMA, modifiedOptions);
+
+        final KafkaDynamicSource expectedSource =
+                createExpectedScanSource(
+                        producedDataType,
+                        keyDecodingFormat,
+                        valueDecodingFormat,
+                        SOURCE_KEY_FIELDS,
+                        SOURCE_VALUE_FIELDS,
+                        null,
+                        Collections.singletonList(SOURCE_TOPIC),
+                        UPSERT_KAFKA_SOURCE_PROPERTIES,
+                        null,
+                        FormatProjectionPushdownLevel.TOP_LEVEL,
+                        FormatProjectionPushdownLevel.TOP_LEVEL);
+        assertThat(actualSource).isEqualTo(expectedSource);
+    }
+
     // --------------------------------------------------------------------------------------------
     // Utilities
     // --------------------------------------------------------------------------------------------
@@ -974,6 +1002,32 @@ class UpsertKafkaDynamicTableFactoryTest {
             List<String> topic,
             Properties properties,
             @Nullable Integer parallelism) {
+        return createExpectedScanSource(
+                producedDataType,
+                keyDecodingFormat,
+                valueDecodingFormat,
+                keyFields,
+                valueFields,
+                keyPrefix,
+                topic,
+                properties,
+                parallelism,
+                FormatProjectionPushdownLevel.NONE,
+                FormatProjectionPushdownLevel.NONE);
+    }
+
+    private KafkaDynamicSource createExpectedScanSource(
+            DataType producedDataType,
+            DecodingFormat<DeserializationSchema<RowData>> keyDecodingFormat,
+            DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat,
+            int[] keyFields,
+            int[] valueFields,
+            String keyPrefix,
+            List<String> topic,
+            Properties properties,
+            @Nullable Integer parallelism,
+            FormatProjectionPushdownLevel keyProjectionPushdownLevel,
+            FormatProjectionPushdownLevel valueProjectionPushdownLevel) {
         return new KafkaDynamicSource(
                 producedDataType,
                 keyDecodingFormat,
@@ -993,8 +1047,8 @@ class UpsertKafkaDynamicTableFactoryTest {
                 true,
                 FactoryMocks.IDENTIFIER.asSummaryString(),
                 parallelism,
-                FormatProjectionPushdownLevel.NONE,
-                FormatProjectionPushdownLevel.NONE);
+                keyProjectionPushdownLevel,
+                valueProjectionPushdownLevel);
     }
 
     private static KafkaDynamicSink createExpectedSink(

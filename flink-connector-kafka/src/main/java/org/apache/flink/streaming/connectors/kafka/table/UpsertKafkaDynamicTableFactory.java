@@ -124,6 +124,8 @@ public class UpsertKafkaDynamicTableFactory
         options.add(SCAN_PARALLELISM);
         options.add(TRANSACTION_NAMING_STRATEGY);
         options.add(SCAN_TOPIC_PARTITION_DISCOVERY);
+        options.add(KEY_PROJECTION_PUSHDOWN_LEVEL);
+        options.add(VALUE_PROJECTION_PUSHDOWN_LEVEL);
         return options;
     }
 
