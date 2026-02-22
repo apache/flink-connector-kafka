@@ -124,6 +124,7 @@ public class TestKafkaContainer implements AutoCloseable, Startable {
                 .withEnv(
                         "KAFKA_TRANSACTION_MAX_TIMEOUT_MS",
                         String.valueOf(Duration.ofHours(2).toMillis()));
+        delegate.withStartupAttempts(3);
     }
 
     /**
