@@ -81,19 +81,23 @@ public class ProducerPoolImpl implements ProducerPool {
      * is empty.
      */
     private final Properties kafkaProducerConfig;
+
     /** Callback to allow the writer to init metrics. */
     private final Consumer<FlinkKafkaInternalProducer<byte[], byte[]>> producerInit;
+
     /**
      * The pool of producers that are available for reuse. This pool is used to avoid creating new
      * producers for every transaction.
      */
     private final Deque<FlinkKafkaInternalProducer<byte[], byte[]>> producerPool =
             new ArrayDeque<>();
+
     /**
      * The map of ongoing transactions (id -> producer/CheckpointTransaction). This is used to keep
      * track of the transactions that are ongoing and the respective producers are not in the pool.
      */
     private final Map<String, ProducerEntry> producerByTransactionalId = new TreeMap<>();
+
     /**
      * A secondary tracking structure to quickly find transactions coming from an earlier
      * checkpoints.

@@ -31,6 +31,7 @@ import java.util.stream.Collectors;
 public class KafkaSourceEnumState {
     /** Splits with status: ASSIGNED or UNASSIGNED_INITIAL. */
     private final Set<SplitAndAssignmentStatus> splits;
+
     /**
      * this flag will be marked as true if initial partitions are discovered after enumerator
      * starts.

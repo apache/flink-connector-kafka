@@ -434,7 +434,9 @@ public class DynamicKafkaSourceEnumeratorTest {
 
             DynamicKafkaSourceEnumState stateBeforeSplitAssignment = enumerator.snapshotState(-1);
             assertThat(
-                            stateBeforeSplitAssignment.getClusterEnumeratorStates().values()
+                            stateBeforeSplitAssignment
+                                    .getClusterEnumeratorStates()
+                                    .values()
                                     .stream()
                                     .map(subState -> subState.assignedSplits().stream())
                                     .count())

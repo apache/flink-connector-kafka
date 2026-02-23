@@ -42,6 +42,7 @@ public final class BackchannelImpl<T> {
      * readable and writable channels are closed.
      */
     private final Runnable closeAction;
+
     /**
      * The messages to be sent from the writer to the committer. It's a thread safe deque in case
      * committer and writer are not chained.
@@ -50,6 +51,7 @@ public final class BackchannelImpl<T> {
 
     /** The readable backchannel. */
     private volatile ReadableBackchannel<T> readableBackchannel;
+
     /** The writable backchannel. */
     private volatile WritableBackchannel<T> writableBackchannel;
 
