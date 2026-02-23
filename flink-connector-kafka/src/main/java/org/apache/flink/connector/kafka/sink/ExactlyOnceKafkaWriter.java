@@ -68,15 +68,18 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  */
 class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     private static final Logger LOG = LoggerFactory.getLogger(ExactlyOnceKafkaWriter.class);
+
     /**
      * Prefix for the transactional id. Must be unique across all sinks writing to the same broker.
      */
     private final String transactionalIdPrefix;
+
     /**
      * Strategy to abort lingering transactions from previous executions during writer
      * initialization.
      */
     private final TransactionAbortStrategyImpl transactionAbortStrategy;
+
     /** Strategy to name transactions. */
     private final TransactionNamingStrategyImpl transactionNamingStrategy;
 
@@ -89,17 +92,20 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
      * to committer).
      */
     private final ProducerPool producerPool;
+
     /**
      * Backchannel used to communicate committed transactions from the committer to this writer.
      * Establishing the channel happens during recovery. Thus, it is only safe to poll in checkpoint
      * related methods.
      */
     private final ReadableBackchannel<TransactionFinished> backchannel;
+
     /** The context used to name transactions. */
     private final TransactionNamingStrategyContextImpl namingContext;
 
     private final int totalNumberOfOwnedSubtasks;
     private final int[] ownedSubtaskIds;
+
     /** Lazily created admin client for {@link TransactionAbortStrategyImpl}. */
     private AdminClient adminClient;
 

@@ -773,7 +773,8 @@ public class KafkaSourceEnumerator
                                     .collect(
                                             Collectors.toMap(
                                                     partition -> partition, __ -> offsetSpec)))
-                    .entrySet().stream()
+                    .entrySet()
+                    .stream()
                     .collect(
                             Collectors.toMap(
                                     Map.Entry::getKey, entry -> entry.getValue().offset()));
@@ -800,7 +801,8 @@ public class KafkaSourceEnumerator
                                                     entry ->
                                                             OffsetSpec.forTimestamp(
                                                                     entry.getValue()))))
-                    .entrySet().stream()
+                    .entrySet()
+                    .stream()
                     // OffsetAndTimestamp cannot be initialized with a negative offset, which is
                     // possible if the timestamp does not correspond to an offset and the topic
                     // partition is empty

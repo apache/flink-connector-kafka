@@ -99,6 +99,7 @@ class KafkaConnectorOptionsUtil {
     protected static final String DEBEZIUM_AVRO_CONFLUENT = "debezium-avro-confluent";
     private static final List<String> SCHEMA_REGISTRY_FORMATS =
             Arrays.asList(AVRO_CONFLUENT, DEBEZIUM_AVRO_CONFLUENT);
+
     // --------------------------------------------------------------------------------------------
     // Validation
     // --------------------------------------------------------------------------------------------
@@ -393,7 +394,7 @@ class KafkaConnectorOptionsUtil {
                                 case SINK_PARTITIONER_VALUE_DEFAULT:
                                 case SINK_PARTITIONER_VALUE_ROUND_ROBIN:
                                     return Optional.empty();
-                                    // Default fallback to full class name of the partitioner.
+                                // Default fallback to full class name of the partitioner.
                                 default:
                                     return Optional.of(
                                             initializePartitioner(partitioner, classLoader));
