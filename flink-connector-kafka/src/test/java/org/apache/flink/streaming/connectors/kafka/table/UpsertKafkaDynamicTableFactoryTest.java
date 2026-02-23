@@ -39,6 +39,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.transformations.SourceTransformation;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
+import org.apache.flink.streaming.connectors.kafka.config.FormatProjectionPushdownLevel;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanBoundedMode;
 import org.apache.flink.streaming.connectors.kafka.testutils.MockPartitionOffsetsRetriever;
@@ -871,6 +872,34 @@ class UpsertKafkaDynamicTableFactoryTest {
         assertThat(actualSource).isEqualTo(expectedSource);
     }
 
+    @Test
+    public void testTableSourceWithProjectionPushdownLevel() {
+        final DataType producedDataType = SOURCE_SCHEMA.toPhysicalRowDataType();
+        final Map<String, String> modifiedOptions =
+                getModifiedOptions(
+                        getFullSourceOptions(),
+                        options -> {
+                            options.put("key.format-projection-pushdown-level", "TOP_LEVEL");
+                            options.put("value.format-projection-pushdown-level", "TOP_LEVEL");
+                        });
+        final DynamicTableSource actualSource = createTableSource(SOURCE_SCHEMA, modifiedOptions);
+
+        final KafkaDynamicSource expectedSource =
+                createExpectedScanSource(
+                        producedDataType,
+                        keyDecodingFormat,
+                        valueDecodingFormat,
+                        SOURCE_KEY_FIELDS,
+                        SOURCE_VALUE_FIELDS,
+                        null,
+                        Collections.singletonList(SOURCE_TOPIC),
+                        UPSERT_KAFKA_SOURCE_PROPERTIES,
+                        null,
+                        FormatProjectionPushdownLevel.TOP_LEVEL,
+                        FormatProjectionPushdownLevel.TOP_LEVEL);
+        assertThat(actualSource).isEqualTo(expectedSource);
+    }
+
     // --------------------------------------------------------------------------------------------
     // Utilities
     // --------------------------------------------------------------------------------------------
@@ -973,6 +1002,32 @@ class UpsertKafkaDynamicTableFactoryTest {
             List<String> topic,
             Properties properties,
             @Nullable Integer parallelism) {
+        return createExpectedScanSource(
+                producedDataType,
+                keyDecodingFormat,
+                valueDecodingFormat,
+                keyFields,
+                valueFields,
+                keyPrefix,
+                topic,
+                properties,
+                parallelism,
+                FormatProjectionPushdownLevel.NONE,
+                FormatProjectionPushdownLevel.NONE);
+    }
+
+    private KafkaDynamicSource createExpectedScanSource(
+            DataType producedDataType,
+            DecodingFormat<DeserializationSchema<RowData>> keyDecodingFormat,
+            DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat,
+            int[] keyFields,
+            int[] valueFields,
+            String keyPrefix,
+            List<String> topic,
+            Properties properties,
+            @Nullable Integer parallelism,
+            FormatProjectionPushdownLevel keyProjectionPushdownLevel,
+            FormatProjectionPushdownLevel valueProjectionPushdownLevel) {
         return new KafkaDynamicSource(
                 producedDataType,
                 keyDecodingFormat,
@@ -991,7 +1046,9 @@ class UpsertKafkaDynamicTableFactoryTest {
                 0,
                 true,
                 FactoryMocks.IDENTIFIER.asSummaryString(),
-                parallelism);
+                parallelism,
+                keyProjectionPushdownLevel,
+                valueProjectionPushdownLevel);
     }
 
     private static KafkaDynamicSink createExpectedSink(
