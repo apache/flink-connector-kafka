@@ -18,6 +18,7 @@
 package org.apache.flink.streaming.connectors.kafka.table;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.api.common.functions.InvalidTypesException;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 import org.apache.flink.api.java.typeutils.TypeExtractor;
@@ -211,12 +212,14 @@ class DynamicKafkaRecordSerializationSchema
                     new DefaultTypeDatasetFacet(
                             ((ResultTypeQueryable<?>) this.valueSerialization).getProducedType()));
         } else {
-            // gets type information from serialize method signature
-            Type type =
-                    TypeExtractor.getParameterType(
-                            SerializationSchema.class, valueSerialization.getClass(), 0);
             try {
+                Type type =
+                        TypeExtractor.getParameterType(
+                                SerializationSchema.class, valueSerialization.getClass(), 0);
+
                 return Optional.of(new DefaultTypeDatasetFacet(TypeExtractor.createTypeInfo(type)));
+            } catch (InvalidTypesException e) {
+                return Optional.of(new DefaultTypeDatasetFacet(valueSerialization));
             } catch (Exception e) {
                 LOG.info(
                         "Could not extract type information from {}",
