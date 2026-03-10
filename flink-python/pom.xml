@@ -143,12 +143,6 @@ under the License.
                             <outputDirectory>${project.build.directory}/test-dependencies</outputDirectory>
                         </configuration>
                     </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-dependency-plugin</artifactId>
-                <executions>
                     <execution>
                         <id>copy-dependencies</id>
                         <phase>package</phase>

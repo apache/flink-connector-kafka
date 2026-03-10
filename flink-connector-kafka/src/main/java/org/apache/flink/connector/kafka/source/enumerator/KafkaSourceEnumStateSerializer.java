@@ -52,8 +52,10 @@ public class KafkaSourceEnumStateSerializer
      * assigned splits.
      */
     private static final int VERSION_0 = 0;
+
     /** state of VERSION_1 only contains assignedPartitions, which is a list of assigned splits. */
     private static final int VERSION_1 = 1;
+
     /**
      * state of VERSION_2 contains initialDiscoveryFinished and partitions with different assignment
      * status.

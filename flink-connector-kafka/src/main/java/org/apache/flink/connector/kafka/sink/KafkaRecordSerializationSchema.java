@@ -77,7 +77,9 @@ public interface KafkaRecordSerializationSchema<T> extends Serializable {
          */
         int getParallelInstanceId();
 
-        /** @return number of parallel KafkaSink tasks. */
+        /**
+         * @return number of parallel KafkaSink tasks.
+         */
         int getNumberOfParallelInstances();
 
         /**
