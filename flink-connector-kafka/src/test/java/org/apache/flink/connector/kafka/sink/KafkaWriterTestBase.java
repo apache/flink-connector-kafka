@@ -35,11 +35,9 @@ import org.apache.flink.metrics.testutils.MetricListener;
 import org.apache.flink.runtime.metrics.groups.InternalSinkWriterMetricGroup;
 import org.apache.flink.runtime.metrics.groups.ProxyMetricGroup;
 import org.apache.flink.runtime.metrics.groups.UnregisteredMetricGroups;
+import org.apache.flink.streaming.connectors.kafka.KafkaTestEnvironmentImpl;
 import org.apache.flink.util.UserCodeClassLoader;
 
-import org.apache.kafka.clients.admin.Admin;
-import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.jupiter.api.AfterEach;
@@ -55,9 +53,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Comparator;
-import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.PriorityQueue;
@@ -99,11 +95,9 @@ public abstract class KafkaWriterTestBase {
         metricListener = new MetricListener();
         timeService = new TriggerTimeService();
         topic = testInfo.getDisplayName().replaceAll("\\W", "");
-        Map<String, Object> properties = new java.util.HashMap<>();
+        Properties properties = new Properties();
         properties.put(BOOTSTRAP_SERVERS_CONFIG, KAFKA_CONTAINER.getBootstrapServers());
-        try (Admin admin = AdminClient.create(properties)) {
-            admin.createTopics(Collections.singleton(new NewTopic(topic, 10, (short) 1)));
-        }
+        KafkaTestEnvironmentImpl.createNewTopic(topic, 10, (short) 1, properties);
     }
 
     @AfterEach
