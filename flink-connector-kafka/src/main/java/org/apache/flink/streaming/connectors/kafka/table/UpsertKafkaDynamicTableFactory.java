@@ -25,6 +25,7 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
+import org.apache.flink.streaming.connectors.kafka.config.FormatProjectionPushdownLevel;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.BoundedOptions;
 import org.apache.flink.table.api.ValidationException;
@@ -59,7 +60,6 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.KEY_FIELDS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.KEY_FIELDS_PREFIX;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.KEY_FORMAT;
-import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.KEY_PROJECTION_PUSHDOWN_LEVEL;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.PROPS_BOOTSTRAP_SERVERS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_BOUNDED_MODE;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_BOUNDED_SPECIFIC_OFFSETS;
@@ -75,7 +75,6 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TRANSACTION_NAMING_STRATEGY;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FIELDS_INCLUDE;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
-import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_PROJECTION_PUSHDOWN_LEVEL;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.PROPERTIES_PREFIX;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.autoCompleteSchemaRegistrySubject;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.createKeyFormatProjection;
@@ -124,8 +123,6 @@ public class UpsertKafkaDynamicTableFactory
         options.add(SCAN_PARALLELISM);
         options.add(TRANSACTION_NAMING_STRATEGY);
         options.add(SCAN_TOPIC_PARTITION_DISCOVERY);
-        options.add(KEY_PROJECTION_PUSHDOWN_LEVEL);
-        options.add(VALUE_PROJECTION_PUSHDOWN_LEVEL);
         return options;
     }
 
@@ -189,8 +186,8 @@ public class UpsertKafkaDynamicTableFactory
                 true,
                 context.getObjectIdentifier().asSummaryString(),
                 parallelism,
-                tableOptions.get(KEY_PROJECTION_PUSHDOWN_LEVEL),
-                tableOptions.get(VALUE_PROJECTION_PUSHDOWN_LEVEL));
+                FormatProjectionPushdownLevel.NONE,
+                FormatProjectionPushdownLevel.NONE);
     }
 
     @Override
