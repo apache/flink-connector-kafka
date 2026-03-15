@@ -18,6 +18,11 @@
 
 package org.apache.flink.connector.kafka.testutils;
 
+import org.apache.flink.core.testutils.CommonTestUtils;
+
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -33,11 +38,14 @@ import org.testcontainers.utility.DockerImageName;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.fail;
@@ -47,6 +55,7 @@ public class KafkaUtil {
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaUtil.class);
     private static final Duration CONSUMER_POLL_DURATION = Duration.ofSeconds(1);
+    private static final int REQUEST_TIMEOUT_SECONDS = 30;
 
     private KafkaUtil() {}
 
@@ -233,5 +242,41 @@ public class KafkaUtil {
             Map.Entry<Thread, StackTraceElement[]> threadStackTrace) {
         return threadStackTrace.getKey().getState() != Thread.State.TERMINATED
                 && threadStackTrace.getKey().getName().contains("kafka-producer-network-thread");
+    }
+
+    public static void createNewTopicAndWaitForPartitionAssignment(
+            String topic, int numberOfPartitions, int replicationFactor, Properties properties) {
+        LOG.info("Creating topic {}", topic);
+        try (AdminClient adminClient = AdminClient.create(properties)) {
+            NewTopic topicObj = new NewTopic(topic, numberOfPartitions, (short) replicationFactor);
+            adminClient.createTopics(Collections.singleton(topicObj)).all().get();
+            CommonTestUtils.waitUtil(
+                    () -> {
+                        try {
+                            // Ensure all partitions have a leader elected and logs initialized
+                            Map<TopicPartition, OffsetSpec> offsetSpecs = new HashMap<>();
+                            for (int i = 0; i < numberOfPartitions; i++) {
+                                offsetSpecs.put(
+                                        new TopicPartition(topic, i), OffsetSpec.earliest());
+                            }
+                            adminClient
+                                    .listOffsets(offsetSpecs)
+                                    .all()
+                                    .get(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                            return true;
+                        } catch (Exception e) {
+                            LOG.warn(
+                                    "Partitions for topic {} not yet ready to serve requests",
+                                    topic,
+                                    e);
+                            return false;
+                        }
+                    },
+                    Duration.ofSeconds(30),
+                    String.format("New topic \"%s\" is not ready within timeout", topicObj));
+        } catch (Exception e) {
+            e.printStackTrace();
+            fail("Create test topic : " + topic + " failed, " + e.getMessage());
+        }
     }
 }

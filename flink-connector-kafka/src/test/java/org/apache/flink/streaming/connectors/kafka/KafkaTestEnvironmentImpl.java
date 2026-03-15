@@ -23,8 +23,6 @@ import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.core.testutils.CommonTestUtils;
 
 import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.NewTopic;
-import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.clients.admin.TopicListing;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -46,10 +44,10 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Random;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createNewTopicAndWaitForPartitionAssignment;
 import static org.assertj.core.api.Assertions.fail;
 
 /** An implementation of the KafkaServerProvider. */
@@ -139,43 +137,8 @@ public class KafkaTestEnvironmentImpl extends KafkaTestEnvironment {
     @Override
     public void createTestTopic(
             String topic, int numberOfPartitions, int replicationFactor, Properties properties) {
-        createNewTopic(topic, numberOfPartitions, replicationFactor, getStandardProperties());
-    }
-
-    public static void createNewTopic(
-            String topic, int numberOfPartitions, int replicationFactor, Properties properties) {
-        LOG.info("Creating topic {}", topic);
-        try (AdminClient adminClient = AdminClient.create(properties)) {
-            NewTopic topicObj = new NewTopic(topic, numberOfPartitions, (short) replicationFactor);
-            adminClient.createTopics(Collections.singleton(topicObj)).all().get();
-            CommonTestUtils.waitUtil(
-                    () -> {
-                        try {
-                            // Ensure all partitions have a leader elected and logs initialized
-                            Map<TopicPartition, OffsetSpec> offsetSpecs = new HashMap<>();
-                            for (int i = 0; i < numberOfPartitions; i++) {
-                                offsetSpecs.put(
-                                        new TopicPartition(topic, i), OffsetSpec.earliest());
-                            }
-                            adminClient
-                                    .listOffsets(offsetSpecs)
-                                    .all()
-                                    .get(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                            return true;
-                        } catch (Exception e) {
-                            LOG.warn(
-                                    "Partitions for topic {} not yet ready to serve requests",
-                                    topic,
-                                    e);
-                            return false;
-                        }
-                    },
-                    Duration.ofSeconds(30),
-                    String.format("New topic \"%s\" is not ready within timeout", topicObj));
-        } catch (Exception e) {
-            e.printStackTrace();
-            fail("Create test topic : " + topic + " failed, " + e.getMessage());
-        }
+        createNewTopicAndWaitForPartitionAssignment(
+                topic, numberOfPartitions, replicationFactor, properties);
     }
 
     @Override
