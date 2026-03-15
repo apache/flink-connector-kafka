@@ -33,7 +33,6 @@ import org.apache.flink.connector.testframe.external.source.DataStreamSourceExte
 import org.apache.flink.connector.testframe.external.source.TestingSourceSettings;
 import org.apache.flink.core.testutils.CommonTestUtils;
 import org.apache.flink.streaming.connectors.kafka.DynamicKafkaSourceTestHelper;
-import org.apache.flink.streaming.connectors.kafka.KafkaTestEnvironmentImpl;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -59,6 +58,8 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+
+import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createNewTopicAndWaitForPartitionAssignment;
 
 /** A external context for {@link DynamicKafkaSource} connector testing framework. */
 public class DynamicKafkaSourceExternalContext implements DataStreamSourceExternalContext<String> {
@@ -134,7 +135,7 @@ public class DynamicKafkaSourceExternalContext implements DataStreamSourceExtern
         for (Tuple2<String, String> clusterTopic : clusterTopics) {
             String cluster = clusterTopic.f0;
             String topic = clusterTopic.f1;
-            KafkaTestEnvironmentImpl.createNewTopic(
+            createNewTopicAndWaitForPartitionAssignment(
                     topic, NUM_PARTITIONS, 1, clusterPropertiesMap.get(cluster));
         }
 

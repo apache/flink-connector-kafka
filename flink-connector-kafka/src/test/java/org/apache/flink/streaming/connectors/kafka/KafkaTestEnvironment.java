@@ -82,7 +82,7 @@ public abstract class KafkaTestEnvironment {
             String topic, int numberOfPartitions, int replicationFactor, Properties properties);
 
     public void createTestTopic(String topic, int numberOfPartitions, int replicationFactor) {
-        this.createTestTopic(topic, numberOfPartitions, replicationFactor, new Properties());
+        this.createTestTopic(topic, numberOfPartitions, replicationFactor, getStandardProperties());
     }
 
     public abstract Properties getStandardProperties();
