@@ -314,15 +314,13 @@ public class KafkaSourceEnumeratorTest {
                     break;
                 }
             }
-            // later elements are initialized with EARLIEST
             verifyLastReadersAssignments(
                     context,
                     Arrays.asList(READER0, READER1),
                     Collections.singleton(DYNAMIC_TOPIC_NAME),
                     3,
-                    OffsetsInitializer.earliest());
+                    OffsetsInitializer.latest());
 
-            // new partitions use EARLIEST_OFFSET, while initial partitions use LATEST_OFFSET
             List<KafkaPartitionSplit> initialPartitionAssign =
                     getAllAssignSplits(context, PRE_EXISTING_TOPICS);
             assertThat(initialPartitionAssign)
@@ -332,7 +330,7 @@ public class KafkaSourceEnumeratorTest {
                     getAllAssignSplits(context, Collections.singleton(DYNAMIC_TOPIC_NAME));
             assertThat(newPartitionAssign)
                     .extracting(KafkaPartitionSplit::getStartingOffset)
-                    .containsOnly(KafkaPartitionSplit.EARLIEST_OFFSET);
+                    .containsOnly(0L);
 
         } finally {
             try (AdminClient adminClient = KafkaSourceTestEnv.getAdminClient()) {

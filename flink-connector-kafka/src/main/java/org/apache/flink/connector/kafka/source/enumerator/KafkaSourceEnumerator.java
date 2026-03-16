@@ -194,7 +194,7 @@ public class KafkaSourceEnumerator
         this.subscriber = subscriber;
         this.startingOffsetInitializer = startingOffsetInitializer;
         this.stoppingOffsetInitializer = stoppingOffsetInitializer;
-        this.newDiscoveryOffsetsInitializer = OffsetsInitializer.earliest();
+        this.newDiscoveryOffsetsInitializer = startingOffsetInitializer;
         this.properties = properties;
         this.context = context;
         this.boundedness = boundedness;
@@ -366,8 +366,8 @@ public class KafkaSourceEnumerator
         Set<TopicPartition> newPartitions = partitionChange.getNewPartitions();
         Set<TopicPartition> initialPartitions = partitionChange.getInitialPartitions();
 
-        // initial partitions use OffsetsInitializer specified by the user while new partitions use
-        // EARLIEST
+        // initial partitions use OffsetsInitializer specified by the user, and newly discovered
+        // partitions also use the user-configured starting offset initializer
         Map<TopicPartition, Long> startingOffsets =
                 newLinkedHashMapWithExpectedSize(newPartitions.size() + initialPartitions.size());
         Map<TopicPartition, Long> stoppingOffsets =
