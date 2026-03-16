@@ -71,12 +71,10 @@ class DynamicKafkaSourceReaderPauseResumeTest {
                     Collections.singleton(cluster0Split.splitId()),
                     Collections.singleton(cluster1Split.splitId()));
 
-            assertThat(cluster0Reader.getPausedSplits())
-                    .containsExactly(cluster0Split.splitId());
+            assertThat(cluster0Reader.getPausedSplits()).containsExactly(cluster0Split.splitId());
             assertThat(cluster0Reader.getResumedSplits()).isEmpty();
             assertThat(cluster1Reader.getPausedSplits()).isEmpty();
-            assertThat(cluster1Reader.getResumedSplits())
-                    .containsExactly(cluster1Split.splitId());
+            assertThat(cluster1Reader.getResumedSplits()).containsExactly(cluster1Split.splitId());
         }
     }
 
@@ -186,10 +184,7 @@ class DynamicKafkaSourceReaderPauseResumeTest {
             return resumedSplits;
         }
 
-        private static RecordEmitter<
-                        ConsumerRecord<byte[], byte[]>,
-                        Integer,
-                        KafkaPartitionSplitState>
+        private static RecordEmitter<ConsumerRecord<byte[], byte[]>, Integer, KafkaPartitionSplitState>
                 noOpRecordEmitter() {
             return (record, output, splitState) -> {};
         }
