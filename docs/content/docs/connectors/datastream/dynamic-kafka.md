@@ -187,6 +187,13 @@ DynamicKafkaSource<String> source =
 {{< /tab >}}
 {{< /tabs >}}
 
+### Watermark Alignment
+
+When watermark alignment is enabled and a dynamic source reader owns multiple splits, Flink may
+pause or resume individual splits to keep their watermarks within the configured drift. Dynamic
+Kafka Source forwards these split pause and resume requests to the underlying Kafka source readers,
+so split-level watermark alignment works the same way as in the regular Kafka Source.
+
 ### Kafka Stream Subscription
 The Dynamic Kafka Source provides 2 ways of subscribing to Kafka stream(s).
 * A set of Kafka stream ids. For example:

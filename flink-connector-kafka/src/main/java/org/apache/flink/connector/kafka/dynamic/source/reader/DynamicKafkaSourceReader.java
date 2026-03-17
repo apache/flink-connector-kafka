@@ -57,6 +57,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -182,6 +183,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     @Override
     public void addSplits(List<DynamicKafkaSourceSplit> splits) {
         logger.info("Adding splits to reader {}: {}", readerContext.getIndexOfSubtask(), splits);
+
         // at startup, don't add splits until we get confirmation from enumerator of the current
         // metadata
         if (!isActivelyConsumingSplits) {
@@ -414,6 +416,25 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         logger.debug("Notify checkpoint complete for {}", clusterReaderMap.keySet());
         for (KafkaSourceReader<T> subReader : clusterReaderMap.values()) {
             subReader.notifyCheckpointComplete(checkpointId);
+        }
+    }
+
+    @Override
+    public void pauseOrResumeSplits(
+            Collection<String> splitsToPause, Collection<String> splitsToResume) {
+        logger.info(
+                "Applying split watermark alignment: subtask={}, pauseCount={}, resumeCount={}, activeReaders={}, activelyConsuming={}, restarting={}",
+                readerContext.getIndexOfSubtask(),
+                splitsToPause.size(),
+                splitsToResume.size(),
+                clusterReaderMap.keySet(),
+                isActivelyConsumingSplits,
+                restartingReaders.get());
+
+        // Each sub-reader keeps dynamic split ids in its own assignment and filters this request
+        // to the splits it currently owns before pausing the underlying fetcher.
+        for (KafkaSourceReader<T> subReader : clusterReaderMap.values()) {
+            subReader.pauseOrResumeSplits(splitsToPause, splitsToResume);
         }
     }
 
