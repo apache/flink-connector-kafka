@@ -216,7 +216,8 @@ class DynamicKafkaSourceReaderPauseResumeTest {
             return resumedSplits;
         }
 
-        private static RecordEmitter<ConsumerRecord<byte[], byte[]>, Integer, KafkaPartitionSplitState>
+        private static RecordEmitter<
+                        ConsumerRecord<byte[], byte[]>, Integer, KafkaPartitionSplitState>
                 noOpRecordEmitter() {
             return (record, output, splitState) -> {};
         }
