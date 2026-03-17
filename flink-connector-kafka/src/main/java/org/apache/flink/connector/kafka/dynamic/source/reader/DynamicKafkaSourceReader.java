@@ -58,7 +58,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -93,7 +92,6 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     // needs have a strict ordering for readers to guarantee availability future consistency
     private final NavigableMap<String, KafkaSourceReader<T>> clusterReaderMap;
     private final Map<String, Properties> clustersProperties;
-    private final Map<String, String> dynamicSplitClusterIds;
     private final List<DynamicKafkaSourceSplit> pendingSplits;
 
     private MultipleFuturesAvailabilityHelper availabilityHelper;
@@ -123,7 +121,6 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         this.isActivelyConsumingSplits = false;
         this.restartingReaders = new AtomicBoolean();
         this.clustersProperties = new HashMap<>();
-        this.dynamicSplitClusterIds = new HashMap<>();
     }
 
     /**
@@ -186,9 +183,6 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     @Override
     public void addSplits(List<DynamicKafkaSourceSplit> splits) {
         logger.info("Adding splits to reader {}: {}", readerContext.getIndexOfSubtask(), splits);
-        for (DynamicKafkaSourceSplit split : splits) {
-            dynamicSplitClusterIds.put(split.splitId(), split.getKafkaClusterId());
-        }
 
         // at startup, don't add splits until we get confirmation from enumerator of the current
         // metadata
@@ -297,7 +291,6 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                         .computeIfAbsent(split.getKafkaClusterId(), (ignore) -> new ArrayList<>())
                         .add(split);
             } else {
-                dynamicSplitClusterIds.remove(split.splitId());
                 logger.info("Skipping outdated split due to metadata changes: {}", split);
             }
         }
@@ -352,7 +345,6 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                                                 isSplitForActiveClusters(
                                                         pendingSplit, newClustersAndTopics);
                                         if (!splitValid) {
-                                            dynamicSplitClusterIds.remove(pendingSplit.splitId());
                                             logger.info(
                                                     "Removing invalid split for reader: {}",
                                                     pendingSplit);
@@ -430,72 +422,19 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     @Override
     public void pauseOrResumeSplits(
             Collection<String> splitsToPause, Collection<String> splitsToResume) {
-        Map<String, List<String>> splitsToPauseByCluster = groupSplitIdsByCluster(splitsToPause);
-        Map<String, List<String>> splitsToResumeByCluster = groupSplitIdsByCluster(splitsToResume);
-
-        Set<String> kafkaClusterIds = new HashSet<>();
-        kafkaClusterIds.addAll(splitsToPauseByCluster.keySet());
-        kafkaClusterIds.addAll(splitsToResumeByCluster.keySet());
-
-        logger.debug(
-                "Received pause/resume request: subtask={}, pauseCount={}, resumeCount={}, clusters={}, activeReaders={}, activelyConsuming={}, restarting={}",
+        logger.info(
+                "Applying split watermark alignment: subtask={}, pauseCount={}, resumeCount={}, activeReaders={}, activelyConsuming={}, restarting={}",
                 readerContext.getIndexOfSubtask(),
                 splitsToPause.size(),
                 splitsToResume.size(),
-                kafkaClusterIds,
                 clusterReaderMap.keySet(),
                 isActivelyConsumingSplits,
                 restartingReaders.get());
 
-        for (String kafkaClusterId : kafkaClusterIds) {
-            List<String> clusterSplitsToPause =
-                    splitsToPauseByCluster.getOrDefault(kafkaClusterId, Collections.emptyList());
-            List<String> clusterSplitsToResume =
-                    splitsToResumeByCluster.getOrDefault(kafkaClusterId, Collections.emptyList());
-            KafkaSourceReader<T> subReader = clusterReaderMap.get(kafkaClusterId);
-            if (subReader == null) {
-                // Best-effort only: dropping a transient pause/resume is safer than replaying
-                // stale pause state onto a different split after metadata churn.
-                logMissingSubReaderForPauseOrResume(
-                        kafkaClusterId, clusterSplitsToPause, clusterSplitsToResume);
-                continue;
-            }
-
-            logger.debug(
-                    "Forwarding pause/resume request to cluster {}: subtask={}, pause={}, resume={}",
-                    kafkaClusterId,
-                    readerContext.getIndexOfSubtask(),
-                    clusterSplitsToPause,
-                    clusterSplitsToResume);
-            subReader.pauseOrResumeSplits(clusterSplitsToPause, clusterSplitsToResume);
-        }
-    }
-
-    private void logMissingSubReaderForPauseOrResume(
-            String kafkaClusterId, List<String> splitsToPause, List<String> splitsToResume) {
-        boolean expectedMissingReader =
-                !isActivelyConsumingSplits
-                        || restartingReaders.get()
-                        || !clustersProperties.containsKey(kafkaClusterId);
-        if (expectedMissingReader) {
-            logger.debug(
-                    "Skipping pause/resume request for cluster {} without an active sub-reader. subtask={}, pause={}, resume={}, activelyConsuming={}, restarting={}, knownClusters={}",
-                    kafkaClusterId,
-                    readerContext.getIndexOfSubtask(),
-                    splitsToPause,
-                    splitsToResume,
-                    isActivelyConsumingSplits,
-                    restartingReaders.get(),
-                    clustersProperties.keySet());
-        } else {
-            logger.warn(
-                    "Received pause/resume request for cluster {} but no sub-reader is registered. subtask={}, pause={}, resume={}, activeReaders={}, knownClusters={}",
-                    kafkaClusterId,
-                    readerContext.getIndexOfSubtask(),
-                    splitsToPause,
-                    splitsToResume,
-                    clusterReaderMap.keySet(),
-                    clustersProperties.keySet());
+        // Each sub-reader keeps dynamic split ids in its own assignment and filters this request
+        // to the splits it currently owns before pausing the underlying fetcher.
+        for (KafkaSourceReader<T> subReader : clusterReaderMap.values()) {
+            subReader.pauseOrResumeSplits(splitsToPause, splitsToResume);
         }
     }
 
@@ -603,27 +542,6 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                     "Failed to clone Kafka deserialization schema for dynamic cluster metadata.",
                     error);
         }
-    }
-
-    private Map<String, List<String>> groupSplitIdsByCluster(Collection<String> dynamicSplitIds) {
-        Map<String, List<String>> splitIdsByCluster = new HashMap<>();
-        for (String dynamicSplitId : dynamicSplitIds) {
-            String kafkaClusterId = dynamicSplitClusterIds.get(dynamicSplitId);
-            if (kafkaClusterId == null) {
-                logger.warn(
-                        "Ignoring pause/resume request for unknown split {}. subtask={}, activeReaders={}, knownSplitCount={}",
-                        dynamicSplitId,
-                        readerContext.getIndexOfSubtask(),
-                        clusterReaderMap.keySet(),
-                        dynamicSplitClusterIds.size());
-                continue;
-            }
-
-            splitIdsByCluster
-                    .computeIfAbsent(kafkaClusterId, ignored -> new ArrayList<>())
-                    .add(dynamicSplitId);
-        }
-        return splitIdsByCluster;
     }
 
     /**

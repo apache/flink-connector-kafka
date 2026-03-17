@@ -46,9 +46,11 @@ import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.NavigableMap;
 import java.util.Properties;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -62,6 +64,7 @@ class DynamicKafkaSourceReaderPauseResumeTest {
             RecordingKafkaSourceReader cluster1Reader = new RecordingKafkaSourceReader();
             registerSubReader(reader, "cluster-0", cluster0Reader);
             registerSubReader(reader, "cluster-1", cluster1Reader);
+            setActivelyConsumingSplits(reader, true);
 
             DynamicKafkaSourceSplit cluster0Split = createSplit("cluster-0", TOPIC, 0);
             DynamicKafkaSourceSplit cluster1Split = createSplit("cluster-1", TOPIC, 1);
@@ -88,6 +91,7 @@ class DynamicKafkaSourceReaderPauseResumeTest {
             RecordingKafkaSourceReader overlappingClusterReader = new RecordingKafkaSourceReader();
             registerSubReader(reader, shortClusterId, shortClusterReader);
             registerSubReader(reader, overlappingClusterId, overlappingClusterReader);
+            setActivelyConsumingSplits(reader, true);
 
             DynamicKafkaSourceSplit shortClusterSplit = createSplit(shortClusterId, TOPIC, 0);
             DynamicKafkaSourceSplit overlappingClusterSplit =
@@ -147,7 +151,17 @@ class DynamicKafkaSourceReaderPauseResumeTest {
         clusterReaderMap.put(kafkaClusterId, subReader);
     }
 
+    private static void setActivelyConsumingSplits(
+            DynamicKafkaSourceReader<Integer> reader, boolean isActivelyConsumingSplits)
+            throws Exception {
+        Field isActivelyConsumingSplitsField =
+                DynamicKafkaSourceReader.class.getDeclaredField("isActivelyConsumingSplits");
+        isActivelyConsumingSplitsField.setAccessible(true);
+        isActivelyConsumingSplitsField.set(reader, isActivelyConsumingSplits);
+    }
+
     private static final class RecordingKafkaSourceReader extends KafkaSourceReader<Integer> {
+        private final Set<String> assignedSplitIds = new HashSet<>();
         private List<String> pausedSplits = Collections.emptyList();
         private List<String> resumedSplits = Collections.emptyList();
 
@@ -170,10 +184,28 @@ class DynamicKafkaSourceReaderPauseResumeTest {
         }
 
         @Override
+        public void addSplits(List<KafkaPartitionSplit> splits) {
+            for (KafkaPartitionSplit split : splits) {
+                assignedSplitIds.add(split.splitId());
+            }
+            super.addSplits(splits);
+        }
+
+        @Override
         public void pauseOrResumeSplits(
                 Collection<String> splitsToPause, Collection<String> splitsToResume) {
-            pausedSplits = new ArrayList<>(splitsToPause);
-            resumedSplits = new ArrayList<>(splitsToResume);
+            pausedSplits = filterAssignedSplits(splitsToPause);
+            resumedSplits = filterAssignedSplits(splitsToResume);
+        }
+
+        private List<String> filterAssignedSplits(Collection<String> splitIds) {
+            List<String> filteredSplitIds = new ArrayList<>();
+            for (String splitId : splitIds) {
+                if (assignedSplitIds.contains(splitId)) {
+                    filteredSplitIds.add(splitId);
+                }
+            }
+            return filteredSplitIds;
         }
 
         private List<String> getPausedSplits() {
