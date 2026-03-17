@@ -69,6 +69,7 @@ public enum TransactionNamingStrategy {
      * leaks of internal classes in signatures.
      */
     private final TransactionNamingStrategyImpl impl;
+
     /**
      * The set of supported abort strategies for this naming strategy. Some naming strategies may
      * not support all abort strategies.

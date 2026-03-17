@@ -47,6 +47,7 @@ public class TransactionAbortStrategyContextImpl implements TransactionAbortStra
     private final Set<String> prefixesToAbort;
     private final long startCheckpointId;
     private final TransactionAborter transactionAborter;
+
     /** Transactional ids that mustn't be aborted. */
     private final Set<String> precommittedTransactionIds;
 
