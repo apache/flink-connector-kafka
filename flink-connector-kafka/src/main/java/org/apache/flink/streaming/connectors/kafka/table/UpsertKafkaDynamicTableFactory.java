@@ -25,6 +25,7 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
+import org.apache.flink.streaming.connectors.kafka.config.FormatProjectionPushdownLevel;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.BoundedOptions;
 import org.apache.flink.table.api.ValidationException;
@@ -184,7 +185,9 @@ public class UpsertKafkaDynamicTableFactory
                 boundedOptions.boundedTimestampMillis,
                 true,
                 context.getObjectIdentifier().asSummaryString(),
-                parallelism);
+                parallelism,
+                FormatProjectionPushdownLevel.NONE,
+                FormatProjectionPushdownLevel.NONE);
     }
 
     @Override
