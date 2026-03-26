@@ -54,6 +54,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -98,7 +99,11 @@ public abstract class KafkaWriterTestBase {
     public void setUp(TestInfo testInfo) {
         metricListener = new MetricListener();
         timeService = new TriggerTimeService();
-        topic = testInfo.getDisplayName().replaceAll("\\W", "");
+        String methodName = testInfo.getTestMethod().map(Method::getName).orElse("unknown");
+        String displayName = testInfo.getDisplayName().replaceAll("\\W", "");
+        // Use the display name if it already contains the method name,
+        // otherwise combine them to ensure uniqueness for parameterized tests.
+        topic = displayName.startsWith(methodName) ? displayName : methodName + "_" + displayName;
         Map<String, Object> properties = new java.util.HashMap<>();
         properties.put(BOOTSTRAP_SERVERS_CONFIG, KAFKA_CONTAINER.getBootstrapServers());
         try (Admin admin = AdminClient.create(properties)) {
