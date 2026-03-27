@@ -24,6 +24,7 @@ import org.apache.flink.testutils.logging.LoggerAuditingExtension;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.errors.InvalidPidMappingException;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.assertj.core.api.Condition;
@@ -126,6 +127,24 @@ class KafkaCommitterTest {
                         BackchannelFactory.getInstance()
                                 .getReadableBackchannel(SUB_ID, ATTEMPT, TRANS_ID)) {
             // will fail because transaction not started
+            final MockCommitRequest<KafkaCommittable> request =
+                    new MockCommitRequest<>(KafkaCommittable.of(producer));
+            committer.commit(Collections.singletonList(request));
+            assertThat(backchannel).has(transactionFinished(false));
+        }
+    }
+
+    @Test
+    void testInvalidPidMappingExceptionIsKnownFailure() throws IOException, InterruptedException {
+        Properties properties = getProperties();
+        try (final KafkaCommitter committer =
+                        new KafkaCommitter(
+                                properties, TRANS_ID, SUB_ID, ATTEMPT, false, MOCK_FACTORY);
+                FlinkKafkaInternalProducer<?, ?> producer =
+                        new MockProducer(properties, new InvalidPidMappingException("test"));
+                ReadableBackchannel<TransactionFinished> backchannel =
+                        BackchannelFactory.getInstance()
+                                .getReadableBackchannel(SUB_ID, ATTEMPT, TRANS_ID)) {
             final MockCommitRequest<KafkaCommittable> request =
                     new MockCommitRequest<>(KafkaCommittable.of(producer));
             committer.commit(Collections.singletonList(request));

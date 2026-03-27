@@ -28,6 +28,7 @@ import org.apache.flink.util.IOUtils;
 
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.errors.InterruptException;
+import org.apache.kafka.common.errors.InvalidPidMappingException;
 import org.apache.kafka.common.errors.InvalidTxnStateException;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.errors.RetriableException;
@@ -123,6 +124,15 @@ public class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
             } catch (UnknownProducerIdException e) {
                 LOG.error(
                         "Unable to commit transaction ({}) " + UNKNOWN_PRODUCER_ID_ERROR_MESSAGE,
+                        request,
+                        e);
+                handleFailedTransaction(producer);
+                request.signalFailedWithKnownReason(e);
+            } catch (InvalidPidMappingException e) {
+                LOG.error(
+                        "Unable to commit transaction ({}) because the producer id mapping is invalid. "
+                                + "This typically happens when the transaction has expired on the broker. "
+                                + "The transaction cannot be committed and data may have been lost.",
                         request,
                         e);
                 handleFailedTransaction(producer);
