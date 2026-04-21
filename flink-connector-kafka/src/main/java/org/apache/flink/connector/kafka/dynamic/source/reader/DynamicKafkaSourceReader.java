@@ -93,12 +93,14 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     private final NavigableMap<String, KafkaSourceReader<T>> clusterReaderMap;
     private final Map<String, Properties> clustersProperties;
     private final List<DynamicKafkaSourceSplit> pendingSplits;
+    private final Set<String> pendingSplitOutputReleases;
 
     private MultipleFuturesAvailabilityHelper availabilityHelper;
     private int availabilityHelperSize;
     private boolean isActivelyConsumingSplits;
     private boolean isNoMoreSplits;
     private AtomicBoolean restartingReaders;
+    private ReaderOutput<T> latestReaderOutput;
 
     public DynamicKafkaSourceReader(
             SourceReaderContext readerContext,
@@ -121,6 +123,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         this.isActivelyConsumingSplits = false;
         this.restartingReaders = new AtomicBoolean();
         this.clustersProperties = new HashMap<>();
+        this.pendingSplitOutputReleases = new HashSet<>();
     }
 
     /**
@@ -137,6 +140,9 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
 
     @Override
     public InputStatus pollNext(ReaderOutput<T> readerOutput) throws Exception {
+        latestReaderOutput = readerOutput;
+        releasePendingSplitOutputs(readerOutput);
+
         // at startup, do not return end of input if metadata event has not been received
         if (clusterReaderMap.isEmpty()) {
             return logAndReturnInputStatus(InputStatus.NOTHING_AVAILABLE);
@@ -183,6 +189,9 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     @Override
     public void addSplits(List<DynamicKafkaSourceSplit> splits) {
         logger.info("Adding splits to reader {}: {}", readerContext.getIndexOfSubtask(), splits);
+        for (DynamicKafkaSourceSplit split : splits) {
+            pendingSplitOutputReleases.remove(split.splitId());
+        }
 
         // at startup, don't add splits until we get confirmation from enumerator of the current
         // metadata
@@ -291,6 +300,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                         .computeIfAbsent(split.getKafkaClusterId(), (ignore) -> new ArrayList<>())
                         .add(split);
             } else {
+                releaseOrDeferSplitOutput(split.splitId());
                 logger.info("Skipping outdated split due to metadata changes: {}", split);
             }
         }
@@ -345,6 +355,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                                                 isSplitForActiveClusters(
                                                         pendingSplit, newClustersAndTopics);
                                         if (!splitValid) {
+                                            releaseOrDeferSplitOutput(pendingSplit.splitId());
                                             logger.info(
                                                     "Removing invalid split for reader: {}",
                                                     pendingSplit);
@@ -359,6 +370,25 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                 notifyNoMoreSplits();
             }
         }
+    }
+
+    private void releaseOrDeferSplitOutput(String splitId) {
+        if (latestReaderOutput == null) {
+            pendingSplitOutputReleases.add(splitId);
+        } else {
+            latestReaderOutput.releaseOutputForSplit(splitId);
+        }
+    }
+
+    private void releasePendingSplitOutputs(ReaderOutput<T> readerOutput) {
+        if (pendingSplitOutputReleases.isEmpty()) {
+            return;
+        }
+
+        for (String splitId : pendingSplitOutputReleases) {
+            readerOutput.releaseOutputForSplit(splitId);
+        }
+        pendingSplitOutputReleases.clear();
     }
 
     private static boolean isSplitForActiveClusters(
