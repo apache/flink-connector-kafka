@@ -21,6 +21,7 @@ package org.apache.flink.tests.util.kafka;
 import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
 import org.apache.flink.connector.kafka.testutils.KafkaSourceExternalContextFactory;
 import org.apache.flink.connector.testframe.container.FlinkContainerTestEnvironment;
+import org.apache.flink.connector.testframe.container.FlinkContainersSettings;
 import org.apache.flink.connector.testframe.external.DefaultContainerizedExternalSystem;
 import org.apache.flink.connector.testframe.junit.annotations.TestContext;
 import org.apache.flink.connector.testframe.junit.annotations.TestEnv;
@@ -46,7 +47,13 @@ public class KafkaSourceE2ECase extends SourceTestSuiteBase<String> {
     CheckpointingMode[] semantics = new CheckpointingMode[] {CheckpointingMode.EXACTLY_ONCE};
 
     // Defines TestEnvironment
-    @TestEnv FlinkContainerTestEnvironment flink = new FlinkContainerTestEnvironment(1, 6);
+    @TestEnv
+    FlinkContainerTestEnvironment flink =
+            FlinkContainerTestEnvironment.fromSettings(
+                    FlinkContainersSettings.builder()
+                            .numTaskManagers(1)
+                            .numSlotsPerTaskManager(6)
+                            .build());
 
     // Defines ConnectorExternalSystem
     @TestExternalSystem
