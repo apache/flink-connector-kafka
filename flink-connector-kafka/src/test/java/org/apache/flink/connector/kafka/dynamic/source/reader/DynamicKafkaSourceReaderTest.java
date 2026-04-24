@@ -76,6 +76,19 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKafkaSourceSplit> {
     private static final String TOPIC = "DynamicKafkaSourceReaderTest";
 
+    private static class TrackingReaderOutput<E> extends TestingReaderOutput<E> {
+        private final List<String> releasedSplitIds = new ArrayList<>();
+
+        @Override
+        public void releaseOutputForSplit(String splitId) {
+            releasedSplitIds.add(splitId);
+        }
+
+        private List<String> releasedSplitIds() {
+            return releasedSplitIds;
+        }
+    }
+
     // we are testing two clusters and SourceReaderTestBase expects there to be a total of 10 splits
     private static final int NUM_SPLITS_PER_CLUSTER = 5;
 
@@ -122,9 +135,59 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
                     splits.stream()
                             .filter(split -> !split.getKafkaClusterId().equals(kafkaClusterId0))
                             .collect(Collectors.toList());
+            List<String> cluster0SplitIds =
+                    splits.stream()
+                            .filter(split -> split.getKafkaClusterId().equals(kafkaClusterId0))
+                            .map(DynamicKafkaSourceSplit::splitId)
+                            .collect(Collectors.toList());
             assertThat(reader.snapshotState(-1))
                     .as("The splits should not contain any split related to cluster 0")
                     .containsExactlyInAnyOrderElementsOf(splitsWithoutCluster0);
+
+            TrackingReaderOutput<Integer> readerOutput = new TrackingReaderOutput<>();
+            assertThat(readerOutput.releasedSplitIds()).isEmpty();
+            reader.pollNext(readerOutput);
+            assertThat(readerOutput.releasedSplitIds())
+                    .as(
+                            "Pending restored split outputs should be released once ReaderOutput exists")
+                    .containsExactlyInAnyOrderElementsOf(cluster0SplitIds);
+        }
+    }
+
+    @Test
+    void testMetadataRemovalReleasesAssignedSplitOutputs() throws Exception {
+        TestingReaderContext context = new TestingReaderContext();
+        try (DynamicKafkaSourceReader<Integer> reader = createReaderWithoutStart(context)) {
+            reader.start();
+            reader.handleSourceEvents(DynamicKafkaSourceTestHelper.getMetadataUpdateEvent(TOPIC));
+
+            DynamicKafkaSourceSplit cluster0Split =
+                    new DynamicKafkaSourceSplit(
+                            kafkaClusterId0,
+                            new KafkaPartitionSplit(
+                                    new TopicPartition(TOPIC, 0),
+                                    0L,
+                                    KafkaPartitionSplit.NO_STOPPING_OFFSET));
+            DynamicKafkaSourceSplit cluster1Split =
+                    new DynamicKafkaSourceSplit(
+                            kafkaClusterId1,
+                            new KafkaPartitionSplit(
+                                    new TopicPartition(TOPIC, 0),
+                                    0L,
+                                    KafkaPartitionSplit.NO_STOPPING_OFFSET));
+            reader.addSplits(ImmutableList.of(cluster0Split, cluster1Split));
+
+            TrackingReaderOutput<Integer> readerOutput = new TrackingReaderOutput<>();
+            reader.pollNext(readerOutput);
+
+            KafkaStream kafkaStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+            kafkaStream.getClusterMetadataMap().remove(kafkaClusterId0);
+            reader.handleSourceEvents(new MetadataUpdateEvent(Collections.singleton(kafkaStream)));
+
+            assertThat(readerOutput.releasedSplitIds())
+                    .as(
+                            "Removed assigned splits should stop contributing to split-local watermarks")
+                    .containsExactly(cluster0Split.splitId());
         }
     }
 
