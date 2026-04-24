@@ -33,6 +33,8 @@ import org.apache.flink.connector.kafka.lineage.TypeDatasetFacetProvider;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
 import org.apache.flink.connector.kafka.sink.internal.KafkaCommitter;
 import org.apache.flink.connector.kafka.sink.internal.NoopCommitter;
+
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.streaming.api.connector.sink2.CommittableMessage;
 import org.apache.flink.streaming.api.connector.sink2.CommittableMessageTypeInfo;
@@ -140,12 +142,21 @@ public class KafkaSink<IN>
     @Override
     public KafkaWriter<IN> restoreWriter(
             WriterInitContext context, Collection<KafkaWriterState> recoveredState) {
+        Properties writerConfig = new Properties();
+        writerConfig.putAll(kafkaProducerConfig);
+        String prefix = writerConfig.getProperty(KafkaSinkOptions.CLIENT_ID_PREFIX.key());
+        if (prefix != null) {
+            writerConfig.setProperty(
+                    ProducerConfig.CLIENT_ID_CONFIG,
+                    prefix + "-" + context.getTaskInfo().getIndexOfThisSubtask());
+        }
+
         KafkaWriter<IN> writer;
         if (deliveryGuarantee == DeliveryGuarantee.EXACTLY_ONCE) {
             writer =
                     new ExactlyOnceKafkaWriter<>(
                             deliveryGuarantee,
-                            kafkaProducerConfig,
+                            writerConfig,
                             transactionalIdPrefix,
                             context,
                             recordSerializer,
@@ -157,7 +168,7 @@ public class KafkaSink<IN>
             writer =
                     new KafkaWriter<>(
                             deliveryGuarantee,
-                            kafkaProducerConfig,
+                            writerConfig,
                             context,
                             recordSerializer,
                             context.asSerializationSchemaInitializationContext());
