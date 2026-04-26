@@ -18,6 +18,7 @@
 package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.annotation.PublicEvolving;
+import org.apache.flink.api.common.functions.InvalidTypesException;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 import org.apache.flink.api.java.typeutils.TypeExtractor;
@@ -432,13 +433,17 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
                                 ((ResultTypeQueryable<?>) this.valueSerializationSchema)
                                         .getProducedType()));
             } else {
-                // gets type information from serialize method signature
-                Type type =
-                        TypeExtractor.getParameterType(
-                                SerializationSchema.class, valueSerializationSchema.getClass(), 0);
                 try {
+                    Type type =
+                            TypeExtractor.getParameterType(
+                                    SerializationSchema.class,
+                                    valueSerializationSchema.getClass(),
+                                    0);
+
                     return Optional.of(
                             new DefaultTypeDatasetFacet(TypeExtractor.createTypeInfo(type)));
+                } catch (InvalidTypesException e) {
+                    return Optional.of(new DefaultTypeDatasetFacet(valueSerializationSchema));
                 } catch (Exception e) {
                     LOG.info(
                             "Could not extract type information from {}",
