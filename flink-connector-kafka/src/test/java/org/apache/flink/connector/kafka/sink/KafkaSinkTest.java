@@ -32,6 +32,8 @@ import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.apache.flink.streaming.api.graph.StreamNode;
+import org.apache.flink.streaming.api.lineage.DatasetConfigFacet;
+import org.apache.flink.streaming.api.lineage.LineageDatasetFacet;
 import org.apache.flink.streaming.api.lineage.LineageVertex;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -106,17 +108,21 @@ public class KafkaSinkTest {
         assertThat(lineageVertex.datasets().get(0).namespace()).isEqualTo("kafka://host1");
         assertThat(lineageVertex.datasets().get(0).name()).isEqualTo("topic1");
 
-        assertThat(
-                        lineageVertex
-                                .datasets()
-                                .get(0)
-                                .facets()
-                                .get(DefaultKafkaDatasetFacet.KAFKA_FACET_NAME))
+        LineageDatasetFacet lineageDatasetFacet =
+                lineageVertex
+                        .datasets()
+                        .get(0)
+                        .facets()
+                        .get(DefaultKafkaDatasetFacet.KAFKA_FACET_NAME);
+        assertThat(lineageDatasetFacet)
                 .hasFieldOrPropertyWithValue("properties", kafkaProperties)
                 .hasFieldOrPropertyWithValue(
                         "topicIdentifier",
                         DefaultKafkaDatasetIdentifier.ofTopics(
                                 Collections.singletonList("topic1")));
+
+        assertThat(((DatasetConfigFacet) lineageDatasetFacet).config())
+                .containsEntry("bootstrap.servers", "host1;host2");
 
         assertThat(
                         lineageVertex

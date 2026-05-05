@@ -161,6 +161,7 @@ public class KafkaSourceTest {
                         dataset.facets().get(DefaultKafkaDatasetFacet.KAFKA_FACET_NAME);
 
         assertThat(kafkaFacet.getProperties()).containsEntry("bootstrap.servers", "host1;host2");
+        assertThat(kafkaFacet.config()).containsEntry("bootstrap.servers", "host1;host2");
 
         assertThat(dataset.facets()).containsKey(DefaultTypeDatasetFacet.TYPE_FACET_NAME);
         assertThat(dataset.facets().get(DefaultTypeDatasetFacet.TYPE_FACET_NAME))
