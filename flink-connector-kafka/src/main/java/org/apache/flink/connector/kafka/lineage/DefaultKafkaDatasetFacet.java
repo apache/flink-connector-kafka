@@ -22,6 +22,9 @@ package org.apache.flink.connector.kafka.lineage;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.connector.kafka.source.KafkaPropertiesUtil;
 
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 
@@ -80,5 +83,19 @@ public class DefaultKafkaDatasetFacet implements KafkaDatasetFacet {
     @Override
     public String name() {
         return KAFKA_FACET_NAME;
+    }
+
+    @Override
+    public Map<String, String> config() {
+        if (properties == null) {
+            return Collections.emptyMap();
+        }
+
+        Map<String, String> config = new HashMap<>();
+        for (String key : properties.stringPropertyNames()) {
+            config.put(key, properties.getProperty(key));
+        }
+
+        return config;
     }
 }
