@@ -199,7 +199,7 @@ class KafkaWriter<IN>
 
     @Override
     public void close() throws Exception {
-        closed = true;
+        markClosed();
         LOG.debug("Closing writer with {}", currentProducer);
         closeAll(currentProducer);
         checkState(
@@ -208,6 +208,10 @@ class KafkaWriter<IN>
 
         // Rethrow exception for the case in which close is called before writer() and flush().
         checkAsyncException();
+    }
+
+    protected void markClosed() {
+        closed = true;
     }
 
     @VisibleForTesting

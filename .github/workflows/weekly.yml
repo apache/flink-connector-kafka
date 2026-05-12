@@ -33,7 +33,7 @@ jobs:
           flink: 2.2-SNAPSHOT,
           branch: main
         }, {
-          flink: 2.1.1,
+          flink: 2.1-SNAPSHOT,
           branch: main
         }, {
           flink: 2.0.1,
