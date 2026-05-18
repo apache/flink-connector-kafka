@@ -73,9 +73,7 @@ import org.apache.flink.testutils.junit.SharedReference;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.CreateTopicsResult;
 import org.apache.kafka.clients.admin.DeleteTopicsResult;
-import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.AfterAll;
@@ -125,6 +123,7 @@ import java.util.stream.Stream;
 import static org.apache.flink.configuration.StateRecoveryOptions.SAVEPOINT_PATH;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
+import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createNewTopicAndWaitForPartitionAssignment;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -176,9 +175,14 @@ class KafkaSinkITCase {
     }
 
     @BeforeEach
-    void setUp() throws ExecutionException, InterruptedException {
+    void setUp() {
         topic = UUID.randomUUID().toString();
-        createTestTopic(topic, 1, TOPIC_REPLICATION_FACTOR);
+        Properties adminProperties = new Properties();
+        adminProperties.put(
+                CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG,
+                KAFKA_CONTAINER.getBootstrapServers());
+        createNewTopicAndWaitForPartitionAssignment(
+                topic, 1, TOPIC_REPLICATION_FACTOR, adminProperties);
     }
 
     @AfterEach
@@ -761,15 +765,6 @@ class KafkaSinkITCase {
         standardProps.put("zookeeper.session.timeout.ms", ZK_TIMEOUT_MILLIS);
         standardProps.put("zookeeper.connection.timeout.ms", ZK_TIMEOUT_MILLIS);
         return standardProps;
-    }
-
-    private void createTestTopic(String topic, int numPartitions, short replicationFactor)
-            throws ExecutionException, InterruptedException {
-        final CreateTopicsResult result =
-                admin.createTopics(
-                        Collections.singletonList(
-                                new NewTopic(topic, numPartitions, replicationFactor)));
-        result.all().get();
     }
 
     private void deleteTestTopic(String topic) throws ExecutionException, InterruptedException {
