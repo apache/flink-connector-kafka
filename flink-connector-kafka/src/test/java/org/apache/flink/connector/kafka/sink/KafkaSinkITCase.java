@@ -55,7 +55,6 @@ import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.runtime.clusterframework.ApplicationStatus;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobmaster.JobResult;
-import org.apache.flink.runtime.messages.FlinkJobNotFoundException;
 import org.apache.flink.runtime.minicluster.MiniCluster;
 import org.apache.flink.runtime.state.FunctionInitializationContext;
 import org.apache.flink.runtime.state.FunctionSnapshotContext;
@@ -117,6 +116,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -137,6 +137,8 @@ class KafkaSinkITCase {
     private static final Network NETWORK = Network.newNetwork();
     private static final int ZK_TIMEOUT_MILLIS = 30000;
     private static final short TOPIC_REPLICATION_FACTOR = 1;
+    private static final long CHECKPOINT_PATH_LOOKUP_TIMEOUT_SECONDS = 10;
+    private static final long CHECKPOINT_PATH_LOOKUP_POLL_INTERVAL_MILLIS = 200;
     private static AdminClient admin;
 
     private String topic;
@@ -325,11 +327,7 @@ class KafkaSinkITCase {
         } catch (Exception e) {
             assertThat(e).hasStackTraceContaining("Exceeded checkpoint tolerable failure");
         }
-        final Optional<String> completedCheckpoint =
-                CommonTestUtils.getLatestCompletedCheckpointPath(firstJobId, miniCluster);
-
-        assertThat(completedCheckpoint).isPresent();
-        config.set(SAVEPOINT_PATH, completedCheckpoint.get());
+        config.set(SAVEPOINT_PATH, waitForCompletedCheckpointPath(miniCluster, firstJobId));
 
         // Run a second job which aborts all lingering transactions and new consumer should
         // immediately see the newly written records
@@ -422,7 +420,7 @@ class KafkaSinkITCase {
                         "firstPrefix",
                         clusterClient);
 
-        config.set(SAVEPOINT_PATH, getCheckpointPath(miniCluster, firstJobId));
+        config.set(SAVEPOINT_PATH, waitForCompletedCheckpointPath(miniCluster, firstJobId));
         config.set(CoreOptions.DEFAULT_PARALLELISM, newParallelsm);
 
         // Run a second job which aborts all lingering transactions and new consumer should
@@ -437,7 +435,7 @@ class KafkaSinkITCase {
                         "secondPrefix",
                         clusterClient);
 
-        config.set(SAVEPOINT_PATH, getCheckpointPath(miniCluster, secondJobId));
+        config.set(SAVEPOINT_PATH, waitForCompletedCheckpointPath(miniCluster, secondJobId));
         config.set(CoreOptions.DEFAULT_PARALLELISM, oldParallelism);
 
         SharedReference<AtomicBoolean> failed = sharedObjects.add(new AtomicBoolean(true));
@@ -455,12 +453,27 @@ class KafkaSinkITCase {
         assertThat(committedRecords).containsExactlyInAnyOrderElementsOf(checkpointedRecords.get());
     }
 
-    private String getCheckpointPath(MiniCluster miniCluster, JobID secondJobId)
-            throws InterruptedException, ExecutionException, FlinkJobNotFoundException {
-        final Optional<String> completedCheckpoint =
-                CommonTestUtils.getLatestCompletedCheckpointPath(secondJobId, miniCluster);
-
-        assertThat(completedCheckpoint).isPresent();
+    private String waitForCompletedCheckpointPath(MiniCluster miniCluster, JobID jobId)
+            throws Exception {
+        // The CompletedCheckpointStats can briefly lag behind requestJobResult() returning,
+        // so poll with a bounded timeout instead of asserting on the first miss.
+        final long deadline =
+                System.nanoTime()
+                        + TimeUnit.SECONDS.toNanos(CHECKPOINT_PATH_LOOKUP_TIMEOUT_SECONDS);
+        Optional<String> completedCheckpoint = Optional.empty();
+        while (System.nanoTime() < deadline) {
+            completedCheckpoint =
+                    CommonTestUtils.getLatestCompletedCheckpointPath(jobId, miniCluster);
+            if (completedCheckpoint.isPresent()) {
+                return completedCheckpoint.get();
+            }
+            Thread.sleep(CHECKPOINT_PATH_LOOKUP_POLL_INTERVAL_MILLIS);
+        }
+        assertThat(completedCheckpoint)
+                .as(
+                        "Job %s did not expose a completed checkpoint within %ds",
+                        jobId, CHECKPOINT_PATH_LOOKUP_TIMEOUT_SECONDS)
+                .isPresent();
         return completedCheckpoint.get();
     }
 
@@ -495,7 +508,7 @@ class KafkaSinkITCase {
                         clusterClient);
 
         // Run a second job which switching to POOLING
-        config.set(SAVEPOINT_PATH, getCheckpointPath(miniCluster, firstJobId));
+        config.set(SAVEPOINT_PATH, waitForCompletedCheckpointPath(miniCluster, firstJobId));
         config.set(CoreOptions.DEFAULT_PARALLELISM, 5);
         JobID secondJobId2 =
                 executeWithMapper(
@@ -508,7 +521,7 @@ class KafkaSinkITCase {
                         clusterClient);
 
         // Run a third job with downscaling
-        config.set(SAVEPOINT_PATH, getCheckpointPath(miniCluster, secondJobId2));
+        config.set(SAVEPOINT_PATH, waitForCompletedCheckpointPath(miniCluster, secondJobId2));
         config.set(CoreOptions.DEFAULT_PARALLELISM, 3);
         JobID thirdJobId =
                 executeWithMapper(
