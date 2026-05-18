@@ -63,10 +63,12 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
                         new SinkInitContext(metricGroup, timeService, null))) {
 
             writer.write(1, SINK_WRITER_CONTEXT);
+            writer.getCurrentProducer().flush();
 
             KAFKA_CONTAINER.stop();
 
             try {
+                writer.write(1, SINK_WRITER_CONTEXT);
                 writer.getCurrentProducer().flush();
                 assertThatCode(() -> writer.write(1, SINK_WRITER_CONTEXT))
                         .rootCause()
@@ -86,9 +88,11 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
                         DeliveryGuarantee.AT_LEAST_ONCE,
                         new SinkInitContext(metricGroup, timeService, null))) {
             writer.write(1, SINK_WRITER_CONTEXT);
+            writer.flush(false);
 
             KAFKA_CONTAINER.stop();
             try {
+                writer.write(1, SINK_WRITER_CONTEXT);
                 assertThatCode(() -> writer.flush(false))
                         .rootCause()
                         .isInstanceOfAny(NetworkException.class, TimeoutException.class);
@@ -108,10 +112,12 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
                         new SinkInitContext(metricGroup, timeService, null));
 
         writer.write(1, SINK_WRITER_CONTEXT);
+        writer.getCurrentProducer().flush();
 
         KAFKA_CONTAINER.stop();
 
         try {
+            writer.write(1, SINK_WRITER_CONTEXT);
             writer.getCurrentProducer().flush();
             // closing producer resource throws exception first
             assertThatCode(() -> writer.close())
