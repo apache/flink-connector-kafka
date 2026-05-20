@@ -24,9 +24,7 @@ import org.apache.flink.streaming.connectors.kafka.internals.KafkaTopicPartition
 @Internal
 public enum StartupMode {
 
-    /**
-     * Start from committed offsets in ZK / Kafka brokers of a specific consumer group (default).
-     */
+    /** Start from committed offsets in Kafka brokers of a specific consumer group (default). */
     GROUP_OFFSETS(KafkaTopicPartitionStateSentinel.GROUP_OFFSET),
 
     /** Start from the earliest offset possible. */

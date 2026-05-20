@@ -27,8 +27,8 @@ public enum BoundedMode {
     UNBOUNDED,
 
     /**
-     * End from committed offsets in ZK / Kafka brokers of a specific consumer group. This is
-     * evaluated at the start of consumption from a given partition.
+     * End from committed offsets in Kafka brokers of a specific consumer group. This is evaluated
+     * at the start of consumption from a given partition.
      */
     GROUP_OFFSETS,
 

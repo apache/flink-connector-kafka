@@ -557,13 +557,13 @@ Note that topic list and topic pattern only work in sources. In sinks, Flink cur
 
 The config option `scan.startup.mode` specifies the startup mode for Kafka consumer. The valid enumerations are:
 
-* `group-offsets`: start from committed offsets in ZK / Kafka brokers of a specific consumer group.
+* `group-offsets`: start from committed offsets in Kafka brokers of a specific consumer group.
 * `earliest-offset`: start from the earliest offset possible.
 * `latest-offset`: start from the latest offset.
 * `timestamp`: start from user-supplied timestamp for each partition.
 * `specific-offsets`: start from user-supplied specific offsets for each partition.
 
-The default option value is `group-offsets` which indicates to consume from last committed offsets in ZK / Kafka brokers.
+The default option value is `group-offsets` which indicates to consume from last committed offsets in Kafka brokers.
 
 If `timestamp` is specified, another config option `scan.startup.timestamp-millis` is required to specify a specific startup timestamp in milliseconds since January 1, 1970 00:00:00.000 GMT.
 
@@ -574,7 +574,7 @@ e.g. an option value `partition:0,offset:42;partition:1,offset:300` indicates of
 
 The config option `scan.bounded.mode` specifies the bounded mode for Kafka consumer. The valid enumerations are:
 <ul>
-<li><span markdown="span">`group-offsets`</span>: bounded by committed offsets in ZooKeeper / Kafka brokers of a specific consumer group. This is evaluated at the start of consumption from a given partition.</li>
+<li><span markdown="span">`group-offsets`</span>: bounded by committed offsets in Kafka brokers of a specific consumer group. This is evaluated at the start of consumption from a given partition.</li>
 <li><span markdown="span">`latest-offset`</span>: bounded by latest offsets. This is evaluated at the start of consumption from a given partition.</li>
 <li><span markdown="span">`timestamp`</span>: bounded by a user-supplied timestamp.</li>
 <li><span markdown="span">`specific-offsets`</span>: bounded by user-supplied specific offsets for each partition.</li>

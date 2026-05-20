@@ -134,7 +134,6 @@ class KafkaSinkITCase {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaSinkITCase.class);
     private static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
     private static final Network NETWORK = Network.newNetwork();
-    private static final int ZK_TIMEOUT_MILLIS = 30000;
     private static final short TOPIC_REPLICATION_FACTOR = 1;
     private static final long CHECKPOINT_PATH_LOOKUP_TIMEOUT_SECONDS = 10;
     private static final long CHECKPOINT_PATH_LOOKUP_POLL_INTERVAL_MILLIS = 200;
@@ -762,8 +761,6 @@ class KafkaSinkITCase {
         standardProps.put("enable.auto.commit", false);
         standardProps.put("auto.offset.reset", "earliest");
         standardProps.put("max.partition.fetch.bytes", 256);
-        standardProps.put("zookeeper.session.timeout.ms", ZK_TIMEOUT_MILLIS);
-        standardProps.put("zookeeper.connection.timeout.ms", ZK_TIMEOUT_MILLIS);
         return standardProps;
     }
 
