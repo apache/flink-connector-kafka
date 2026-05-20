@@ -63,7 +63,6 @@ abstract class KafkaTableTestBase extends AbstractTestBase {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaTableTestBase.class);
 
     private static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
-    private static final int zkTimeoutMills = 30000;
 
     @Container
     public static final TestKafkaContainer KAFKA_CONTAINER =
@@ -115,8 +114,6 @@ abstract class KafkaTableTestBase extends AbstractTestBase {
         standardProps.put("enable.auto.commit", false);
         standardProps.put("auto.offset.reset", "earliest");
         standardProps.put("max.partition.fetch.bytes", 256);
-        standardProps.put("zookeeper.session.timeout.ms", zkTimeoutMills);
-        standardProps.put("zookeeper.connection.timeout.ms", zkTimeoutMills);
         return standardProps;
     }
 
