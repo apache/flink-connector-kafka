@@ -240,14 +240,29 @@ public class KafkaPartitionSplitReader
     public void pauseOrResumeSplits(
             Collection<KafkaPartitionSplit> splitsToPause,
             Collection<KafkaPartitionSplit> splitsToResume) {
-        consumer.resume(
-                splitsToResume.stream()
-                        .map(KafkaPartitionSplit::getTopicPartition)
-                        .collect(Collectors.toList()));
-        consumer.pause(
-                splitsToPause.stream()
-                        .map(KafkaPartitionSplit::getTopicPartition)
-                        .collect(Collectors.toList()));
+        // Filter against current assignment to avoid IllegalStateException when a partition
+        // was concurrently unassigned by fetch() or removeEmptySplits().
+        Set<TopicPartition> assigned = consumer.assignment();
+        List<TopicPartition> toResume = new ArrayList<>();
+        for (KafkaPartitionSplit split : splitsToResume) {
+            TopicPartition tp = split.getTopicPartition();
+            if (assigned.contains(tp)) {
+                toResume.add(tp);
+            } else {
+                LOG.warn("Skipping resume for unassigned partition {}", tp);
+            }
+        }
+        List<TopicPartition> toPause = new ArrayList<>();
+        for (KafkaPartitionSplit split : splitsToPause) {
+            TopicPartition tp = split.getTopicPartition();
+            if (assigned.contains(tp)) {
+                toPause.add(tp);
+            } else {
+                LOG.warn("Skipping pause for unassigned partition {}", tp);
+            }
+        }
+        consumer.resume(toResume);
+        consumer.pause(toPause);
     }
 
     // ---------------

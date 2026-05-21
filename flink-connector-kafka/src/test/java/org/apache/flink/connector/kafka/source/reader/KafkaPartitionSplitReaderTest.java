@@ -354,6 +354,29 @@ public class KafkaPartitionSplitReaderTest {
         assertThat(properties.containsKey(ConsumerConfig.CLIENT_RACK_CONFIG)).isFalse();
     }
 
+    @Test
+    void testPauseOrResumeSplitsWithUnassignedPartition() {
+        KafkaPartitionSplitReader reader = createReader();
+        // Create a split for a partition that is NOT assigned to the consumer.
+        // Without the fix, this would throw IllegalStateException:
+        // "No current assignment for partition".
+        TopicPartition unassignedPartition = new TopicPartition(TOPIC1, 0);
+        KafkaPartitionSplit unassignedSplit =
+                new KafkaPartitionSplit(unassignedPartition, KafkaPartitionSplit.EARLIEST_OFFSET);
+
+        // Verify the partition is indeed not assigned
+        assertThat(reader.consumer().assignment()).doesNotContain(unassignedPartition);
+
+        // This should be a no-op, not throw an exception
+        reader.pauseOrResumeSplits(
+                Collections.singletonList(unassignedSplit), Collections.emptyList());
+        reader.pauseOrResumeSplits(
+                Collections.emptyList(), Collections.singletonList(unassignedSplit));
+        reader.pauseOrResumeSplits(
+                Collections.singletonList(unassignedSplit),
+                Collections.singletonList(unassignedSplit));
+    }
+
     // ------------------
 
     private void assignSplitsAndFetchUntilFinish(KafkaPartitionSplitReader reader, int readerId)
