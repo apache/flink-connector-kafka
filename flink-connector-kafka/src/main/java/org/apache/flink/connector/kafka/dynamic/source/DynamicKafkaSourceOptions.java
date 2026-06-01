@@ -62,6 +62,14 @@ public class DynamicKafkaSourceOptions {
                                     + "trigger jobmanager failure and global failover. The default is one to at least catch startup "
                                     + "failures.");
 
+    public static final ConfigOption<Long> STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS =
+            ConfigOptions.key("stream-metadata-removed-cluster-retention-ms")
+                    .longType()
+                    .defaultValue(0L)
+                    .withDescription(
+                            "The duration in milliseconds that removed Kafka cluster split offsets "
+                                    + "and enumerator state stay in checkpoints. Zero disables retention.");
+
     public static final ConfigOption<String> STREAM_ENUMERATOR_MODE =
             ConfigOptions.key("stream-enumerator-mode")
                     .stringType()
@@ -107,5 +115,19 @@ public class DynamicKafkaSourceOptions {
                                 e);
                     }
                 });
+    }
+
+    @Internal
+    public static long getRemovedClusterStateRetentionMs(Properties props) {
+        long retentionMs =
+                getOption(props, STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS, Long::parseLong);
+        if (retentionMs < 0) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid %s='%d'. The value must be non-negative.",
+                            STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(), retentionMs));
+        }
+
+        return retentionMs;
     }
 }
