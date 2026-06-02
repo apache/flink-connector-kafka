@@ -19,12 +19,11 @@
 package org.apache.flink.tests.util.kafka;
 
 import org.apache.flink.api.common.time.Deadline;
+import org.apache.flink.connector.kafka.testutils.KafkaUtil;
 import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.core.testutils.CommonTestUtils;
 
 import org.apache.kafka.clients.CommonClientConfigs;
-import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -48,9 +47,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Properties;
 
 /** A utility class that exposes common methods over a {@link TestKafkaContainer}. */
@@ -63,22 +60,11 @@ public class KafkaContainerClient {
     }
 
     public void createTopic(int replicationFactor, int numPartitions, String topic) {
-        Map<String, Object> properties = new HashMap<>();
+        Properties properties = new Properties();
         properties.put(
                 CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, container.getBootstrapServers());
-        try (AdminClient admin = AdminClient.create(properties)) {
-            admin.createTopics(
-                            Collections.singletonList(
-                                    new NewTopic(topic, numPartitions, (short) replicationFactor)))
-                    .all()
-                    .get();
-        } catch (Exception e) {
-            throw new IllegalStateException(
-                    String.format(
-                            "Fail to create topic [%s partitions: %d replication factor: %d].",
-                            topic, numPartitions, replicationFactor),
-                    e);
-        }
+        KafkaUtil.createNewTopicAndWaitForPartitionAssignment(
+                topic, numPartitions, replicationFactor, properties);
     }
 
     public <T> void sendMessages(String topic, Serializer<T> valueSerializer, T... messages) {
