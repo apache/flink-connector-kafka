@@ -32,7 +32,6 @@ import org.apache.flink.connector.testframe.external.source.TestingSourceSetting
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewPartitions;
-import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.TopicPartition;
@@ -178,10 +177,9 @@ public class KafkaSourceExternalContext implements DataStreamSourceExternalConte
     private KafkaPartitionDataWriter createSinglePartitionTopic(int topicIndex) throws Exception {
         String newTopicName = topicName + "-" + topicIndex;
         LOG.info("Creating topic '{}'", newTopicName);
-        adminClient
-                .createTopics(Collections.singletonList(new NewTopic(newTopicName, 1, (short) 1)))
-                .all()
-                .get();
+        final Properties adminProperties = new Properties();
+        adminProperties.setProperty(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        KafkaUtil.createNewTopicAndWaitForPartitionAssignment(newTopicName, 1, 1, adminProperties);
         return new KafkaPartitionDataWriter(
                 getKafkaProducerProperties(topicIndex), new TopicPartition(newTopicName, 0));
     }
@@ -207,10 +205,10 @@ public class KafkaSourceExternalContext implements DataStreamSourceExternalConte
                     new TopicPartition(topicName, numPartitions));
         } else {
             LOG.info("Creating topic '{}'", topicName);
-            adminClient
-                    .createTopics(Collections.singletonList(new NewTopic(topicName, 1, (short) 1)))
-                    .all()
-                    .get();
+            final Properties adminProperties = new Properties();
+            adminProperties.setProperty(
+                    AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+            KafkaUtil.createNewTopicAndWaitForPartitionAssignment(topicName, 1, 1, adminProperties);
             return new KafkaPartitionDataWriter(
                     getKafkaProducerProperties(0), new TopicPartition(topicName, 0));
         }

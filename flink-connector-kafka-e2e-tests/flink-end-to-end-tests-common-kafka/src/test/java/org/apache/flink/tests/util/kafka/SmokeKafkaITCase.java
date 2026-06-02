@@ -30,8 +30,6 @@ import org.apache.flink.test.resources.ResourceTestUtils;
 import org.apache.flink.test.util.JobSubmission;
 
 import org.apache.kafka.clients.CommonClientConfigs;
-import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -50,7 +48,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -90,7 +87,6 @@ class SmokeKafkaITCase {
                     .withTestcontainersSettings(TESTCONTAINERS_SETTINGS)
                     .build();
 
-    private static AdminClient admin;
     private static KafkaProducer<Void, Integer> producer;
 
     private static Configuration getConfiguration() {
@@ -117,7 +113,6 @@ class SmokeKafkaITCase {
         adminProperties.put(
                 CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG,
                 KAFKA_CONTAINER.getBootstrapServers());
-        admin = AdminClient.create(adminProperties);
         final Properties producerProperties = new Properties();
         producerProperties.putAll(adminProperties);
         producerProperties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, VoidSerializer.class);
@@ -128,7 +123,6 @@ class SmokeKafkaITCase {
 
     @AfterAll
     static void teardown() {
-        admin.close();
         producer.close();
     }
 
@@ -141,12 +135,14 @@ class SmokeKafkaITCase {
 
         // create the required topics
         final short replicationFactor = 1;
-        admin.createTopics(
-                        Arrays.asList(
-                                new NewTopic(inputTopic, 1, replicationFactor),
-                                new NewTopic(outputTopic, 1, replicationFactor)))
-                .all()
-                .get();
+        final Properties adminProperties = new Properties();
+        adminProperties.put(
+                CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG,
+                KAFKA_CONTAINER.getBootstrapServers());
+        KafkaUtil.createNewTopicAndWaitForPartitionAssignment(
+                inputTopic, 1, replicationFactor, adminProperties);
+        KafkaUtil.createNewTopicAndWaitForPartitionAssignment(
+                outputTopic, 1, replicationFactor, adminProperties);
 
         producer.send(new ProducerRecord<>(inputTopic, 1));
         producer.send(new ProducerRecord<>(inputTopic, 2));
