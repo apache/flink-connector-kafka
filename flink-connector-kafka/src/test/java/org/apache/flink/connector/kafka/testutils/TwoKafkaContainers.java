@@ -29,8 +29,8 @@ public class TwoKafkaContainers extends GenericContainer<TwoKafkaContainers> {
 
     public TwoKafkaContainers() {
         DockerImageName dockerImageName = DockerImageName.parse(DockerImageVersions.KAFKA);
-        this.kafka0 = new KafkaContainer(dockerImageName);
-        this.kafka1 = new KafkaContainer(dockerImageName);
+        this.kafka0 = new KafkaContainer(dockerImageName).withStartupAttempts(3);
+        this.kafka1 = new KafkaContainer(dockerImageName).withStartupAttempts(3);
     }
 
     @Override
