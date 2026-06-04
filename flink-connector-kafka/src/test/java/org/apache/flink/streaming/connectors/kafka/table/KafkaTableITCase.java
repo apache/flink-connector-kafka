@@ -49,6 +49,7 @@ import org.assertj.core.api.ThrowingConsumer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -756,6 +757,149 @@ class KafkaTableITCase extends KafkaTableTestBase {
         assertThat(result).satisfies(matching(deepEqualTo(expected, true)));
 
         // ------------- cleanup -------------------
+
+        cleanupTopic(topic);
+    }
+
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
+    void testKafkaSourceSinkWithMultiHeaders(final String format) throws Exception {
+        final String topic = "header_list_topic_" + format + "_" + UUID.randomUUID();
+        createTestTopic(topic, 1, 1);
+
+        String groupId = getStandardProps().getProperty("group.id");
+        String bootstraps = getBootstrapServers();
+
+        final String createTable =
+                String.format(
+                        "CREATE TABLE kafka (\n"
+                                + "  `physical_1` STRING,\n"
+                                + "  `header-list` ARRAY<ROW<`key` STRING, `value` BYTES>> METADATA,\n"
+                                + "  `physical_2` BOOLEAN\n"
+                                + ") WITH (\n"
+                                + "  'connector' = 'kafka',\n"
+                                + "  'topic' = '%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'properties.group.id' = '%s',\n"
+                                + "  'scan.startup.mode' = 'earliest-offset',\n"
+                                + "  %s\n"
+                                + ")",
+                        topic, bootstraps, groupId, formatOptions(format));
+        tEnv.executeSql(createTable);
+
+        // Row 1: duplicate key 'k1' — both entries must survive the round-trip.
+        // Row 2: null header array.
+        // Row 3: null-key entry is silently dropped; null value on k3 is preserved.
+        // Row 4: null ROW in array is silently skipped; adjacent entries survive.
+        tEnv.executeSql(
+                        "INSERT INTO kafka VALUES\n"
+                                + " ('data 1', ARRAY[ROW('k1', X'C0FFEE'), ROW('k1', X'BABE01')], TRUE),\n"
+                                + " ('data 2', CAST(NULL AS ARRAY<ROW<`key` STRING, `value` BYTES>>), FALSE),\n"
+                                + " ('data 3', ARRAY[ROW('k1', X'102030'), ROW(CAST(NULL AS STRING), X'DEAD'),"
+                                + " ROW('k2', X'203040'), ROW('k3', CAST(NULL AS BYTES))], TRUE),\n"
+                                + " ('data 4', ARRAY[ROW('ka', X'0102'),"
+                                + " CAST(NULL AS ROW<`key` STRING, `value` BYTES>),"
+                                + " ROW('kb', CAST(NULL AS BYTES))], FALSE)")
+                .await();
+
+        final List<Row> result = collectRows(tEnv.sqlQuery("SELECT * FROM kafka"), 4);
+
+        final List<Row> expected =
+                Arrays.asList(
+                        Row.of(
+                                "data 1",
+                                new Row[] {
+                                    Row.of("k1", EncodingUtils.decodeHex("C0FFEE")),
+                                    Row.of("k1", EncodingUtils.decodeHex("BABE01"))
+                                },
+                                true),
+                        // null and empty arrays are indistinguishable on the wire; source returns
+                        // [].
+                        Row.of("data 2", new Row[0], false),
+                        Row.of(
+                                "data 3",
+                                new Row[] {
+                                    Row.of("k1", EncodingUtils.decodeHex("102030")),
+                                    Row.of("k2", EncodingUtils.decodeHex("203040")),
+                                    Row.of("k3", null)
+                                },
+                                true),
+                        Row.of(
+                                "data 4",
+                                new Row[] {
+                                    Row.of("ka", EncodingUtils.decodeHex("0102")),
+                                    Row.of("kb", null)
+                                },
+                                false));
+
+        assertThat(result).satisfies(matching(deepEqualTo(expected, true)));
+
+        cleanupTopic(topic);
+    }
+
+    /**
+     * Verifies that {@code headers} and {@code header-list} are interoperable: data written via one
+     * can be read back via the other, and both columns can be declared on the same source.
+     */
+    @ParameterizedTest(name = "writeMultiHeaders: {0}")
+    @ValueSource(booleans = {true, false})
+    void testKafkaHeadersInteroperability(final boolean writeMulti) throws Exception {
+        final String topic = "headers_interop_topic_" + writeMulti + "_" + UUID.randomUUID();
+        createTestTopic(topic, 1, 1);
+
+        final String groupId = getStandardProps().getProperty("group.id");
+        final String bootstraps = getBootstrapServers();
+
+        final String hVirtual = writeMulti ? " VIRTUAL" : "";
+        final String mhVirtual = writeMulti ? "" : " VIRTUAL";
+
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE kafka (\n"
+                                + "  `physical_1` STRING,\n"
+                                + "  `headers` MAP<STRING, BYTES> METADATA%s,\n"
+                                + "  `header-list` ARRAY<ROW<`key` STRING, `value` BYTES>> METADATA%s,\n"
+                                + "  `physical_2` BOOLEAN\n"
+                                + ") WITH (\n"
+                                + "  'connector' = 'kafka',\n"
+                                + "  'topic' = '%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'properties.group.id' = '%s',\n"
+                                + "  'scan.startup.mode' = 'earliest-offset',\n"
+                                + "  'format' = 'json'\n"
+                                + ")",
+                        hVirtual, mhVirtual, topic, bootstraps, groupId));
+
+        final String dataValues =
+                writeMulti ? "ARRAY[ROW('k1', X'C0FFEE')]" : "MAP['k1', X'C0FFEE']";
+        final String nullValues =
+                writeMulti
+                        ? "CAST(NULL AS ARRAY<ROW<`key` STRING, `value` BYTES>>)"
+                        : "CAST(NULL AS MAP<STRING, BYTES>)";
+
+        tEnv.executeSql(
+                        "INSERT INTO kafka VALUES\n"
+                                + " ('data 1', "
+                                + dataValues
+                                + ", TRUE),\n"
+                                + " ('data 2', "
+                                + nullValues
+                                + ", FALSE)")
+                .await();
+
+        final List<Row> result = collectRows(tEnv.sqlQuery("SELECT * FROM kafka"), 2);
+
+        final List<Row> expected =
+                Arrays.asList(
+                        Row.of(
+                                "data 1",
+                                map(entry("k1", EncodingUtils.decodeHex("C0FFEE"))),
+                                new Row[] {Row.of("k1", EncodingUtils.decodeHex("C0FFEE"))},
+                                true),
+                        // null/empty → no headers on wire; both columns read back as empty.
+                        Row.of("data 2", Collections.emptyMap(), new Row[0], false));
+
+        assertThat(result).satisfies(matching(deepEqualTo(expected, true)));
 
         cleanupTopic(topic);
     }

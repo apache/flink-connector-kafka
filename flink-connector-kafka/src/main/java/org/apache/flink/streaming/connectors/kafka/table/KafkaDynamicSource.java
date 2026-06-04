@@ -44,7 +44,9 @@ import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
 import org.apache.flink.table.connector.source.abilities.SupportsReadingMetadata;
 import org.apache.flink.table.connector.source.abilities.SupportsWatermarkPushDown;
+import org.apache.flink.table.data.GenericArrayData;
 import org.apache.flink.table.data.GenericMapData;
+import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
@@ -620,6 +622,39 @@ public class KafkaDynamicSource
                             map.put(StringData.fromString(header.key()), header.value());
                         }
                         return new GenericMapData(map);
+                    }
+                }),
+
+        /**
+         * Wire-faithful alternative to {@code headers}: preserves duplicate keys and insertion
+         * order. Key is NOT NULL; headers with a null key are silently omitted.
+         */
+        HEADER_LIST(
+                "header-list",
+                DataTypes.ARRAY(
+                                DataTypes.ROW(
+                                                DataTypes.FIELD(
+                                                        "key", DataTypes.STRING().notNull()),
+                                                DataTypes.FIELD(
+                                                        "value", DataTypes.BYTES().nullable()))
+                                        .notNull())
+                        .notNull(),
+                new MetadataConverter() {
+                    private static final long serialVersionUID = 1L;
+
+                    @Override
+                    public Object read(ConsumerRecord<?, ?> record) {
+                        final List<GenericRowData> rows = new ArrayList<>();
+                        for (Header header : record.headers()) {
+                            if (header.key() == null) {
+                                continue;
+                            }
+                            final GenericRowData row = new GenericRowData(2);
+                            row.setField(0, StringData.fromString(header.key()));
+                            row.setField(1, header.value());
+                            rows.add(row);
+                        }
+                        return new GenericArrayData(rows.toArray());
                     }
                 }),
 
