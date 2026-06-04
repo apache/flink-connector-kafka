@@ -93,8 +93,14 @@ Read-only columns must be declared `VIRTUAL` to exclude them during an `INSERT I
     </tr>
     <tr>
       <td><code>headers</code></td>
-      <td><code>MAP<STRING, BYTES> NOT NULL</code></td>
-      <td>Headers of the Kafka record as a map of raw bytes.</td>
+      <td><code>MAP&lt;STRING, BYTES&gt; NOT NULL</code></td>
+      <td>Headers of the Kafka record as a map. Duplicate keys are collapsed (last value wins) and insertion order is lost.</td>
+      <td><code>R/W</code></td>
+    </tr>
+    <tr>
+      <td><code>header-list</code></td>
+      <td><code>ARRAY&lt;ROW&lt;key STRING, value BYTES&gt;&gt; NOT NULL</code></td>
+      <td>Headers of the Kafka record as an ordered list of key-value pairs. Preserves duplicate keys and insertion order. Mutually exclusive with <code>headers</code> on the write path.</td>
       <td><code>R/W</code></td>
     </tr>
     <tr>
