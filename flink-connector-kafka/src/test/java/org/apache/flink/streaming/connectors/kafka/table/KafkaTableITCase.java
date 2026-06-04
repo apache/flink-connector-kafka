@@ -47,6 +47,7 @@ import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.assertj.core.api.Assertions;
 import org.assertj.core.api.ThrowingConsumer;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -757,6 +758,51 @@ class KafkaTableITCase extends KafkaTableTestBase {
         assertThat(result).satisfies(matching(deepEqualTo(expected, true)));
 
         // ------------- cleanup -------------------
+
+        cleanupTopic(topic);
+    }
+
+    @Test
+    void testKafkaHeadersMapNullValue() throws Exception {
+        final String topic = "headers_null_value_topic_" + UUID.randomUUID();
+        createTestTopic(topic, 1, 1);
+
+        final String groupId = getStandardProps().getProperty("group.id");
+        final String bootstraps = getBootstrapServers();
+
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE kafka (\n"
+                                + "  `physical_1` STRING,\n"
+                                + "  `headers` MAP<STRING, BYTES> METADATA,\n"
+                                + "  `physical_2` BOOLEAN\n"
+                                + ") WITH (\n"
+                                + "  'connector' = 'kafka',\n"
+                                + "  'topic' = '%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'properties.group.id' = '%s',\n"
+                                + "  'scan.startup.mode' = 'earliest-offset',\n"
+                                + "  'format' = 'json'\n"
+                                + ")",
+                        topic, bootstraps, groupId));
+
+        tEnv.executeSql(
+                        "INSERT INTO kafka VALUES ('data 1',"
+                                + " MAP['k1', X'C0FFEE', 'k2', CAST(NULL AS BYTES)], TRUE)")
+                .await();
+
+        final List<Row> result = collectRows(tEnv.sqlQuery("SELECT * FROM kafka"), 1);
+
+        final List<Row> expected =
+                Collections.singletonList(
+                        Row.of(
+                                "data 1",
+                                map(
+                                        entry("k1", EncodingUtils.decodeHex("C0FFEE")),
+                                        entry("k2", null)),
+                                true));
+
+        assertThat(result).satisfies(matching(deepEqualTo(expected, true)));
 
         cleanupTopic(topic);
     }
