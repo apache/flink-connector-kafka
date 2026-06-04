@@ -26,6 +26,7 @@ import org.apache.flink.configuration.description.Description;
 import org.apache.flink.configuration.description.InlineElement;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
+import org.apache.flink.streaming.connectors.kafka.config.FormatProjectionPushdownLevel;
 import org.apache.flink.table.factories.FactoryUtil;
 
 import java.time.Duration;
@@ -109,6 +110,34 @@ public class KafkaConnectorOptions {
 
     public static final ConfigOption<Integer> SCAN_PARALLELISM = FactoryUtil.SOURCE_PARALLELISM;
     public static final ConfigOption<Integer> SINK_PARALLELISM = FactoryUtil.SINK_PARALLELISM;
+
+    private static final String FORMAT_PROJECTION_PUSHDOWN_LEVEL =
+            "format-projection-pushdown-level";
+    private static final String PROJECTION_PUSHDOWN_LEVEL_DESCRIPTION =
+            "Controls what level of projections can be pushed down into the ProjectableDecodingFormat. Valid values are:\n"
+                    + " - \"NONE\" i.e. no projections are pushed down into the ProjectableDecodingFormat. This is the default.\n"
+                    + " - \"TOP_LEVEL\" i.e. top-level projections are pushed down into the ProjectableDecodingFormat.\n"
+                    + " - \"ALL\" i.e. top-level and nested projections are pushed down into the ProjectableDecodingFormat.\n"
+                    + "This config should be set carefully with respect to the Format. "
+                    + "In particular, users should ensure the Format properly support the desired level of projection pushdown "
+                    + "as otherwise it can lead to runtime exceptions or even incorrect results.\n"
+                    + "For example:\n"
+                    + " - avro format does not support projection pushdown properly.\n"
+                    + " - csv format only supports top-level projection pushdown.\n"
+                    + " - json format supports top-level and nested projection pushdown.";
+
+    public static final ConfigOption<FormatProjectionPushdownLevel> KEY_PROJECTION_PUSHDOWN_LEVEL =
+            ConfigOptions.key("key." + FORMAT_PROJECTION_PUSHDOWN_LEVEL)
+                    .enumType(FormatProjectionPushdownLevel.class)
+                    .defaultValue(FormatProjectionPushdownLevel.NONE)
+                    .withDescription(PROJECTION_PUSHDOWN_LEVEL_DESCRIPTION);
+
+    public static final ConfigOption<FormatProjectionPushdownLevel>
+            VALUE_PROJECTION_PUSHDOWN_LEVEL =
+                    ConfigOptions.key("value." + FORMAT_PROJECTION_PUSHDOWN_LEVEL)
+                            .enumType(FormatProjectionPushdownLevel.class)
+                            .defaultValue(FormatProjectionPushdownLevel.NONE)
+                            .withDescription(PROJECTION_PUSHDOWN_LEVEL_DESCRIPTION);
 
     // --------------------------------------------------------------------------------------------
     // Kafka specific options
