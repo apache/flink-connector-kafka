@@ -455,11 +455,12 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
                         final ArrayData valueArray = map.valueArray();
                         final List<Header> headers = new ArrayList<>();
                         for (int i = 0; i < keyArray.size(); i++) {
-                            if (!keyArray.isNullAt(i) && !valueArray.isNullAt(i)) {
+                            if (!keyArray.isNullAt(i)) {
                                 // StringData.toString() decodes UTF-8; invalid bytes produce
                                 // replacement characters (see FLIP-568).
                                 final String key = keyArray.getString(i).toString();
-                                final byte[] value = valueArray.getBinary(i);
+                                final byte[] value =
+                                        valueArray.isNullAt(i) ? null : valueArray.getBinary(i);
                                 headers.add(new KafkaHeader(key, value));
                             }
                         }
