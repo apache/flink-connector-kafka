@@ -75,7 +75,8 @@ public class KafkaUtil {
                         "KAFKA_TRANSACTION_MAX_TIMEOUT_MS",
                         String.valueOf(Duration.ofHours(2).toMillis()))
                 .withEnv("KAFKA_LOG4J_TOOLS_ROOT_LOGLEVEL", logLevel)
-                .withLogConsumer(logConsumer);
+                .withLogConsumer(logConsumer)
+                .withStartupAttempts(3);
     }
 
     private static String inferLogLevel(Logger logger) {
