@@ -50,6 +50,7 @@ public class DynamicKafkaSourceEnumStateSerializer
 
     private static final int VERSION_1 = 1;
     private static final int VERSION_2 = 2;
+    private static final int VERSION_3 = 3;
 
     private final KafkaSourceEnumStateSerializer kafkaSourceEnumStateSerializer;
 
@@ -59,7 +60,7 @@ public class DynamicKafkaSourceEnumStateSerializer
 
     @Override
     public int getVersion() {
-        return VERSION_2;
+        return VERSION_3;
     }
 
     @Override
@@ -74,19 +75,17 @@ public class DynamicKafkaSourceEnumStateSerializer
                     state.getClusterEnumeratorStates();
             out.writeInt(kafkaSourceEnumStateSerializer.getVersion());
 
-            // write sub enumerator states
-            out.writeInt(clusterEnumeratorStates.size());
-            for (Map.Entry<String, KafkaSourceEnumState> clusterEnumeratorState :
-                    clusterEnumeratorStates.entrySet()) {
-                String kafkaClusterId = clusterEnumeratorState.getKey();
-                out.writeUTF(kafkaClusterId);
-                byte[] bytes =
-                        kafkaSourceEnumStateSerializer.serialize(clusterEnumeratorState.getValue());
-                // we need to know the exact size of the byte array since
-                // KafkaSourceEnumStateSerializer
-                // will throw exception if there are leftover unread bytes in deserialization.
-                out.writeInt(bytes.length);
-                out.write(bytes);
+            writeClusterEnumeratorStates(clusterEnumeratorStates, out);
+
+            Map<String, DynamicKafkaSourceEnumState.RetainedClusterState>
+                    retainedClusterEnumeratorStates = state.getRetainedClusterEnumeratorStates();
+            out.writeInt(retainedClusterEnumeratorStates.size());
+            for (Map.Entry<String, DynamicKafkaSourceEnumState.RetainedClusterState>
+                    retainedClusterEnumeratorState : retainedClusterEnumeratorStates.entrySet()) {
+                out.writeUTF(retainedClusterEnumeratorState.getKey());
+                out.writeLong(retainedClusterEnumeratorState.getValue().getRetainedUntilMs());
+                writeKafkaSourceEnumState(
+                        retainedClusterEnumeratorState.getValue().getKafkaSourceEnumState(), out);
             }
 
             return baos.toByteArray();
@@ -96,7 +95,7 @@ public class DynamicKafkaSourceEnumStateSerializer
     @Override
     public DynamicKafkaSourceEnumState deserialize(int version, byte[] serialized)
             throws IOException {
-        if (version != VERSION_1 && version != VERSION_2) {
+        if (version != VERSION_1 && version != VERSION_2 && version != VERSION_3) {
             throw new IOException(
                     String.format(
                             "The bytes are serialized with version %d, "
@@ -112,19 +111,68 @@ public class DynamicKafkaSourceEnumStateSerializer
             Map<String, KafkaSourceEnumState> clusterEnumeratorStates = new HashMap<>();
             int kafkaSourceEnumStateSerializerVersion = in.readInt();
 
-            int clusterEnumeratorStateMapSize = in.readInt();
-            for (int i = 0; i < clusterEnumeratorStateMapSize; i++) {
-                String kafkaClusterId = in.readUTF();
-                int byteArraySize = in.readInt();
-                KafkaSourceEnumState kafkaSourceEnumState =
-                        kafkaSourceEnumStateSerializer.deserialize(
-                                kafkaSourceEnumStateSerializerVersion,
-                                readNBytes(in, byteArraySize));
-                clusterEnumeratorStates.put(kafkaClusterId, kafkaSourceEnumState);
+            readClusterEnumeratorStates(
+                    in, kafkaSourceEnumStateSerializerVersion, clusterEnumeratorStates);
+
+            Map<String, DynamicKafkaSourceEnumState.RetainedClusterState>
+                    retainedClusterEnumeratorStates = new HashMap<>();
+            if (version == VERSION_3) {
+                int retainedClusterEnumeratorStateMapSize = in.readInt();
+                for (int i = 0; i < retainedClusterEnumeratorStateMapSize; i++) {
+                    String kafkaClusterId = in.readUTF();
+                    long retainedUntilMs = in.readLong();
+                    KafkaSourceEnumState kafkaSourceEnumState =
+                            readKafkaSourceEnumState(in, kafkaSourceEnumStateSerializerVersion);
+                    retainedClusterEnumeratorStates.put(
+                            kafkaClusterId,
+                            new DynamicKafkaSourceEnumState.RetainedClusterState(
+                                    kafkaSourceEnumState, retainedUntilMs));
+                }
             }
 
-            return new DynamicKafkaSourceEnumState(kafkaStreams, clusterEnumeratorStates);
+            return new DynamicKafkaSourceEnumState(
+                    kafkaStreams, clusterEnumeratorStates, retainedClusterEnumeratorStates);
         }
+    }
+
+    private void writeClusterEnumeratorStates(
+            Map<String, KafkaSourceEnumState> clusterEnumeratorStates, DataOutputStream out)
+            throws IOException {
+        out.writeInt(clusterEnumeratorStates.size());
+        for (Map.Entry<String, KafkaSourceEnumState> clusterEnumeratorState :
+                clusterEnumeratorStates.entrySet()) {
+            out.writeUTF(clusterEnumeratorState.getKey());
+            writeKafkaSourceEnumState(clusterEnumeratorState.getValue(), out);
+        }
+    }
+
+    private void readClusterEnumeratorStates(
+            DataInputStream in,
+            int kafkaSourceEnumStateSerializerVersion,
+            Map<String, KafkaSourceEnumState> clusterEnumeratorStates)
+            throws IOException {
+        int clusterEnumeratorStateMapSize = in.readInt();
+        for (int i = 0; i < clusterEnumeratorStateMapSize; i++) {
+            String kafkaClusterId = in.readUTF();
+            clusterEnumeratorStates.put(
+                    kafkaClusterId,
+                    readKafkaSourceEnumState(in, kafkaSourceEnumStateSerializerVersion));
+        }
+    }
+
+    private void writeKafkaSourceEnumState(
+            KafkaSourceEnumState kafkaSourceEnumState, DataOutputStream out) throws IOException {
+        byte[] bytes = kafkaSourceEnumStateSerializer.serialize(kafkaSourceEnumState);
+        // KafkaSourceEnumStateSerializer rejects leftover unread bytes on deserialization.
+        out.writeInt(bytes.length);
+        out.write(bytes);
+    }
+
+    private KafkaSourceEnumState readKafkaSourceEnumState(
+            DataInputStream in, int kafkaSourceEnumStateSerializerVersion) throws IOException {
+        int byteArraySize = in.readInt();
+        return kafkaSourceEnumStateSerializer.deserialize(
+                kafkaSourceEnumStateSerializerVersion, readNBytes(in, byteArraySize));
     }
 
     private void serializeV2(Set<KafkaStream> kafkaStreams, DataOutputStream out)

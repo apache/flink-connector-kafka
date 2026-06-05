@@ -238,6 +238,11 @@ swap from one cluster to the new cluster when the service makes that change in t
 Cluster metadata can optionally carry per-cluster starting and stopping offsets initializers. These
 override the global builder configuration for the affected cluster.
 
+By default, metadata removal also removes that cluster's split offsets from subsequent checkpoints.
+To keep removed cluster offsets available for a later re-add or restore, set
+`stream-metadata-removed-cluster-retention-ms` to a positive duration. For example,
+`604800000` retains removed cluster state for seven days before the source stops checkpointing it.
+
 ### Additional Properties
 There are configuration options in DynamicKafkaSourceOptions that can be configured in the properties through the builder:
 <table class="table table-bordered">
@@ -264,6 +269,13 @@ There are configuration options in DynamicKafkaSourceOptions that can be configu
       <td style="word-wrap: break-word;">1</td>
       <td>Integer</td>
       <td>The number of consecutive failures before letting the exception from Kafka metadata service discovery trigger jobmanager failure and global failover. The default is one to at least catch startup failures.</td>
+    </tr>
+    <tr>
+      <td><h5>stream-metadata-removed-cluster-retention-ms</h5></td>
+      <td>required</td>
+      <td style="word-wrap: break-word;">0</td>
+      <td>Long</td>
+      <td>The duration in milliseconds that removed Kafka cluster split offsets and enumerator state stay in checkpoints. Zero disables retention.</td>
     </tr>
     <tr>
       <td><h5>stream-enumerator-mode</h5></td>

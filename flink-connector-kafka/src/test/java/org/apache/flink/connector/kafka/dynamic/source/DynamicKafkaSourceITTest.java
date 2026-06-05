@@ -18,14 +18,18 @@
 
 package org.apache.flink.connector.kafka.dynamic.source;
 
+import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.ReaderInfo;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitsAssignment;
 import org.apache.flink.api.connector.source.mocks.MockSplitEnumeratorContext;
+import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.ExternalizedCheckpointRetention;
 import org.apache.flink.configuration.RestartStrategyOptions;
+import org.apache.flink.configuration.StateBackendOptions;
 import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
@@ -52,15 +56,21 @@ import org.apache.flink.connector.testframe.junit.annotations.TestExternalSystem
 import org.apache.flink.connector.testframe.junit.annotations.TestSemantics;
 import org.apache.flink.connector.testframe.testsuites.SourceTestSuiteBase;
 import org.apache.flink.core.execution.CheckpointingMode;
+import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.testutils.CommonTestUtils;
 import org.apache.flink.metrics.MetricGroup;
+import org.apache.flink.runtime.messages.FlinkJobTerminatedWithoutCancellationException;
 import org.apache.flink.runtime.testutils.InMemoryReporter;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.sink.legacy.RichSinkFunction;
 import org.apache.flink.streaming.connectors.kafka.DynamicKafkaSourceTestHelper;
 import org.apache.flink.streaming.connectors.kafka.KafkaTestBase;
 import org.apache.flink.test.util.MiniClusterWithClientResource;
+import org.apache.flink.test.util.TestUtils;
+import org.apache.flink.testutils.junit.SharedObjectsExtension;
+import org.apache.flink.testutils.junit.SharedReference;
 import org.apache.flink.util.CloseableIterator;
 
 import com.google.common.collect.ImmutableList;
@@ -76,6 +86,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
@@ -92,12 +103,16 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import static org.apache.flink.configuration.StateRecoveryOptions.SAVEPOINT_PATH;
 import static org.apache.flink.connector.kafka.dynamic.source.metrics.KafkaClusterMetricGroup.DYNAMIC_KAFKA_SOURCE_METRIC_GROUP;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -120,6 +135,9 @@ class DynamicKafkaSourceITTest {
     @Nested
     @TestInstance(TestInstance.Lifecycle.PER_CLASS)
     class DynamicKafkaSourceSpecificTests {
+        @RegisterExtension
+        final SharedObjectsExtension sharedObjects = SharedObjectsExtension.create();
+
         @BeforeAll
         void beforeAll() throws Throwable {
             DynamicKafkaSourceTestHelper.setup();
@@ -715,6 +733,97 @@ class DynamicKafkaSourceITTest {
         }
 
         @Test
+        void testRemovedClusterOffsetsRetainedAcrossCheckpointRestoreAndRescale() throws Throwable {
+            int kafkaClusterIdx = 0;
+            String topic = "test-retained-removed-cluster-" + System.currentTimeMillis();
+            DynamicKafkaSourceTestHelper.createTopic(kafkaClusterIdx, topic, NUM_PARTITIONS);
+
+            String testStreamId = "test-retained-removed-cluster-stream";
+            File metadataFile = File.createTempFile(testDir.getPath() + "/metadata", ".yaml");
+            writeClusterMetadataToFile(
+                    metadataFile,
+                    testStreamId,
+                    topic,
+                    ImmutableList.of(
+                            DynamicKafkaSourceTestHelper.getKafkaClusterTestEnvMetadata(
+                                    kafkaClusterIdx)));
+
+            SharedReference<List<Integer>> collectedRecords = sharedObjects.add(new ArrayList<>());
+            Configuration checkpointConfiguration = createCheckpointConfiguration();
+            JobClient phase1JobClient = null;
+            JobClient phase2JobClient = null;
+            try {
+                int stage1End =
+                        DynamicKafkaSourceTestHelper.produceToKafka(
+                                kafkaClusterIdx, topic, NUM_PARTITIONS, NUM_RECORDS_PER_SPLIT, 0);
+                phase1JobClient =
+                        startRetainedRemovedClusterJob(
+                                checkpointConfiguration,
+                                metadataFile,
+                                testStreamId,
+                                collectedRecords,
+                                1);
+                waitForCollectedRecords(
+                        collectedRecords,
+                        phase1JobClient,
+                        stage1End,
+                        "Could not read initial retained-cluster records before removal");
+                assertThat(copyCollectedRecords(collectedRecords))
+                        .containsExactlyInAnyOrderElementsOf(
+                                IntStream.range(0, stage1End).boxed().collect(Collectors.toList()));
+
+                File checkpointBeforeRemoval = waitForCompletedCheckpoint(null);
+                writeClusterMetadataToFile(
+                        metadataFile, testStreamId, topic, Collections.emptyList());
+                waitForKafkaClusterMetricsToDisappear(
+                        kafkaClusterTestEnvMetadata0.getKafkaClusterId());
+                waitForCompletedCheckpoint(checkpointBeforeRemoval);
+
+                phase1JobClient.cancel().get(30, TimeUnit.SECONDS);
+                phase1JobClient = null;
+                // The selected checkpoint can be subsumed before cancellation completes.
+                File retainedCheckpoint = waitForCompletedCheckpoint(null);
+
+                writeClusterMetadataToFile(
+                        metadataFile,
+                        testStreamId,
+                        topic,
+                        ImmutableList.of(
+                                DynamicKafkaSourceTestHelper.getKafkaClusterTestEnvMetadata(
+                                        kafkaClusterIdx)));
+                int stage2End =
+                        DynamicKafkaSourceTestHelper.produceToKafka(
+                                kafkaClusterIdx,
+                                topic,
+                                NUM_PARTITIONS,
+                                NUM_RECORDS_PER_SPLIT,
+                                stage1End);
+
+                Configuration restoreConfiguration = new Configuration(checkpointConfiguration);
+                restoreConfiguration.set(SAVEPOINT_PATH, retainedCheckpoint.toURI().toString());
+                phase2JobClient =
+                        startRetainedRemovedClusterJob(
+                                restoreConfiguration,
+                                metadataFile,
+                                testStreamId,
+                                collectedRecords,
+                                2);
+                waitForCollectedRecords(
+                        collectedRecords,
+                        phase2JobClient,
+                        stage2End,
+                        "Could not read records after retained cluster re-add and restore");
+
+                assertThat(copyCollectedRecords(collectedRecords))
+                        .containsExactlyInAnyOrderElementsOf(
+                                IntStream.range(0, stage2End).boxed().collect(Collectors.toList()));
+            } finally {
+                cancelJob(phase2JobClient);
+                cancelJob(phase1JobClient);
+            }
+        }
+
+        @Test
         void testTopicReAddMigrationUsingFileMetadataService() throws Throwable {
             // setup topics
             int kafkaClusterIdx = 0;
@@ -1134,6 +1243,162 @@ class DynamicKafkaSourceITTest {
                     .collect(Collectors.toSet());
         }
 
+        private Configuration createCheckpointConfiguration() {
+            Configuration configuration = new Configuration();
+            configuration.set(RestartStrategyOptions.RESTART_STRATEGY, "disable");
+            configuration.set(StateBackendOptions.STATE_BACKEND, "rocksdb");
+            File checkpointDir = new File(testDir, "retained-removed-cluster-checkpoints");
+            configuration.set(
+                    CheckpointingOptions.CHECKPOINTS_DIRECTORY, checkpointDir.toURI().toString());
+            configuration.set(
+                    CheckpointingOptions.EXTERNALIZED_CHECKPOINT_RETENTION,
+                    ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION);
+            configuration.set(CheckpointingOptions.MAX_RETAINED_CHECKPOINTS, 2);
+            return configuration;
+        }
+
+        private JobClient startRetainedRemovedClusterJob(
+                Configuration configuration,
+                File metadataFile,
+                String streamId,
+                SharedReference<List<Integer>> collectedRecords,
+                int parallelism)
+                throws Exception {
+            StreamExecutionEnvironment env =
+                    StreamExecutionEnvironment.getExecutionEnvironment(configuration);
+            env.setParallelism(parallelism);
+            env.enableCheckpointing(100L);
+
+            Properties properties = new Properties();
+            properties.setProperty(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "100");
+            properties.setProperty(
+                    DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "100");
+            properties.setProperty(
+                    DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_FAILURE_THRESHOLD.key(),
+                    "2");
+            properties.setProperty(
+                    DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
+                    "60000");
+            properties.setProperty(
+                    CommonClientConfigs.GROUP_ID_CONFIG, "test-retained-removed-cluster-offsets");
+
+            YamlFileMetadataService yamlFileMetadataService =
+                    new YamlFileMetadataService(metadataFile.getPath(), Duration.ofMillis(100));
+            DynamicKafkaSource<Integer> dynamicKafkaSource =
+                    DynamicKafkaSource.<Integer>builder()
+                            .setStreamIds(Collections.singleton(streamId))
+                            .setKafkaMetadataService(yamlFileMetadataService)
+                            .setDeserializer(
+                                    KafkaRecordDeserializationSchema.valueOnly(
+                                            IntegerDeserializer.class))
+                            .setStartingOffsets(OffsetsInitializer.earliest())
+                            .setProperties(properties)
+                            .build();
+
+            DataStreamSource<Integer> stream =
+                    env.fromSource(
+                            dynamicKafkaSource,
+                            WatermarkStrategy.noWatermarks(),
+                            "dynamic-kafka-src");
+            stream.uid("dynamic-kafka-src");
+            stream.addSink(new CollectingSink(collectedRecords)).uid("collecting-sink");
+            return env.executeAsync("test-retained-removed-cluster-offsets");
+        }
+
+        private void waitForCollectedRecords(
+                SharedReference<List<Integer>> collectedRecords,
+                JobClient jobClient,
+                int expectedCount,
+                String message)
+                throws Exception {
+            CommonTestUtils.waitUtil(
+                    () -> {
+                        try {
+                            throwIfJobFailed(jobClient);
+                        } catch (Exception exception) {
+                            throw new RuntimeException(exception);
+                        }
+                        return collectedRecords.applySync(
+                                records -> records.size() >= expectedCount);
+                    },
+                    Duration.ofSeconds(30),
+                    message);
+        }
+
+        private List<Integer> copyCollectedRecords(
+                SharedReference<List<Integer>> collectedRecords) {
+            return collectedRecords.applySync(ArrayList::new);
+        }
+
+        private void waitForKafkaClusterMetricsToDisappear(String kafkaClusterId) throws Exception {
+            CommonTestUtils.waitUtil(
+                    () -> !hasKafkaClusterMetrics(kafkaClusterId),
+                    Duration.ofSeconds(30),
+                    "Could not observe removed Kafka cluster metrics disappear");
+        }
+
+        private boolean hasKafkaClusterMetrics(String kafkaClusterId) {
+            Optional<MetricGroup> groups = reporter.findGroup(DYNAMIC_KAFKA_SOURCE_METRIC_GROUP);
+            if (groups.isEmpty()) {
+                return false;
+            }
+
+            return reporter.getMetricsByGroup(groups.get()).keySet().stream()
+                    .map(metricName -> groups.get().getMetricIdentifier(metricName))
+                    .anyMatch(metricName -> metricName.contains(".kafkaCluster." + kafkaClusterId));
+        }
+
+        private File waitForCompletedCheckpoint(File previousCheckpoint) throws Exception {
+            AtomicReference<File> completedCheckpoint = new AtomicReference<>();
+            CommonTestUtils.waitUtil(
+                    () -> {
+                        try {
+                            File checkpoint =
+                                    TestUtils.getMostRecentCompletedCheckpoint(
+                                            new File(
+                                                    testDir,
+                                                    "retained-removed-cluster-checkpoints"));
+                            if (checkpoint != null && !checkpoint.equals(previousCheckpoint)) {
+                                completedCheckpoint.set(checkpoint);
+                                return true;
+                            }
+                        } catch (Exception ignored) {
+                            // Checkpoint directory is not populated yet.
+                        }
+                        return false;
+                    },
+                    Duration.ofSeconds(30),
+                    "Could not obtain a completed retained-cluster checkpoint");
+            return completedCheckpoint.get();
+        }
+
+        private void cancelJob(JobClient jobClient) throws Exception {
+            if (jobClient != null) {
+                try {
+                    jobClient.cancel().get(30, TimeUnit.SECONDS);
+                } catch (ExecutionException executionException) {
+                    if (!(executionException.getCause()
+                            instanceof FlinkJobTerminatedWithoutCancellationException)) {
+                        throw executionException;
+                    }
+                }
+            }
+        }
+
+        private void throwIfJobFailed(JobClient jobClient) throws Exception {
+            if (jobClient.getJobStatus().get(30, TimeUnit.SECONDS) != JobStatus.FAILED) {
+                return;
+            }
+
+            try {
+                jobClient.getJobExecutionResult().get(30, TimeUnit.SECONDS);
+            } catch (ExecutionException executionException) {
+                throw new RuntimeException(
+                        "Dynamic source job failed before expected records were collected",
+                        executionException.getCause());
+            }
+        }
+
         private void registerReader(
                 MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context,
                 DynamicKafkaSourceEnumerator enumerator,
@@ -1204,6 +1469,19 @@ class DynamicKafkaSourceITTest {
                     Collections.singletonMap(
                             kafkaClusterId,
                             new ClusterMetadata(Collections.singleton(topic), properties)));
+        }
+    }
+
+    private static final class CollectingSink extends RichSinkFunction<Integer> {
+        private final SharedReference<List<Integer>> collectedRecords;
+
+        private CollectingSink(SharedReference<List<Integer>> collectedRecords) {
+            this.collectedRecords = collectedRecords;
+        }
+
+        @Override
+        public void invoke(Integer value, Context context) {
+            collectedRecords.consumeSync(records -> records.add(value));
         }
     }
 
