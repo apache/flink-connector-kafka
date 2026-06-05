@@ -45,20 +45,16 @@ import org.apache.flink.runtime.state.OperatorStateHandle;
 import org.apache.flink.runtime.state.OperatorStreamStateHandle;
 import org.apache.flink.runtime.state.memory.ByteStreamStateHandle;
 import org.apache.flink.streaming.connectors.kafka.DynamicKafkaSourceTestHelper;
+import org.apache.flink.testutils.logging.LoggerAuditingExtension;
 
 import com.google.common.collect.ImmutableSet;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.core.LogEvent;
-import org.apache.logging.log4j.core.Logger;
-import org.apache.logging.log4j.core.appender.AbstractAppender;
-import org.apache.logging.log4j.core.config.Property;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -80,6 +76,7 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.slf4j.event.Level.DEBUG;
 
 /** A test for {@link DynamicKafkaSourceEnumerator}. */
 public class DynamicKafkaSourceEnumeratorTest {
@@ -90,6 +87,10 @@ public class DynamicKafkaSourceEnumeratorTest {
     private static final String SOURCE_READER_SPLIT_STATE_NAME = "source-reader-splits";
     private static final String REFRESHED_CLUSTER_PROPERTY_KEY = "refreshed.cluster.property";
     private static final String REFRESHED_CLUSTER_PROPERTY_VALUE = "from-metadata-service";
+
+    @RegisterExtension
+    public final LoggerAuditingExtension dynamicEnumeratorLogger =
+            new LoggerAuditingExtension(DynamicKafkaSourceEnumerator.class, DEBUG);
 
     @BeforeAll
     public static void beforeAll() throws Throwable {
@@ -483,9 +484,7 @@ public class DynamicKafkaSourceEnumeratorTest {
     public void testSnapshotStateLogsAssignedAndUnassignedOffsets() throws Throwable {
         try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
-                DynamicKafkaSourceEnumerator enumerator = createEnumerator(context);
-                TestLogAppender appender = new TestLogAppender()) {
-            appender.register();
+                DynamicKafkaSourceEnumerator enumerator = createEnumerator(context)) {
             enumerator.start();
 
             mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, 0);
@@ -493,12 +492,11 @@ public class DynamicKafkaSourceEnumeratorTest {
             mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, 2);
             runAllOneTimeCallables(context);
 
-            appender.clear();
             enumerator.snapshotState(7L);
 
             // Snapshot logs in dynamic Kafka source encode special offset sentinels:
             // -2 = EARLIEST_OFFSET in KafkaPartitionSplit (not a real partition offset).
-            assertThat(appender.messages)
+            assertThat(dynamicEnumeratorLogger.getMessages())
                     .as(
                             "checkpoint snapshot should label enumerator startup offsets for assigned splits")
                     .anyMatch(
@@ -550,9 +548,7 @@ public class DynamicKafkaSourceEnumeratorTest {
         DynamicKafkaSourceEnumState checkpointState = getCheckpointState();
 
         try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
-                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
-                TestLogAppender appender = new TestLogAppender()) {
-            appender.register();
+                new MockSplitEnumeratorContext<>(NUM_SUBTASKS)) {
             try (DynamicKafkaSourceEnumerator restoredEnumerator =
                     new DynamicKafkaSourceEnumerator(
                             new KafkaStreamSetSubscriber(Collections.singleton(TOPIC)),
@@ -568,7 +564,7 @@ public class DynamicKafkaSourceEnumeratorTest {
                             new TestKafkaEnumContextProxyFactory())) {
                 restoredEnumerator.start();
 
-                assertThat(appender.messages)
+                assertThat(dynamicEnumeratorLogger.getMessages())
                         .as("restore path should emit checkpoint state logs")
                         .anyMatch(
                                 message ->
@@ -1964,45 +1960,6 @@ public class DynamicKafkaSourceEnumeratorTest {
             throws Throwable {
         while (!context.getOneTimeCallables().isEmpty()) {
             context.runNextOneTimeCallable();
-        }
-    }
-
-    private static class TestLogAppender extends AbstractAppender implements AutoCloseable {
-        private final Logger logger;
-        private final List<String> messages = new ArrayList<>();
-        private Level previousLevel;
-
-        private TestLogAppender() {
-            super("testAppender", null, null, false, Property.EMPTY_ARRAY);
-            this.logger = (Logger) LogManager.getLogger(DynamicKafkaSourceEnumerator.class);
-        }
-
-        private void register() {
-            start();
-            logger.addAppender(this);
-            previousLevel = logger.getLevel();
-            logger.setLevel(Level.DEBUG);
-        }
-
-        private void clear() {
-            messages.clear();
-        }
-
-        private void unregister() {
-            logger.removeAppender(this);
-            logger.setLevel(previousLevel);
-            stop();
-            messages.clear();
-        }
-
-        @Override
-        public void append(LogEvent event) {
-            messages.add(event.getMessage().getFormattedMessage());
-        }
-
-        @Override
-        public void close() {
-            unregister();
         }
     }
 
