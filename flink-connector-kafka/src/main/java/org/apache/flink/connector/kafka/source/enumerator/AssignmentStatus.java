@@ -27,7 +27,12 @@ public enum AssignmentStatus {
     /** Partitions that have been assigned to readers. */
     ASSIGNED(0),
     /** The partitions that have been discovered but not assigned to readers yet. */
-    UNASSIGNED(1);
+    UNASSIGNED(1),
+    /**
+     * Splits that have been removed from the source but are retained as tombstones for potential
+     * resurrection within the retention window.
+     */
+    TOMBSTONED(2);
     private final int statusCode;
 
     AssignmentStatus(int statusCode) {
