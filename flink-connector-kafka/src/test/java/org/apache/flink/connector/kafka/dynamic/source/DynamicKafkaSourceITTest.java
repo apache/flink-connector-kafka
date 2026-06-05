@@ -777,10 +777,12 @@ class DynamicKafkaSourceITTest {
                         metadataFile, testStreamId, topic, Collections.emptyList());
                 waitForKafkaClusterMetricsToDisappear(
                         kafkaClusterTestEnvMetadata0.getKafkaClusterId());
-                File retainedCheckpoint = waitForCompletedCheckpoint(checkpointBeforeRemoval);
+                waitForCompletedCheckpoint(checkpointBeforeRemoval);
 
                 phase1JobClient.cancel().get(30, TimeUnit.SECONDS);
                 phase1JobClient = null;
+                // The selected checkpoint can be subsumed before cancellation completes.
+                File retainedCheckpoint = waitForCompletedCheckpoint(null);
 
                 writeClusterMetadataToFile(
                         metadataFile,
