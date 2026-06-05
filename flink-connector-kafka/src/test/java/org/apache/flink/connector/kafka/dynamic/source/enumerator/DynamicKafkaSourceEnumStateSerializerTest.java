@@ -104,7 +104,15 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
                                                 getSplitAssignment("topic3", 1, UNASSIGNED),
                                                 getSplitAssignment("topic4", 2, UNASSIGNED),
                                                 getSplitAssignment("topic5", 3, UNASSIGNED)),
-                                        false)));
+                                        false)),
+                        ImmutableMap.of(
+                                "retained-cluster",
+                                new DynamicKafkaSourceEnumState.RetainedClusterState(
+                                        new KafkaSourceEnumState(
+                                                ImmutableSet.of(
+                                                        getSplitAssignment("topic6", 0, ASSIGNED)),
+                                                true),
+                                        123L)));
 
         DynamicKafkaSourceEnumState dynamicKafkaSourceEnumStateAfterSerde =
                 dynamicKafkaSourceEnumStateSerializer.deserialize(
@@ -190,6 +198,7 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
                 dynamicKafkaSourceEnumStateSerializer.deserialize(1, serializedState);
 
         assertThat(dynamicKafkaSourceEnumState.getClusterEnumeratorStates()).isEmpty();
+        assertThat(dynamicKafkaSourceEnumState.getRetainedClusterEnumeratorStates()).isEmpty();
         KafkaStream kafkaStream = dynamicKafkaSourceEnumState.getKafkaStreams().iterator().next();
         assertThat(kafkaStream.getStreamId()).isEqualTo("stream0");
         ClusterMetadata clusterMetadata = kafkaStream.getClusterMetadataMap().get("cluster0");

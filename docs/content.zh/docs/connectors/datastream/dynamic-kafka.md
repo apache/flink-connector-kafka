@@ -229,6 +229,11 @@ swap from one cluster to the new cluster when the service makes that change in t
 
 Cluster metadata 可以包含每个集群的起始/停止 offsets initializer，用于覆盖全局 builder 配置。
 
+默认情况下，从 metadata 中移除集群后，后续 checkpoint 也会移除该集群的 split offset。
+如果希望在之后重新加入集群或恢复作业时继续使用这些 offset，请将
+`stream-metadata-removed-cluster-retention-ms` 设置为正数。例如，`604800000`
+会将已移除集群的状态保留七天，之后 source 将不再把它写入 checkpoint。
+
 ### Additional Properties
 There are configuration options in DynamicKafkaSourceOptions that can be configured in the properties through the builder:
 <table class="table table-bordered">
@@ -255,6 +260,13 @@ There are configuration options in DynamicKafkaSourceOptions that can be configu
       <td style="word-wrap: break-word;">1</td>
       <td>Integer</td>
       <td>The number of consecutive failures before letting the exception from Kafka metadata service discovery trigger jobmanager failure and global failover. The default is one to at least catch startup failures.</td>
+    </tr>
+    <tr>
+      <td><h5>stream-metadata-removed-cluster-retention-ms</h5></td>
+      <td>required</td>
+      <td style="word-wrap: break-word;">0</td>
+      <td>Long</td>
+      <td>已移除 Kafka 集群的 split offset 和 enumerator 状态继续写入 checkpoint 的时长，单位为毫秒。零值会禁用保留。</td>
     </tr>
     <tr>
       <td><h5>stream-enumerator-mode</h5></td>
