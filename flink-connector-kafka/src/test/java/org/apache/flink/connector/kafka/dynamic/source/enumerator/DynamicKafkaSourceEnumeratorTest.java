@@ -682,6 +682,163 @@ public class DynamicKafkaSourceEnumeratorTest {
     }
 
     @Test
+    public void testEnumeratorStateRetainsRemovedClusterUntilExpired() throws Throwable {
+        int restoredParallelism = NUM_SUBTASKS + 1;
+        KafkaStream initialStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+        KafkaStream shrunkStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+        String removedClusterId = DynamicKafkaSourceTestHelper.getKafkaClusterId(1);
+        shrunkStream.getClusterMetadataMap().remove(removedClusterId);
+
+        try (MockKafkaMetadataService metadataService =
+                        new MockKafkaMetadataService(Collections.singleton(initialStream));
+                MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                context,
+                                metadataService,
+                                (properties) -> {
+                                    properties.setProperty(
+                                            DynamicKafkaSourceOptions
+                                                    .STREAM_METADATA_DISCOVERY_INTERVAL_MS
+                                                    .key(),
+                                            "1");
+                                    properties.setProperty(
+                                            DynamicKafkaSourceOptions
+                                                    .STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS
+                                                    .key(),
+                                            "1000");
+                                })) {
+            enumerator.start();
+            context.runPeriodicCallable(0);
+            runAllOneTimeCallables(context);
+
+            mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, 0);
+            mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, 1);
+            runAllOneTimeCallables(context);
+
+            metadataService.setKafkaStreams(Collections.singleton(shrunkStream));
+            context.runPeriodicCallable(0);
+            runAllOneTimeCallables(context);
+
+            DynamicKafkaSourceEnumState retainedCheckpoint = enumerator.snapshotState(-1);
+            assertThat(retainedCheckpoint.getClusterEnumeratorStates())
+                    .doesNotContainKey(removedClusterId);
+            assertThat(retainedCheckpoint.getRetainedClusterEnumeratorStates())
+                    .containsKey(removedClusterId);
+
+            Properties restoredProperties = new Properties();
+            restoredProperties.setProperty(
+                    KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "0");
+            restoredProperties.setProperty(
+                    DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "1");
+            restoredProperties.setProperty(
+                    DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
+                    "1000");
+            try (MockKafkaMetadataService restoredMetadataService =
+                            new MockKafkaMetadataService(Collections.singleton(shrunkStream));
+                    MockSplitEnumeratorContext<DynamicKafkaSourceSplit> restoredContext =
+                            new MockSplitEnumeratorContext<>(restoredParallelism);
+                    DynamicKafkaSourceEnumerator restoredEnumerator =
+                            new DynamicKafkaSourceEnumerator(
+                                    new KafkaStreamSetSubscriber(Collections.singleton(TOPIC)),
+                                    restoredMetadataService,
+                                    restoredContext,
+                                    OffsetsInitializer.earliest(),
+                                    new NoStoppingOffsetsInitializer(),
+                                    restoredProperties,
+                                    Boundedness.CONTINUOUS_UNBOUNDED,
+                                    retainedCheckpoint,
+                                    new TestKafkaEnumContextProxyFactory())) {
+                restoredEnumerator.start();
+                restoredContext.runPeriodicCallable(0);
+                runAllOneTimeCallables(restoredContext);
+                for (int i = 0; i < restoredParallelism; i++) {
+                    mockRegisterReaderAndSendReaderStartupEvent(
+                            restoredContext, restoredEnumerator, i);
+                }
+                runAllOneTimeCallables(restoredContext);
+
+                int assignmentsBeforeReAdd = restoredContext.getSplitsAssignmentSequence().size();
+                restoredMetadataService.setKafkaStreams(Collections.singleton(initialStream));
+                restoredContext.runPeriodicCallable(0);
+                runAllOneTimeCallables(restoredContext);
+                assertThat(restoredContext.getSplitsAssignmentSequence())
+                        .as(
+                                "re-added cluster should not resend splits restored from retained state after rescale")
+                        .hasSize(assignmentsBeforeReAdd);
+            }
+
+            DynamicKafkaSourceEnumState expiredCheckpoint = retainedCheckpoint;
+            DynamicKafkaSourceEnumState.RetainedClusterState retainedClusterState =
+                    expiredCheckpoint.getRetainedClusterEnumeratorStates().get(removedClusterId);
+            expiredCheckpoint
+                    .getRetainedClusterEnumeratorStates()
+                    .put(
+                            removedClusterId,
+                            new DynamicKafkaSourceEnumState.RetainedClusterState(
+                                    retainedClusterState.getKafkaSourceEnumState(),
+                                    System.currentTimeMillis() - 1));
+
+            Properties expiredStateProperties = new Properties();
+            expiredStateProperties.setProperty(
+                    DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
+                    "1000");
+            try (MockKafkaMetadataService restoredMetadataService =
+                            new MockKafkaMetadataService(Collections.singleton(shrunkStream));
+                    MockSplitEnumeratorContext<DynamicKafkaSourceSplit> restoredContext =
+                            new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                    DynamicKafkaSourceEnumerator restoredEnumerator =
+                            new DynamicKafkaSourceEnumerator(
+                                    new KafkaStreamSetSubscriber(Collections.singleton(TOPIC)),
+                                    restoredMetadataService,
+                                    restoredContext,
+                                    OffsetsInitializer.earliest(),
+                                    new NoStoppingOffsetsInitializer(),
+                                    expiredStateProperties,
+                                    Boundedness.CONTINUOUS_UNBOUNDED,
+                                    expiredCheckpoint,
+                                    new TestKafkaEnumContextProxyFactory())) {
+                assertThat(
+                                restoredEnumerator
+                                        .snapshotState(-1)
+                                        .getRetainedClusterEnumeratorStates())
+                        .doesNotContainKey(removedClusterId);
+            }
+        }
+    }
+
+    @Test
+    public void testRemovedClusterRetentionOptionIsNotPassedToClusterEnumerator() throws Exception {
+        MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                new MockSplitEnumeratorContext<>(2);
+        try (DynamicKafkaSourceEnumerator enumerator =
+                createEnumerator(
+                        context,
+                        properties ->
+                                properties.setProperty(
+                                        DynamicKafkaSourceOptions
+                                                .STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS
+                                                .key(),
+                                        "60000"))) {
+            enumerator.start();
+            mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, 0);
+
+            Map<String, ?> clusterEnumeratorMap =
+                    (Map<String, ?>) Whitebox.getInternalState(enumerator, "clusterEnumeratorMap");
+            for (Object clusterEnumerator : clusterEnumeratorMap.values()) {
+                Properties clusterEnumeratorProperties =
+                        (Properties) Whitebox.getInternalState(clusterEnumerator, "properties");
+                assertThat(clusterEnumeratorProperties)
+                        .doesNotContainKey(
+                                DynamicKafkaSourceOptions
+                                        .STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS
+                                        .key());
+            }
+        }
+    }
+
+    @Test
     public void testStartupWithCheckpointState() throws Throwable {
         // init enumerator with checkpoint state
         final DynamicKafkaSourceEnumState dynamicKafkaSourceEnumState = getCheckpointState();
