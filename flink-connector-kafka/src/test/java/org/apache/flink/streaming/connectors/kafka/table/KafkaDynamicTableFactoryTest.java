@@ -709,6 +709,7 @@ class KafkaDynamicTableFactoryTest {
         assertThat(actualKafkaSink.listWritableMetadata())
                 .containsOnlyKeys(
                         KafkaDynamicSink.WritableMetadata.HEADERS.key,
+                        KafkaDynamicSink.WritableMetadata.HEADER_LIST.key,
                         KafkaDynamicSink.WritableMetadata.TIMESTAMP.key);
     }
 
@@ -969,6 +970,7 @@ class KafkaDynamicTableFactoryTest {
                 .containsOnlyKeys(
                         KafkaDynamicSink.WritableMetadata.TOPIC.key,
                         KafkaDynamicSink.WritableMetadata.HEADERS.key,
+                        KafkaDynamicSink.WritableMetadata.HEADER_LIST.key,
                         KafkaDynamicSink.WritableMetadata.TIMESTAMP.key);
     }
 
@@ -1008,6 +1010,7 @@ class KafkaDynamicTableFactoryTest {
                 .containsOnlyKeys(
                         KafkaDynamicSink.WritableMetadata.TOPIC.key,
                         KafkaDynamicSink.WritableMetadata.HEADERS.key,
+                        KafkaDynamicSink.WritableMetadata.HEADER_LIST.key,
                         KafkaDynamicSink.WritableMetadata.TIMESTAMP.key);
     }
 
@@ -1321,6 +1324,22 @@ class KafkaDynamicTableFactoryTest {
         ScanTableSource.ScanRuntimeProvider provider =
                 actualSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
         assertKafkaSource(provider);
+    }
+
+    @Test
+    void testHeadersAndMultiHeadersMutuallyExclusive() {
+        final KafkaDynamicSink sink =
+                (KafkaDynamicSink) createTableSink(SCHEMA, getBasicSinkOptions());
+        assertThatThrownBy(
+                        () ->
+                                sink.applyWritableMetadata(
+                                        Arrays.asList(
+                                                KafkaDynamicSink.WritableMetadata.HEADERS.key,
+                                                KafkaDynamicSink.WritableMetadata.HEADER_LIST.key),
+                                        SCHEMA.toSinkRowDataType()))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining(KafkaDynamicSink.WritableMetadata.HEADERS.key)
+                .hasMessageContaining(KafkaDynamicSink.WritableMetadata.HEADER_LIST.key);
     }
 
     @Test

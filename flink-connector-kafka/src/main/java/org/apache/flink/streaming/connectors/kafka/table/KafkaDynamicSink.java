@@ -31,6 +31,7 @@ import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.table.api.DataTypes;
+import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.Projection;
 import org.apache.flink.table.connector.ProviderContext;
@@ -274,6 +275,13 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
 
     @Override
     public void applyWritableMetadata(List<String> metadataKeys, DataType consumedDataType) {
+        if (metadataKeys.contains(WritableMetadata.HEADERS.key)
+                && metadataKeys.contains(WritableMetadata.HEADER_LIST.key)) {
+            throw new ValidationException(
+                    String.format(
+                            "The writable metadata is ambiguous. Please use either metadata key '%s' or '%s'.",
+                            WritableMetadata.HEADERS.key, WritableMetadata.HEADER_LIST.key));
+        }
         this.metadataKeys = metadataKeys;
         this.consumedDataType = consumedDataType;
     }
@@ -447,10 +455,55 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
                         final ArrayData valueArray = map.valueArray();
                         final List<Header> headers = new ArrayList<>();
                         for (int i = 0; i < keyArray.size(); i++) {
-                            if (!keyArray.isNullAt(i) && !valueArray.isNullAt(i)) {
+                            if (!keyArray.isNullAt(i)) {
+                                // StringData.toString() decodes UTF-8; invalid bytes produce
+                                // replacement characters (see FLIP-568).
                                 final String key = keyArray.getString(i).toString();
-                                final byte[] value = valueArray.getBinary(i);
+                                final byte[] value =
+                                        valueArray.isNullAt(i) ? null : valueArray.getBinary(i);
                                 headers.add(new KafkaHeader(key, value));
+                            }
+                        }
+                        return headers;
+                    }
+                }),
+
+        /**
+         * Wire-faithful alternative to {@code headers}: preserves duplicate keys and insertion
+         * order using {@code ARRAY<ROW<key STRING, value BYTES>>} instead of a lossy MAP.
+         */
+        HEADER_LIST(
+                "header-list",
+                DataTypes.ARRAY(
+                                DataTypes.ROW(
+                                                DataTypes.FIELD(
+                                                        "key", DataTypes.STRING().nullable()),
+                                                DataTypes.FIELD(
+                                                        "value", DataTypes.BYTES().nullable()))
+                                        .notNull())
+                        .nullable(),
+                new MetadataConverter() {
+                    private static final long serialVersionUID = 1L;
+
+                    @Override
+                    public Object read(RowData row, int pos) {
+                        if (row.isNullAt(pos)) {
+                            return null;
+                        }
+                        final ArrayData arrayData = row.getArray(pos);
+                        final List<Header> headers = new ArrayList<>();
+                        for (int i = 0; i < arrayData.size(); i++) {
+                            if (!arrayData.isNullAt(i)) {
+                                final RowData headerRow = arrayData.getRow(i, 2);
+                                if (headerRow.isNullAt(0)) {
+                                    continue;
+                                }
+                                // StringData.toString() decodes UTF-8; invalid bytes produce
+                                // replacement characters (see FLIP-568).
+                                final String name = headerRow.getString(0).toString();
+                                final byte[] value =
+                                        headerRow.isNullAt(1) ? null : headerRow.getBinary(1);
+                                headers.add(new KafkaHeader(name, value));
                             }
                         }
                         return headers;
