@@ -136,7 +136,7 @@ of all available metadata fields.
       <td>
          该选项可以传递任意的 Kafka 参数。选项的后缀名必须匹配定义在 <a href="https://kafka.apache.org/documentation/#configuration">Kafka 参数文档</a>中的参数名。
          Flink 会自动移除 选项名中的 "properties." 前缀，并将转换后的键名以及值传入 KafkaClient。 例如，你可以通过 <code>'properties.allow.auto.create.topics' = 'false'</code>
-         来禁止自动创建 topic。 但是，某些选项，例如<code>'auto.offset.reset'</code> 是不允许通过该方式传递参数，因为 Flink 会重写这些参数的值。
+         来禁止自动创建 topic。<code>'auto.offset.reset'</code> 属性用于配置 source 如何处理 Kafka 中不存在的初始化起始 offset。它独立于 <code>'scan.startup.mode'</code>。某些其他配置项可能不受支持，因为 Flink 会覆盖它们。
       </td>
     </tr>
     <tr>
