@@ -382,7 +382,7 @@ public class KafkaSourceBuilder<OUT> {
      * created.
      *
      * <ul>
-     *   <li><code>auto.offset.reset.strategy</code> is overridden by {@link
+     *   <li><code>auto.offset.reset</code> is overridden by {@link
      *       OffsetsInitializer#getAutoOffsetResetStrategy()} for the starting offsets, which is by
      *       default {@link OffsetsInitializer#earliest()}.
      *   <li><code>partition.discovery.interval.ms</code> is overridden to -1 when {@link
@@ -406,7 +406,7 @@ public class KafkaSourceBuilder<OUT> {
      * created.
      *
      * <ul>
-     *   <li><code>auto.offset.reset.strategy</code> is overridden by {@link
+     *   <li><code>auto.offset.reset</code> is overridden by {@link
      *       OffsetsInitializer#getAutoOffsetResetStrategy()} for the starting offsets, which is by
      *       default {@link OffsetsInitializer#earliest()}.
      *   <li><code>partition.discovery.interval.ms</code> is overridden to -1 when {@link

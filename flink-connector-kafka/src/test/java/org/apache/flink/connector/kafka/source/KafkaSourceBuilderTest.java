@@ -25,6 +25,7 @@ import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -83,6 +84,35 @@ public class KafkaSourceBuilderTest {
                                                 .booleanType()
                                                 .noDefaultValue()))
                 .isFalse();
+    }
+
+    @Test
+    public void testAutoOffsetResetDefaultsToInitializerStrategy() {
+        assertThat(getAutoOffsetResetStrategy(getBasicBuilder().build())).isEqualTo("earliest");
+    }
+
+    @Test
+    public void testAutoOffsetResetUsesExplicitInitializerStrategy() {
+        KafkaSource<String> kafkaSource =
+                getBasicBuilder()
+                        .setStartingOffsets(
+                                OffsetsInitializer.withOffsetResetStrategy(
+                                        OffsetsInitializer.earliest(), OffsetResetStrategy.NONE))
+                        .setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest")
+                        .build();
+
+        assertThat(getAutoOffsetResetStrategy(kafkaSource)).isEqualTo("none");
+    }
+
+    @Test
+    public void testAutoOffsetResetPropertyStillUsesInitializerStrategy() {
+        KafkaSource<String> kafkaSource =
+                getBasicBuilder()
+                        .setStartingOffsets(OffsetsInitializer.latest())
+                        .setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "none")
+                        .build();
+
+        assertThat(getAutoOffsetResetStrategy(kafkaSource)).isEqualTo("latest");
     }
 
     @Test
@@ -157,6 +187,21 @@ public class KafkaSourceBuilderTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining(
                         "Property group.id is required because partition topic-0 is initialized with committed offset");
+    }
+
+    @Test
+    public void testWrappedOffsetsInitializerValidation() {
+        assertThatThrownBy(
+                        () ->
+                                getBasicBuilder()
+                                        .setStartingOffsets(
+                                                OffsetsInitializer.withOffsetResetStrategy(
+                                                        OffsetsInitializer.committedOffsets(),
+                                                        OffsetResetStrategy.EARLIEST))
+                                        .build())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(
+                        "Property group.id is required when using committed offset for offsets initializer");
     }
 
     @Test
@@ -243,6 +288,15 @@ public class KafkaSourceBuilderTest {
                 .setTopics("topic")
                 .setDeserializer(
                         KafkaRecordDeserializationSchema.valueOnly(StringDeserializer.class));
+    }
+
+    private String getAutoOffsetResetStrategy(KafkaSource<?> kafkaSource) {
+        return kafkaSource
+                .getConfiguration()
+                .get(
+                        ConfigOptions.key(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG)
+                                .stringType()
+                                .noDefaultValue());
     }
 
     private static class ExampleCustomSubscriber implements KafkaSubscriber {

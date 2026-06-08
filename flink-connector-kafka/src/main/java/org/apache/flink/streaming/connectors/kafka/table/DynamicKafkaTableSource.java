@@ -462,31 +462,7 @@ public class DynamicKafkaTableSource
                 .setDeserializer(kafkaDeserializer)
                 .setProperties(properties);
 
-        switch (startupMode) {
-            case EARLIEST:
-                dynamicKafkaSourceBuilder.setStartingOffsets(OffsetsInitializer.earliest());
-                break;
-            case LATEST:
-                dynamicKafkaSourceBuilder.setStartingOffsets(OffsetsInitializer.latest());
-                break;
-            case GROUP_OFFSETS:
-                String offsetResetConfig =
-                        properties.getProperty(
-                                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                                OffsetResetStrategy.NONE.name());
-                OffsetResetStrategy offsetResetStrategy = getResetStrategy(offsetResetConfig);
-                dynamicKafkaSourceBuilder.setStartingOffsets(
-                        OffsetsInitializer.committedOffsets(offsetResetStrategy));
-                break;
-            case SPECIFIC_OFFSETS:
-                dynamicKafkaSourceBuilder.setStartingOffsets(
-                        OffsetsInitializer.offsets(specificStartupOffsets));
-                break;
-            case TIMESTAMP:
-                dynamicKafkaSourceBuilder.setStartingOffsets(
-                        OffsetsInitializer.timestamp(startupTimestampMillis));
-                break;
-        }
+        dynamicKafkaSourceBuilder.setStartingOffsets(getStartingOffsetsInitializer());
 
         switch (boundedMode) {
             case UNBOUNDED:
@@ -508,6 +484,35 @@ public class DynamicKafkaTableSource
         }
 
         return dynamicKafkaSourceBuilder.build();
+    }
+
+    private OffsetsInitializer getStartingOffsetsInitializer() {
+        final OffsetsInitializer startingOffsetsInitializer;
+        switch (startupMode) {
+            case EARLIEST:
+                startingOffsetsInitializer = OffsetsInitializer.earliest();
+                break;
+            case LATEST:
+                startingOffsetsInitializer = OffsetsInitializer.latest();
+                break;
+            case GROUP_OFFSETS:
+                startingOffsetsInitializer = OffsetsInitializer.committedOffsets();
+                break;
+            case SPECIFIC_OFFSETS:
+                startingOffsetsInitializer = OffsetsInitializer.offsets(specificStartupOffsets);
+                break;
+            case TIMESTAMP:
+                startingOffsetsInitializer = OffsetsInitializer.timestamp(startupTimestampMillis);
+                break;
+            default:
+                throw new IllegalStateException("Unsupported startup mode: " + startupMode);
+        }
+
+        String offsetResetConfig = properties.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
+        return offsetResetConfig == null
+                ? startingOffsetsInitializer
+                : OffsetsInitializer.withOffsetResetStrategy(
+                        startingOffsetsInitializer, getResetStrategy(offsetResetConfig));
     }
 
     private OffsetResetStrategy getResetStrategy(String offsetResetConfig) {

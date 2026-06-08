@@ -181,7 +181,11 @@ KafkaSource.builder()
     // Start from earliest offset
     .setStartingOffsets(OffsetsInitializer.earliest())
     // Start from latest offset
-    .setStartingOffsets(OffsetsInitializer.latest());
+    .setStartingOffsets(OffsetsInitializer.latest())
+    // Start from earliest offset, but fail if an initialized offset later falls out of range
+    .setStartingOffsets(
+        OffsetsInitializer.withOffsetResetStrategy(
+            OffsetsInitializer.earliest(), OffsetResetStrategy.NONE));
 ```
 {{< /tab >}}
 {{< tab "Python" >}}
@@ -235,7 +239,7 @@ for more details.
 
 Please note that the following keys will be overridden by the builder even if
 it is configured:
-- ```auto.offset.reset.strategy``` is overridden by ```OffsetsInitializer#getAutoOffsetResetStrategy()```
+- ```auto.offset.reset``` is overridden by ```OffsetsInitializer#getAutoOffsetResetStrategy()```
   for the starting offsets
 - ```partition.discovery.interval.ms``` is overridden to -1 when
   ```setBounded(OffsetsInitializer)``` has been invoked
