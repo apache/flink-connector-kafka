@@ -179,7 +179,11 @@ KafkaSource.builder()
     // 从最早位点开始消费
     .setStartingOffsets(OffsetsInitializer.earliest())
     // 从最末尾位点开始消费
-    .setStartingOffsets(OffsetsInitializer.latest());
+    .setStartingOffsets(OffsetsInitializer.latest())
+    // 从最早位点开始消费，但如果初始化后的位点超出范围则失败
+    .setStartingOffsets(
+        OffsetsInitializer.withOffsetResetStrategy(
+            OffsetsInitializer.earliest(), OffsetResetStrategy.NONE));
 ```
 {{< /tab >}}
 {{< tab "Python" >}}
@@ -222,7 +226,7 @@ Kafka Source 支持流式和批式两种运行模式。默认情况下，KafkaSo
 Kafka consumer 的配置可以参考 [Apache Kafka 文档](http://kafka.apache.org/documentation/#consumerconfigs)。
 
 请注意，即使指定了以下配置项，构建器也会将其覆盖：
-- ```auto.offset.reset.strategy``` 被 OffsetsInitializer#getAutoOffsetResetStrategy() 覆盖
+- ```auto.offset.reset``` 被 OffsetsInitializer#getAutoOffsetResetStrategy() 覆盖
 - ```partition.discovery.interval.ms``` 会在批模式下被覆盖为 -1
 
 ### 动态分区检查

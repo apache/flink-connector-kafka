@@ -18,6 +18,7 @@
 
 package org.apache.flink.streaming.connectors.kafka.table;
 
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.table.api.DataTypes;
@@ -27,8 +28,11 @@ import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.factories.TestFormatFactory;
 
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -75,6 +79,28 @@ class DynamicKafkaTableFactoryTest {
                 .isThrownBy(() -> createTableSource(SCHEMA, options))
                 .withMessageContaining("stream-ids")
                 .withMessageContaining("stream-pattern");
+    }
+
+    @Test
+    void testTableSourceUsesConfiguredOffsetResetStrategy() throws Exception {
+        final Map<String, String> options = getSingleClusterSourceOptions();
+        options.put(
+                "properties." + ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                OffsetResetStrategy.NONE.name().toLowerCase());
+
+        final DynamicKafkaTableSource tableSource =
+                (DynamicKafkaTableSource) createTableSource(SCHEMA, options);
+
+        assertThat(getStartingOffsetsInitializer(tableSource).getAutoOffsetResetStrategy())
+                .isEqualTo(OffsetResetStrategy.NONE);
+    }
+
+    private OffsetsInitializer getStartingOffsetsInitializer(DynamicKafkaTableSource tableSource)
+            throws Exception {
+        Method method =
+                DynamicKafkaTableSource.class.getDeclaredMethod("getStartingOffsetsInitializer");
+        method.setAccessible(true);
+        return (OffsetsInitializer) method.invoke(tableSource);
     }
 
     private static Map<String, String> getSingleClusterSourceOptions() {

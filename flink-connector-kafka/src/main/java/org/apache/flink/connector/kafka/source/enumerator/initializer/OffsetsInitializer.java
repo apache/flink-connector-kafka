@@ -32,6 +32,8 @@ import java.io.Serializable;
 import java.util.Collection;
 import java.util.Map;
 
+import static org.apache.flink.util.Preconditions.checkNotNull;
+
 /**
  * An interface for users to specify the starting / stopping offset of a {@link
  * KafkaPartitionSplit}.
@@ -120,6 +122,31 @@ public interface OffsetsInitializer extends Serializable {
     static OffsetsInitializer committedOffsets(OffsetResetStrategy offsetResetStrategy) {
         return new ReaderHandledOffsetsInitializer(
                 KafkaPartitionSplit.COMMITTED_OFFSET, offsetResetStrategy);
+    }
+
+    /**
+     * Get an {@link OffsetsInitializer} which delegates offset initialization to the given {@link
+     * OffsetsInitializer} and uses the given {@link OffsetResetStrategy} when Kafka needs to reset
+     * an initialized starting offset.
+     *
+     * <p>The offset reset strategy is only used when the returned initializer is used to initialize
+     * starting offsets. The initialized offsets themselves are unchanged, so initializers such as
+     * {@link #earliest()} and {@link #latest()} keep their normal startup behavior.
+     *
+     * @param offsetsInitializer the initializer which resolves the starting offsets.
+     * @param offsetResetStrategy the offset reset strategy to use when the initialized starting
+     *     offsets are out of range.
+     * @return an {@link OffsetsInitializer} with the given offset reset strategy.
+     */
+    static OffsetsInitializer withOffsetResetStrategy(
+            OffsetsInitializer offsetsInitializer, OffsetResetStrategy offsetResetStrategy) {
+        checkNotNull(offsetsInitializer);
+        checkNotNull(offsetResetStrategy);
+        if (offsetsInitializer.getAutoOffsetResetStrategy() == offsetResetStrategy) {
+            return offsetsInitializer;
+        }
+        return new OffsetsInitializerWithOffsetResetStrategy(
+                offsetsInitializer, offsetResetStrategy);
     }
 
     /**
