@@ -228,6 +228,7 @@ class KafkaWriter<IN>
         byteOutMetric =
                 MetricUtil.getKafkaMetric(
                         producer.metrics(), KAFKA_PRODUCER_METRICS, "outgoing-byte-total");
+        latestOutgoingByteTotal = ((Number) byteOutMetric.metricValue()).longValue();
         if (disabledMetrics) {
             return;
         }
