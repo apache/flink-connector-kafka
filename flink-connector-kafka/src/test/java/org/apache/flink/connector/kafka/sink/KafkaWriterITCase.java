@@ -68,14 +68,15 @@ public class KafkaWriterITCase extends KafkaWriterTestBase {
         assertKafkaMetricNotPresent(guarantee, "register.producer.metrics", "false");
     }
 
-    @Test
-    public void testIncreasingRecordBasedCounters() throws Exception {
+    @ParameterizedTest
+    @EnumSource(
+            value = DeliveryGuarantee.class,
+            names = {"AT_LEAST_ONCE", "EXACTLY_ONCE"})
+    public void testIncreasingRecordBasedCounters(DeliveryGuarantee guarantee) throws Exception {
         final SinkWriterMetricGroup metricGroup = createSinkWriterMetricGroup();
 
         try (final KafkaWriter<Integer> writer =
-                createWriter(
-                        DeliveryGuarantee.AT_LEAST_ONCE,
-                        new SinkInitContext(metricGroup, timeService, null))) {
+                createWriter(guarantee, new SinkInitContext(metricGroup, timeService, null))) {
             final Counter numBytesOut = metricGroup.getIOMetricGroup().getNumBytesOutCounter();
             final Counter numRecordsOut = metricGroup.getIOMetricGroup().getNumRecordsOutCounter();
             final Counter numRecordsOutErrors = metricGroup.getNumRecordsOutErrorsCounter();
@@ -107,6 +108,15 @@ public class KafkaWriterITCase extends KafkaWriterTestBase {
             assertThat(numRecordsOut.getCount()).isEqualTo(2);
             assertThat(numRecordsOutErrors.getCount()).isEqualTo(0);
             assertThat(numRecordsSendErrors.getCount()).isEqualTo(0);
+
+            // numBytesOut doesn't decrease between producers
+            baselineCount = numBytesOut.getCount();
+            writer.prepareCommit();
+            writer.snapshotState(1);
+            timeService.trigger();
+            assertThat(numBytesOut.getCount())
+                    .as("numBytesOut must increment across producers")
+                    .isGreaterThanOrEqualTo(baselineCount);
         }
     }
 
