@@ -128,13 +128,17 @@ public class Decoder {
         }
     }
 
-    /** @return a {@link DeserializationSchema} or null. */
+    /**
+     * @return a {@link DeserializationSchema} or null.
+     */
     @Nullable
     public DeserializationSchema<RowData> getDeserializationSchema() {
         return deserializationSchema;
     }
 
-    /** @return a {@link Projector}. */
+    /**
+     * @return a {@link Projector}.
+     */
     public Projector getProjector() {
         return projector;
     }

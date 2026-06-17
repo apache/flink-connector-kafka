@@ -32,7 +32,6 @@ import org.apache.flink.runtime.messages.FlinkJobTerminatedWithoutCancellationEx
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.legacy.SinkFunction;
-import org.apache.flink.streaming.connectors.kafka.config.FormatProjectionPushdownLevel;
 import org.apache.flink.table.api.Table;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
@@ -71,7 +70,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
@@ -2216,56 +2214,50 @@ class KafkaTableITCase extends KafkaTableTestBase {
         }
     }
 
-    private static FormatProjectionPushdownLevel projectionPushdownLevel(final String format) {
-        if (Objects.equals(format, "avro")) {
-            return FormatProjectionPushdownLevel.NONE;
-        } else if (Objects.equals(format, "csv")) {
-            return FormatProjectionPushdownLevel.TOP_LEVEL;
-        } else if (Objects.equals(format, "json")) {
-            return FormatProjectionPushdownLevel.ALL;
-        } else if (Objects.equals(format, "debezium-json")) {
-            return FormatProjectionPushdownLevel.TOP_LEVEL;
+    private static boolean projectionPushdownEnabled(final String format) {
+        if ("avro".equals(format)) {
+            // Avro doesn't support projection pushdown properly:
+            // https://issues.apache.org/jira/browse/FLINK-35324
+            return false;
+        } else if ("csv".equals(format)) {
+            return true;
+        } else if ("json".equals(format)) {
+            return true;
+        } else if ("debezium-json".equals(format)) {
+            return true;
         } else {
             throw new UnsupportedOperationException(
                     String.format(
-                            "The level of support the %s format has for projection pushdown is unknown",
+                            "Whether the %s format supports projection pushdown is unknown",
                             format));
         }
     }
 
     private String formatOptions(final String format) {
-        final FormatProjectionPushdownLevel formatProjectionPushdownLevel =
-                projectionPushdownLevel(format);
-
+        final boolean enabled = projectionPushdownEnabled(format);
         return String.format(
                 "'format' = '%s',\n" + "'%s' = '%s',\n" + "'%s' = '%s'",
                 format,
-                KafkaConnectorOptions.KEY_PROJECTION_PUSHDOWN_LEVEL.key(),
-                formatProjectionPushdownLevel,
-                KafkaConnectorOptions.VALUE_PROJECTION_PUSHDOWN_LEVEL.key(),
-                formatProjectionPushdownLevel);
+                KafkaConnectorOptions.KEY_PROJECTION_PUSHDOWN_ENABLED.key(),
+                enabled,
+                KafkaConnectorOptions.VALUE_PROJECTION_PUSHDOWN_ENABLED.key(),
+                enabled);
     }
 
     private static String keyFormatOptions(final String format) {
-        final FormatProjectionPushdownLevel formatProjectionPushdownLevel =
-                projectionPushdownLevel(format);
-
         return String.format(
                 "'key.format' = '%s',\n" + "'%s' = '%s'",
                 format,
-                KafkaConnectorOptions.KEY_PROJECTION_PUSHDOWN_LEVEL.key(),
-                formatProjectionPushdownLevel);
+                KafkaConnectorOptions.KEY_PROJECTION_PUSHDOWN_ENABLED.key(),
+                projectionPushdownEnabled(format));
     }
 
     private static String valueFormatOptions(final String format) {
-        final FormatProjectionPushdownLevel formatProjectionPushdownLevel =
-                projectionPushdownLevel(format);
-
         return String.format(
                 "'value.format' = '%s',\n" + "'%s' = '%s'",
                 format,
-                KafkaConnectorOptions.VALUE_PROJECTION_PUSHDOWN_LEVEL.key(),
-                formatProjectionPushdownLevel);
+                KafkaConnectorOptions.VALUE_PROJECTION_PUSHDOWN_ENABLED.key(),
+                projectionPushdownEnabled(format));
     }
 
     private static final class TestingSinkFunction implements SinkFunction<RowData> {

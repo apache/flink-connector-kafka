@@ -32,13 +32,13 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
-import org.apache.flink.streaming.connectors.kafka.config.FormatProjectionPushdownLevel;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.streaming.connectors.kafka.table.DynamicKafkaDeserializationSchema.MetadataConverter;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.ProviderContext;
 import org.apache.flink.table.connector.format.DecodingFormat;
+import org.apache.flink.table.connector.format.ProjectableDecodingFormat;
 import org.apache.flink.table.connector.source.DataStreamScanProvider;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
@@ -131,9 +131,9 @@ public class KafkaDynamicSource
     /** Prefix that needs to be removed from fields when constructing the physical data type. */
     protected final @Nullable String keyPrefix;
 
-    protected final FormatProjectionPushdownLevel keyFormatProjectionPushdownLevel;
+    protected final boolean keyProjectionPushdownEnabled;
 
-    protected final FormatProjectionPushdownLevel valueFormatProjectionPushdownLevel;
+    protected final boolean valueProjectionPushdownEnabled;
 
     // --------------------------------------------------------------------------------------------
     // Kafka-specific attributes
@@ -207,8 +207,8 @@ public class KafkaDynamicSource
             boolean upsertMode,
             String tableIdentifier,
             @Nullable Integer parallelism,
-            FormatProjectionPushdownLevel keyFormatProjectionPushdownLevel,
-            FormatProjectionPushdownLevel valueFormatProjectionPushdownLevel) {
+            boolean keyProjectionPushdownEnabled,
+            boolean valueProjectionPushdownEnabled) {
         // Format attributes
         this.physicalDataType =
                 Preconditions.checkNotNull(
@@ -222,8 +222,8 @@ public class KafkaDynamicSource
         this.valueProjection =
                 Preconditions.checkNotNull(valueProjection, "Value projection must not be null.");
         this.keyPrefix = keyPrefix;
-        this.keyFormatProjectionPushdownLevel = keyFormatProjectionPushdownLevel;
-        this.valueFormatProjectionPushdownLevel = valueFormatProjectionPushdownLevel;
+        this.keyProjectionPushdownEnabled = keyProjectionPushdownEnabled;
+        this.valueProjectionPushdownEnabled = valueProjectionPushdownEnabled;
         // Mutable attributes
         this.producedDataType = physicalDataType;
         this.valueFormatMetadataKeys = Collections.emptyList();
@@ -272,7 +272,7 @@ public class KafkaDynamicSource
                         keyPrefix,
                         projectedPhysicalFields,
                         Collections.emptyList(),
-                        pushProjectionsIntoDecodingFormat(keyFormatProjectionPushdownLevel));
+                        keyProjectionPushdownEnabled);
 
         final Decoder valueDecoder =
                 Decoder.create(
@@ -283,7 +283,7 @@ public class KafkaDynamicSource
                         null,
                         projectedPhysicalFields,
                         valueFormatMetadataKeys,
-                        pushProjectionsIntoDecodingFormat(valueFormatProjectionPushdownLevel));
+                        valueProjectionPushdownEnabled);
 
         final TypeInformation<RowData> producedTypeInfo =
                 context.createTypeInformation(producedDataType);
@@ -359,9 +359,22 @@ public class KafkaDynamicSource
 
     @Override
     public boolean supportsNestedProjection() {
-        return (keyDecodingFormat == null
-                        || keyFormatProjectionPushdownLevel == FormatProjectionPushdownLevel.ALL)
-                && valueFormatProjectionPushdownLevel == FormatProjectionPushdownLevel.ALL;
+        return keySupportsNestedProjection() && valueSupportsNestedProjection();
+    }
+
+    private boolean keySupportsNestedProjection() {
+        if (keyDecodingFormat == null) {
+            return true;
+        }
+        return keyProjectionPushdownEnabled
+                && keyDecodingFormat instanceof ProjectableDecodingFormat
+                && ((ProjectableDecodingFormat<?>) keyDecodingFormat).supportsNestedProjection();
+    }
+
+    private boolean valueSupportsNestedProjection() {
+        return valueProjectionPushdownEnabled
+                && valueDecodingFormat instanceof ProjectableDecodingFormat
+                && ((ProjectableDecodingFormat<?>) valueDecodingFormat).supportsNestedProjection();
     }
 
     @Override
@@ -391,8 +404,8 @@ public class KafkaDynamicSource
                         upsertMode,
                         tableIdentifier,
                         parallelism,
-                        keyFormatProjectionPushdownLevel,
-                        valueFormatProjectionPushdownLevel);
+                        keyProjectionPushdownEnabled,
+                        valueProjectionPushdownEnabled);
         copy.producedDataType = producedDataType;
         copy.valueFormatMetadataKeys = valueFormatMetadataKeys;
         copy.metadataKeys = metadataKeys;
@@ -438,11 +451,8 @@ public class KafkaDynamicSource
                 && Objects.equals(watermarkStrategy, that.watermarkStrategy)
                 && Objects.equals(parallelism, that.parallelism)
                 && Arrays.deepEquals(projectedPhysicalFields, that.projectedPhysicalFields)
-                && Objects.equals(
-                        keyFormatProjectionPushdownLevel, that.keyFormatProjectionPushdownLevel)
-                && Objects.equals(
-                        valueFormatProjectionPushdownLevel,
-                        that.valueFormatProjectionPushdownLevel);
+                && keyProjectionPushdownEnabled == that.keyProjectionPushdownEnabled
+                && valueProjectionPushdownEnabled == that.valueProjectionPushdownEnabled;
     }
 
     @Override
@@ -471,25 +481,11 @@ public class KafkaDynamicSource
                 watermarkStrategy,
                 parallelism,
                 Arrays.deepHashCode(projectedPhysicalFields),
-                keyFormatProjectionPushdownLevel,
-                valueFormatProjectionPushdownLevel);
+                keyProjectionPushdownEnabled,
+                valueProjectionPushdownEnabled);
     }
 
     // --------------------------------------------------------------------------------------------
-
-    private boolean pushProjectionsIntoDecodingFormat(
-            final FormatProjectionPushdownLevel formatProjectionPushdownLevel) {
-        switch (formatProjectionPushdownLevel) {
-            case NONE:
-                return false;
-            case TOP_LEVEL:
-            case ALL:
-                return true;
-            default:
-                throw new IllegalArgumentException(
-                        "Unsupported projection pushdown level: " + formatProjectionPushdownLevel);
-        }
-    }
 
     protected KafkaSource<RowData> createKafkaSource(
             Decoder keyDecoder, Decoder valueDecoder, TypeInformation<RowData> producedTypeInfo) {

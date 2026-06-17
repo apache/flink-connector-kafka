@@ -43,7 +43,6 @@ import org.apache.flink.formats.avro.typeutils.AvroSchemaConverter;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.SourceTransformation;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
-import org.apache.flink.streaming.connectors.kafka.config.FormatProjectionPushdownLevel;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkFixedPartitioner;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanStartupMode;
@@ -512,8 +511,8 @@ class KafkaDynamicTableFactoryTest {
                         false,
                         "abc",
                         1,
-                        FormatProjectionPushdownLevel.NONE,
-                        FormatProjectionPushdownLevel.NONE);
+                        false,
+                        false);
 
         final Supplier<Integer> runnable =
                 () -> {
@@ -1531,8 +1530,8 @@ class KafkaDynamicTableFactoryTest {
                 false,
                 FactoryMocks.IDENTIFIER.asSummaryString(),
                 parallelism,
-                FormatProjectionPushdownLevel.NONE,
-                FormatProjectionPushdownLevel.NONE);
+                false,
+                false);
     }
 
     private static KafkaDynamicSink createExpectedSink(
