@@ -19,10 +19,13 @@
 package org.apache.flink.connector.kafka.dynamic.source.split;
 
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
+import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplitSerializer;
 
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -41,7 +44,51 @@ public class DynamicKafkaSourceSplitSerializerTest {
                         "test-cluster",
                         new KafkaPartitionSplit(new TopicPartition("test-topic", 3), 1));
         DynamicKafkaSourceSplit dynamicKafkaSourceSplitAfterSerde =
-                serializer.deserialize(1, serializer.serialize(dynamicKafkaSourceSplit));
+                serializer.deserialize(
+                        serializer.getVersion(), serializer.serialize(dynamicKafkaSourceSplit));
         assertEquals(dynamicKafkaSourceSplit, dynamicKafkaSourceSplitAfterSerde);
+    }
+
+    @Test
+    public void testSerdeRetainedSplit() throws IOException {
+        DynamicKafkaSourceSplitSerializer serializer = new DynamicKafkaSourceSplitSerializer();
+        DynamicKafkaSourceSplit retainedSplit =
+                new DynamicKafkaSourceSplit(
+                        "test-cluster",
+                        new KafkaPartitionSplit(new TopicPartition("test-topic", 3), 1),
+                        123L);
+
+        DynamicKafkaSourceSplit retainedSplitAfterSerde =
+                serializer.deserialize(
+                        serializer.getVersion(), serializer.serialize(retainedSplit));
+
+        assertEquals(retainedSplit, retainedSplitAfterSerde);
+    }
+
+    @Test
+    public void testDeserializeV1State() throws IOException {
+        DynamicKafkaSourceSplitSerializer serializer = new DynamicKafkaSourceSplitSerializer();
+        DynamicKafkaSourceSplit dynamicKafkaSourceSplit =
+                serializer.deserialize(1, serializeV1State());
+
+        assertEquals(
+                new DynamicKafkaSourceSplit(
+                        "test-cluster",
+                        new KafkaPartitionSplit(new TopicPartition("test-topic", 3), 1)),
+                dynamicKafkaSourceSplit);
+    }
+
+    private static byte[] serializeV1State() throws IOException {
+        KafkaPartitionSplitSerializer kafkaPartitionSplitSerializer =
+                new KafkaPartitionSplitSerializer();
+        KafkaPartitionSplit kafkaPartitionSplit =
+                new KafkaPartitionSplit(new TopicPartition("test-topic", 3), 1);
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                DataOutputStream out = new DataOutputStream(baos)) {
+            out.writeUTF("test-cluster");
+            out.writeInt(kafkaPartitionSplitSerializer.getVersion());
+            out.write(kafkaPartitionSplitSerializer.serialize(kafkaPartitionSplit));
+            return baos.toByteArray();
+        }
     }
 }

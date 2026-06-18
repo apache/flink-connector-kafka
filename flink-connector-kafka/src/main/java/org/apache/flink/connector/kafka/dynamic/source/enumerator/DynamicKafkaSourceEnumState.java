@@ -35,17 +35,27 @@ import java.util.Set;
 public class DynamicKafkaSourceEnumState {
     private final Set<KafkaStream> kafkaStreams;
     private final Map<String, KafkaSourceEnumState> clusterEnumeratorStates;
+    private final Map<String, RetainedClusterState> retainedClusterEnumeratorStates;
 
     public DynamicKafkaSourceEnumState() {
         this.kafkaStreams = new HashSet<>();
         this.clusterEnumeratorStates = new HashMap<>();
+        this.retainedClusterEnumeratorStates = new HashMap<>();
     }
 
     public DynamicKafkaSourceEnumState(
             Set<KafkaStream> kafkaStreams,
             Map<String, KafkaSourceEnumState> clusterEnumeratorStates) {
+        this(kafkaStreams, clusterEnumeratorStates, new HashMap<>());
+    }
+
+    public DynamicKafkaSourceEnumState(
+            Set<KafkaStream> kafkaStreams,
+            Map<String, KafkaSourceEnumState> clusterEnumeratorStates,
+            Map<String, RetainedClusterState> retainedClusterEnumeratorStates) {
         this.kafkaStreams = kafkaStreams;
         this.clusterEnumeratorStates = clusterEnumeratorStates;
+        this.retainedClusterEnumeratorStates = retainedClusterEnumeratorStates;
     }
 
     public Set<KafkaStream> getKafkaStreams() {
@@ -54,5 +64,29 @@ public class DynamicKafkaSourceEnumState {
 
     public Map<String, KafkaSourceEnumState> getClusterEnumeratorStates() {
         return clusterEnumeratorStates;
+    }
+
+    public Map<String, RetainedClusterState> getRetainedClusterEnumeratorStates() {
+        return retainedClusterEnumeratorStates;
+    }
+
+    /** Kafka enumerator state that stays checkpointed after its cluster becomes inactive. */
+    public static class RetainedClusterState {
+        private final KafkaSourceEnumState kafkaSourceEnumState;
+        private final long retainedUntilMs;
+
+        public RetainedClusterState(
+                KafkaSourceEnumState kafkaSourceEnumState, long retainedUntilMs) {
+            this.kafkaSourceEnumState = kafkaSourceEnumState;
+            this.retainedUntilMs = retainedUntilMs;
+        }
+
+        public KafkaSourceEnumState getKafkaSourceEnumState() {
+            return kafkaSourceEnumState;
+        }
+
+        public long getRetainedUntilMs() {
+            return retainedUntilMs;
+        }
     }
 }

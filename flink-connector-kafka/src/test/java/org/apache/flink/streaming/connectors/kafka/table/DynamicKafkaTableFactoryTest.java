@@ -18,6 +18,7 @@
 
 package org.apache.flink.streaming.connectors.kafka.table;
 
+import org.apache.flink.connector.kafka.dynamic.source.DynamicKafkaSourceOptions;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.table.api.DataTypes;
@@ -75,6 +76,25 @@ class DynamicKafkaTableFactoryTest {
                 .isThrownBy(() -> createTableSource(SCHEMA, options))
                 .withMessageContaining("stream-ids")
                 .withMessageContaining("stream-pattern");
+    }
+
+    @Test
+    void testTableSourceWithRemovedClusterRetentionOption() {
+        final Map<String, String> options = getSingleClusterSourceOptions();
+        options.put(
+                DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
+                "60000");
+
+        final DynamicTableSource actualSource = createTableSource(SCHEMA, options);
+        assertThat(actualSource).isInstanceOf(DynamicKafkaTableSource.class);
+
+        final DynamicKafkaTableSource actualKafkaSource = (DynamicKafkaTableSource) actualSource;
+        assertThat(
+                        actualKafkaSource.properties.getProperty(
+                                DynamicKafkaSourceOptions
+                                        .STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS
+                                        .key()))
+                .isEqualTo("60000");
     }
 
     private static Map<String, String> getSingleClusterSourceOptions() {
