@@ -79,6 +79,18 @@ public class DynamicKafkaSourceOptions {
                                     + "'per_cluster' keeps per-cluster assignment behavior, while "
                                     + "'global' enables global load-balanced assignment across clusters.");
 
+    public static final ConfigOption<Long> REMOVED_SPLITS_RETENTION_MS =
+            ConfigOptions.key("removed-splits-retention-ms")
+                    .longType()
+                    .defaultValue(0L)
+                    .withDescription(
+                            "Duration in milliseconds to retain removed splits in checkpoints. "
+                                    + "When Kafka metadata service experiences instability (e.g., during rollouts), "
+                                    + "clusters/partitions may temporarily disappear and reappear. Retaining removed "
+                                    + "splits allows the source to restore their progress if they return within the "
+                                    + "retention window, preventing duplicate processing or data loss. "
+                                    + "Default is 0ms (disabled). Recommended value for production: 86400000ms (24 hours).");
+
     @Internal
     public static <T> T getOption(
             Properties props, ConfigOption<?> configOption, Function<String, T> parser) {
