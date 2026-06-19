@@ -21,7 +21,7 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.connector.sink2.Committer;
 import org.apache.flink.connector.kafka.sink.KafkaCommittable;
 import org.apache.flink.connector.kafka.sink.KafkaShareEosCommittable;
-import org.apache.flink.connector.kafka.sink.ShareAckCommittable;
+import org.apache.flink.connector.kafka.share.ShareAckCommittable;
 import org.apache.flink.util.IOUtils;
 
 import java.io.IOException;

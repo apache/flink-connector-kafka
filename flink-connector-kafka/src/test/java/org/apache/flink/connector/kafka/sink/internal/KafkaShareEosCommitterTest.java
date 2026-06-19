@@ -20,7 +20,7 @@ package org.apache.flink.connector.kafka.sink.internal;
 import org.apache.flink.api.connector.sink2.Committer;
 import org.apache.flink.connector.kafka.sink.KafkaCommittable;
 import org.apache.flink.connector.kafka.sink.KafkaShareEosCommittable;
-import org.apache.flink.connector.kafka.sink.ShareAckCommittable;
+import org.apache.flink.connector.kafka.share.ShareAckCommittable;
 
 import org.junit.jupiter.api.Test;
 

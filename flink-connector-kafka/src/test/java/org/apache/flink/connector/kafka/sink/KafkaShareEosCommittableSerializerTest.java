@@ -17,6 +17,8 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.flink.connector.kafka.share.ShareAckCommittable;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;

@@ -15,39 +15,24 @@
  * limitations under the License.
  */
 
-package org.apache.flink.connector.kafka.sink;
+package org.apache.flink.connector.kafka.source.reader.transaction;
 
 import org.apache.flink.annotation.Internal;
 
 import java.util.Objects;
 
 @Internal
-public class ShareAckCommittable {
+public class ShareAckTransactionHandle {
 
-    private final long checkpointId;
     private final String transactionalId;
     private final long transactionOwnerId;
     private final short transactionOwnerEpoch;
-    private final String groupId;
-    private final int sourceSubtaskId;
 
-    public ShareAckCommittable(
-            long checkpointId,
-            String transactionalId,
-            long transactionOwnerId,
-            short transactionOwnerEpoch,
-            String groupId,
-            int sourceSubtaskId) {
-        this.checkpointId = checkpointId;
+    public ShareAckTransactionHandle(
+            String transactionalId, long transactionOwnerId, short transactionOwnerEpoch) {
         this.transactionalId = transactionalId;
         this.transactionOwnerId = transactionOwnerId;
         this.transactionOwnerEpoch = transactionOwnerEpoch;
-        this.groupId = groupId;
-        this.sourceSubtaskId = sourceSubtaskId;
-    }
-
-    public long getCheckpointId() {
-        return checkpointId;
     }
 
     public String getTransactionalId() {
@@ -62,14 +47,6 @@ public class ShareAckCommittable {
         return transactionOwnerEpoch;
     }
 
-    public String getGroupId() {
-        return groupId;
-    }
-
-    public int getSourceSubtaskId() {
-        return sourceSubtaskId;
-    }
-
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -78,43 +55,27 @@ public class ShareAckCommittable {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        ShareAckCommittable that = (ShareAckCommittable) o;
-        return checkpointId == that.checkpointId
-                && transactionOwnerId == that.transactionOwnerId
+        ShareAckTransactionHandle that = (ShareAckTransactionHandle) o;
+        return transactionOwnerId == that.transactionOwnerId
                 && transactionOwnerEpoch == that.transactionOwnerEpoch
-                && sourceSubtaskId == that.sourceSubtaskId
-                && transactionalId.equals(that.transactionalId)
-                && groupId.equals(that.groupId);
+                && transactionalId.equals(that.transactionalId);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(
-                checkpointId,
-                transactionalId,
-                transactionOwnerId,
-                transactionOwnerEpoch,
-                groupId,
-                sourceSubtaskId);
+        return Objects.hash(transactionalId, transactionOwnerId, transactionOwnerEpoch);
     }
 
     @Override
     public String toString() {
-        return "ShareAckCommittable{"
-                + "checkpointId="
-                + checkpointId
-                + ", transactionalId='"
+        return "ShareAckTransactionHandle{"
+                + "transactionalId='"
                 + transactionalId
                 + '\''
                 + ", transactionOwnerId="
                 + transactionOwnerId
                 + ", transactionOwnerEpoch="
                 + transactionOwnerEpoch
-                + ", groupId='"
-                + groupId
-                + '\''
-                + ", sourceSubtaskId="
-                + sourceSubtaskId
                 + '}';
     }
 }

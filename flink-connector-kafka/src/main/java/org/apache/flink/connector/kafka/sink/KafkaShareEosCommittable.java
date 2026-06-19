@@ -18,6 +18,7 @@
 package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.connector.kafka.share.ShareAckCommittable;
 
 import java.util.ArrayList;
 import java.util.Collection;
