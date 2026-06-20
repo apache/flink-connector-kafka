@@ -17,11 +17,19 @@
 
 package org.apache.flink.connector.kafka.share;
 
+import org.apache.flink.api.common.functions.RichMapFunction;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
 import org.apache.flink.connector.kafka.source.reader.transaction.KafkaShareAckTransactionManager;
 import org.apache.flink.connector.kafka.source.reader.transaction.ShareAckTransactionClient;
 import org.apache.flink.connector.kafka.source.reader.transaction.ShareAckTransactionHandle;
 import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
+import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.source.legacy.RichParallelSourceFunction;
+import org.apache.flink.streaming.api.functions.source.legacy.SourceFunction;
+import org.apache.flink.test.util.MiniClusterWithClientResource;
+import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.core.testutils.CommonTestUtils;
 
 import org.apache.kafka.clients.admin.AdminClient;
@@ -53,16 +61,20 @@ import org.junit.jupiter.api.parallel.ResourceLock;
 import org.testcontainers.utility.DockerImageName;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -77,6 +89,7 @@ class KafkaShareAckTransactionITCase {
     private static final String SHARE_AUTO_OFFSET_RESET_CONFIG = "share.auto.offset.reset";
     private static final Duration POLL_TIMEOUT = Duration.ofMillis(500);
     private static final Duration WAIT_TIMEOUT = Duration.ofSeconds(30);
+    private static final int PARALLELISM = 4;
 
     private TestKafkaContainer kafkaContainer;
 
@@ -178,21 +191,106 @@ class KafkaShareAckTransactionITCase {
         }
     }
 
+    @Test
+    void testParallelSubtasksCommitMultiPartitionShareAcks() throws Exception {
+        int partitionCount = 6;
+        int recordsPerPartition = 4;
+        int expectedRecords = partitionCount * recordsPerPartition;
+        ShareTestContext context = createContext(partitionCount);
+        produceToPartitions(
+                context.bootstrapServers, context.topic, partitionCount, recordsPerPartition);
+
+        MiniClusterWithClientResource miniCluster =
+                new MiniClusterWithClientResource(
+                        new MiniClusterResourceConfiguration.Builder()
+                                .setNumberTaskManagers(2)
+                                .setNumberSlotsPerTaskManager(2)
+                                .setConfiguration(new Configuration())
+                                .build());
+        miniCluster.before();
+        try (AdminClient admin = createAdmin(context.bootstrapServers)) {
+            StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+            env.setParallelism(PARALLELISM);
+
+            List<ShareReadRecord> results = new ArrayList<>();
+            try (CloseableIterator<ShareReadRecord> iterator =
+                    env.addSource(
+                                    new ParallelTransactionalShareSource(
+                                            context.bootstrapServers,
+                                            context.groupId,
+                                            context.topic))
+                            .name("parallel-share-source")
+                            .setParallelism(PARALLELISM)
+                            .rebalance()
+                            .map(new RecordingMapFunction())
+                            .name("downstream-map")
+                            .setParallelism(PARALLELISM)
+                            .executeAndCollect()) {
+                iterator.forEachRemaining(results::add);
+            }
+
+            List<ShareReadRecord> dataRecords =
+                    results.stream()
+                            .filter(record -> !record.sourceStarted)
+                            .collect(Collectors.toList());
+            assertThat(dataRecords).hasSize(expectedRecords);
+            assertThat(
+                            dataRecords.stream()
+                                    .map(record -> record.partition)
+                                    .collect(Collectors.toSet()))
+                    .containsExactlyInAnyOrderElementsOf(
+                            IntStream.range(0, partitionCount)
+                                    .boxed()
+                                    .collect(Collectors.toSet()));
+            assertThat(
+                            results.stream()
+                                    .filter(record -> record.sourceStarted)
+                                    .map(record -> record.sourceSubtaskId)
+                                    .collect(Collectors.toSet()))
+                    .containsExactlyInAnyOrder(0, 1, 2, 3);
+            assertThat(
+                            results.stream()
+                                    .map(record -> record.mapSubtaskId)
+                                    .collect(Collectors.toSet()))
+                    .hasSizeGreaterThan(1);
+            Set<String> topicPartitionOffsets =
+                    dataRecords.stream()
+                            .map(record -> record.partition + "-" + record.offset)
+                            .collect(Collectors.toCollection(HashSet::new));
+            assertThat(topicPartitionOffsets).hasSize(expectedRecords);
+
+            for (TopicPartition topicPartition : context.topicPartitions) {
+                waitForShareLag(admin, context.groupId, topicPartition, 0L);
+            }
+        } finally {
+            miniCluster.after();
+        }
+    }
+
     private ShareTestContext createContext() throws Exception {
+        return createContext(1);
+    }
+
+    private ShareTestContext createContext(int partitionCount) throws Exception {
         assumeTransactionalShareAckApis();
         String bootstrapServers = bootstrapServers();
         String suffix = UUID.randomUUID().toString();
         String topic = "flink-share-ack-it-" + suffix;
         String groupId = "flink-share-ack-group-" + suffix;
         TopicPartition topicPartition = new TopicPartition(topic, 0);
+        List<TopicPartition> topicPartitions =
+                IntStream.range(0, partitionCount)
+                        .mapToObj(partition -> new TopicPartition(topic, partition))
+                        .collect(Collectors.toList());
 
         try (AdminClient admin = createAdmin(bootstrapServers)) {
-            admin.createTopics(Set.of(new NewTopic(topic, 1, (short) 1)))
+            admin.createTopics(Set.of(new NewTopic(topic, partitionCount, (short) 1)))
                     .all()
                     .get(30, TimeUnit.SECONDS);
             alterShareGroupOffsetReset(admin, groupId);
         }
-        return new ShareTestContext(bootstrapServers, topic, groupId, topicPartition);
+        return new ShareTestContext(
+                bootstrapServers, topic, groupId, topicPartition, topicPartitions);
     }
 
     private String bootstrapServers() {
@@ -278,6 +376,23 @@ class KafkaShareAckTransactionITCase {
         }
     }
 
+    private static void produceToPartitions(
+            String bootstrapServers, String topic, int partitionCount, int recordsPerPartition)
+            throws Exception {
+        Properties properties = producerProperties(bootstrapServers);
+        try (KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(properties)) {
+            for (int partition = 0; partition < partitionCount; partition++) {
+                for (int index = 0; index < recordsPerPartition; index++) {
+                    String value = "partition-" + partition + "-record-" + index;
+                    byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+                    producer.send(new ProducerRecord<>(topic, partition, null, bytes, bytes))
+                            .get();
+                }
+            }
+            producer.flush();
+        }
+    }
+
     private static Properties producerProperties(String bootstrapServers) {
         Properties properties = new Properties();
         properties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
@@ -350,13 +465,19 @@ class KafkaShareAckTransactionITCase {
         private final String topic;
         private final String groupId;
         private final TopicPartition topicPartition;
+        private final List<TopicPartition> topicPartitions;
 
         private ShareTestContext(
-                String bootstrapServers, String topic, String groupId, TopicPartition topicPartition) {
+                String bootstrapServers,
+                String topic,
+                String groupId,
+                TopicPartition topicPartition,
+                List<TopicPartition> topicPartitions) {
             this.bootstrapServers = bootstrapServers;
             this.topic = topic;
             this.groupId = groupId;
             this.topicPartition = topicPartition;
+            this.topicPartitions = topicPartitions;
         }
     }
 
@@ -438,6 +559,10 @@ class KafkaShareAckTransactionITCase {
             return consumer.poll(POLL_TIMEOUT).count();
         }
 
+        private ConsumerRecords<byte[], byte[]> poll(Duration timeout) {
+            return consumer.poll(timeout);
+        }
+
         private void acknowledgeAccept(ConsumerRecord<byte[], byte[]> record) {
             consumer.acknowledge(record, AcknowledgeType.ACCEPT);
         }
@@ -468,6 +593,131 @@ class KafkaShareAckTransactionITCase {
                 producer.close();
             }
             consumer.close(Duration.ZERO);
+        }
+    }
+
+    private static final class ParallelTransactionalShareSource
+            extends RichParallelSourceFunction<ShareReadRecord> {
+
+        private static final int MAX_EMPTY_POLLS = 12;
+
+        private final String bootstrapServers;
+        private final String groupId;
+        private final String topic;
+
+        private volatile boolean running = true;
+
+        private ParallelTransactionalShareSource(
+                String bootstrapServers, String groupId, String topic) {
+            this.bootstrapServers = bootstrapServers;
+            this.groupId = groupId;
+            this.topic = topic;
+        }
+
+        @Override
+        public void run(SourceFunction.SourceContext<ShareReadRecord> context) throws Exception {
+            int subtaskId = getRuntimeContext().getTaskInfo().getIndexOfThisSubtask();
+            synchronized (context.getCheckpointLock()) {
+                context.collect(ShareReadRecord.sourceStarted(subtaskId));
+            }
+
+            ReflectiveShareAckTransactionClient client =
+                    new ReflectiveShareAckTransactionClient(bootstrapServers, groupId, topic);
+            try (KafkaShareAckTransactionManager manager =
+                    new KafkaShareAckTransactionManager(client, groupId, subtaskId, List.of())) {
+                boolean stagedAcknowledgements = false;
+                int emptyPolls = 0;
+                while (running && emptyPolls < MAX_EMPTY_POLLS) {
+                    ConsumerRecords<byte[], byte[]> records = client.poll(POLL_TIMEOUT);
+                    if (records.isEmpty()) {
+                        emptyPolls++;
+                        continue;
+                    }
+
+                    emptyPolls = 0;
+                    for (ConsumerRecord<byte[], byte[]> record : records) {
+                        client.acknowledgeAccept(record);
+                        synchronized (context.getCheckpointLock()) {
+                            context.collect(ShareReadRecord.data(subtaskId, record));
+                        }
+                    }
+                    manager.stageAcknowledgements();
+                    stagedAcknowledgements = true;
+                }
+
+                if (stagedAcknowledgements) {
+                    for (ShareAckCommittable committable : manager.snapshotState(1L)) {
+                        client.commit(committable);
+                    }
+                    manager.markCommittedUpTo(1L);
+                }
+            }
+        }
+
+        @Override
+        public void cancel() {
+            running = false;
+        }
+    }
+
+    private static final class RecordingMapFunction
+            extends RichMapFunction<ShareReadRecord, ShareReadRecord> {
+
+        @Override
+        public ShareReadRecord map(ShareReadRecord value) {
+            return value.withMapSubtaskId(
+                    getRuntimeContext().getTaskInfo().getIndexOfThisSubtask());
+        }
+    }
+
+    private static final class ShareReadRecord implements Serializable {
+        private static final long serialVersionUID = 1L;
+
+        private final boolean sourceStarted;
+        private final int sourceSubtaskId;
+        private final int mapSubtaskId;
+        private final int partition;
+        private final long offset;
+        private final String value;
+
+        private ShareReadRecord(
+                boolean sourceStarted,
+                int sourceSubtaskId,
+                int mapSubtaskId,
+                int partition,
+                long offset,
+                String value) {
+            this.sourceStarted = sourceStarted;
+            this.sourceSubtaskId = sourceSubtaskId;
+            this.mapSubtaskId = mapSubtaskId;
+            this.partition = partition;
+            this.offset = offset;
+            this.value = value;
+        }
+
+        private static ShareReadRecord sourceStarted(int subtaskId) {
+            return new ShareReadRecord(true, subtaskId, -1, -1, -1L, "");
+        }
+
+        private static ShareReadRecord data(
+                int subtaskId, ConsumerRecord<byte[], byte[]> record) {
+            return new ShareReadRecord(
+                    false,
+                    subtaskId,
+                    -1,
+                    record.partition(),
+                    record.offset(),
+                    value(record));
+        }
+
+        private ShareReadRecord withMapSubtaskId(int mapSubtaskId) {
+            return new ShareReadRecord(
+                    sourceStarted,
+                    sourceSubtaskId,
+                    mapSubtaskId,
+                    partition,
+                    offset,
+                    value);
         }
     }
 }
