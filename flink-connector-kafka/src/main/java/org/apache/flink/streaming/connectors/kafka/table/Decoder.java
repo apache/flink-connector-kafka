@@ -104,21 +104,34 @@ public class Decoder {
             final boolean pushProjectionsIntoDecodingFormat) {
         if (decodingFormat == null) {
             return Decoder.noDeserializationOrProjection();
+        } else if (!pushProjectionsIntoDecodingFormat
+                || !(decodingFormat instanceof ProjectableDecodingFormat)) {
+            return Decoder.projectAfterDeserializing(
+                    context,
+                    decodingFormat,
+                    physicalTableDataType,
+                    physicalDataTypeProjection,
+                    prefix,
+                    projectedPhysicalFields,
+                    metadataKeys);
         } else {
-            if (decodingFormat instanceof ProjectableDecodingFormat
-                    && pushProjectionsIntoDecodingFormat) {
+            final ProjectableDecodingFormat<DeserializationSchema<RowData>>
+                    projectableDecodingFormat =
+                            (ProjectableDecodingFormat<DeserializationSchema<RowData>>)
+                                    decodingFormat;
+            if (projectableDecodingFormat.supportsNestedProjection()) {
                 return Decoder.projectInsideDeserializer(
                         context,
-                        (ProjectableDecodingFormat<DeserializationSchema<RowData>>) decodingFormat,
+                        projectableDecodingFormat,
                         physicalTableDataType,
                         physicalDataTypeProjection,
                         prefix,
                         projectedPhysicalFields,
                         metadataKeys);
             } else {
-                return Decoder.projectAfterDeserializing(
+                return Decoder.projectTopLevelInsideDeserializerThenNestedAfter(
                         context,
-                        decodingFormat,
+                        projectableDecodingFormat,
                         physicalTableDataType,
                         physicalDataTypeProjection,
                         prefix,
@@ -266,6 +279,75 @@ public class Decoder {
     }
 
     /**
+     * This method generates a {@link Decoder} for a {@link ProjectableDecodingFormat} that does not
+     * support <em>nested</em> projection. Only the required <em>top-level</em> fields are pushed
+     * down into the format, and any nested sub-fields are extracted from the deserialized row
+     * afterward by the {@link Projector}.
+     */
+    private static Decoder projectTopLevelInsideDeserializerThenNestedAfter(
+            final Context context,
+            final ProjectableDecodingFormat<DeserializationSchema<RowData>>
+                    projectableDecodingFormat,
+            final DataType physicalTableDataType,
+            final int[] physicalDataTypeProjection,
+            final @Nullable String prefix,
+            final int[][] projectedPhysicalFields,
+            final List<String> metadataKeys) {
+        final Map<Integer, Integer> tableToDeserializedTopLevelPos =
+                tableToDeserializedTopLevelPos(physicalDataTypeProjection);
+
+        // Top-level fields (in data type space) to push into the format, deduplicated so each
+        // required top-level field is only deserialized once.
+        final List<int[]> topLevelProjectedFields = new ArrayList<>();
+        final Map<Integer, Integer> dataTypeTopLevelToDeserializedPos = new HashMap<>();
+        final Map<List<Integer>, Integer> deserializedToProducedPos = new HashMap<>();
+        for (int producedPos = 0; producedPos < projectedPhysicalFields.length; producedPos++) {
+            final int[] tablePos = projectedPhysicalFields[producedPos];
+            final int tableTopLevelPos = tablePos[0];
+
+            final Integer dataTypeTopLevelPos =
+                    tableToDeserializedTopLevelPos.get(tableTopLevelPos);
+            if (dataTypeTopLevelPos != null) {
+                final int deserializedTopLevelPos =
+                        dataTypeTopLevelToDeserializedPos.computeIfAbsent(
+                                dataTypeTopLevelPos,
+                                k -> {
+                                    topLevelProjectedFields.add(new int[] {k});
+                                    return topLevelProjectedFields.size() - 1;
+                                });
+
+                // The remaining (nested) path is extracted from the deserialized row afterward.
+                final int[] deserializedPos = copyArray(tablePos);
+                deserializedPos[0] = deserializedTopLevelPos;
+                deserializedToProducedPos.put(
+                        Collections.unmodifiableList(
+                                Arrays.stream(deserializedPos)
+                                        .boxed()
+                                        .collect(Collectors.toList())),
+                        producedPos);
+            }
+        }
+
+        addMetadataProjections(
+                projectableDecodingFormat,
+                topLevelProjectedFields.size(),
+                projectedPhysicalFields.length,
+                metadataKeys,
+                deserializedToProducedPos);
+
+        return new Decoder(
+                projectableDecodingFormat.createRuntimeDecoder(
+                        context,
+                        toPhysicalDataType(
+                                physicalTableDataType, physicalDataTypeProjection, prefix),
+                        topLevelProjectedFields.toArray(new int[topLevelProjectedFields.size()][])),
+                new ProjectorImpl(
+                        deserializedToProducedPos,
+                        topLevelProjectedFields.size(),
+                        metadataKeys.size()));
+    }
+
+    /**
      * This method generates a {@link Decoder} which deserializes the data fully using the {@link
      * DecodingFormat} and then applies any projections afterward.
      */
@@ -377,6 +459,9 @@ public class Decoder {
                     (deserializedPos, targetPos) -> {
                         Object value = deserialized;
                         for (final Integer i : deserializedPos) {
+                            if (value == null) {
+                                break;
+                            }
                             value = ((GenericRowData) value).getField(i);
                         }
                         producedRow.setField(targetPos, value);

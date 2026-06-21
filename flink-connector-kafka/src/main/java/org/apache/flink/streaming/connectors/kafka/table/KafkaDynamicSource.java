@@ -38,7 +38,6 @@ import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.ProviderContext;
 import org.apache.flink.table.connector.format.DecodingFormat;
-import org.apache.flink.table.connector.format.ProjectableDecodingFormat;
 import org.apache.flink.table.connector.source.DataStreamScanProvider;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
@@ -359,22 +358,7 @@ public class KafkaDynamicSource
 
     @Override
     public boolean supportsNestedProjection() {
-        return keySupportsNestedProjection() && valueSupportsNestedProjection();
-    }
-
-    private boolean keySupportsNestedProjection() {
-        if (keyDecodingFormat == null) {
-            return true;
-        }
-        return keyProjectionPushdownEnabled
-                && keyDecodingFormat instanceof ProjectableDecodingFormat
-                && ((ProjectableDecodingFormat<?>) keyDecodingFormat).supportsNestedProjection();
-    }
-
-    private boolean valueSupportsNestedProjection() {
-        return valueProjectionPushdownEnabled
-                && valueDecodingFormat instanceof ProjectableDecodingFormat
-                && ((ProjectableDecodingFormat<?>) valueDecodingFormat).supportsNestedProjection();
+        return true;
     }
 
     @Override

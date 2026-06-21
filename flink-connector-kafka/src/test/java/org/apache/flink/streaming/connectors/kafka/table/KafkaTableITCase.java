@@ -2137,6 +2137,57 @@ class KafkaTableITCase extends KafkaTableTestBase {
         cleanupTopic(topic);
     }
 
+    @Test
+    public void testNestedProjectionPushdownDisabledStillProjectsNestedFieldsAndHandlesNullParent()
+            throws Exception {
+        // Even with format projection pushdown disabled, the source advertises nested projection
+        // support: the planner pushes the nested projection into the scan and the fields are
+        // extracted after full deserialization. A null nested parent must produce a null sub-field
+        // rather than a NullPointerException.
+        final String format = "json";
+
+        final String topic = "testNestedProjectionPushdownDisabled_" + UUID.randomUUID();
+        createTestTopic(topic, 1, 1);
+
+        final String groupId = getStandardProps().getProperty("group.id");
+        final String bootstraps = getBootstrapServers();
+
+        final String createTable =
+                String.format(
+                        "CREATE TABLE kafka (\n"
+                                + "  `a` ROW(a1 STRING, a2 STRING),\n"
+                                + "  `d` ROW(d1 ROW(d2 STRING, d3 STRING))\n"
+                                + ") WITH (\n"
+                                + "  'connector' = 'kafka',\n"
+                                + "  'topic' = '%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'properties.group.id' = '%s',\n"
+                                + "  'scan.startup.mode' = 'earliest-offset',\n"
+                                + "  'value.format' = '%s',\n"
+                                + "  '%s' = 'false'\n"
+                                + ")",
+                        topic,
+                        bootstraps,
+                        groupId,
+                        format,
+                        KafkaConnectorOptions.VALUE_PROJECTION_PUSHDOWN_ENABLED.key());
+        tEnv.executeSql(createTable);
+
+        tEnv.executeSql(
+                        "INSERT INTO kafka SELECT CAST(NULL AS ROW<a1 STRING, a2 STRING>), ROW(ROW('d2_2', 'd3_2'))")
+                .await();
+
+        // The nested projection is still pushed into the scan (project=[a_a1, d_d1_d3]) even though
+        // format pushdown is disabled, because the source applies it after deserialization.
+        assertQueryResult(
+                "SELECT a.a1, d.d1.d3 FROM kafka",
+                "== Optimized Execution Plan ==\n"
+                        + "TableSourceScan(table=[[default_catalog, default_database, kafka, project=[a_a1, d_d1_d3], metadata=[]]], fields=[a_a1, d_d1_d3])\n",
+                Arrays.asList("+I(null,d3_2)"));
+
+        cleanupTopic(topic);
+    }
+
     private void setupValueOnlyData(final String format, final String topic)
             throws ExecutionException, InterruptedException {
         createTestTopic(topic, 1, 1);

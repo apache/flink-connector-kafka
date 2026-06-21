@@ -37,7 +37,7 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 
-import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Named;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -65,50 +65,15 @@ class DecoderTest {
         return new DebeziumJsonDecodingFormat(false, false, TimestampFormat.ISO_8601);
     }
 
-    private static class NonProjectable<T> implements DecodingFormat<T> {
+    private abstract static class RecordingDecodingFormat<T> implements DecodingFormat<T> {
 
-        private final ProjectableDecodingFormat<T> underlying;
-
-        NonProjectable(final ProjectableDecodingFormat<T> underlying) {
-            this.underlying = underlying;
-        }
-
-        @Override
-        public T createRuntimeDecoder(
-                DynamicTableSource.Context context, DataType physicalDataType) {
-            return underlying.createRuntimeDecoder(context, physicalDataType);
-        }
-
-        @Override
-        public ChangelogMode getChangelogMode() {
-            return underlying.getChangelogMode();
-        }
-
-        @Override
-        public Map<String, DataType> listReadableMetadata() {
-            return underlying.listReadableMetadata();
-        }
-
-        @Override
-        public void applyReadableMetadata(List<String> metadataKeys) {
-            underlying.applyReadableMetadata(metadataKeys);
-        }
-    }
-
-    private static class RecordingFormat<T> implements DecodingFormat<T> {
-
-        private final DecodingFormat<T> underlying;
+        final DecodingFormat<T> underlying;
 
         private List<String> appliedMetadataKeys = null;
+        protected int[][] projectedFields = null;
 
-        RecordingFormat(final DecodingFormat<T> underlying) {
+        RecordingDecodingFormat(final DecodingFormat<T> underlying) {
             this.underlying = underlying;
-        }
-
-        @Override
-        public T createRuntimeDecoder(
-                DynamicTableSource.Context context, DataType physicalDataType) {
-            return underlying.createRuntimeDecoder(context, physicalDataType);
         }
 
         @Override
@@ -126,85 +91,197 @@ class DecoderTest {
             this.appliedMetadataKeys = metadataKeys;
             underlying.applyReadableMetadata(metadataKeys);
         }
+
+        List<String> getAppliedMetadataKeys() {
+            return appliedMetadataKeys;
+        }
+
+        /** The projection pushed into the format, or null if none was pushed. */
+        int[][] getProjectedFields() {
+            return projectedFields;
+        }
     }
 
-    private static final String PROJECTABLE_DECODING_FORMAT_WITH_PUSHDOWN_ENABLED =
-            "Projectable DecodingFormat with pushdown enabled";
-    private static final String PROJECTABLE_DECODING_FORMAT_WITH_PUSHDOWN_DISABLED =
-            "Projectable DecodingFormat with pushdown disabled";
-    private static final String NON_PROJECTABLE_DECODING_FORMAT = "Non-projectable DecodingFormat";
+    private static class RecordingNonProjectableFormat<T> extends RecordingDecodingFormat<T> {
+
+        RecordingNonProjectableFormat(final DecodingFormat<T> underlying) {
+            super(underlying);
+        }
+
+        @Override
+        public T createRuntimeDecoder(
+                DynamicTableSource.Context context, DataType physicalDataType) {
+            return underlying.createRuntimeDecoder(context, physicalDataType);
+        }
+    }
+
+    private static class RecordingProjectableFormat<T> extends RecordingDecodingFormat<T>
+            implements ProjectableDecodingFormat<T> {
+
+        private final boolean supportsNestedProjection;
+
+        RecordingProjectableFormat(
+                final ProjectableDecodingFormat<T> underlying,
+                final boolean supportsNestedProjection) {
+            super(underlying);
+            this.supportsNestedProjection = supportsNestedProjection;
+        }
+
+        @Override
+        public boolean supportsNestedProjection() {
+            return supportsNestedProjection;
+        }
+
+        @Override
+        public T createRuntimeDecoder(
+                DynamicTableSource.Context context, DataType physicalDataType) {
+            return underlying.createRuntimeDecoder(context, physicalDataType);
+        }
+
+        @Override
+        public T createRuntimeDecoder(
+                DynamicTableSource.Context context,
+                DataType physicalDataType,
+                int[][] projectedFields) {
+            this.projectedFields = projectedFields;
+            return ((ProjectableDecodingFormat<T>) underlying)
+                    .createRuntimeDecoder(context, physicalDataType, projectedFields);
+        }
+    }
 
     private static void assertThatIsProjectionNeeded(
-            final String testName,
+            final boolean pushdownEnabled,
+            final DecodingFormat<DeserializationSchema<RowData>> format,
             final Decoder decoder,
-            final boolean forProjectableWithPushdownEnabled,
-            final boolean forProjectableWithPushdownDisabled,
-            final boolean forNonProjectable) {
-        final boolean expected;
-        switch (testName) {
-            case PROJECTABLE_DECODING_FORMAT_WITH_PUSHDOWN_ENABLED:
-                expected = forProjectableWithPushdownEnabled;
-                break;
-            case PROJECTABLE_DECODING_FORMAT_WITH_PUSHDOWN_DISABLED:
-                expected = forProjectableWithPushdownDisabled;
-                break;
-            case NON_PROJECTABLE_DECODING_FORMAT:
-                expected = forNonProjectable;
-                break;
-            default:
-                throw new IllegalStateException("Unexpected value: " + testName);
-        }
+            final boolean forPushdownDisabled,
+            final boolean forNonProjectableDecodingFormat,
+            final boolean forProjectableDecodingFormat,
+            final boolean forProjectableTopLevelOnlyDecodingFormat) {
+        final boolean expected =
+                expectedForVariant(
+                        pushdownEnabled,
+                        format,
+                        forPushdownDisabled,
+                        forNonProjectableDecodingFormat,
+                        forProjectableDecodingFormat,
+                        forProjectableTopLevelOnlyDecodingFormat);
 
         assertThat(decoder.getProjector().isProjectionNeeded()).isEqualTo(expected);
     }
 
+    private static void assertThatPushedProjectionEquals(
+            final boolean pushdownEnabled,
+            final DecodingFormat<DeserializationSchema<RowData>> format,
+            final int[][] forPushdownDisabled,
+            final int[][] forNonProjectableDecodingFormat,
+            final int[][] forProjectableDecodingFormat,
+            final int[][] forProjectableTopLevelOnlyDecodingFormat) {
+        final int[][] expected =
+                expectedForVariant(
+                        pushdownEnabled,
+                        format,
+                        forPushdownDisabled,
+                        forNonProjectableDecodingFormat,
+                        forProjectableDecodingFormat,
+                        forProjectableTopLevelOnlyDecodingFormat);
+
+        final int[][] result = ((RecordingDecodingFormat<?>) format).getProjectedFields();
+        if (expected == null) {
+            assertThat(result).isNull();
+        } else {
+            assertThat(result).isDeepEqualTo(expected);
+        }
+    }
+
+    private static <T> T expectedForVariant(
+            final boolean pushdownEnabled,
+            final DecodingFormat<DeserializationSchema<RowData>> format,
+            final T forPushdownDisabled,
+            final T forNonProjectableDecodingFormat,
+            final T forProjectableDecodingFormat,
+            final T forProjectableTopLevelOnlyDecodingFormat) {
+        if (pushdownEnabled) {
+            if (format instanceof ProjectableDecodingFormat) {
+                if (((ProjectableDecodingFormat<?>) format).supportsNestedProjection()) {
+                    return forProjectableDecodingFormat;
+                } else {
+                    return forProjectableTopLevelOnlyDecodingFormat;
+                }
+            } else {
+                return forNonProjectableDecodingFormat;
+            }
+        } else {
+            return forPushdownDisabled;
+        }
+    }
+
     private static Stream<Arguments> jsonTestCases() {
-        return Stream.of(
-                Arguments.of(
-                        PROJECTABLE_DECODING_FORMAT_WITH_PUSHDOWN_ENABLED,
-                        (Supplier<DecodingFormat<DeserializationSchema<RowData>>>)
-                                DecoderTest::jsonDecodingFormat,
-                        true),
-                Arguments.of(
-                        PROJECTABLE_DECODING_FORMAT_WITH_PUSHDOWN_DISABLED,
-                        (Supplier<DecodingFormat<DeserializationSchema<RowData>>>)
-                                DecoderTest::jsonDecodingFormat,
-                        false),
-                Arguments.of(
-                        NON_PROJECTABLE_DECODING_FORMAT,
-                        (Supplier<DecodingFormat<DeserializationSchema<RowData>>>)
-                                () -> new NonProjectable<>(jsonDecodingFormat()),
-                        false));
+        return testCases(DecoderTest::jsonDecodingFormat);
     }
 
     // debezium-json format exposes some metadata fields (unlike json format)
     private static Stream<Arguments> debeziumJsonTestCases() {
-        return Stream.of(
-                Arguments.of(
-                        PROJECTABLE_DECODING_FORMAT_WITH_PUSHDOWN_ENABLED,
-                        (Supplier<DecodingFormat<DeserializationSchema<RowData>>>)
-                                DecoderTest::debeziumJsonDecodingFormat,
-                        true),
-                Arguments.of(
-                        PROJECTABLE_DECODING_FORMAT_WITH_PUSHDOWN_DISABLED,
-                        (Supplier<DecodingFormat<DeserializationSchema<RowData>>>)
-                                DecoderTest::debeziumJsonDecodingFormat,
-                        false),
-                Arguments.of(
-                        NON_PROJECTABLE_DECODING_FORMAT,
-                        (Supplier<DecodingFormat<DeserializationSchema<RowData>>>)
-                                () -> new NonProjectable<>(debeziumJsonDecodingFormat()),
-                        false));
+        return testCases(DecoderTest::debeziumJsonDecodingFormat);
     }
 
-    private static final DataType tableDataType =
+    private static Stream<Arguments> testCases(
+            final Supplier<ProjectableDecodingFormat<DeserializationSchema<RowData>>> baseFormat) {
+        return Stream.of(
+                testCase(
+                        "Non-Projectable (Pushdown Disabled)",
+                        () -> new RecordingNonProjectableFormat<>(baseFormat.get()),
+                        false),
+                testCase(
+                        "Projectable (Pushdown Disabled)",
+                        () -> new RecordingProjectableFormat<>(baseFormat.get(), true),
+                        false),
+                testCase(
+                        "Projectable Top-Level-Only (Pushdown Disabled)",
+                        () -> new RecordingProjectableFormat<>(baseFormat.get(), false),
+                        false),
+                testCase(
+                        "Non-Projectable (Pushdown Enabled)",
+                        () -> new RecordingNonProjectableFormat<>(baseFormat.get()),
+                        true),
+                testCase(
+                        "Projectable (Pushdown Enabled)",
+                        () -> new RecordingProjectableFormat<>(baseFormat.get(), true),
+                        true),
+                testCase(
+                        "Projectable Top-Level-Only (Pushdown Enabled)",
+                        () -> new RecordingProjectableFormat<>(baseFormat.get(), false),
+                        true));
+    }
+
+    private static Arguments testCase(
+            final String name,
+            final Supplier<DecodingFormat<DeserializationSchema<RowData>>> format,
+            final boolean pushdownEnabled) {
+        return Arguments.of(Named.of(name, format), pushdownEnabled);
+    }
+
+    private static final DataType TABLE_DATA_TYPE =
             DataTypes.ROW(
                     DataTypes.FIELD("a", DataTypes.STRING()),
                     DataTypes.FIELD("b", DataTypes.STRING()),
-                    DataTypes.FIELD("c", DataTypes.STRING()),
-                    DataTypes.FIELD("d", DataTypes.STRING()),
-                    DataTypes.FIELD("e", DataTypes.STRING()),
-                    DataTypes.FIELD("f", DataTypes.STRING()));
+                    DataTypes.FIELD("c", DataTypes.STRING()));
+
+    private static final String TABLE_INPUT = "{\"a\":\"a\", \"b\":\"b\", \"c\":\"c\"}";
+
+    private static final int[] DATA_TYPE_PROJECTION = new int[] {0, 1, 2};
+
+    private static final DataType NESTED_TABLE_DATA_TYPE =
+            DataTypes.ROW(
+                    DataTypes.FIELD(
+                            "a0",
+                            DataTypes.ROW(
+                                    DataTypes.FIELD("a1", DataTypes.STRING()),
+                                    DataTypes.FIELD("b1", DataTypes.STRING()))),
+                    DataTypes.FIELD(
+                            "b0",
+                            DataTypes.ROW(
+                                    DataTypes.FIELD("a1", DataTypes.STRING()),
+                                    DataTypes.FIELD("b1", DataTypes.STRING()))));
 
     private static class MockContext implements DynamicTableSource.Context {
         @Override
@@ -244,12 +321,12 @@ class DecoderTest {
     }
 
     @Test
-    void testNoDecoder() {
+    void testProjectsNothingWhenFormatIsNull() {
         final Decoder decoder =
                 Decoder.create(
                         new MockContext(),
                         null,
-                        tableDataType,
+                        TABLE_DATA_TYPE,
                         new int[] {},
                         null,
                         new int[][] {},
@@ -261,154 +338,36 @@ class DecoderTest {
         assertThat(decoder.getProjector().isProjectionNeeded()).isFalse();
     }
 
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("jsonTestCases")
-    void testProjectAllFields(
-            final String name,
-            final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
-            final Boolean isPushdownEnabled) {
-        final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
-
-        final int[] dataTypeProjection = new int[] {0, 1, 2, 3, 4, 5};
-        final int[][] projectedFields =
-                new int[][] {
-                    new int[] {0},
-                    new int[] {1},
-                    new int[] {2},
-                    new int[] {3},
-                    new int[] {4},
-                    new int[] {5},
-                };
-
+    @Test
+    void testProjectsNothingWhenProjectionIsEmpty() {
         final Decoder decoder =
                 Decoder.create(
                         new MockContext(),
-                        format,
-                        tableDataType,
-                        dataTypeProjection,
+                        jsonDecodingFormat(),
+                        TABLE_DATA_TYPE,
+                        DATA_TYPE_PROJECTION,
                         null,
-                        projectedFields,
+                        new int[][] {},
                         Collections.emptyList(),
-                        isPushdownEnabled);
+                        false);
 
-        final String input =
-                "{\"a\":\"a\", \"b\":\"b\", \"c\":\"c\", \"d\":\"d\", \"e\":\"e\", \"f\":\"f\"}";
+        assertThat(decoder.getDeserializationSchema()).isNotNull();
+        assertThat(decoder.getProjector().isEmptyProjection()).isTrue();
+        assertThat(decoder.getProjector().isProjectionNeeded()).isTrue();
 
-        final int expectedArity = 6;
+        final GenericRowData producedRow = new GenericRowData(0);
+        produceRow(decoder, TABLE_INPUT, producedRow);
 
-        final GenericRowData producedRow = new GenericRowData(expectedArity);
-        produceRow(decoder, input, producedRow);
-
-        final GenericRowData expected = new GenericRowData(expectedArity);
-        expected.setField(0, "a");
-        expected.setField(1, "b");
-        expected.setField(2, "c");
-        expected.setField(3, "d");
-        expected.setField(4, "e");
-        expected.setField(5, "f");
-
-        assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-        assertThatIsProjectionNeeded(name, decoder, false, false, false);
-
-        assertThat(producedRow.toString()).isEqualTo(expected.toString());
+        assertThat(producedRow.toString()).isEqualTo(new GenericRowData(0).toString());
     }
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("jsonTestCases")
-    void testProjectFirstFieldOnly(
-            final String name,
+    void testProjectsAllFields(
             final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
             final Boolean isPushdownEnabled) {
         final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
 
-        final int[] dataTypeProjection = new int[] {0, 2, 4};
-        final int[][] projectedFields = new int[][] {new int[] {0}};
-
-        final Decoder decoder =
-                Decoder.create(
-                        new MockContext(),
-                        format,
-                        tableDataType,
-                        dataTypeProjection,
-                        null,
-                        projectedFields,
-                        Collections.emptyList(),
-                        isPushdownEnabled);
-
-        assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-        assertThatIsProjectionNeeded(name, decoder, false, true, true);
-
-        final String input = "{\"a\":\"a\", \"c\":\"c\", \"e\":\"e\"}";
-
-        final int expectedArity = 1;
-
-        final GenericRowData producedRow = new GenericRowData(expectedArity);
-        produceRow(decoder, input, producedRow);
-
-        final GenericRowData expected = new GenericRowData(expectedArity);
-        expected.setField(0, "a");
-
-        assertThat(producedRow.toString()).isEqualTo(expected.toString());
-    }
-
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("jsonTestCases")
-    void testProjectToReorderedTableSchema(
-            final String name,
-            final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
-            final Boolean isPushdownEnabled) {
-        final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
-
-        final int[] dataTypeProjection = new int[] {0, 2, 4};
-        // Reverse order of table schema
-        final int[][] projectedFields =
-                new int[][] {
-                    new int[] {5},
-                    new int[] {4},
-                    new int[] {3},
-                    new int[] {2},
-                    new int[] {1},
-                    new int[] {0},
-                };
-
-        final Decoder decoder =
-                Decoder.create(
-                        new MockContext(),
-                        format,
-                        tableDataType,
-                        dataTypeProjection,
-                        null,
-                        projectedFields,
-                        Collections.emptyList(),
-                        isPushdownEnabled);
-
-        final String input = "{\"a\":\"a\", \"c\":\"c\", \"e\":\"e\"}";
-
-        final int expectedArity = 6;
-
-        final GenericRowData producedRow = new GenericRowData(expectedArity);
-        produceRow(decoder, input, producedRow);
-
-        final GenericRowData expected = new GenericRowData(expectedArity);
-        expected.setField(1, "e");
-        expected.setField(3, "c");
-        expected.setField(5, "a");
-
-        assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-        assertThatIsProjectionNeeded(name, decoder, true, true, true);
-
-        assertThat(producedRow.toString()).isEqualTo(expected.toString());
-    }
-
-    @ParameterizedTest(name = "{0}")
-    @MethodSource("jsonTestCases")
-    void testProjectToSubsetOfTableSchema(
-            final String name,
-            final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
-            final Boolean isPushdownEnabled) {
-        final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
-
-        final int[] dataTypeProjection = new int[] {0, 2, 4};
         final int[][] projectedFields =
                 new int[][] {
                     new int[] {0}, new int[] {1}, new int[] {2},
@@ -418,22 +377,308 @@ class DecoderTest {
                 Decoder.create(
                         new MockContext(),
                         format,
-                        tableDataType,
-                        dataTypeProjection,
+                        TABLE_DATA_TYPE,
+                        DATA_TYPE_PROJECTION,
                         null,
                         projectedFields,
                         Collections.emptyList(),
                         isPushdownEnabled);
 
-        assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-        assertThatIsProjectionNeeded(name, decoder, true, true, true);
-
-        final String input = "{\"a\":\"a\", \"c\":\"c\", \"e\":\"e\"}";
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                format,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {
+                    new int[] {0}, new int[] {1}, new int[] {2}
+                },
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {
+                    new int[] {0}, new int[] {1}, new int[] {2}
+                });
 
         final int expectedArity = 3;
 
         final GenericRowData producedRow = new GenericRowData(expectedArity);
-        produceRow(decoder, input, producedRow);
+        produceRow(decoder, TABLE_INPUT, producedRow);
+
+        final GenericRowData expected = new GenericRowData(expectedArity);
+        expected.setField(0, "a");
+        expected.setField(1, "b");
+        expected.setField(2, "c");
+
+        assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
+        assertThatIsProjectionNeeded(
+                isPushdownEnabled,
+                format,
+                decoder,
+                /* forPushdownDisabled= */ false,
+                /* forNonProjectableDecodingFormat= */ false,
+                /* forProjectableDecodingFormat= */ false,
+                /* forProjectableTopLevelOnlyDecodingFormat= */ false);
+
+        assertThat(producedRow.toString()).isEqualTo(expected.toString());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("jsonTestCases")
+    void testProjectsFirstField(
+            final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
+            final Boolean isPushdownEnabled) {
+        final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
+
+        final int[][] projectedFields = new int[][] {new int[] {0}};
+
+        final Decoder decoder =
+                Decoder.create(
+                        new MockContext(),
+                        format,
+                        TABLE_DATA_TYPE,
+                        DATA_TYPE_PROJECTION,
+                        null,
+                        projectedFields,
+                        Collections.emptyList(),
+                        isPushdownEnabled);
+
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                format,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {new int[] {0}},
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {new int[] {0}});
+
+        assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
+        assertThatIsProjectionNeeded(
+                isPushdownEnabled,
+                format,
+                decoder,
+                /* forPushdownDisabled= */ true,
+                /* forNonProjectableDecodingFormat= */ true,
+                /* forProjectableDecodingFormat= */ false,
+                /* forProjectableTopLevelOnlyDecodingFormat= */ false);
+
+        final int expectedArity = 1;
+
+        final GenericRowData producedRow = new GenericRowData(expectedArity);
+        produceRow(decoder, TABLE_INPUT, producedRow);
+
+        final GenericRowData expected = new GenericRowData(expectedArity);
+        expected.setField(0, "a");
+
+        assertThat(producedRow.toString()).isEqualTo(expected.toString());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("jsonTestCases")
+    void testProjectsSecondField(
+            final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
+            final Boolean isPushdownEnabled) {
+        final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
+
+        final int[][] projectedFields = new int[][] {new int[] {1}};
+
+        final Decoder decoder =
+                Decoder.create(
+                        new MockContext(),
+                        format,
+                        TABLE_DATA_TYPE,
+                        DATA_TYPE_PROJECTION,
+                        null,
+                        projectedFields,
+                        Collections.emptyList(),
+                        isPushdownEnabled);
+
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                format,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {new int[] {1}},
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {new int[] {1}});
+
+        assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
+        assertThatIsProjectionNeeded(
+                isPushdownEnabled,
+                format,
+                decoder,
+                /* forPushdownDisabled= */ true,
+                /* forNonProjectableDecodingFormat= */ true,
+                /* forProjectableDecodingFormat= */ false,
+                /* forProjectableTopLevelOnlyDecodingFormat= */ false);
+
+        final int expectedArity = 1;
+
+        final GenericRowData producedRow = new GenericRowData(expectedArity);
+        produceRow(decoder, TABLE_INPUT, producedRow);
+
+        final GenericRowData expected = new GenericRowData(expectedArity);
+        expected.setField(0, "b");
+
+        assertThat(producedRow.toString()).isEqualTo(expected.toString());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("jsonTestCases")
+    void testProjectsAllFieldsInDifferentOrder(
+            final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
+            final Boolean isPushdownEnabled) {
+        final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
+
+        // Reverse order of table schema
+        final int[][] projectedFields =
+                new int[][] {
+                    new int[] {2}, new int[] {1}, new int[] {0},
+                };
+
+        final Decoder decoder =
+                Decoder.create(
+                        new MockContext(),
+                        format,
+                        TABLE_DATA_TYPE,
+                        DATA_TYPE_PROJECTION,
+                        null,
+                        projectedFields,
+                        Collections.emptyList(),
+                        isPushdownEnabled);
+
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                format,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {
+                    new int[] {2}, new int[] {1}, new int[] {0}
+                },
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {
+                    new int[] {2}, new int[] {1}, new int[] {0}
+                });
+
+        final int expectedArity = 3;
+
+        final GenericRowData producedRow = new GenericRowData(expectedArity);
+        produceRow(decoder, TABLE_INPUT, producedRow);
+
+        final GenericRowData expected = new GenericRowData(expectedArity);
+        expected.setField(0, "c");
+        expected.setField(1, "b");
+        expected.setField(2, "a");
+
+        assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
+        assertThatIsProjectionNeeded(
+                isPushdownEnabled,
+                format,
+                decoder,
+                /* forPushdownDisabled= */ true,
+                /* forNonProjectableDecodingFormat= */ true,
+                /* forProjectableDecodingFormat= */ false,
+                /* forProjectableTopLevelOnlyDecodingFormat= */ false);
+
+        assertThat(producedRow.toString()).isEqualTo(expected.toString());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("jsonTestCases")
+    void testProjectsContiguousSubsetOfFields(
+            final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
+            final Boolean isPushdownEnabled) {
+        final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
+
+        final int[][] projectedFields =
+                new int[][] {
+                    new int[] {0}, new int[] {1},
+                };
+
+        final Decoder decoder =
+                Decoder.create(
+                        new MockContext(),
+                        format,
+                        TABLE_DATA_TYPE,
+                        DATA_TYPE_PROJECTION,
+                        null,
+                        projectedFields,
+                        Collections.emptyList(),
+                        isPushdownEnabled);
+
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                format,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {new int[] {0}, new int[] {1}},
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {
+                    new int[] {0}, new int[] {1}
+                });
+
+        assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
+        assertThatIsProjectionNeeded(
+                isPushdownEnabled,
+                format,
+                decoder,
+                /* forPushdownDisabled= */ true,
+                /* forNonProjectableDecodingFormat= */ true,
+                /* forProjectableDecodingFormat= */ false,
+                /* forProjectableTopLevelOnlyDecodingFormat= */ false);
+
+        final int expectedArity = 2;
+
+        final GenericRowData producedRow = new GenericRowData(expectedArity);
+        produceRow(decoder, TABLE_INPUT, producedRow);
+
+        final GenericRowData expected = new GenericRowData(expectedArity);
+        expected.setField(0, "a");
+        expected.setField(1, "b");
+
+        assertThat(producedRow.toString()).isEqualTo(expected.toString());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("jsonTestCases")
+    void testProjectsNonContiguousSubsetOfFields(
+            final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
+            final Boolean isPushdownEnabled) {
+        final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
+
+        final int[] valueProjection = new int[] {0, 2};
+        final int[][] projectedFields =
+                new int[][] {
+                    new int[] {0}, new int[] {1}, new int[] {2},
+                };
+
+        final Decoder valueDecoder =
+                Decoder.create(
+                        new MockContext(),
+                        format,
+                        TABLE_DATA_TYPE,
+                        valueProjection,
+                        null,
+                        projectedFields,
+                        Collections.emptyList(),
+                        isPushdownEnabled);
+
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                format,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {new int[] {0}, new int[] {1}},
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {
+                    new int[] {0}, new int[] {1}
+                });
+
+        assertThat(valueDecoder.getProjector().isEmptyProjection()).isFalse();
+        assertThatIsProjectionNeeded(
+                isPushdownEnabled,
+                format,
+                valueDecoder,
+                /* forPushdownDisabled= */ true,
+                /* forNonProjectableDecodingFormat= */ true,
+                /* forProjectableDecodingFormat= */ true,
+                /* forProjectableTopLevelOnlyDecodingFormat= */ true);
+
+        final int expectedArity = 3;
+
+        final GenericRowData producedRow = new GenericRowData(expectedArity);
+        produceRow(valueDecoder, TABLE_INPUT, producedRow);
 
         final GenericRowData expected = new GenericRowData(expectedArity);
         expected.setField(0, "a");
@@ -444,41 +689,54 @@ class DecoderTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("jsonTestCases")
-    void testProjectToReorderedSubsetOfTableSchema(
-            final String name,
+    void testProjectsContiguousSubsetOfFieldsInDifferentOrder(
             final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
             final Boolean isPushdownEnabled) {
         final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
 
-        final int[] dataTypeProjection = new int[] {0, 2, 4};
         final int[][] projectedFields =
                 new int[][] {
-                    new int[] {2}, new int[] {0}, new int[] {1},
+                    new int[] {1}, new int[] {0},
                 };
 
         final Decoder decoder =
                 Decoder.create(
                         new MockContext(),
                         format,
-                        tableDataType,
-                        dataTypeProjection,
+                        TABLE_DATA_TYPE,
+                        DATA_TYPE_PROJECTION,
                         null,
                         projectedFields,
                         Collections.emptyList(),
                         isPushdownEnabled);
 
-        assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-        assertThatIsProjectionNeeded(name, decoder, false, true, true);
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                format,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {new int[] {1}, new int[] {0}},
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {
+                    new int[] {1}, new int[] {0}
+                });
 
-        final String input = "{\"a\":\"a\", \"c\":\"c\", \"e\":\"e\"}";
+        assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
+        assertThatIsProjectionNeeded(
+                isPushdownEnabled,
+                format,
+                decoder,
+                /* forPushdownDisabled= */ true,
+                /* forNonProjectableDecodingFormat= */ true,
+                /* forProjectableDecodingFormat= */ false,
+                /* forProjectableTopLevelOnlyDecodingFormat= */ false);
 
         final int expectedArity = 2;
 
         final GenericRowData producedRow = new GenericRowData(expectedArity);
-        produceRow(decoder, input, producedRow);
+        produceRow(decoder, TABLE_INPUT, producedRow);
 
         final GenericRowData expected = new GenericRowData(expectedArity);
-        expected.setField(0, "c");
+        expected.setField(0, "b");
         expected.setField(1, "a");
 
         assertThat(producedRow.toString()).isEqualTo(expected.toString());
@@ -486,8 +744,7 @@ class DecoderTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("jsonTestCases")
-    void testPrefix(
-            final String name,
+    void testProjectsFieldWithKeyPrefix(
             final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
             final Boolean isPushdownEnabled) {
         final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
@@ -517,6 +774,14 @@ class DecoderTest {
                         Collections.emptyList(),
                         isPushdownEnabled);
 
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                format,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {new int[] {1}},
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {new int[] {1}});
+
         final int expectedArity = 1;
 
         final GenericRowData producedRow = new GenericRowData(expectedArity);
@@ -530,24 +795,10 @@ class DecoderTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("jsonTestCases")
-    void testProjectNestedFields(
-            final String name,
+    void testProjectsNestedFields(
             final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
             final Boolean isPushdownEnabled) {
         final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
-
-        final DataType tableDataType =
-                DataTypes.ROW(
-                        DataTypes.FIELD(
-                                "a0",
-                                DataTypes.ROW(
-                                        DataTypes.FIELD("a1", DataTypes.STRING()),
-                                        DataTypes.FIELD("b1", DataTypes.STRING()))),
-                        DataTypes.FIELD(
-                                "b0",
-                                DataTypes.ROW(
-                                        DataTypes.FIELD("a1", DataTypes.STRING()),
-                                        DataTypes.FIELD("b1", DataTypes.STRING()))));
 
         final int[] dataTypeProjection = new int[] {0, 1};
         final String input =
@@ -566,15 +817,40 @@ class DecoderTest {
                 Decoder.create(
                         new MockContext(),
                         format,
-                        tableDataType,
+                        NESTED_TABLE_DATA_TYPE,
                         dataTypeProjection,
                         null,
                         projectedFields,
                         Collections.emptyList(),
                         isPushdownEnabled);
 
+        // Each format variant must only ever receive a projection it supports: the nested-capable
+        // format gets the full nested paths, a top-level-only projectable format gets just the
+        // (deduplicated) top-level parents (never nested paths, which would violate the {@link
+        // ProjectableDecodingFormat#supportsNestedProjection()} contract), and the
+        // project-after-deserializing variants get nothing pushed in. Any nested sub-fields are
+        // extracted afterward.
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                format,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {
+                    new int[] {0, 1}, new int[] {1, 0}
+                },
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {
+                    new int[] {0}, new int[] {1}
+                });
+
         assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-        assertThatIsProjectionNeeded(name, decoder, false, true, true);
+        assertThatIsProjectionNeeded(
+                isPushdownEnabled,
+                format,
+                decoder,
+                /* forPushdownDisabled= */ true,
+                /* forNonProjectableDecodingFormat= */ true,
+                /* forProjectableDecodingFormat= */ false,
+                /* forProjectableTopLevelOnlyDecodingFormat= */ true);
 
         final int expectedArity = 2;
 
@@ -590,8 +866,55 @@ class DecoderTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("jsonTestCases")
-    void testProjectDeeplyNestedFields(
-            final String name,
+    void testProjectsNestedFieldsWithNullParent(
+            final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
+            final Boolean isPushdownEnabled) {
+        final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
+
+        final int[][] projectedFields =
+                new int[][] {
+                    new int[] {0, 1}, // a0.b1 -> a0 is null
+                    new int[] {1, 0} // b0.a1
+                };
+
+        final Decoder decoder =
+                Decoder.create(
+                        new MockContext(),
+                        format,
+                        NESTED_TABLE_DATA_TYPE,
+                        new int[] {0, 1},
+                        null,
+                        projectedFields,
+                        Collections.emptyList(),
+                        isPushdownEnabled);
+
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                format,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {
+                    new int[] {0, 1}, new int[] {1, 0}
+                },
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {
+                    new int[] {0}, new int[] {1}
+                });
+
+        final String input = "{\"a0\":null, \"b0\":{\"a1\":\"b0_a1\", \"b1\":\"b0_b1\"}}";
+
+        final GenericRowData producedRow = new GenericRowData(2);
+        produceRow(decoder, input, producedRow);
+
+        final GenericRowData expected = new GenericRowData(2);
+        expected.setField(0, null);
+        expected.setField(1, "b0_a1");
+
+        assertThat(producedRow.toString()).isEqualTo(expected.toString());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("jsonTestCases")
+    void testProjectsDeeplyNestedFields(
             final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
             final Boolean isPushdownEnabled) {
         final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
@@ -669,8 +992,27 @@ class DecoderTest {
                         Collections.emptyList(),
                         isPushdownEnabled);
 
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                format,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {
+                    new int[] {0, 1, 1}, new int[] {1, 0, 0}
+                },
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {
+                    new int[] {0}, new int[] {1}
+                });
+
         assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-        assertThatIsProjectionNeeded(name, decoder, false, true, true);
+        assertThatIsProjectionNeeded(
+                isPushdownEnabled,
+                format,
+                decoder,
+                /* forPushdownDisabled= */ true,
+                /* forNonProjectableDecodingFormat= */ true,
+                /* forProjectableDecodingFormat= */ false,
+                /* forProjectableTopLevelOnlyDecodingFormat= */ true);
 
         final int expectedArity = 2;
 
@@ -685,13 +1027,167 @@ class DecoderTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @MethodSource("debeziumJsonTestCases")
-    void testProjectOneMetadataField(
-            final String name,
+    @MethodSource("jsonTestCases")
+    void testProjectsDeeplyNestedFieldsWithNullIntermediateParent(
             final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
             final Boolean isPushdownEnabled) {
-        final RecordingFormat<DeserializationSchema<RowData>> recordingFormat =
-                new RecordingFormat<>(formatSupplier.get());
+        final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
+
+        final DataType tableDataType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                "a0",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(
+                                                "a1",
+                                                DataTypes.ROW(
+                                                        DataTypes.FIELD("a2", DataTypes.STRING()),
+                                                        DataTypes.FIELD("b2", DataTypes.STRING()))),
+                                        DataTypes.FIELD(
+                                                "b1",
+                                                DataTypes.ROW(
+                                                        DataTypes.FIELD("a2", DataTypes.STRING()),
+                                                        DataTypes.FIELD(
+                                                                "b2", DataTypes.STRING()))))),
+                        DataTypes.FIELD(
+                                "b0",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(
+                                                "a1",
+                                                DataTypes.ROW(
+                                                        DataTypes.FIELD("a2", DataTypes.STRING()),
+                                                        DataTypes.FIELD("b2", DataTypes.STRING()))),
+                                        DataTypes.FIELD(
+                                                "b1",
+                                                DataTypes.ROW(
+                                                        DataTypes.FIELD("a2", DataTypes.STRING()),
+                                                        DataTypes.FIELD(
+                                                                "b2", DataTypes.STRING()))))));
+
+        final int[] dataTypeProjection = new int[] {0, 1};
+        // a0 is present but its intermediate child a0.b1 is null, so projecting a0.b1.b2 must
+        // null-short-circuit mid-descent (rather than NPE) and yield null.
+        final String input =
+                "{\n"
+                        + "  \"a0\": {\n"
+                        + "    \"a1\": {\n"
+                        + "      \"a2\": \"a0_a1_a2\",\n"
+                        + "      \"b2\": \"a0_a1_b2\"\n"
+                        + "    },\n"
+                        + "    \"b1\": null\n"
+                        + "  },\n"
+                        + "  \"b0\": {\n"
+                        + "    \"a1\": {\n"
+                        + "      \"a2\": \"b0_a1_a2\",\n"
+                        + "      \"b2\": \"b0_a1_b2\"\n"
+                        + "    },\n"
+                        + "    \"b1\": {\n"
+                        + "      \"a2\": \"b0_b1_a2\",\n"
+                        + "      \"b2\": \"b0_b1_b2\"\n"
+                        + "    }\n"
+                        + "  }\n"
+                        + "}";
+
+        final int[][] projectedFields =
+                new int[][] {
+                    new int[] {0, 1, 1}, // a0.b1.b2 -> a0.b1 is null
+                    new int[] {1, 0, 0} // b0.a1.a2
+                };
+
+        final Decoder decoder =
+                Decoder.create(
+                        new MockContext(),
+                        format,
+                        tableDataType,
+                        dataTypeProjection,
+                        null,
+                        projectedFields,
+                        Collections.emptyList(),
+                        isPushdownEnabled);
+
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                format,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {
+                    new int[] {0, 1, 1}, new int[] {1, 0, 0}
+                },
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {
+                    new int[] {0}, new int[] {1}
+                });
+
+        final GenericRowData producedRow = new GenericRowData(2);
+        produceRow(decoder, input, producedRow);
+
+        final GenericRowData expected = new GenericRowData(2);
+        expected.setField(0, null);
+        expected.setField(1, "b0_a1_a2");
+
+        assertThat(producedRow.toString()).isEqualTo(expected.toString());
+    }
+
+    /**
+     * Two nested fields under the same top-level parent: a top-level-only projectable format must
+     * receive that parent exactly once (the pushed-down top-level projection is deduplicated),
+     * while a nested-capable format receives both distinct nested paths.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("jsonTestCases")
+    void testProjectsNestedFieldsUnderSameParent(
+            final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
+            final Boolean isPushdownEnabled) {
+        final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
+
+        final int[][] projectedFields =
+                new int[][] {
+                    new int[] {0, 0}, // a0.a1
+                    new int[] {0, 1} // a0.b1
+                };
+
+        final Decoder decoder =
+                Decoder.create(
+                        new MockContext(),
+                        format,
+                        NESTED_TABLE_DATA_TYPE,
+                        new int[] {0, 1},
+                        null,
+                        projectedFields,
+                        Collections.emptyList(),
+                        isPushdownEnabled);
+
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                format,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {
+                    new int[] {0, 0}, new int[] {0, 1}
+                },
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {new int[] {0}});
+
+        final String input =
+                "{"
+                        + "\"a0\":{\"a1\":\"a0_a1\", \"b1\":\"a0_b1\"}, "
+                        + "\"b0\":{\"a1\":\"b0_a1\", \"b1\":\"b0_b1\"}"
+                        + "}";
+
+        final GenericRowData producedRow = new GenericRowData(2);
+        produceRow(decoder, input, producedRow);
+
+        final GenericRowData expected = new GenericRowData(2);
+        expected.setField(0, "a0_a1");
+        expected.setField(1, "a0_b1");
+
+        assertThat(producedRow.toString()).isEqualTo(expected.toString());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("debeziumJsonTestCases")
+    void testProjectsOneMetadataField(
+            final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
+            final Boolean isPushdownEnabled) {
+        final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
 
         final DataType tableDataType = DataTypes.ROW(DataTypes.FIELD("a", DataTypes.STRING()));
 
@@ -711,7 +1207,7 @@ class DecoderTest {
         final Decoder decoder =
                 Decoder.create(
                         new MockContext(),
-                        recordingFormat,
+                        format,
                         tableDataType,
                         dataTypeProjection,
                         null,
@@ -719,10 +1215,26 @@ class DecoderTest {
                         metadataKeys,
                         isPushdownEnabled);
 
-        assertThat(recordingFormat.appliedMetadataKeys).isEqualTo(metadataKeys);
+        assertThat(((RecordingDecodingFormat<?>) format).getAppliedMetadataKeys())
+                .isEqualTo(metadataKeys);
+
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                format,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {new int[] {0}},
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {new int[] {0}});
 
         assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-        assertThatIsProjectionNeeded(name, decoder, false, false, false);
+        assertThatIsProjectionNeeded(
+                isPushdownEnabled,
+                format,
+                decoder,
+                /* forPushdownDisabled= */ false,
+                /* forNonProjectableDecodingFormat= */ false,
+                /* forProjectableDecodingFormat= */ false,
+                /* forProjectableTopLevelOnlyDecodingFormat= */ false);
 
         final int expectedArity = 2;
 
@@ -738,12 +1250,10 @@ class DecoderTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("debeziumJsonTestCases")
-    void testProjectTwoMetadataFields(
-            final String name,
+    void testProjectsTwoMetadataFields(
             final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
             final Boolean isPushdownEnabled) {
-        final RecordingFormat<DeserializationSchema<RowData>> recordingFormat =
-                new RecordingFormat<>(formatSupplier.get());
+        final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
 
         final DataType tableDataType = DataTypes.ROW(DataTypes.FIELD("a", DataTypes.STRING()));
 
@@ -766,7 +1276,7 @@ class DecoderTest {
         final Decoder decoder =
                 Decoder.create(
                         new MockContext(),
-                        recordingFormat,
+                        format,
                         tableDataType,
                         dataTypeProjection,
                         null,
@@ -774,10 +1284,26 @@ class DecoderTest {
                         metadataKeys,
                         isPushdownEnabled);
 
-        assertThat(recordingFormat.appliedMetadataKeys).isEqualTo(metadataKeys);
+        assertThat(((RecordingDecodingFormat<?>) format).getAppliedMetadataKeys())
+                .isEqualTo(metadataKeys);
+
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                format,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {new int[] {0}},
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {new int[] {0}});
 
         assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-        assertThatIsProjectionNeeded(name, decoder, false, false, false);
+        assertThatIsProjectionNeeded(
+                isPushdownEnabled,
+                format,
+                decoder,
+                /* forPushdownDisabled= */ false,
+                /* forNonProjectableDecodingFormat= */ false,
+                /* forProjectableDecodingFormat= */ false,
+                /* forProjectableTopLevelOnlyDecodingFormat= */ false);
 
         final int expectedArity = 3;
 
@@ -793,9 +1319,81 @@ class DecoderTest {
     }
 
     @ParameterizedTest(name = "{0}")
+    @MethodSource("debeziumJsonTestCases")
+    void testProjectsReorderedFieldsWithMetadata(
+            final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
+            final Boolean isPushdownEnabled) {
+        final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
+
+        final DataType tableDataType =
+                DataTypes.ROW(
+                        DataTypes.FIELD("a", DataTypes.STRING()),
+                        DataTypes.FIELD("b", DataTypes.STRING()));
+
+        final int[] dataTypeProjection = new int[] {0, 1};
+        final String input =
+                "{"
+                        + "\"before\":null,"
+                        + "\"after\":{\"a\":\"a\", \"b\":\"b\"},"
+                        + "\"op\":\"c\","
+                        + "\"ts_ms\":0"
+                        + "}";
+
+        // Reorder the physical columns (b, a) and append a metadata field after them.
+        final int[][] projectedFields = new int[][] {new int[] {1}, new int[] {0}};
+
+        final List<String> metadataKeys = Collections.singletonList("ingestion-timestamp");
+
+        final Decoder decoder =
+                Decoder.create(
+                        new MockContext(),
+                        format,
+                        tableDataType,
+                        dataTypeProjection,
+                        null,
+                        projectedFields,
+                        metadataKeys,
+                        isPushdownEnabled);
+
+        assertThat(((RecordingDecodingFormat<?>) format).getAppliedMetadataKeys())
+                .isEqualTo(metadataKeys);
+
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                format,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {new int[] {1}, new int[] {0}},
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {
+                    new int[] {1}, new int[] {0}
+                });
+
+        assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
+        assertThatIsProjectionNeeded(
+                isPushdownEnabled,
+                format,
+                decoder,
+                /* forPushdownDisabled= */ true,
+                /* forNonProjectableDecodingFormat= */ true,
+                /* forProjectableDecodingFormat= */ false,
+                /* forProjectableTopLevelOnlyDecodingFormat= */ false);
+
+        final int expectedArity = 3;
+
+        final GenericRowData producedRow = new GenericRowData(expectedArity);
+        produceRow(decoder, input, producedRow);
+
+        final GenericRowData expected = new GenericRowData(expectedArity);
+        expected.setField(0, "b");
+        expected.setField(1, "a");
+        expected.setField(2, TimestampData.fromEpochMillis(0));
+
+        assertThat(producedRow.toString()).isEqualTo(expected.toString());
+    }
+
+    @ParameterizedTest(name = "{0}")
     @MethodSource("jsonTestCases")
-    void testPrefixProjectToReorderedSubsetOfTableSchema(
-            final String name,
+    void testProjectsKeyAndValueSubsetInDifferentOrder(
             final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
             final Boolean isPushdownEnabled) {
         final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
@@ -834,6 +1432,14 @@ class DecoderTest {
                         Collections.emptyList(),
                         isPushdownEnabled);
 
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                format,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {new int[] {2}},
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {new int[] {2}});
+
         final Decoder valueDecoder =
                 Decoder.create(
                         new MockContext(),
@@ -844,6 +1450,14 @@ class DecoderTest {
                         projectedFields,
                         Collections.emptyList(),
                         isPushdownEnabled);
+
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                format,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {new int[] {0}},
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {new int[] {0}});
 
         final int expectedArity = 2;
 
@@ -860,8 +1474,7 @@ class DecoderTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("jsonTestCases")
-    void testPrefixProjectToReorderedSubsetOfNestedTableSchema(
-            final String name,
+    void testProjectsKeyAndValueNestedSubsetInDifferentOrder(
             final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
             final Boolean isPushdownEnabled) {
         final DecodingFormat<DeserializationSchema<RowData>> keyFormat = formatSupplier.get();
@@ -911,6 +1524,14 @@ class DecoderTest {
                         Collections.emptyList(),
                         isPushdownEnabled);
 
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                keyFormat,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {new int[] {2}},
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {new int[] {2}});
+
         final Decoder valueDecoder =
                 Decoder.create(
                         new MockContext(),
@@ -921,6 +1542,16 @@ class DecoderTest {
                         projectedFields,
                         Collections.emptyList(),
                         isPushdownEnabled);
+
+        assertThatPushedProjectionEquals(
+                isPushdownEnabled,
+                valueFormat,
+                /* forPushdownDisabled= */ null,
+                /* forNonProjectableDecodingFormat= */ null,
+                /* forProjectableDecodingFormat= */ new int[][] {new int[] {0}, new int[] {2, 0}},
+                /* forProjectableTopLevelOnlyDecodingFormat= */ new int[][] {
+                    new int[] {0}, new int[] {2}
+                });
 
         final int expectedArity = 3;
 
@@ -934,306 +1565,5 @@ class DecoderTest {
         expected.setField(2, "v_e");
 
         assertThat(producedRow.toString()).isEqualTo(expected.toString());
-    }
-
-    private static Stream<Arguments> withoutProjectionPushdownCases() {
-        return Stream.of(
-                Arguments.of(
-                        PROJECTABLE_DECODING_FORMAT_WITH_PUSHDOWN_DISABLED,
-                        (Supplier<DecodingFormat<DeserializationSchema<RowData>>>)
-                                DecoderTest::debeziumJsonDecodingFormat),
-                Arguments.of(
-                        NON_PROJECTABLE_DECODING_FORMAT,
-                        (Supplier<DecodingFormat<DeserializationSchema<RowData>>>)
-                                () -> new NonProjectable<>(debeziumJsonDecodingFormat())));
-    }
-
-    @Nested
-    class IsProjectionNeeded {
-        private final DataType tableDataType =
-                DataTypes.ROW(
-                        DataTypes.FIELD("a", DataTypes.STRING()),
-                        DataTypes.FIELD("b", DataTypes.STRING()),
-                        DataTypes.FIELD("c", DataTypes.STRING()));
-        private final int[] dataTypeProjection = new int[] {0, 1, 2};
-
-        private Decoder createDecoder(
-                final Supplier<DecodingFormat<DeserializationSchema<RowData>>> format,
-                final int[][] projectedFields,
-                final boolean pushProjectionsIntoDecodingFormat) {
-            return createDecoder(
-                    format,
-                    projectedFields,
-                    Collections.emptyList(),
-                    pushProjectionsIntoDecodingFormat);
-        }
-
-        private Decoder createDecoder(
-                final Supplier<DecodingFormat<DeserializationSchema<RowData>>> format,
-                final int[][] projectedFields,
-                final List<String> metadataKeys,
-                final boolean pushProjectionsIntoDecodingFormat) {
-            return createDecoder(
-                    format,
-                    tableDataType,
-                    dataTypeProjection,
-                    projectedFields,
-                    metadataKeys,
-                    pushProjectionsIntoDecodingFormat);
-        }
-
-        private Decoder createDecoder(
-                final Supplier<DecodingFormat<DeserializationSchema<RowData>>> format,
-                final DataType tableDataType,
-                final int[] dataTypeProjection,
-                final int[][] projectedFields,
-                final List<String> metadataKeys,
-                final boolean pushProjectionsIntoDecodingFormat) {
-            return Decoder.create(
-                    new MockContext(),
-                    format.get(),
-                    tableDataType,
-                    Arrays.copyOf(dataTypeProjection, dataTypeProjection.length),
-                    null,
-                    projectedFields,
-                    metadataKeys,
-                    pushProjectionsIntoDecodingFormat);
-        }
-
-        @Nested
-        class WithoutProjectionPushdown {
-            private final boolean dontPushProjectionsIntoDecodingFormat = false;
-
-            @ParameterizedTest(name = "{0}")
-            @MethodSource(
-                    "org.apache.flink.streaming.connectors.kafka.table.DecoderTest#withoutProjectionPushdownCases")
-            void testAllFields(
-                    final String name,
-                    final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier) {
-                final int[][] projectedFields =
-                        new int[][] {new int[] {0}, new int[] {1}, new int[] {2}};
-                final Decoder decoder =
-                        createDecoder(
-                                formatSupplier,
-                                projectedFields,
-                                dontPushProjectionsIntoDecodingFormat);
-
-                assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-                assertThat(decoder.getProjector().isProjectionNeeded()).isFalse();
-            }
-
-            @ParameterizedTest(name = "{0}")
-            @MethodSource(
-                    "org.apache.flink.streaming.connectors.kafka.table.DecoderTest#withoutProjectionPushdownCases")
-            void testAllFieldsWithMetadata(
-                    final String name,
-                    final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier) {
-                final int[][] projectedFields =
-                        new int[][] {new int[] {0}, new int[] {1}, new int[] {2}};
-
-                final Decoder decoder =
-                        createDecoder(
-                                formatSupplier,
-                                projectedFields,
-                                Collections.singletonList("ingestion-timestamp"),
-                                dontPushProjectionsIntoDecodingFormat);
-
-                assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-                assertThat(decoder.getProjector().isProjectionNeeded()).isFalse();
-            }
-
-            @ParameterizedTest(name = "{0}")
-            @MethodSource(
-                    "org.apache.flink.streaming.connectors.kafka.table.DecoderTest#withoutProjectionPushdownCases")
-            void testAllFieldsInDifferentOrder(
-                    final String name,
-                    final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier) {
-                final int[][] projectedFields =
-                        new int[][] {new int[] {2}, new int[] {1}, new int[] {0}};
-                final Decoder decoder =
-                        createDecoder(
-                                formatSupplier,
-                                projectedFields,
-                                dontPushProjectionsIntoDecodingFormat);
-
-                assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-                assertThat(decoder.getProjector().isProjectionNeeded()).isTrue();
-            }
-
-            @ParameterizedTest(name = "{0}")
-            @MethodSource(
-                    "org.apache.flink.streaming.connectors.kafka.table.DecoderTest#withoutProjectionPushdownCases")
-            void testSubsetOfContiguousFields(
-                    final String name,
-                    final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier) {
-                final int[][] projectedFields =
-                        new int[][] {
-                            new int[] {0}, new int[] {1},
-                        };
-                final Decoder decoder =
-                        createDecoder(
-                                formatSupplier,
-                                projectedFields,
-                                dontPushProjectionsIntoDecodingFormat);
-
-                assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-                assertThat(decoder.getProjector().isProjectionNeeded()).isTrue();
-            }
-
-            @ParameterizedTest(name = "{0}")
-            @MethodSource(
-                    "org.apache.flink.streaming.connectors.kafka.table.DecoderTest#withoutProjectionPushdownCases")
-            void testSubsetOfContiguousFieldsInDifferentOrder(
-                    final String name,
-                    final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier) {
-                final int[][] projectedFields =
-                        new int[][] {
-                            new int[] {1}, new int[] {0},
-                        };
-                final Decoder decoder =
-                        createDecoder(
-                                formatSupplier,
-                                projectedFields,
-                                dontPushProjectionsIntoDecodingFormat);
-
-                assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-                assertThat(decoder.getProjector().isProjectionNeeded()).isTrue();
-            }
-
-            @ParameterizedTest(name = "{0}")
-            @MethodSource(
-                    "org.apache.flink.streaming.connectors.kafka.table.DecoderTest#withoutProjectionPushdownCases")
-            void testSubsetOfNonContiguousFields(
-                    final String name,
-                    final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier) {
-                final DataType tableDataType =
-                        DataTypes.ROW(
-                                DataTypes.FIELD("a", DataTypes.STRING()), // value
-                                DataTypes.FIELD("b", DataTypes.STRING()), // key
-                                DataTypes.FIELD("c", DataTypes.STRING())); // value
-
-                final int[] dataTypeProjection = new int[] {0, 2};
-
-                final int[][] projectedFields =
-                        new int[][] {
-                            new int[] {0}, // value
-                            new int[] {1}, // key
-                            new int[] {2} // value
-                        };
-
-                final Decoder valueDecoder =
-                        createDecoder(
-                                formatSupplier,
-                                tableDataType,
-                                dataTypeProjection,
-                                projectedFields,
-                                Collections.emptyList(),
-                                dontPushProjectionsIntoDecodingFormat);
-
-                assertThat(valueDecoder.getProjector().isEmptyProjection()).isFalse();
-                assertThat(valueDecoder.getProjector().isProjectionNeeded()).isTrue();
-            }
-        }
-
-        @Nested
-        class WithProjectionPushdown {
-            private final Supplier<DecodingFormat<DeserializationSchema<RowData>>> format =
-                    DecoderTest::debeziumJsonDecodingFormat;
-            private final boolean pushProjectionsIntoDecodingFormat = true;
-
-            @Test
-            void testAllFields() {
-                final int[][] projectedFields =
-                        new int[][] {new int[] {0}, new int[] {1}, new int[] {2}};
-                final Decoder decoder =
-                        createDecoder(format, projectedFields, pushProjectionsIntoDecodingFormat);
-
-                assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-                assertThat(decoder.getProjector().isProjectionNeeded()).isFalse();
-            }
-
-            @Test
-            void testAllFieldsWithMetadata() {
-                final int[][] projectedFields =
-                        new int[][] {new int[] {0}, new int[] {1}, new int[] {2}};
-
-                final Decoder decoder =
-                        createDecoder(
-                                format,
-                                projectedFields,
-                                Collections.singletonList("ingestion-timestamp"),
-                                pushProjectionsIntoDecodingFormat);
-
-                assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-                assertThat(decoder.getProjector().isProjectionNeeded()).isFalse();
-            }
-
-            @Test
-            void testAllFieldsInDifferentOrder() {
-                final int[][] projectedFields =
-                        new int[][] {new int[] {2}, new int[] {1}, new int[] {0}};
-                final Decoder decoder =
-                        createDecoder(format, projectedFields, pushProjectionsIntoDecodingFormat);
-
-                assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-                assertThat(decoder.getProjector().isProjectionNeeded()).isFalse();
-            }
-
-            @Test
-            void testSubsetOfContiguousFields() {
-                final int[][] projectedFields =
-                        new int[][] {
-                            new int[] {0}, new int[] {1},
-                        };
-                final Decoder decoder =
-                        createDecoder(format, projectedFields, pushProjectionsIntoDecodingFormat);
-
-                assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-                assertThat(decoder.getProjector().isProjectionNeeded()).isFalse();
-            }
-
-            @Test
-            void testSubsetOfContiguousFieldsInDifferentOrder() {
-                final int[][] projectedFields =
-                        new int[][] {
-                            new int[] {1}, new int[] {0},
-                        };
-                final Decoder decoder =
-                        createDecoder(format, projectedFields, pushProjectionsIntoDecodingFormat);
-
-                assertThat(decoder.getProjector().isEmptyProjection()).isFalse();
-                assertThat(decoder.getProjector().isProjectionNeeded()).isFalse();
-            }
-
-            @Test
-            void testSubsetOfNonContiguousFields() {
-                final DataType tableDataType =
-                        DataTypes.ROW(
-                                DataTypes.FIELD("a", DataTypes.STRING()), // value
-                                DataTypes.FIELD("b", DataTypes.STRING()), // key
-                                DataTypes.FIELD("c", DataTypes.STRING())); // value
-
-                final int[] dataTypeProjection = new int[] {0, 2};
-
-                final int[][] projectedFields =
-                        new int[][] {
-                            new int[] {0}, // value
-                            new int[] {1}, // key
-                            new int[] {2} // value
-                        };
-
-                final Decoder valueDecoder =
-                        createDecoder(
-                                format,
-                                tableDataType,
-                                dataTypeProjection,
-                                projectedFields,
-                                Collections.emptyList(),
-                                pushProjectionsIntoDecodingFormat);
-
-                assertThat(valueDecoder.getProjector().isEmptyProjection()).isFalse();
-                assertThat(valueDecoder.getProjector().isProjectionNeeded()).isTrue();
-            }
-        }
     }
 }
