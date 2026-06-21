@@ -40,6 +40,7 @@ import java.lang.reflect.Method;
 import java.time.Duration;
 import java.util.Properties;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.apache.flink.util.Preconditions.checkState;
 
@@ -203,7 +204,36 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         TransactionalRequestResult result = enqueueNewPartitions();
         Object sender = getField("sender");
         invoke(sender, "wakeup");
-        result.await();
+        awaitTransactionalRequestResult(result);
+    }
+
+    private static void awaitTransactionalRequestResult(TransactionalRequestResult result) {
+        try {
+            Method method = result.getClass().getDeclaredMethod("await");
+            method.setAccessible(true);
+            method.invoke(result);
+        } catch (NoSuchMethodException e) {
+            invoke(
+                    result,
+                    "await",
+                    new Class<?>[] {Long.TYPE, TimeUnit.class, String.class},
+                    new Object[] {
+                        1L,
+                        TimeUnit.DAYS,
+                        "Timed out while flushing new Kafka transaction partitions."
+                    });
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException) {
+                throw (RuntimeException) cause;
+            }
+            if (cause instanceof Error) {
+                throw (Error) cause;
+            }
+            throw new RuntimeException("Incompatible KafkaProducer version", cause);
+        } catch (IllegalAccessException e) {
+            throw new RuntimeException("Incompatible KafkaProducer version", e);
+        }
     }
 
     /**

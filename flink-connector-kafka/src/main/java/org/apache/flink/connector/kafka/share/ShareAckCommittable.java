@@ -19,10 +19,13 @@ package org.apache.flink.connector.kafka.share;
 
 import org.apache.flink.annotation.Internal;
 
+import java.io.Serializable;
 import java.util.Objects;
 
 @Internal
-public class ShareAckCommittable {
+public class ShareAckCommittable implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private final long checkpointId;
     private final String transactionalId;

@@ -48,9 +48,15 @@ public class KafkaShareAckTransactionManager implements AutoCloseable {
     }
 
     public void stageAcknowledgements() throws IOException, InterruptedException {
+        stageAcknowledgementsForTransaction();
+    }
+
+    public ShareAckTransactionHandle stageAcknowledgementsForTransaction()
+            throws IOException, InterruptedException {
         ShareAckTransactionHandle transaction = activeTransaction();
         client.stageAcknowledgements(transaction);
         activeTransactionHasAcknowledgements = true;
+        return transaction;
     }
 
     public List<ShareAckCommittable> snapshotState(long checkpointId)
