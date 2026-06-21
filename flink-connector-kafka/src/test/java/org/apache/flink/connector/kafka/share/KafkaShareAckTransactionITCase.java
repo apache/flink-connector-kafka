@@ -229,10 +229,13 @@ class KafkaShareAckTransactionITCase {
                 iterator.forEachRemaining(results::add);
             }
 
-            List<ShareReadRecord> dataRecords =
-                    results.stream()
-                            .filter(record -> !record.sourceStarted)
-                            .collect(Collectors.toList());
+            List<ShareReadRecord> dataRecords = recordsOfType(results, ShareReadEventType.RECORD);
+            List<ShareReadRecord> stagedEvents =
+                    recordsOfType(results, ShareReadEventType.ACK_STAGED);
+            List<ShareReadRecord> precommittedEvents =
+                    recordsOfType(results, ShareReadEventType.TX_PRECOMMITTED);
+            List<ShareReadRecord> committedEvents =
+                    recordsOfType(results, ShareReadEventType.TX_COMMITTED);
             assertThat(dataRecords).hasSize(expectedRecords);
             assertThat(
                             dataRecords.stream()
@@ -243,13 +246,32 @@ class KafkaShareAckTransactionITCase {
                                     .boxed()
                                     .collect(Collectors.toSet()));
             assertThat(
-                            results.stream()
-                                    .filter(record -> record.sourceStarted)
+                            recordsOfType(results, ShareReadEventType.SOURCE_STARTED).stream()
                                     .map(record -> record.sourceSubtaskId)
                                     .collect(Collectors.toSet()))
                     .containsExactlyInAnyOrder(0, 1, 2, 3);
             assertThat(
-                            results.stream()
+                            recordsOfType(results, ShareReadEventType.CONSUMER_CREATED).stream()
+                                    .map(record -> record.sourceSubtaskId)
+                                    .collect(Collectors.toSet()))
+                    .containsExactlyInAnyOrder(0, 1, 2, 3);
+            assertThat(
+                            recordsOfType(results, ShareReadEventType.CONSUMER_CREATED).stream()
+                                    .map(record -> record.clientId)
+                                    .collect(Collectors.toSet()))
+                    .hasSize(PARALLELISM);
+            assertThat(
+                            recordsOfType(results, ShareReadEventType.TX_MANAGER_CREATED).stream()
+                                    .map(record -> record.sourceSubtaskId)
+                                    .collect(Collectors.toSet()))
+                    .containsExactlyInAnyOrder(0, 1, 2, 3);
+            assertThat(
+                            dataRecords.stream()
+                                    .map(record -> record.sourceSubtaskId)
+                                    .collect(Collectors.toSet()))
+                    .hasSizeGreaterThan(1);
+            assertThat(
+                            dataRecords.stream()
                                     .map(record -> record.mapSubtaskId)
                                     .collect(Collectors.toSet()))
                     .hasSizeGreaterThan(1);
@@ -258,6 +280,38 @@ class KafkaShareAckTransactionITCase {
                             .map(record -> record.partition + "-" + record.offset)
                             .collect(Collectors.toCollection(HashSet::new));
             assertThat(topicPartitionOffsets).hasSize(expectedRecords);
+            assertThat(stagedEvents).isNotEmpty();
+            assertThat(stagedEvents.stream().mapToInt(record -> record.batchSize).sum())
+                    .isEqualTo(expectedRecords);
+            assertThat(
+                            stagedEvents.stream()
+                                    .map(KafkaShareAckTransactionITCase::transactionKey)
+                                    .collect(Collectors.toSet()))
+                    .containsExactlyInAnyOrderElementsOf(
+                            precommittedEvents.stream()
+                                    .map(KafkaShareAckTransactionITCase::transactionKey)
+                                    .collect(Collectors.toSet()));
+            assertThat(
+                            committedEvents.stream()
+                                    .map(KafkaShareAckTransactionITCase::transactionKey)
+                                    .collect(Collectors.toList()))
+                    .doesNotHaveDuplicates();
+            assertThat(
+                            committedEvents.stream()
+                                    .map(KafkaShareAckTransactionITCase::transactionKey)
+                                    .collect(Collectors.toSet()))
+                    .containsExactlyInAnyOrderElementsOf(
+                            stagedEvents.stream()
+                                    .map(KafkaShareAckTransactionITCase::transactionKey)
+                                    .collect(Collectors.toSet()));
+            assertThat(
+                            stagedEvents.stream()
+                                    .map(record -> record.sourceSubtaskId)
+                                    .collect(Collectors.toSet()))
+                    .containsAll(
+                            dataRecords.stream()
+                                    .map(record -> record.sourceSubtaskId)
+                                    .collect(Collectors.toSet()));
 
             for (TopicPartition topicPartition : context.topicPartitions) {
                 waitForShareLag(admin, context.groupId, topicPartition, 0L);
@@ -405,11 +459,19 @@ class KafkaShareAckTransactionITCase {
     }
 
     private static Properties shareConsumerProperties(String bootstrapServers, String groupId) {
+        return shareConsumerProperties(bootstrapServers, groupId, "");
+    }
+
+    private static Properties shareConsumerProperties(
+            String bootstrapServers, String groupId, String clientId) {
         Properties properties = new Properties();
         properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         properties.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class);
         properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class);
+        if (!clientId.isBlank()) {
+            properties.put(ConsumerConfig.CLIENT_ID_CONFIG, clientId);
+        }
         properties.put(SHARE_ACK_MODE_CONFIG, "explicit");
         return properties;
     }
@@ -460,6 +522,21 @@ class KafkaShareAckTransactionITCase {
         return invoke(target, methodName, new Class<?>[0]);
     }
 
+    private static List<ShareReadRecord> recordsOfType(
+            List<ShareReadRecord> records, ShareReadEventType eventType) {
+        return records.stream()
+                .filter(record -> record.eventType == eventType)
+                .collect(Collectors.toList());
+    }
+
+    private static String transactionKey(ShareReadRecord record) {
+        return record.transactionalId
+                + "-"
+                + record.transactionOwnerId
+                + "-"
+                + record.transactionOwnerEpoch;
+    }
+
     private static final class ShareTestContext {
         private final String bootstrapServers;
         private final String topic;
@@ -485,6 +562,7 @@ class KafkaShareAckTransactionITCase {
             implements ShareAckTransactionClient {
 
         private final String topic;
+        private final String clientId;
         private final KafkaShareConsumer<byte[], byte[]> consumer;
         private final Properties producerProperties;
 
@@ -494,14 +572,28 @@ class KafkaShareAckTransactionITCase {
 
         private ReflectiveShareAckTransactionClient(
                 String bootstrapServers, String groupId, String topic) {
+            this(bootstrapServers, groupId, topic, -1);
+        }
+
+        private ReflectiveShareAckTransactionClient(
+                String bootstrapServers, String groupId, String topic, int sourceSubtaskId) {
             this.topic = topic;
+            String clientId =
+                    sourceSubtaskId < 0
+                            ? ""
+                            : "flink-share-ack-source-" + sourceSubtaskId + "-" + groupId;
             this.consumer =
                     new KafkaShareConsumer<>(
-                            shareConsumerProperties(bootstrapServers, groupId),
+                            shareConsumerProperties(bootstrapServers, groupId, clientId),
                             new ByteArrayDeserializer(),
                             new ByteArrayDeserializer());
             this.consumer.subscribe(List.of(topic));
             this.producerProperties = producerProperties(bootstrapServers);
+            this.clientId = clientId;
+        }
+
+        private String clientId() {
+            return clientId;
         }
 
         @Override
@@ -617,14 +709,15 @@ class KafkaShareAckTransactionITCase {
         @Override
         public void run(SourceFunction.SourceContext<ShareReadRecord> context) throws Exception {
             int subtaskId = getRuntimeContext().getTaskInfo().getIndexOfThisSubtask();
-            synchronized (context.getCheckpointLock()) {
-                context.collect(ShareReadRecord.sourceStarted(subtaskId));
-            }
+            collect(context, ShareReadRecord.sourceStarted(subtaskId));
 
             ReflectiveShareAckTransactionClient client =
-                    new ReflectiveShareAckTransactionClient(bootstrapServers, groupId, topic);
+                    new ReflectiveShareAckTransactionClient(
+                            bootstrapServers, groupId, topic, subtaskId);
+            collect(context, ShareReadRecord.consumerCreated(subtaskId, client.clientId()));
             try (KafkaShareAckTransactionManager manager =
                     new KafkaShareAckTransactionManager(client, groupId, subtaskId, List.of())) {
+                collect(context, ShareReadRecord.transactionManagerCreated(subtaskId));
                 boolean stagedAcknowledgements = false;
                 int emptyPolls = 0;
                 while (running && emptyPolls < MAX_EMPTY_POLLS) {
@@ -635,19 +728,28 @@ class KafkaShareAckTransactionITCase {
                     }
 
                     emptyPolls = 0;
-                    for (ConsumerRecord<byte[], byte[]> record : records) {
+                    List<ConsumerRecord<byte[], byte[]>> batch = new ArrayList<>();
+                    records.forEach(batch::add);
+                    for (ConsumerRecord<byte[], byte[]> record : batch) {
                         client.acknowledgeAccept(record);
-                        synchronized (context.getCheckpointLock()) {
-                            context.collect(ShareReadRecord.data(subtaskId, record));
-                        }
+                        collect(context, ShareReadRecord.data(subtaskId, record));
                     }
-                    manager.stageAcknowledgements();
+                    ShareAckTransactionHandle transaction =
+                            manager.stageAcknowledgementsForTransaction();
+                    collect(context, ShareReadRecord.ackStaged(subtaskId, transaction, batch.size()));
                     stagedAcknowledgements = true;
                 }
 
                 if (stagedAcknowledgements) {
-                    for (ShareAckCommittable committable : manager.snapshotState(1L)) {
+                    List<ShareAckCommittable> committables = manager.snapshotState(1L);
+                    for (ShareAckCommittable committable : committables) {
+                        collect(
+                                context,
+                                ShareReadRecord.transactionPreCommitted(subtaskId, committable));
                         client.commit(committable);
+                        collect(
+                                context,
+                                ShareReadRecord.transactionCommitted(subtaskId, committable));
                     }
                     manager.markCommittedUpTo(1L);
                 }
@@ -657,6 +759,13 @@ class KafkaShareAckTransactionITCase {
         @Override
         public void cancel() {
             running = false;
+        }
+
+        private void collect(
+                SourceFunction.SourceContext<ShareReadRecord> context, ShareReadRecord record) {
+            synchronized (context.getCheckpointLock()) {
+                context.collect(record);
+            }
         }
     }
 
@@ -670,54 +779,163 @@ class KafkaShareAckTransactionITCase {
         }
     }
 
+    private enum ShareReadEventType {
+        SOURCE_STARTED,
+        CONSUMER_CREATED,
+        TX_MANAGER_CREATED,
+        RECORD,
+        ACK_STAGED,
+        TX_PRECOMMITTED,
+        TX_COMMITTED
+    }
+
     private static final class ShareReadRecord implements Serializable {
         private static final long serialVersionUID = 1L;
 
-        private final boolean sourceStarted;
+        private final ShareReadEventType eventType;
         private final int sourceSubtaskId;
         private final int mapSubtaskId;
         private final int partition;
         private final long offset;
         private final String value;
+        private final String clientId;
+        private final String transactionalId;
+        private final long transactionOwnerId;
+        private final short transactionOwnerEpoch;
+        private final int batchSize;
 
         private ShareReadRecord(
-                boolean sourceStarted,
+                ShareReadEventType eventType,
                 int sourceSubtaskId,
                 int mapSubtaskId,
                 int partition,
                 long offset,
-                String value) {
-            this.sourceStarted = sourceStarted;
+                String value,
+                String clientId,
+                String transactionalId,
+                long transactionOwnerId,
+                short transactionOwnerEpoch,
+                int batchSize) {
+            this.eventType = eventType;
             this.sourceSubtaskId = sourceSubtaskId;
             this.mapSubtaskId = mapSubtaskId;
             this.partition = partition;
             this.offset = offset;
             this.value = value;
+            this.clientId = clientId;
+            this.transactionalId = transactionalId;
+            this.transactionOwnerId = transactionOwnerId;
+            this.transactionOwnerEpoch = transactionOwnerEpoch;
+            this.batchSize = batchSize;
         }
 
         private static ShareReadRecord sourceStarted(int subtaskId) {
-            return new ShareReadRecord(true, subtaskId, -1, -1, -1L, "");
+            return event(ShareReadEventType.SOURCE_STARTED, subtaskId);
+        }
+
+        private static ShareReadRecord consumerCreated(int subtaskId, String clientId) {
+            return new ShareReadRecord(
+                    ShareReadEventType.CONSUMER_CREATED,
+                    subtaskId,
+                    -1,
+                    -1,
+                    -1L,
+                    "",
+                    clientId,
+                    "",
+                    -1L,
+                    (short) -1,
+                    0);
+        }
+
+        private static ShareReadRecord transactionManagerCreated(int subtaskId) {
+            return event(ShareReadEventType.TX_MANAGER_CREATED, subtaskId);
         }
 
         private static ShareReadRecord data(
                 int subtaskId, ConsumerRecord<byte[], byte[]> record) {
             return new ShareReadRecord(
-                    false,
+                    ShareReadEventType.RECORD,
                     subtaskId,
                     -1,
                     record.partition(),
                     record.offset(),
-                    value(record));
+                    value(record),
+                    "",
+                    "",
+                    -1L,
+                    (short) -1,
+                    0);
+        }
+
+        private static ShareReadRecord ackStaged(
+                int subtaskId, ShareAckTransactionHandle transaction, int batchSize) {
+            return transactionEvent(ShareReadEventType.ACK_STAGED, subtaskId, transaction, batchSize);
+        }
+
+        private static ShareReadRecord transactionPreCommitted(
+                int subtaskId, ShareAckCommittable committable) {
+            return transactionEvent(ShareReadEventType.TX_PRECOMMITTED, subtaskId, committable);
+        }
+
+        private static ShareReadRecord transactionCommitted(
+                int subtaskId, ShareAckCommittable committable) {
+            return transactionEvent(ShareReadEventType.TX_COMMITTED, subtaskId, committable);
+        }
+
+        private static ShareReadRecord event(ShareReadEventType eventType, int subtaskId) {
+            return new ShareReadRecord(
+                    eventType, subtaskId, -1, -1, -1L, "", "", "", -1L, (short) -1, 0);
+        }
+
+        private static ShareReadRecord transactionEvent(
+                ShareReadEventType eventType,
+                int subtaskId,
+                ShareAckTransactionHandle transaction,
+                int batchSize) {
+            return new ShareReadRecord(
+                    eventType,
+                    subtaskId,
+                    -1,
+                    -1,
+                    -1L,
+                    "",
+                    "",
+                    transaction.getTransactionalId(),
+                    transaction.getTransactionOwnerId(),
+                    transaction.getTransactionOwnerEpoch(),
+                    batchSize);
+        }
+
+        private static ShareReadRecord transactionEvent(
+                ShareReadEventType eventType, int subtaskId, ShareAckCommittable committable) {
+            return new ShareReadRecord(
+                    eventType,
+                    subtaskId,
+                    -1,
+                    -1,
+                    -1L,
+                    "",
+                    "",
+                    committable.getTransactionalId(),
+                    committable.getTransactionOwnerId(),
+                    committable.getTransactionOwnerEpoch(),
+                    0);
         }
 
         private ShareReadRecord withMapSubtaskId(int mapSubtaskId) {
             return new ShareReadRecord(
-                    sourceStarted,
+                    eventType,
                     sourceSubtaskId,
                     mapSubtaskId,
                     partition,
                     offset,
-                    value);
+                    value,
+                    clientId,
+                    transactionalId,
+                    transactionOwnerId,
+                    transactionOwnerEpoch,
+                    batchSize);
         }
     }
 }
