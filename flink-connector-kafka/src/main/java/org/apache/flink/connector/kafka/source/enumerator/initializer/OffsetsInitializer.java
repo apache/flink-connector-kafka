@@ -160,6 +160,7 @@ public interface OffsetsInitializer extends Serializable {
 
     /**
      * Get an {@link OffsetsInitializer} which initializes the offsets to the specified offsets.
+     * Partitions without specified offsets will be initialized to their earliest offsets.
      *
      * @param offsets the specified offsets for each partition.
      * @return an {@link OffsetsInitializer} which initializes the offsets to the specified offsets.
@@ -171,11 +172,11 @@ public interface OffsetsInitializer extends Serializable {
     /**
      * Get an {@link OffsetsInitializer} which initializes the offsets to the specified offsets. Use
      * the given {@link OffsetResetStrategy} to initialize the offsets in case the specified offset
-     * is out of range.
+     * is out of range, or in case a partition does not have a specified offset.
      *
      * @param offsets the specified offsets for each partition.
      * @param offsetResetStrategy the {@link OffsetResetStrategy} to use when the specified offset
-     *     is out of range.
+     *     is out of range or missing.
      * @return an {@link OffsetsInitializer} which initializes the offsets to the specified offsets.
      */
     static OffsetsInitializer offsets(
