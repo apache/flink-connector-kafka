@@ -56,7 +56,8 @@ final class SynchronizedKafkaMetadataService implements KafkaMetadataService {
     }
 
     @Override
-    public synchronized void close() throws Exception {
+    public void close() throws Exception {
+        // Closing must be able to unblock an in-flight metadata call during source shutdown.
         delegate.close();
     }
 }

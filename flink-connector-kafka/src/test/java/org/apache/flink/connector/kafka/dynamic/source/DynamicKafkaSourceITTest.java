@@ -571,7 +571,7 @@ class DynamicKafkaSourceITTest {
                 enumerator.start();
                 registerReader(context, enumerator, 0);
                 registerReader(context, enumerator, 1);
-                runAllOneTimeCallables(context);
+                waitForInitialSplitAssignments(context);
 
                 List<DynamicKafkaSourceSplit> assignedSplits =
                         context.getSplitsAssignmentSequence().stream()

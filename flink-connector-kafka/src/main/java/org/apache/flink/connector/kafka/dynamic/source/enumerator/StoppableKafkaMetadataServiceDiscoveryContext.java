@@ -102,12 +102,16 @@ public class StoppableKafkaMetadataServiceDiscoveryContext implements AutoClosea
         return thread;
     }
 
-    @Override
-    public void close() throws InterruptedException {
+    void prepareForClose() {
         synchronized (this) {
             isClosing = true;
             metadataDiscoveryWorker.shutdownNow();
         }
+    }
+
+    @Override
+    public void close() throws InterruptedException {
+        prepareForClose();
         metadataDiscoveryWorker.awaitTermination(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
     }
 

@@ -50,7 +50,6 @@ import org.apache.flink.testutils.logging.LoggerAuditingExtension;
 
 import com.google.common.collect.ImmutableSet;
 import org.apache.kafka.clients.CommonClientConfigs;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.AfterAll;
@@ -1051,35 +1050,6 @@ public class DynamicKafkaSourceEnumeratorTest {
     }
 
     @Test
-    public void testClusterEnumeratorUsesHalfReaderTimeout() throws Exception {
-        MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
-                new MockSplitEnumeratorContext<>(2);
-        try (DynamicKafkaSourceEnumerator enumerator =
-                createEnumerator(
-                        context,
-                        properties -> {
-                            properties.setProperty(
-                                    ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG, "600000");
-                            properties.setProperty(
-                                    CommonClientConfigs.DEFAULT_API_TIMEOUT_MS_CONFIG, "600000");
-                        })) {
-            enumerator.start();
-            mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, 0);
-
-            Map<String, ?> clusterEnumeratorMap =
-                    (Map<String, ?>) Whitebox.getInternalState(enumerator, "clusterEnumeratorMap");
-            for (Object clusterEnumerator : clusterEnumeratorMap.values()) {
-                Properties clusterEnumeratorProperties =
-                        (Properties) Whitebox.getInternalState(clusterEnumerator, "properties");
-                assertThat(clusterEnumeratorProperties)
-                        .containsEntry(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG, "300000");
-                assertThat(clusterEnumeratorProperties)
-                        .containsEntry(CommonClientConfigs.DEFAULT_API_TIMEOUT_MS_CONFIG, "300000");
-            }
-        }
-    }
-
-    @Test
     public void testRestoreReconcilesRemovedAndAddedClustersFromLatestMetadata() throws Throwable {
         KafkaStream baseStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
         DynamicKafkaSourceEnumState checkpointState = getCheckpointState(baseStream);
@@ -1236,6 +1206,51 @@ public class DynamicKafkaSourceEnumeratorTest {
             }
         } finally {
             refreshExecutor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testCloseSurfacesAsynchronousStaleEnumeratorCloseFailure() throws Throwable {
+        KafkaStream initialStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+        KafkaStream shrunkStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+        String removedCluster = DynamicKafkaSourceTestHelper.getKafkaClusterId(1);
+        shrunkStream.getClusterMetadataMap().remove(removedCluster);
+
+        MockKafkaMetadataService metadataService =
+                new MockKafkaMetadataService(Collections.singleton(initialStream));
+        ThrowingCloseKafkaEnumContextProxyFactory enumContextProxyFactory =
+                new ThrowingCloseKafkaEnumContextProxyFactory(removedCluster);
+
+        Properties properties = new Properties();
+        properties.setProperty(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "0");
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "1");
+
+        try (DroppingCoordinatorThreadContext context =
+                new DroppingCoordinatorThreadContext(NUM_SUBTASKS)) {
+            DynamicKafkaSourceEnumerator enumerator =
+                    new DynamicKafkaSourceEnumerator(
+                            new KafkaStreamSetSubscriber(Collections.singleton(TOPIC)),
+                            metadataService,
+                            context,
+                            OffsetsInitializer.committedOffsets(),
+                            new NoStoppingOffsetsInitializer(),
+                            properties,
+                            Boundedness.CONTINUOUS_UNBOUNDED,
+                            new DynamicKafkaSourceEnumState(),
+                            enumContextProxyFactory);
+
+            enumerator.start();
+            context.runPeriodicCallable(0);
+            runAllOneTimeCallables(context);
+
+            metadataService.setKafkaStreams(Collections.singleton(shrunkStream));
+            context.runPeriodicCallable(0);
+            runAllOneTimeCallables(context);
+
+            assertThatThrownBy(enumerator::close)
+                    .hasMessageContaining("Failed to close stale dynamic Kafka enumerator")
+                    .hasRootCauseMessage("test close failure");
         }
     }
 
@@ -2533,6 +2548,57 @@ public class DynamicKafkaSourceEnumeratorTest {
                     .isTrue();
             super.close();
         }
+    }
+
+    private static class ThrowingCloseKafkaEnumContextProxyFactory
+            implements StoppableKafkaEnumContextProxy.StoppableKafkaEnumContextProxyFactory {
+        private final String failingClusterId;
+
+        private ThrowingCloseKafkaEnumContextProxyFactory(String failingClusterId) {
+            this.failingClusterId = failingClusterId;
+        }
+
+        @Override
+        public StoppableKafkaEnumContextProxy create(
+                SplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext,
+                String kafkaClusterId,
+                KafkaMetadataService kafkaMetadataService,
+                Runnable signalNoMoreSplitsCallback) {
+            if (failingClusterId.equals(kafkaClusterId)) {
+                return new ThrowingCloseKafkaEnumContextProxy(
+                        kafkaClusterId,
+                        kafkaMetadataService,
+                        (MockSplitEnumeratorContext<DynamicKafkaSourceSplit>) enumContext);
+            }
+            return new TestKafkaEnumContextProxy(
+                    kafkaClusterId,
+                    kafkaMetadataService,
+                    (MockSplitEnumeratorContext<DynamicKafkaSourceSplit>) enumContext);
+        }
+    }
+
+    private static class ThrowingCloseKafkaEnumContextProxy extends TestKafkaEnumContextProxy {
+        private ThrowingCloseKafkaEnumContextProxy(
+                String kafkaClusterId,
+                KafkaMetadataService kafkaMetadataService,
+                MockSplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext) {
+            super(kafkaClusterId, kafkaMetadataService, enumContext);
+        }
+
+        @Override
+        public void close() throws Exception {
+            throw new Exception("test close failure");
+        }
+    }
+
+    private static class DroppingCoordinatorThreadContext
+            extends MockSplitEnumeratorContext<DynamicKafkaSourceSplit> {
+        private DroppingCoordinatorThreadContext(int parallelism) {
+            super(parallelism);
+        }
+
+        @Override
+        public void runInCoordinatorThread(Runnable runnable) {}
     }
 
     private static class BlockingDescribeStreamsKafkaMetadataService

@@ -65,6 +65,7 @@ import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 /**
@@ -74,7 +75,6 @@ import java.util.stream.Collectors;
 @Internal
 public class DynamicKafkaSourceEnumerator
         implements SplitEnumerator<DynamicKafkaSourceSplit, DynamicKafkaSourceEnumState> {
-    private static final int ENUMERATOR_ADMIN_CLIENT_TIMEOUT_DIVISOR = 2;
     private static final Logger logger =
             LoggerFactory.getLogger(DynamicKafkaSourceEnumerator.class);
 
@@ -97,6 +97,7 @@ public class DynamicKafkaSourceEnumerator
     private final StoppableKafkaMetadataServiceDiscoveryContext
             kafkaMetadataServiceDiscoveryContext;
     private final ExecutorService enumeratorClosingExecutor;
+    private final AtomicReference<Throwable> asynchronousEnumeratorCloseFailure;
 
     // options
     private final long kafkaMetadataServiceDiscoveryIntervalMs;
@@ -209,6 +210,7 @@ public class DynamicKafkaSourceEnumerator
                         runnable ->
                                 createDaemonThread(
                                         runnable, "dynamic-kafka-enumerator-closing-worker"));
+        this.asynchronousEnumeratorCloseFailure = new AtomicReference<>();
         this.splitAssignmentStrategy = createSplitAssignmentStrategy(properties);
 
         if (!dynamicKafkaSourceEnumState.getClusterEnumeratorStates().isEmpty()) {
@@ -598,7 +600,6 @@ public class DynamicKafkaSourceEnumerator
         KafkaPropertiesUtil.copyProperties(fetchedProperties, consumerProps);
         KafkaPropertiesUtil.copyProperties(properties, consumerProps);
         DynamicKafkaSourceOptions.removeRemovedClusterRetentionOption(consumerProps);
-        tuneEnumeratorAdminClientTimeouts(consumerProps);
         KafkaPropertiesUtil.setClientIdPrefix(consumerProps, kafkaClusterId);
         consumerProps.setProperty(
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
@@ -679,12 +680,24 @@ public class DynamicKafkaSourceEnumerator
                         closingClusterEnumContextMap.get(cluster).close();
                         subEnumerator.close();
                     } catch (Exception e) {
-                        enumContext.runInCoordinatorThread(
-                                () -> {
-                                    throw new RuntimeException(e);
-                                });
+                        handleAsynchronousEnumeratorCloseFailure(e);
                     }
                 });
+    }
+
+    private void handleAsynchronousEnumeratorCloseFailure(Exception e) {
+        asynchronousEnumeratorCloseFailure.compareAndSet(null, e);
+        try {
+            enumContext.runInCoordinatorThread(
+                    () -> {
+                        throw new RuntimeException(e);
+                    });
+        } catch (Throwable coordinatorFailure) {
+            logger.warn(
+                    "Unable to propagate asynchronous dynamic Kafka enumerator close failure to "
+                            + "the coordinator thread. The failure will be rethrown during close.",
+                    coordinatorFailure);
+        }
     }
 
     /**
@@ -812,29 +825,6 @@ public class DynamicKafkaSourceEnumerator
                 .collect(Collectors.toSet());
     }
 
-    private void tuneEnumeratorAdminClientTimeouts(Properties consumerProps) {
-        tuneEnumeratorAdminClientTimeout(consumerProps, ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG);
-        tuneEnumeratorAdminClientTimeout(
-                consumerProps, CommonClientConfigs.DEFAULT_API_TIMEOUT_MS_CONFIG);
-    }
-
-    private void tuneEnumeratorAdminClientTimeout(Properties consumerProps, String propertyKey) {
-        String configuredTimeoutMs = consumerProps.getProperty(propertyKey);
-        if (configuredTimeoutMs == null) {
-            return;
-        }
-
-        long readerTimeoutMs = Long.parseLong(configuredTimeoutMs);
-        long enumeratorTimeoutMs =
-                Math.max(1L, readerTimeoutMs / ENUMERATOR_ADMIN_CLIENT_TIMEOUT_DIVISOR);
-        consumerProps.setProperty(propertyKey, Long.toString(enumeratorTimeoutMs));
-        logger.debug(
-                "Using {}={} for dynamic Kafka sub-enumerator AdminClient, derived from reader timeout {}.",
-                propertyKey,
-                enumeratorTimeoutMs,
-                readerTimeoutMs);
-    }
-
     private static String summarizeSplitOffsets(Collection<KafkaPartitionSplit> splits) {
         if (splits.isEmpty()) {
             return "[]";
@@ -864,6 +854,11 @@ public class DynamicKafkaSourceEnumerator
     @Override
     public void close() throws IOException {
         try {
+            kafkaMetadataServiceDiscoveryContext.prepareForClose();
+            clusterEnumContextMap.values().forEach(StoppableKafkaEnumContextProxy::prepareForClose);
+
+            // Metadata service close may unblock an in-flight metadata discovery call.
+            kafkaMetadataService.close();
             kafkaMetadataServiceDiscoveryContext.close();
 
             // close contexts first since they may have running tasks
@@ -878,7 +873,12 @@ public class DynamicKafkaSourceEnumerator
 
             enumeratorClosingExecutor.shutdown();
             enumeratorClosingExecutor.awaitTermination(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
-            kafkaMetadataService.close();
+
+            Throwable asynchronousCloseFailure = asynchronousEnumeratorCloseFailure.get();
+            if (asynchronousCloseFailure != null) {
+                throw new RuntimeException(
+                        "Failed to close stale dynamic Kafka enumerator", asynchronousCloseFailure);
+            }
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

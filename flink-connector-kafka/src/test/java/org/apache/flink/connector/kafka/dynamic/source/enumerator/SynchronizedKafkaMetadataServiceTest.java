@@ -36,6 +36,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** A test for {@link SynchronizedKafkaMetadataService}. */
 public class SynchronizedKafkaMetadataServiceTest {
@@ -75,10 +76,46 @@ public class SynchronizedKafkaMetadataServiceTest {
         }
     }
 
+    @Test
+    public void testCloseCanUnblockInFlightMetadataCall() throws Exception {
+        BlockingKafkaMetadataService delegate = new BlockingKafkaMetadataService();
+        KafkaMetadataService metadataService = new SynchronizedKafkaMetadataService(delegate);
+        KafkaStreamSetSubscriber kafkaStreamSubscriber =
+                new KafkaStreamSetSubscriber(Collections.singleton("stream"));
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<Set<KafkaStream>> subscribedStreams =
+                    executor.submit(
+                            () -> kafkaStreamSubscriber.getSubscribedStreams(metadataService));
+            assertThat(delegate.awaitDescribeStreamsStarted())
+                    .as("subscribed stream metadata fetch should start")
+                    .isTrue();
+
+            Future<?> close =
+                    executor.submit(
+                            () -> {
+                                metadataService.close();
+                                return null;
+                            });
+            assertThatCode(() -> close.get(10, TimeUnit.SECONDS))
+                    .as("metadata service close should unblock the in-flight fetch")
+                    .doesNotThrowAnyException();
+            assertThat(subscribedStreams.get(10, TimeUnit.SECONDS)).isEmpty();
+            assertThat(delegate.awaitCloseCalled())
+                    .as("delegate close should run while metadata fetch is in flight")
+                    .isTrue();
+        } finally {
+            delegate.allowDescribeStreams();
+            executor.shutdownNow();
+        }
+    }
+
     private static class BlockingKafkaMetadataService implements KafkaMetadataService {
         private final CountDownLatch describeStreamsStarted = new CountDownLatch(1);
         private final CountDownLatch allowDescribeStreams = new CountDownLatch(1);
         private final CountDownLatch isClusterActiveStarted = new CountDownLatch(1);
+        private final CountDownLatch closeCalled = new CountDownLatch(1);
         private final AtomicInteger concurrentCalls = new AtomicInteger();
         private final AtomicInteger maxConcurrentCalls = new AtomicInteger();
 
@@ -142,7 +179,14 @@ public class SynchronizedKafkaMetadataServiceTest {
         }
 
         @Override
-        public void close() {}
+        public void close() {
+            closeCalled.countDown();
+            allowDescribeStreams();
+        }
+
+        private boolean awaitCloseCalled() throws InterruptedException {
+            return closeCalled.await(10, TimeUnit.SECONDS);
+        }
     }
 
     @FunctionalInterface
