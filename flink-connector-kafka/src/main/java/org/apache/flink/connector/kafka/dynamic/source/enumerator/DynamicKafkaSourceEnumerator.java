@@ -62,6 +62,9 @@ import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -71,6 +74,7 @@ import java.util.stream.Collectors;
 @Internal
 public class DynamicKafkaSourceEnumerator
         implements SplitEnumerator<DynamicKafkaSourceSplit, DynamicKafkaSourceEnumState> {
+    private static final int ENUMERATOR_ADMIN_CLIENT_TIMEOUT_DIVISOR = 2;
     private static final Logger logger =
             LoggerFactory.getLogger(DynamicKafkaSourceEnumerator.class);
 
@@ -90,6 +94,9 @@ public class DynamicKafkaSourceEnumerator
     private final Boundedness boundedness;
     private final StoppableKafkaEnumContextProxy.StoppableKafkaEnumContextProxyFactory
             stoppableKafkaEnumContextProxyFactory;
+    private final StoppableKafkaMetadataServiceDiscoveryContext
+            kafkaMetadataServiceDiscoveryContext;
+    private final ExecutorService enumeratorClosingExecutor;
 
     // options
     private final long kafkaMetadataServiceDiscoveryIntervalMs;
@@ -123,7 +130,9 @@ public class DynamicKafkaSourceEnumerator
                 boundedness,
                 dynamicKafkaSourceEnumState,
                 StoppableKafkaEnumContextProxy.StoppableKafkaEnumContextProxyFactory
-                        .getDefaultFactory());
+                        .getDefaultFactory(),
+                StoppableKafkaMetadataServiceDiscoveryContext
+                        .StoppableKafkaMetadataServiceDiscoveryContextFactory.getDefaultFactory());
     }
 
     @VisibleForTesting
@@ -138,6 +147,35 @@ public class DynamicKafkaSourceEnumerator
             DynamicKafkaSourceEnumState dynamicKafkaSourceEnumState,
             StoppableKafkaEnumContextProxy.StoppableKafkaEnumContextProxyFactory
                     stoppableKafkaEnumContextProxyFactory) {
+        this(
+                kafkaStreamSubscriber,
+                kafkaMetadataService,
+                enumContext,
+                startingOffsetsInitializer,
+                stoppingOffsetInitializer,
+                properties,
+                boundedness,
+                dynamicKafkaSourceEnumState,
+                stoppableKafkaEnumContextProxyFactory,
+                StoppableKafkaMetadataServiceDiscoveryContext
+                        .StoppableKafkaMetadataServiceDiscoveryContextFactory
+                        .getSplitEnumeratorContextFactory());
+    }
+
+    DynamicKafkaSourceEnumerator(
+            KafkaStreamSubscriber kafkaStreamSubscriber,
+            KafkaMetadataService kafkaMetadataService,
+            SplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext,
+            OffsetsInitializer startingOffsetsInitializer,
+            OffsetsInitializer stoppingOffsetInitializer,
+            Properties properties,
+            Boundedness boundedness,
+            DynamicKafkaSourceEnumState dynamicKafkaSourceEnumState,
+            StoppableKafkaEnumContextProxy.StoppableKafkaEnumContextProxyFactory
+                    stoppableKafkaEnumContextProxyFactory,
+            StoppableKafkaMetadataServiceDiscoveryContext
+                            .StoppableKafkaMetadataServiceDiscoveryContextFactory
+                    kafkaMetadataServiceDiscoveryContextFactory) {
         this.kafkaStreamSubscriber = kafkaStreamSubscriber;
         this.boundedness = boundedness;
 
@@ -162,8 +200,15 @@ public class DynamicKafkaSourceEnumerator
         this.kafkaMetadataServiceDiscoveryFailureCount = 0;
         this.firstDiscoveryComplete = false;
 
-        this.kafkaMetadataService = kafkaMetadataService;
+        this.kafkaMetadataService = new SynchronizedKafkaMetadataService(kafkaMetadataService);
         this.stoppableKafkaEnumContextProxyFactory = stoppableKafkaEnumContextProxyFactory;
+        this.kafkaMetadataServiceDiscoveryContext =
+                kafkaMetadataServiceDiscoveryContextFactory.create(enumContext);
+        this.enumeratorClosingExecutor =
+                Executors.newSingleThreadExecutor(
+                        runnable ->
+                                createDaemonThread(
+                                        runnable, "dynamic-kafka-enumerator-closing-worker"));
         this.splitAssignmentStrategy = createSplitAssignmentStrategy(properties);
 
         if (!dynamicKafkaSourceEnumState.getClusterEnumeratorStates().isEmpty()) {
@@ -313,12 +358,15 @@ public class DynamicKafkaSourceEnumerator
         }
 
         if (kafkaMetadataServiceDiscoveryIntervalMs <= 0) {
-            enumContext.callAsync(
-                    () -> kafkaStreamSubscriber.getSubscribedStreams(kafkaMetadataService),
-                    this::onHandleSubscribedStreamsFetch);
+            logger.info("Scheduling one-time dynamic Kafka metadata refresh");
+            kafkaMetadataServiceDiscoveryContext.callAsync(
+                    this::fetchSubscribedKafkaStreams, this::onHandleSubscribedStreamsFetch);
         } else {
-            enumContext.callAsync(
-                    () -> kafkaStreamSubscriber.getSubscribedStreams(kafkaMetadataService),
+            logger.info(
+                    "Scheduling dynamic Kafka metadata refresh every {} ms",
+                    kafkaMetadataServiceDiscoveryIntervalMs);
+            kafkaMetadataServiceDiscoveryContext.callAsync(
+                    this::fetchSubscribedKafkaStreams,
                     this::onHandleSubscribedStreamsFetch,
                     0,
                     kafkaMetadataServiceDiscoveryIntervalMs);
@@ -346,7 +394,24 @@ public class DynamicKafkaSourceEnumerator
 
     // --------------- private methods for metadata discovery ---------------
 
+    private Set<KafkaStream> fetchSubscribedKafkaStreams() {
+        logger.debug("Fetching subscribed Kafka streams for metadata refresh");
+        Set<KafkaStream> fetchedKafkaStreams =
+                kafkaStreamSubscriber.getSubscribedStreams(kafkaMetadataService);
+        logger.debug(
+                "Fetched {} subscribed Kafka streams for metadata refresh",
+                fetchedKafkaStreams.size());
+        return fetchedKafkaStreams;
+    }
+
+    private static Thread createDaemonThread(Runnable runnable, String threadName) {
+        Thread thread = new Thread(runnable, threadName);
+        thread.setDaemon(true);
+        return thread;
+    }
+
     private void onHandleSubscribedStreamsFetch(Set<KafkaStream> fetchedKafkaStreams, Throwable t) {
+        logger.debug("Handling subscribed Kafka streams fetched by metadata refresh");
         firstDiscoveryComplete = true;
         Set<KafkaStream> handledFetchKafkaStreams =
                 handleFetchSubscribedStreamsError(fetchedKafkaStreams, t);
@@ -397,13 +462,13 @@ public class DynamicKafkaSourceEnumerator
             throw new RuntimeException("unable to snapshot state in metadata change", e);
         }
 
-        logger.info("Closing enumerators due to metadata change");
-
-        closeAllEnumeratorsAndContexts();
         latestClusterTopicsMap = newClustersTopicsMap;
         latestKafkaStreams = handledFetchKafkaStreams;
         sendMetadataUpdateEventToAvailableReaders();
 
+        logger.info("Closing enumerators due to metadata change");
+
+        closeAllEnumeratorsAndContexts();
         retainRemovedClusterEnumeratorStates(
                 dynamicKafkaSourceEnumState.getClusterEnumeratorStates(),
                 latestClusterTopicsMap.keySet());
@@ -533,6 +598,7 @@ public class DynamicKafkaSourceEnumerator
         KafkaPropertiesUtil.copyProperties(fetchedProperties, consumerProps);
         KafkaPropertiesUtil.copyProperties(properties, consumerProps);
         DynamicKafkaSourceOptions.removeRemovedClusterRetentionOption(consumerProps);
+        tuneEnumeratorAdminClientTimeouts(consumerProps);
         KafkaPropertiesUtil.setClientIdPrefix(consumerProps, kafkaClusterId);
         consumerProps.setProperty(
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
@@ -587,17 +653,38 @@ public class DynamicKafkaSourceEnumerator
     }
 
     private void closeAllEnumeratorsAndContexts() {
-        clusterEnumeratorMap.forEach(
-                (cluster, subEnumerator) -> {
-                    try {
-                        clusterEnumContextMap.get(cluster).close();
-                        subEnumerator.close();
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                });
+        Map<String, StoppableKafkaEnumContextProxy> closingClusterEnumContextMap =
+                new HashMap<>(clusterEnumContextMap);
+        Map<String, SplitEnumerator<KafkaPartitionSplit, KafkaSourceEnumState>>
+                closingClusterEnumeratorMap = new HashMap<>(clusterEnumeratorMap);
+        closingClusterEnumContextMap
+                .values()
+                .forEach(StoppableKafkaEnumContextProxy::prepareForClose);
         clusterEnumContextMap.clear();
         clusterEnumeratorMap.clear();
+
+        enumeratorClosingExecutor.execute(
+                () ->
+                        closeEnumeratorsAndContexts(
+                                closingClusterEnumContextMap, closingClusterEnumeratorMap));
+    }
+
+    private void closeEnumeratorsAndContexts(
+            Map<String, StoppableKafkaEnumContextProxy> closingClusterEnumContextMap,
+            Map<String, SplitEnumerator<KafkaPartitionSplit, KafkaSourceEnumState>>
+                    closingClusterEnumeratorMap) {
+        closingClusterEnumeratorMap.forEach(
+                (cluster, subEnumerator) -> {
+                    try {
+                        closingClusterEnumContextMap.get(cluster).close();
+                        subEnumerator.close();
+                    } catch (Exception e) {
+                        enumContext.runInCoordinatorThread(
+                                () -> {
+                                    throw new RuntimeException(e);
+                                });
+                    }
+                });
     }
 
     /**
@@ -725,6 +812,29 @@ public class DynamicKafkaSourceEnumerator
                 .collect(Collectors.toSet());
     }
 
+    private void tuneEnumeratorAdminClientTimeouts(Properties consumerProps) {
+        tuneEnumeratorAdminClientTimeout(consumerProps, ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG);
+        tuneEnumeratorAdminClientTimeout(
+                consumerProps, CommonClientConfigs.DEFAULT_API_TIMEOUT_MS_CONFIG);
+    }
+
+    private void tuneEnumeratorAdminClientTimeout(Properties consumerProps, String propertyKey) {
+        String configuredTimeoutMs = consumerProps.getProperty(propertyKey);
+        if (configuredTimeoutMs == null) {
+            return;
+        }
+
+        long readerTimeoutMs = Long.parseLong(configuredTimeoutMs);
+        long enumeratorTimeoutMs =
+                Math.max(1L, readerTimeoutMs / ENUMERATOR_ADMIN_CLIENT_TIMEOUT_DIVISOR);
+        consumerProps.setProperty(propertyKey, Long.toString(enumeratorTimeoutMs));
+        logger.debug(
+                "Using {}={} for dynamic Kafka sub-enumerator AdminClient, derived from reader timeout {}.",
+                propertyKey,
+                enumeratorTimeoutMs,
+                readerTimeoutMs);
+    }
+
     private static String summarizeSplitOffsets(Collection<KafkaPartitionSplit> splits) {
         if (splits.isEmpty()) {
             return "[]";
@@ -754,6 +864,8 @@ public class DynamicKafkaSourceEnumerator
     @Override
     public void close() throws IOException {
         try {
+            kafkaMetadataServiceDiscoveryContext.close();
+
             // close contexts first since they may have running tasks
             for (StoppableKafkaEnumContextProxy subEnumContext : clusterEnumContextMap.values()) {
                 subEnumContext.close();
@@ -764,6 +876,8 @@ public class DynamicKafkaSourceEnumerator
                 clusterEnumerator.getValue().close();
             }
 
+            enumeratorClosingExecutor.shutdown();
+            enumeratorClosingExecutor.awaitTermination(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
             kafkaMetadataService.close();
         } catch (Exception e) {
             throw new RuntimeException(e);

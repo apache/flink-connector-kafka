@@ -277,7 +277,7 @@ class DynamicKafkaSourceITTest {
                 for (int readerId = 0; readerId < numSubtasks; readerId++) {
                     registerReader(context, enumerator, readerId);
                 }
-                runAllOneTimeCallables(context);
+                waitForInitialSplitAssignments(context);
 
                 verifyAllSplitsAssignedOnce(
                         context.getSplitsAssignmentSequence(), metadataService.getAllStreams());
@@ -1413,6 +1413,21 @@ class DynamicKafkaSourceITTest {
             while (!context.getOneTimeCallables().isEmpty()) {
                 context.runNextOneTimeCallable();
             }
+        }
+
+        private void waitForInitialSplitAssignments(
+                MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context) throws Exception {
+            CommonTestUtils.waitUtil(
+                    () -> {
+                        try {
+                            runAllOneTimeCallables(context);
+                        } catch (Throwable t) {
+                            throw new RuntimeException(t);
+                        }
+                        return !context.getSplitsAssignmentSequence().isEmpty();
+                    },
+                    Duration.ofSeconds(10),
+                    "Initial dynamic Kafka split assignment did not complete");
         }
 
         private void verifyAllSplitsAssignedOnce(
