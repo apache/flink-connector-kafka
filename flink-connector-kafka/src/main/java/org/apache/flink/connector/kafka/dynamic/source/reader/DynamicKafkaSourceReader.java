@@ -595,6 +595,12 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                         this.availabilityHelperSize = clusterReaderMap.size());
         syncAvailabilityHelperWithReaders();
 
+        if (clusterReaderMap.isEmpty()) {
+            restartingReaders.set(false);
+            cachedPreviousFuture.complete(null);
+            return;
+        }
+
         // We cannot immediately complete the previous future here. We must complete it only when
         // the new readers have finished handling the split assignment. Completing the future too
         // early can cause WakeupException (implicitly woken up by invocation to pollNext()) if the

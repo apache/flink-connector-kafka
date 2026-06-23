@@ -38,6 +38,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -66,7 +67,11 @@ class DynamicKafkaSourceReaderIdlenessTest {
                                     KafkaPartitionSplit.NO_STOPPING_OFFSET));
             reader.addSplits(Collections.singletonList(split));
 
+            CompletableFuture<Void> availabilityFuture = reader.isAvailable();
+            assertThat(availabilityFuture).isNotDone();
+
             reader.handleSourceEvents(getEmptyMetadataUpdateEvent());
+            assertThat(availabilityFuture).isDone();
 
             TrackingReaderOutputWithIdleness<byte[]> readerOutput =
                     new TrackingReaderOutputWithIdleness<>();
