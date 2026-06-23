@@ -102,6 +102,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     private int availabilityHelperSize;
     private boolean isActivelyConsumingSplits;
     private boolean isNoMoreSplits;
+    private boolean dynamicOutputIdle;
     private AtomicBoolean restartingReaders;
     private ReaderOutput<T> latestReaderOutput;
 
@@ -127,6 +128,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                 new MultipleFuturesAvailabilityHelper(this.availabilityHelperSize = 0);
         this.isNoMoreSplits = false;
         this.isActivelyConsumingSplits = false;
+        this.dynamicOutputIdle = false;
         this.restartingReaders = new AtomicBoolean();
         this.clustersProperties = new HashMap<>();
         this.pendingSplitOutputReleases = new HashSet<>();
@@ -148,6 +150,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     public InputStatus pollNext(ReaderOutput<T> readerOutput) throws Exception {
         latestReaderOutput = readerOutput;
         releasePendingSplitOutputs(readerOutput);
+        maybeUpdateNoSubReaderOutputIdleness(readerOutput);
 
         // at startup, do not return end of input if metadata event has not been received
         if (clusterReaderMap.isEmpty()) {
@@ -678,6 +681,16 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         retainedSplits.removeIf(
                 split -> split.isRetained() && !split.isRetained(currentTimeMillis));
         pendingSplits.removeIf(split -> split.isRetained() && !split.isRetained(currentTimeMillis));
+    }
+
+    private void maybeUpdateNoSubReaderOutputIdleness(ReaderOutput<T> readerOutput) {
+        if (clusterReaderMap.isEmpty() && isActivelyConsumingSplits && !dynamicOutputIdle) {
+            readerOutput.markIdle();
+            dynamicOutputIdle = true;
+        } else if (!clusterReaderMap.isEmpty() && dynamicOutputIdle) {
+            readerOutput.markActive();
+            dynamicOutputIdle = false;
+        }
     }
 
     static Configuration toConfiguration(Properties props) {
