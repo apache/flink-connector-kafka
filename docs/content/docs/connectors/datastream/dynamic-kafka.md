@@ -168,10 +168,10 @@ In `global` mode, balancing is **forward-looking**: newly discovered splits are 
 future distribution balanced, while already assigned active splits are not proactively migrated only
 for rebalancing.
 
-If global assignment becomes skewed due to shrink/removal, the enumerator does not rebalance already
-active splits by itself. To rebalance existing ownership, use a restore with parallelism change
-(for example, savepoint/checkpoint restore after rescale), so Flink runtime repartitions source
-reader operator state.
+If global assignment becomes skewed due to shrink/removal, a recovery redistributes the restored
+active splits across the available readers. A parallelism change is not required. Removed splits
+kept only for offset retention are excluded from this active rebalance and stay with their previous
+reader until they are reactivated or expire.
 
 {{< tabs "DynamicKafkaSourceEnumeratorMode" >}}
 {{< tab "Java" >}}
