@@ -139,6 +139,23 @@ DynamicKafkaSource<String> source =
         .build();
 ```
 {{< /tab >}}
+{{< tab "Python" >}}
+```python
+metadata_service = SingleClusterTopicMetadataService(
+    "cluster-a",
+    {"bootstrap.servers": "localhost:9092"},
+    starting_offsets_initializer=KafkaOffsetsInitializer.earliest(),
+    stopping_offsets_initializer=KafkaOffsetsInitializer.latest())
+
+source = DynamicKafkaSource.builder() \
+    .set_kafka_metadata_service(metadata_service) \
+    .set_stream_ids({"input-stream"}) \
+    .set_starting_offsets(KafkaOffsetsInitializer.latest()) \
+    .set_bounded(KafkaOffsetsInitializer.latest()) \
+    .set_value_only_deserializer(SimpleStringSchema()) \
+    .build()
+```
+{{< /tab >}}
 {{< /tabs >}}
 
 ### Watermark 对齐
