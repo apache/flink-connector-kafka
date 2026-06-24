@@ -69,6 +69,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -83,10 +84,13 @@ import java.util.stream.Collectors;
 @Internal
 public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafkaSourceSplit> {
     private static final Logger logger = LoggerFactory.getLogger(DynamicKafkaSourceReader.class);
+    static final String ACTIVE_SPLIT_COUNT_METRIC = "activeSplitCount";
+
     private final KafkaRecordDeserializationSchema<T> deserializationSchema;
     private final Properties properties;
     private final MetricGroup dynamicKafkaSourceMetricGroup;
     private final Gauge<Integer> kafkaClusterCount;
+    private final AtomicInteger activeSplitCount;
     private final SourceReaderContext readerContext;
     private final KafkaClusterMetricGroupManager kafkaClusterMetricGroupManager;
 
@@ -114,6 +118,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         this.deserializationSchema = deserializationSchema;
         this.properties = properties;
         this.kafkaClusterCount = clusterReaderMap::size;
+        this.activeSplitCount = new AtomicInteger();
         this.dynamicKafkaSourceMetricGroup =
                 readerContext
                         .metricGroup()
@@ -141,6 +146,10 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         logger.trace("Starting reader for subtask index={}", readerContext.getIndexOfSubtask());
         // metrics cannot be registered in the enumerator
         readerContext.metricGroup().gauge("kafkaClusterCount", kafkaClusterCount);
+        // Keep this gauge registered for the full source-reader lifetime. In particular, it must
+        // continue reporting zero after metadata removes all locally assigned splits, rather than
+        // relying on split-specific metric groups that disappear with removed clusters.
+        dynamicKafkaSourceMetricGroup.gauge(ACTIVE_SPLIT_COUNT_METRIC, activeSplitCount::get);
         readerContext.sendSourceEventToCoordinator(new GetMetadataUpdateEvent());
     }
 
@@ -174,6 +183,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
             }
         }
 
+        refreshActiveSplitCount();
         return logAndReturnInputStatus(consolidateInputStatus(isMoreAvailable, isNothingAvailable));
     }
 
@@ -239,6 +249,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         if (newCluster) {
             completeAndResetAvailabilityHelper();
         }
+        refreshActiveSplitCount();
     }
 
     /**
@@ -343,6 +354,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
 
             // reset the availability future to also depend on the new sub readers
             completeAndResetAvailabilityHelper();
+            refreshActiveSplitCount();
         } else {
             // update properties even on no metadata change
             clustersProperties.clear();
@@ -479,6 +491,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         for (KafkaSourceReader<T> subReader : clusterReaderMap.values()) {
             subReader.close();
         }
+        activeSplitCount.set(0);
         kafkaClusterMetricGroupManager.close();
     }
 
@@ -630,6 +643,20 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         }
         clusterReaderMap.clear();
         clustersProperties.clear();
+        activeSplitCount.set(0);
+    }
+
+    /**
+     * Refresh the local active split count from the underlying readers on the source reader's main
+     * thread. Pending restored splits and retained removed-cluster offsets are intentionally not
+     * counted until metadata has validated and assigned them to an active reader.
+     */
+    private void refreshActiveSplitCount() {
+        int currentActiveSplitCount =
+                clusterReaderMap.values().stream()
+                        .mapToInt(KafkaSourceReader::getNumberOfCurrentlyAssignedSplits)
+                        .sum();
+        activeSplitCount.set(currentActiveSplitCount);
     }
 
     private void reactivateRetainedSplits(

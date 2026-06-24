@@ -1121,7 +1121,8 @@ class DynamicKafkaSourceITTest {
                                         .collect(Collectors.toList()));
 
                 // should contain cluster 0 metrics
-                assertThat(findMetrics(reporter, DYNAMIC_KAFKA_SOURCE_METRIC_GROUP))
+                assertThat(findKafkaClusterMetrics(reporter))
+                        .isNotEmpty()
                         .allSatisfy(
                                 metricName ->
                                         assertThat(metricName)
@@ -1149,7 +1150,8 @@ class DynamicKafkaSourceITTest {
                 }
 
                 // cluster 0 is not being consumed from, metrics should not appear
-                assertThat(findMetrics(reporter, DYNAMIC_KAFKA_SOURCE_METRIC_GROUP))
+                assertThat(findKafkaClusterMetrics(reporter))
+                        .isNotEmpty()
                         .allSatisfy(
                                 metricName ->
                                         assertThat(metricName)
@@ -1158,7 +1160,8 @@ class DynamicKafkaSourceITTest {
                                                                 + DYNAMIC_KAFKA_SOURCE_METRIC_GROUP
                                                                 + "\\.kafkaCluster\\.kafka-cluster-0.*"));
 
-                assertThat(findMetrics(reporter, DYNAMIC_KAFKA_SOURCE_METRIC_GROUP))
+                assertThat(findKafkaClusterMetrics(reporter))
+                        .isNotEmpty()
                         .allSatisfy(
                                 metricName ->
                                         assertThat(metricName)
@@ -1240,6 +1243,12 @@ class DynamicKafkaSourceITTest {
             assertThat(groups).isPresent();
             return inMemoryReporter.getMetricsByGroup(groups.get()).keySet().stream()
                     .map(metricName -> groups.get().getMetricIdentifier(metricName))
+                    .collect(Collectors.toSet());
+        }
+
+        private Set<String> findKafkaClusterMetrics(InMemoryReporter inMemoryReporter) {
+            return findMetrics(inMemoryReporter, DYNAMIC_KAFKA_SOURCE_METRIC_GROUP).stream()
+                    .filter(metricName -> metricName.contains(".kafkaCluster."))
                     .collect(Collectors.toSet());
         }
 

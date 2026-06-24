@@ -26,9 +26,11 @@ import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitReader;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
 import org.apache.flink.connector.base.source.reader.synchronization.FutureCompletingBlockingQueue;
+import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
 import org.apache.flink.connector.kafka.dynamic.source.DynamicKafkaSourceOptions;
 import org.apache.flink.connector.kafka.dynamic.source.MetadataUpdateEvent;
+import org.apache.flink.connector.kafka.dynamic.source.metrics.KafkaClusterMetricGroup;
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
 import org.apache.flink.connector.kafka.source.metrics.KafkaSourceReaderMetrics;
 import org.apache.flink.connector.kafka.source.reader.KafkaSourceReader;
@@ -40,7 +42,10 @@ import org.apache.flink.connector.testutils.source.reader.SourceReaderTestBase;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderOutput;
 import org.apache.flink.core.io.InputStatus;
+import org.apache.flink.metrics.Gauge;
 import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
+import org.apache.flink.metrics.testutils.MetricListener;
+import org.apache.flink.runtime.metrics.groups.InternalSourceReaderMetricGroup;
 import org.apache.flink.streaming.connectors.kafka.DynamicKafkaSourceTestHelper;
 
 import com.google.common.collect.ImmutableList;
@@ -63,6 +68,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -110,6 +116,65 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
     @AfterAll
     static void afterAll() throws Exception {
         DynamicKafkaSourceTestHelper.tearDown();
+    }
+
+    @Test
+    void testActiveSplitCountMetricTracksMetadataRemoval() throws Exception {
+        MetricListener metricListener = new MetricListener();
+        TestingReaderContext context =
+                new TestingReaderContext(
+                        new Configuration(),
+                        InternalSourceReaderMetricGroup.mock(metricListener.getMetricGroup()));
+        Properties properties = getRequiredProperties();
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
+                "60000");
+
+        try (DynamicKafkaSourceReader<Integer> reader =
+                createReaderWithoutStart(context, properties)) {
+            reader.start();
+            Optional<Gauge<Integer>> activeSplitCountGauge =
+                    metricListener.getGauge(
+                            KafkaClusterMetricGroup.DYNAMIC_KAFKA_SOURCE_METRIC_GROUP,
+                            DynamicKafkaSourceReader.ACTIVE_SPLIT_COUNT_METRIC);
+            assertThat(activeSplitCountGauge).isPresent();
+            assertThat(activeSplitCountGauge.orElseThrow().getValue()).isZero();
+
+            reader.handleSourceEvents(DynamicKafkaSourceTestHelper.getMetadataUpdateEvent(TOPIC));
+            assertThat(activeSplitCountGauge.orElseThrow().getValue())
+                    .as("cluster readers without assigned splits remain empty")
+                    .isZero();
+            reader.addSplits(
+                    getSplits(
+                            getNumSplits(),
+                            NUM_RECORDS_PER_SPLIT,
+                            Boundedness.CONTINUOUS_UNBOUNDED));
+            assertThat(activeSplitCountGauge.orElseThrow().getValue()).isEqualTo(getNumSplits());
+
+            KafkaStream kafkaStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+            ClusterMetadata cluster1Metadata =
+                    kafkaStream.getClusterMetadataMap().get(kafkaClusterId1);
+            kafkaStream.getClusterMetadataMap().remove(kafkaClusterId0);
+            reader.handleSourceEvents(new MetadataUpdateEvent(Collections.singleton(kafkaStream)));
+            assertThat(activeSplitCountGauge.orElseThrow().getValue())
+                    .isEqualTo(NUM_SPLITS_PER_CLUSTER);
+            assertThat(reader.snapshotState(-1))
+                    .as("retained removed-cluster state is not an active split")
+                    .hasSize(getNumSplits());
+
+            kafkaStream.getClusterMetadataMap().remove(kafkaClusterId1);
+            reader.handleSourceEvents(new MetadataUpdateEvent(Collections.singleton(kafkaStream)));
+            assertThat(activeSplitCountGauge.orElseThrow().getValue()).isZero();
+            assertThat(reader.snapshotState(-1))
+                    .as("all removed-cluster state is retained but inactive")
+                    .hasSize(getNumSplits());
+
+            kafkaStream.getClusterMetadataMap().put(kafkaClusterId1, cluster1Metadata);
+            reader.handleSourceEvents(new MetadataUpdateEvent(Collections.singleton(kafkaStream)));
+            assertThat(activeSplitCountGauge.orElseThrow().getValue())
+                    .as("reactivated retained splits become active again")
+                    .isEqualTo(NUM_SPLITS_PER_CLUSTER);
+        }
     }
 
     @Test
@@ -392,7 +457,11 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
 
     private DynamicKafkaSourceReader<Integer> createReaderWithoutStart(
             TestingReaderContext context) {
-        Properties properties = getRequiredProperties();
+        return createReaderWithoutStart(context, getRequiredProperties());
+    }
+
+    private DynamicKafkaSourceReader<Integer> createReaderWithoutStart(
+            TestingReaderContext context, Properties properties) {
         return new DynamicKafkaSourceReader<>(
                 context,
                 KafkaRecordDeserializationSchema.valueOnly(IntegerDeserializer.class),

@@ -305,7 +305,7 @@ a list of applicable properties.
   </thead>
   <tbody>
     <tr>
-        <th rowspan="8">Operator</th>
+        <th rowspan="6">Operator</th>
         <td>currentEmitEventTimeLag</td>
         <td>n/a</td>
         <td>The time span from the record event timestamp to the time the record is emitted by the source connector¹: <code>currentEmitEventTimeLag = EmitTime - EventTime.</code></td>
@@ -333,6 +333,12 @@ a list of applicable properties.
       <td>kafkaClustersCount</td>
       <td>n/a</td>
       <td>The total number of Kafka clusters read by this reader.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>activeSplitCount</td>
+      <td>n/a</td>
+      <td>The number of currently assigned active splits in this source reader. The gauge is registered for the reader lifetime and reports <code>0</code> after metadata removes all local splits. Retained removed-cluster checkpoint offsets are excluded.</td>
       <td>Gauge</td>
     </tr>
   </tbody>

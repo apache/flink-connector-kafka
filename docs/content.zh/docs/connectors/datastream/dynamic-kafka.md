@@ -296,7 +296,7 @@ a list of applicable properties.
   </thead>
   <tbody>
     <tr>
-        <th rowspan="8">Operator</th>
+        <th rowspan="6">Operator</th>
         <td>currentEmitEventTimeLag</td>
         <td>n/a</td>
         <td>The time span from the record event timestamp to the time the record is emitted by the source connector¹: <code>currentEmitEventTimeLag = EmitTime - EventTime.</code></td>
@@ -324,6 +324,12 @@ a list of applicable properties.
       <td>kafkaClustersCount</td>
       <td>n/a</td>
       <td>The total number of Kafka clusters read by this reader.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>activeSplitCount</td>
+      <td>n/a</td>
+      <td>当前分配给此 source reader 的活跃 split 数。该 gauge 在 reader 的整个生命周期内保持注册；当元数据移除所有本地 split 后会报告 <code>0</code>。为已移除集群保留的 checkpoint offset 不计入其中。</td>
       <td>Gauge</td>
     </tr>
   </tbody>
