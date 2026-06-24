@@ -45,10 +45,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests idleness transitions for {@link DynamicKafkaSourceReader}. */
 class DynamicKafkaSourceReaderIdlenessTest {
     private static final String TOPIC = "topic";
+    private static final String REMAINING_TOPIC = "remaining-topic";
     private static final String KAFKA_CLUSTER_ID = "cluster-1";
 
     @Test
-    void testMetadataRemovalMarksReaderIdleWhenAllSubReadersRemoved() throws Exception {
+    void testMetadataRemovalMarksReaderIdleWhenAllActiveSplitsRemoved() throws Exception {
         TestingReaderContext context = new TestingReaderContext();
         try (DynamicKafkaSourceReader<byte[]> reader =
                 new DynamicKafkaSourceReader<>(
@@ -70,34 +71,35 @@ class DynamicKafkaSourceReaderIdlenessTest {
             CompletableFuture<Void> availabilityFuture = reader.isAvailable();
             assertThat(availabilityFuture).isNotDone();
 
-            reader.handleSourceEvents(getEmptyMetadataUpdateEvent());
+            reader.handleSourceEvents(getMetadataUpdateEvent(REMAINING_TOPIC));
+            assertThat(reader.getAvailabilityHelperSize()).isEqualTo(1);
             assertThat(availabilityFuture).isDone();
 
             TrackingReaderOutputWithIdleness<byte[]> readerOutput =
                     new TrackingReaderOutputWithIdleness<>();
             assertThat(reader.pollNext(readerOutput)).isEqualTo(InputStatus.NOTHING_AVAILABLE);
+            assertThat(reader.pollNext(readerOutput)).isEqualTo(InputStatus.NOTHING_AVAILABLE);
             assertThat(readerOutput.releasedSplitIds()).containsExactly(split.splitId());
             assertThat(readerOutput.idleCount()).isEqualTo(1);
+            assertThat(readerOutput.activeCount()).isZero();
             assertThat(readerOutput.isIdle()).isTrue();
         }
     }
 
     private static MetadataUpdateEvent getMetadataUpdateEvent() {
+        return getMetadataUpdateEvent(TOPIC);
+    }
+
+    private static MetadataUpdateEvent getMetadataUpdateEvent(String topic) {
         Properties clusterProperties = new Properties();
         clusterProperties.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
         ClusterMetadata clusterMetadata =
-                new ClusterMetadata(Collections.singleton(TOPIC), clusterProperties);
+                new ClusterMetadata(Collections.singleton(topic), clusterProperties);
         return new MetadataUpdateEvent(
                 Collections.singleton(
                         new KafkaStream(
                                 TOPIC,
                                 Collections.singletonMap(KAFKA_CLUSTER_ID, clusterMetadata))));
-    }
-
-    private static MetadataUpdateEvent getEmptyMetadataUpdateEvent() {
-        return new MetadataUpdateEvent(
-                Collections.singleton(
-                        new KafkaStream(TOPIC, Collections.<String, ClusterMetadata>emptyMap())));
     }
 
     private static Properties getRequiredProperties() {
@@ -113,6 +115,7 @@ class DynamicKafkaSourceReaderIdlenessTest {
 
     private static class TrackingReaderOutputWithIdleness<E> extends TestingReaderOutput<E> {
         private int idleCount;
+        private int activeCount;
         private boolean idle;
         private final List<String> releasedSplitIds = new ArrayList<>();
 
@@ -126,12 +129,22 @@ class DynamicKafkaSourceReaderIdlenessTest {
         }
 
         @Override
+        public void markActive() {
+            activeCount++;
+            idle = false;
+        }
+
+        @Override
         public void releaseOutputForSplit(String splitId) {
             releasedSplitIds.add(splitId);
         }
 
         private int idleCount() {
             return idleCount;
+        }
+
+        private int activeCount() {
+            return activeCount;
         }
 
         private boolean isIdle() {

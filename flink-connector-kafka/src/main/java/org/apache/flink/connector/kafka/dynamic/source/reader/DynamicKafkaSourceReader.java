@@ -150,7 +150,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     public InputStatus pollNext(ReaderOutput<T> readerOutput) throws Exception {
         latestReaderOutput = readerOutput;
         releasePendingSplitOutputs(readerOutput);
-        maybeUpdateNoSubReaderOutputIdleness(readerOutput);
+        maybeUpdateNoActiveSplitOutputIdleness(readerOutput);
 
         // at startup, do not return end of input if metadata event has not been received
         if (clusterReaderMap.isEmpty()) {
@@ -595,7 +595,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                         this.availabilityHelperSize = clusterReaderMap.size());
         syncAvailabilityHelperWithReaders();
 
-        if (clusterReaderMap.isEmpty()) {
+        if (getNumberOfActiveSplits() == 0) {
             restartingReaders.set(false);
             cachedPreviousFuture.complete(null);
             return;
@@ -689,11 +689,18 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         pendingSplits.removeIf(split -> split.isRetained() && !split.isRetained(currentTimeMillis));
     }
 
-    private void maybeUpdateNoSubReaderOutputIdleness(ReaderOutput<T> readerOutput) {
-        if (clusterReaderMap.isEmpty() && isActivelyConsumingSplits && !dynamicOutputIdle) {
+    private int getNumberOfActiveSplits() {
+        return clusterReaderMap.values().stream()
+                .mapToInt(KafkaSourceReader::getNumberOfCurrentlyAssignedSplits)
+                .sum();
+    }
+
+    private void maybeUpdateNoActiveSplitOutputIdleness(ReaderOutput<T> readerOutput) {
+        boolean hasActiveSplits = getNumberOfActiveSplits() > 0;
+        if (!hasActiveSplits && isActivelyConsumingSplits && !dynamicOutputIdle) {
             readerOutput.markIdle();
             dynamicOutputIdle = true;
-        } else if (!clusterReaderMap.isEmpty() && dynamicOutputIdle) {
+        } else if (hasActiveSplits && dynamicOutputIdle) {
             readerOutput.markActive();
             dynamicOutputIdle = false;
         }
