@@ -39,6 +39,7 @@ import org.apache.flink.connector.kafka.source.enumerator.initializer.NoStopping
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.connector.kafka.testutils.MockKafkaMetadataService;
+import org.apache.flink.core.testutils.CommonTestUtils;
 import org.apache.flink.mock.Whitebox;
 import org.apache.flink.runtime.checkpoint.RoundRobinOperatorStateRepartitioner;
 import org.apache.flink.runtime.state.OperatorStateHandle;
@@ -56,6 +57,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -68,6 +70,11 @@ import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -1129,6 +1136,185 @@ public class DynamicKafkaSourceEnumeratorTest {
     }
 
     @Test
+    public void testMetadataRefreshSendsReaderMetadataBeforeClosingStaleEnumerators()
+            throws Throwable {
+        KafkaStream initialStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+        KafkaStream shrunkStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+        String removedCluster = DynamicKafkaSourceTestHelper.getKafkaClusterId(1);
+        shrunkStream.getClusterMetadataMap().remove(removedCluster);
+
+        MockKafkaMetadataService metadataService =
+                new MockKafkaMetadataService(Collections.singleton(initialStream));
+        BlockingCloseKafkaEnumContextProxyFactory enumContextProxyFactory =
+                new BlockingCloseKafkaEnumContextProxyFactory();
+
+        Properties properties = new Properties();
+        properties.setProperty(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "0");
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "1");
+        ExecutorService refreshExecutor = Executors.newSingleThreadExecutor();
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                DynamicKafkaSourceEnumerator enumerator =
+                        new DynamicKafkaSourceEnumerator(
+                                new KafkaStreamSetSubscriber(Collections.singleton(TOPIC)),
+                                metadataService,
+                                context,
+                                OffsetsInitializer.committedOffsets(),
+                                new NoStoppingOffsetsInitializer(),
+                                properties,
+                                Boundedness.CONTINUOUS_UNBOUNDED,
+                                new DynamicKafkaSourceEnumState(),
+                                enumContextProxyFactory)) {
+            enumerator.start();
+            context.runPeriodicCallable(0);
+            runAllOneTimeCallables(context);
+            mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, 0);
+
+            metadataService.setKafkaStreams(Collections.singleton(shrunkStream));
+            Future<?> metadataRefresh =
+                    refreshExecutor.submit(
+                            () -> {
+                                try {
+                                    context.runPeriodicCallable(0);
+                                } catch (Throwable t) {
+                                    throw new RuntimeException(t);
+                                }
+                            });
+
+            assertThat(enumContextProxyFactory.awaitCloseStarted())
+                    .as("metadata refresh should start closing stale enumerators")
+                    .isTrue();
+
+            MetadataUpdateEvent metadataUpdateEvent =
+                    getLatestMetadataUpdateEventWithoutContextSync(context, 0);
+            KafkaStream latestReaderStream =
+                    metadataUpdateEvent.getKafkaStreams().stream()
+                            .findFirst()
+                            .orElseThrow(
+                                    () -> new AssertionError("Missing metadata update stream"));
+            assertThat(latestReaderStream.getClusterMetadataMap())
+                    .as("metadata event sent to reader should remove stale clusters before close")
+                    .doesNotContainKey(removedCluster);
+
+            try {
+                assertThatCode(() -> metadataRefresh.get(10, TimeUnit.SECONDS))
+                        .as("metadata refresh should not wait for stale enumerator close")
+                        .doesNotThrowAnyException();
+            } finally {
+                enumContextProxyFactory.allowClose();
+            }
+        } finally {
+            refreshExecutor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testCloseSurfacesAsynchronousStaleEnumeratorCloseFailure() throws Throwable {
+        KafkaStream initialStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+        KafkaStream shrunkStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+        String removedCluster = DynamicKafkaSourceTestHelper.getKafkaClusterId(1);
+        shrunkStream.getClusterMetadataMap().remove(removedCluster);
+
+        MockKafkaMetadataService metadataService =
+                new MockKafkaMetadataService(Collections.singleton(initialStream));
+        ThrowingCloseKafkaEnumContextProxyFactory enumContextProxyFactory =
+                new ThrowingCloseKafkaEnumContextProxyFactory(removedCluster);
+
+        Properties properties = new Properties();
+        properties.setProperty(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "0");
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "1");
+
+        try (DroppingCoordinatorThreadContext context =
+                new DroppingCoordinatorThreadContext(NUM_SUBTASKS)) {
+            DynamicKafkaSourceEnumerator enumerator =
+                    new DynamicKafkaSourceEnumerator(
+                            new KafkaStreamSetSubscriber(Collections.singleton(TOPIC)),
+                            metadataService,
+                            context,
+                            OffsetsInitializer.committedOffsets(),
+                            new NoStoppingOffsetsInitializer(),
+                            properties,
+                            Boundedness.CONTINUOUS_UNBOUNDED,
+                            new DynamicKafkaSourceEnumState(),
+                            enumContextProxyFactory);
+
+            enumerator.start();
+            context.runPeriodicCallable(0);
+            runAllOneTimeCallables(context);
+
+            metadataService.setKafkaStreams(Collections.singleton(shrunkStream));
+            context.runPeriodicCallable(0);
+            runAllOneTimeCallables(context);
+
+            assertThatThrownBy(enumerator::close)
+                    .hasMessageContaining("Failed to close stale dynamic Kafka enumerator")
+                    .hasRootCauseMessage("test close failure");
+        }
+    }
+
+    @Test
+    public void testProductionMetadataRefreshBypassesBlockedSourceCoordinatorAsyncCallable()
+            throws Throwable {
+        KafkaStream kafkaStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+        BlockingDescribeStreamsKafkaMetadataService metadataService =
+                new BlockingDescribeStreamsKafkaMetadataService(Collections.singleton(kafkaStream));
+        CountDownLatch sourceCoordinatorCallableStarted = new CountDownLatch(1);
+        CountDownLatch allowSourceCoordinatorCallableToFinish = new CountDownLatch(1);
+        ExecutorService sourceCoordinatorWorker = Executors.newSingleThreadExecutor();
+
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createProductionEnumerator(context, metadataService)) {
+            context.callAsync(
+                    () -> {
+                        sourceCoordinatorCallableStarted.countDown();
+                        awaitUninterruptibly(allowSourceCoordinatorCallableToFinish);
+                        return null;
+                    },
+                    (result, t) -> {});
+            Future<?> blockedSourceCoordinatorCallable =
+                    sourceCoordinatorWorker.submit(
+                            () -> {
+                                try {
+                                    context.runNextOneTimeCallable();
+                                } catch (Throwable t) {
+                                    throw new RuntimeException(t);
+                                }
+                            });
+            assertThat(sourceCoordinatorCallableStarted.await(10, TimeUnit.SECONDS))
+                    .as("source coordinator async callable should start")
+                    .isTrue();
+
+            enumerator.start();
+            assertThat(metadataService.awaitDescribeStreamsStarted())
+                    .as("production metadata discovery worker should fetch streams")
+                    .isTrue();
+            mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, 0);
+
+            metadataService.allowDescribeStreams();
+            CommonTestUtils.waitUtil(
+                    () -> hasLatestMetadataUpdateEvent(context, 0, kafkaStream),
+                    Duration.ofSeconds(10),
+                    "Metadata refresh did not bypass blocked source coordinator async callable");
+            assertThat(blockedSourceCoordinatorCallable.isDone())
+                    .as("source coordinator async callable should still be blocked")
+                    .isFalse();
+
+            allowSourceCoordinatorCallableToFinish.countDown();
+            assertThatCode(() -> blockedSourceCoordinatorCallable.get(10, TimeUnit.SECONDS))
+                    .as("source coordinator async callable should finish after release")
+                    .doesNotThrowAnyException();
+        } finally {
+            metadataService.allowDescribeStreams();
+            allowSourceCoordinatorCallableToFinish.countDown();
+            sourceCoordinatorWorker.shutdownNow();
+        }
+    }
+
+    @Test
     public void testAddSplitsBack() throws Throwable {
         try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
@@ -1853,6 +2039,24 @@ public class DynamicKafkaSourceEnumeratorTest {
                 new TestKafkaEnumContextProxyFactory());
     }
 
+    private DynamicKafkaSourceEnumerator createProductionEnumerator(
+            SplitEnumeratorContext<DynamicKafkaSourceSplit> context,
+            KafkaMetadataService kafkaMetadataService) {
+        Properties properties = new Properties();
+        properties.setProperty(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "0");
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "0");
+        return new DynamicKafkaSourceEnumerator(
+                new KafkaStreamSetSubscriber(Collections.singleton(TOPIC)),
+                kafkaMetadataService,
+                context,
+                OffsetsInitializer.earliest(),
+                new NoStoppingOffsetsInitializer(),
+                properties,
+                Boundedness.CONTINUOUS_UNBOUNDED,
+                new DynamicKafkaSourceEnumState());
+    }
+
     private void mockRegisterReaderAndSendReaderStartupEvent(
             MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context,
             DynamicKafkaSourceEnumerator enumerator,
@@ -2120,6 +2324,21 @@ public class DynamicKafkaSourceEnumeratorTest {
         }
     }
 
+    private static void awaitUninterruptibly(CountDownLatch latch) {
+        boolean interrupted = false;
+        while (true) {
+            try {
+                latch.await();
+                break;
+            } catch (InterruptedException e) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     private DynamicKafkaSourceEnumState getCheckpointState(KafkaStream kafkaStream)
             throws Throwable {
         try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
@@ -2170,6 +2389,28 @@ public class DynamicKafkaSourceEnumeratorTest {
             throws Exception {
         List<SourceEvent> sourceEvents = context.getSentSourceEvent().get(readerId);
         assertThat(sourceEvents)
+                .as("source events should have been sent to reader %s", readerId)
+                .isNotNull();
+        return sourceEvents.stream()
+                .filter(MetadataUpdateEvent.class::isInstance)
+                .map(MetadataUpdateEvent.class::cast)
+                .reduce((first, second) -> second)
+                .orElseThrow(
+                        () ->
+                                new AssertionError(
+                                        String.format(
+                                                "metadata update event was not sent to reader %s",
+                                                readerId)));
+    }
+
+    @SuppressWarnings("unchecked")
+    private MetadataUpdateEvent getLatestMetadataUpdateEventWithoutContextSync(
+            MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context, int readerId) {
+        Map<Integer, List<SourceEvent>> sentSourceEvents =
+                (Map<Integer, List<SourceEvent>>)
+                        Whitebox.getInternalState(context, "sentSourceEvent");
+        List<SourceEvent> sourceEvents = sentSourceEvents.get(readerId);
+        assertThat(sourceEvents)
                 .as("reader %s should have received source events", readerId)
                 .isNotNull();
         return sourceEvents.stream()
@@ -2182,6 +2423,19 @@ public class DynamicKafkaSourceEnumeratorTest {
                                         String.format(
                                                 "reader %s did not receive metadata update event",
                                                 readerId)));
+    }
+
+    private boolean hasLatestMetadataUpdateEvent(
+            MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context,
+            int readerId,
+            KafkaStream expectedKafkaStream) {
+        try {
+            return getLatestMetadataUpdateEventWithoutContextSync(context, readerId)
+                    .getKafkaStreams()
+                    .equals(Collections.singleton(expectedKafkaStream));
+        } catch (AssertionError e) {
+            return false;
+        }
     }
 
     private ClusterMetadata copyClusterMetadataWithOverrides(
@@ -2240,6 +2494,135 @@ public class DynamicKafkaSourceEnumeratorTest {
                     wrapCallAsyncCallableHandler(handler),
                     initialDelay,
                     period);
+        }
+    }
+
+    private static class BlockingCloseKafkaEnumContextProxyFactory
+            implements StoppableKafkaEnumContextProxy.StoppableKafkaEnumContextProxyFactory {
+        private final CountDownLatch closeStarted = new CountDownLatch(1);
+        private final CountDownLatch allowClose = new CountDownLatch(1);
+
+        @Override
+        public StoppableKafkaEnumContextProxy create(
+                SplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext,
+                String kafkaClusterId,
+                KafkaMetadataService kafkaMetadataService,
+                Runnable signalNoMoreSplitsCallback) {
+            return new BlockingCloseKafkaEnumContextProxy(
+                    kafkaClusterId,
+                    kafkaMetadataService,
+                    (MockSplitEnumeratorContext<DynamicKafkaSourceSplit>) enumContext,
+                    closeStarted,
+                    allowClose);
+        }
+
+        private boolean awaitCloseStarted() throws InterruptedException {
+            return closeStarted.await(10, TimeUnit.SECONDS);
+        }
+
+        private void allowClose() {
+            allowClose.countDown();
+        }
+    }
+
+    private static class BlockingCloseKafkaEnumContextProxy extends TestKafkaEnumContextProxy {
+        private final CountDownLatch closeStarted;
+        private final CountDownLatch allowClose;
+
+        public BlockingCloseKafkaEnumContextProxy(
+                String kafkaClusterId,
+                KafkaMetadataService kafkaMetadataService,
+                MockSplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext,
+                CountDownLatch closeStarted,
+                CountDownLatch allowClose) {
+            super(kafkaClusterId, kafkaMetadataService, enumContext);
+            this.closeStarted = closeStarted;
+            this.allowClose = allowClose;
+        }
+
+        @Override
+        public void close() throws Exception {
+            closeStarted.countDown();
+            assertThat(allowClose.await(10, TimeUnit.SECONDS))
+                    .as("test should allow stale enumerator close to complete")
+                    .isTrue();
+            super.close();
+        }
+    }
+
+    private static class ThrowingCloseKafkaEnumContextProxyFactory
+            implements StoppableKafkaEnumContextProxy.StoppableKafkaEnumContextProxyFactory {
+        private final String failingClusterId;
+
+        private ThrowingCloseKafkaEnumContextProxyFactory(String failingClusterId) {
+            this.failingClusterId = failingClusterId;
+        }
+
+        @Override
+        public StoppableKafkaEnumContextProxy create(
+                SplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext,
+                String kafkaClusterId,
+                KafkaMetadataService kafkaMetadataService,
+                Runnable signalNoMoreSplitsCallback) {
+            if (failingClusterId.equals(kafkaClusterId)) {
+                return new ThrowingCloseKafkaEnumContextProxy(
+                        kafkaClusterId,
+                        kafkaMetadataService,
+                        (MockSplitEnumeratorContext<DynamicKafkaSourceSplit>) enumContext);
+            }
+            return new TestKafkaEnumContextProxy(
+                    kafkaClusterId,
+                    kafkaMetadataService,
+                    (MockSplitEnumeratorContext<DynamicKafkaSourceSplit>) enumContext);
+        }
+    }
+
+    private static class ThrowingCloseKafkaEnumContextProxy extends TestKafkaEnumContextProxy {
+        private ThrowingCloseKafkaEnumContextProxy(
+                String kafkaClusterId,
+                KafkaMetadataService kafkaMetadataService,
+                MockSplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext) {
+            super(kafkaClusterId, kafkaMetadataService, enumContext);
+        }
+
+        @Override
+        public void close() throws Exception {
+            throw new Exception("test close failure");
+        }
+    }
+
+    private static class DroppingCoordinatorThreadContext
+            extends MockSplitEnumeratorContext<DynamicKafkaSourceSplit> {
+        private DroppingCoordinatorThreadContext(int parallelism) {
+            super(parallelism);
+        }
+
+        @Override
+        public void runInCoordinatorThread(Runnable runnable) {}
+    }
+
+    private static class BlockingDescribeStreamsKafkaMetadataService
+            extends MockKafkaMetadataService {
+        private final CountDownLatch describeStreamsStarted = new CountDownLatch(1);
+        private final CountDownLatch allowDescribeStreams = new CountDownLatch(1);
+
+        private BlockingDescribeStreamsKafkaMetadataService(Set<KafkaStream> kafkaStreams) {
+            super(kafkaStreams);
+        }
+
+        @Override
+        public Map<String, KafkaStream> describeStreams(Collection<String> streamIds) {
+            describeStreamsStarted.countDown();
+            awaitUninterruptibly(allowDescribeStreams);
+            return super.describeStreams(streamIds);
+        }
+
+        private boolean awaitDescribeStreamsStarted() throws InterruptedException {
+            return describeStreamsStarted.await(10, TimeUnit.SECONDS);
+        }
+
+        private void allowDescribeStreams() {
+            allowDescribeStreams.countDown();
         }
     }
 }

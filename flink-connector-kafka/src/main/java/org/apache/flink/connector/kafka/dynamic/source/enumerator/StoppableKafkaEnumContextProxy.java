@@ -211,12 +211,19 @@ public class StoppableKafkaEnumContextProxy
     @Override
     public void close() throws Exception {
         logger.info("Closing enum context for {}", kafkaClusterId);
+        prepareForClose();
         if (subEnumeratorWorker != null) {
-            // KafkaSubscriber worker thread will fail if admin client is closed in the middle.
-            // Swallow the error and set the context to closed state.
+            subEnumeratorWorker.awaitTermination(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    void prepareForClose() {
+        if (subEnumeratorWorker != null) {
+            // KafkaSubscriber worker thread may fail if KafkaSourceEnumerator closes its Admin
+            // client while discovery is in flight. Mark the context closing before stale
+            // enumerators are closed so those failures are swallowed and callbacks are skipped.
             isClosing = true;
             subEnumeratorWorker.shutdown();
-            subEnumeratorWorker.awaitTermination(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
         }
     }
 
@@ -226,6 +233,11 @@ public class StoppableKafkaEnumContextProxy
      */
     protected <T> Callable<T> wrapCallAsyncCallable(Callable<T> callable) {
         return () -> {
+            if (isClosing) {
+                throw new HandledFlinkKafkaException(
+                        new KafkaException("Enumerator context is closing"), kafkaClusterId);
+            }
+
             try {
                 return callable.call();
             } catch (Exception e) {
@@ -254,6 +266,11 @@ public class StoppableKafkaEnumContextProxy
     protected <T> BiConsumer<T, Throwable> wrapCallAsyncCallableHandler(
             BiConsumer<T, Throwable> mainHandler) {
         return (result, t) -> {
+            if (isClosing) {
+                logger.debug("Skipping callback for closing enum context {}", kafkaClusterId);
+                return;
+            }
+
             // check if exception is handled
             Optional<HandledFlinkKafkaException> throwable =
                     ExceptionUtils.findThrowable(t, HandledFlinkKafkaException.class);
