@@ -197,9 +197,9 @@ Dynamic Kafka Source 支持两种 split 分配模式：
 在 `global` 模式下，均衡策略是**前向增量（forward-only）**的：新发现 split 会尽量保证后续分配均衡，
 但不会仅为重平衡主动迁移已分配且仍在消费的 active split。
 
-如果因为缩容/移除导致 global 分配出现倾斜，enumerator 不会自行重排已在运行的 split。
-如需对已有 ownership 做重平衡，可通过并行度变化后的恢复流程（例如 savepoint/checkpoint + rescale restore），
-让 Flink Runtime 对 source reader 的 operator state 进行重分区。
+如果因为缩容/移除导致 global 分配出现倾斜，恢复流程会将恢复出的 active split
+重新分配到可用 reader，无需改变并行度。仅为保留 offset 而保存的已移除 split
+不会参与 active 重平衡，在重新激活或过期前仍保留在原 reader 上。
 
 {{< tabs "DynamicKafkaSourceEnumeratorMode" >}}
 {{< tab "Java" >}}
