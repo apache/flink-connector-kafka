@@ -1005,7 +1005,12 @@ public class DynamicKafkaSourceEnumeratorTest {
                                 serializedRestoredState,
                                 new TestKafkaEnumContextProxyFactory())) {
             enumerator.start();
-            mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, 0);
+            // Recovery metadata updates are deferred until all restored readers register and the
+            // first metadata discovery completes.
+            for (int reader = 0; reader < NUM_SUBTASKS; reader++) {
+                mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, reader);
+            }
+            runAllOneTimeCallables(context);
 
             MetadataUpdateEvent metadataUpdateEvent = getLatestMetadataUpdateEvent(context, 0);
             KafkaStream updatedStream =
