@@ -643,7 +643,9 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         }
         clusterReaderMap.clear();
         clustersProperties.clear();
-        activeSplitCount.set(0);
+        // Keep the last published count during a rebuild because metric reporters may sample the
+        // gauge concurrently. The caller publishes the final count after replacement readers have
+        // received their splits.
     }
 
     /**
