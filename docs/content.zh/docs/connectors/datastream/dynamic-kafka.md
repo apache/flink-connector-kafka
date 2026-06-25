@@ -233,6 +233,7 @@ Cluster metadata 可以包含每个集群的起始/停止 offsets initializer，
 如果希望在之后重新加入集群或恢复作业时继续使用这些 offset，请将
 `stream-metadata-removed-cluster-retention-ms` 设置为正数。例如，`604800000`
 会将已移除集群的状态保留七天，之后 source 将不再把它写入 checkpoint。
+如果该集群重新加入，source 会使用保留的 offset，但会重新计算 reader 分配，而不会复用之前的 owner。
 
 ### Additional Properties
 There are configuration options in DynamicKafkaSourceOptions that can be configured in the properties through the builder:
