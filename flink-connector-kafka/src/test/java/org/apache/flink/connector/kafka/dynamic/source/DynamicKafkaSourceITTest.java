@@ -58,7 +58,6 @@ import org.apache.flink.connector.testframe.testsuites.SourceTestSuiteBase;
 import org.apache.flink.core.execution.CheckpointingMode;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.testutils.CommonTestUtils;
-import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.messages.FlinkJobTerminatedWithoutCancellationException;
 import org.apache.flink.runtime.testutils.InMemoryReporter;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
@@ -100,7 +99,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
@@ -1120,15 +1118,8 @@ class DynamicKafkaSourceITTest {
                                         .boxed()
                                         .collect(Collectors.toList()));
 
-                // should contain cluster 0 metrics
-                assertThat(findMetrics(reporter, DYNAMIC_KAFKA_SOURCE_METRIC_GROUP))
-                        .allSatisfy(
-                                metricName ->
-                                        assertThat(metricName)
-                                                .containsPattern(
-                                                        ".*"
-                                                                + DYNAMIC_KAFKA_SOURCE_METRIC_GROUP
-                                                                + "\\.kafkaCluster\\.kafka-cluster-0.*"));
+                // should contain only cluster 0 metrics
+                waitForOnlyKafkaClusterMetrics("kafka-cluster-0");
 
                 // setup test data for cluster 1 and stop consuming from cluster 0
                 latestValueOffset =
@@ -1148,24 +1139,8 @@ class DynamicKafkaSourceITTest {
                     results.add(iterator.next());
                 }
 
-                // cluster 0 is not being consumed from, metrics should not appear
-                assertThat(findMetrics(reporter, DYNAMIC_KAFKA_SOURCE_METRIC_GROUP))
-                        .allSatisfy(
-                                metricName ->
-                                        assertThat(metricName)
-                                                .doesNotContainPattern(
-                                                        ".*"
-                                                                + DYNAMIC_KAFKA_SOURCE_METRIC_GROUP
-                                                                + "\\.kafkaCluster\\.kafka-cluster-0.*"));
-
-                assertThat(findMetrics(reporter, DYNAMIC_KAFKA_SOURCE_METRIC_GROUP))
-                        .allSatisfy(
-                                metricName ->
-                                        assertThat(metricName)
-                                                .containsPattern(
-                                                        ".*"
-                                                                + DYNAMIC_KAFKA_SOURCE_METRIC_GROUP
-                                                                + "\\.kafkaCluster\\.kafka-cluster-1.*"));
+                // cluster 0 is not being consumed from, metrics should contain only cluster 1
+                waitForOnlyKafkaClusterMetrics("kafka-cluster-1");
             }
         }
 
@@ -1235,11 +1210,16 @@ class DynamicKafkaSourceITTest {
                     kafkaClusterTestEnvMetadataList);
         }
 
-        private Set<String> findMetrics(InMemoryReporter inMemoryReporter, String groupPattern) {
-            Optional<MetricGroup> groups = inMemoryReporter.findGroup(groupPattern);
-            assertThat(groups).isPresent();
-            return inMemoryReporter.getMetricsByGroup(groups.get()).keySet().stream()
-                    .map(metricName -> groups.get().getMetricIdentifier(metricName))
+        private Set<String> findKafkaClusterMetrics(InMemoryReporter inMemoryReporter) {
+            // Metrics are registered per source subtask, so aggregate every matching group.
+            return inMemoryReporter.findGroups(DYNAMIC_KAFKA_SOURCE_METRIC_GROUP).stream()
+                    .flatMap(
+                            group ->
+                                    inMemoryReporter.getMetricsByGroup(group).keySet().stream()
+                                            .map(
+                                                    metricName ->
+                                                            group.getMetricIdentifier(metricName)))
+                    .filter(metricName -> metricName.contains(".kafkaCluster."))
                     .collect(Collectors.toSet());
         }
 
@@ -1337,14 +1317,23 @@ class DynamicKafkaSourceITTest {
                     "Could not observe removed Kafka cluster metrics disappear");
         }
 
-        private boolean hasKafkaClusterMetrics(String kafkaClusterId) {
-            Optional<MetricGroup> groups = reporter.findGroup(DYNAMIC_KAFKA_SOURCE_METRIC_GROUP);
-            if (groups.isEmpty()) {
-                return false;
-            }
+        private void waitForOnlyKafkaClusterMetrics(String kafkaClusterId) throws Exception {
+            CommonTestUtils.waitUtil(
+                    () -> {
+                        Set<String> metrics = findKafkaClusterMetrics(reporter);
+                        return !metrics.isEmpty()
+                                && metrics.stream()
+                                        .allMatch(
+                                                metricName ->
+                                                        metricName.contains(
+                                                                ".kafkaCluster." + kafkaClusterId));
+                    },
+                    Duration.ofSeconds(30),
+                    "Could not observe only Kafka cluster metrics for " + kafkaClusterId);
+        }
 
-            return reporter.getMetricsByGroup(groups.get()).keySet().stream()
-                    .map(metricName -> groups.get().getMetricIdentifier(metricName))
+        private boolean hasKafkaClusterMetrics(String kafkaClusterId) {
+            return findKafkaClusterMetrics(reporter).stream()
                     .anyMatch(metricName -> metricName.contains(".kafkaCluster." + kafkaClusterId));
         }
 
