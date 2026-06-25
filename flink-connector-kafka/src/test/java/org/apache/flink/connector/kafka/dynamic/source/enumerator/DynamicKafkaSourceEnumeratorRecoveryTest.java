@@ -31,6 +31,8 @@ import org.apache.flink.connector.kafka.dynamic.source.DynamicKafkaSource;
 import org.apache.flink.connector.kafka.dynamic.source.DynamicKafkaSourceOptions;
 import org.apache.flink.connector.kafka.dynamic.source.GetMetadataUpdateEvent;
 import org.apache.flink.connector.kafka.dynamic.source.MetadataUpdateEvent;
+import org.apache.flink.connector.kafka.dynamic.source.RequestRetainedSplitOffsetsEvent;
+import org.apache.flink.connector.kafka.dynamic.source.RetainedSplitOffsetsEvent;
 import org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.KafkaStreamSetSubscriber;
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
@@ -189,6 +191,164 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
             assertThat(context.getSentSourceEvent().get(0))
                     .hasSize(1)
                     .allMatch(MetadataUpdateEvent.class::isInstance);
+        }
+    }
+
+    @Test
+    public void testReaddedRetainedSplitsWaitForHandoffAfterRecovery() throws Throwable {
+        int parallelism = 2;
+        String streamId = "stream";
+        String clusterId = "cluster-0";
+        String topic = "topic";
+        long retainedUntilMs = System.currentTimeMillis() + 60_000L;
+        List<DynamicKafkaSourceSplit> retainedSplits =
+                createSplits(clusterId, topic, 2).stream()
+                        .map(split -> split.retainUntil(retainedUntilMs))
+                        .collect(java.util.stream.Collectors.toList());
+        KafkaSourceEnumState retainedClusterState =
+                new KafkaSourceEnumState(
+                        unwrapSplits(retainedSplits), Collections.emptyList(), true);
+        DynamicKafkaSourceEnumState restoredState =
+                new DynamicKafkaSourceEnumState(
+                        Collections.emptySet(),
+                        Collections.emptyMap(),
+                        Collections.singletonMap(
+                                clusterId,
+                                new DynamicKafkaSourceEnumState.RetainedClusterState(
+                                        retainedClusterState, retainedUntilMs)));
+        KafkaStream currentKafkaStream = createKafkaStream(streamId, clusterId, topic);
+        Properties properties = createGlobalModeProperties();
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
+                "60000");
+
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(parallelism);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                streamId,
+                                new MockKafkaMetadataService(
+                                        Collections.singleton(currentKafkaStream)),
+                                context,
+                                properties,
+                                restoredState)) {
+            enumerator.start();
+            context.registerReader(ReaderInfo.createReaderInfo(0, "location-0", retainedSplits));
+            enumerator.addReader(0);
+            context.registerReader(
+                    ReaderInfo.createReaderInfo(1, "location-1", Collections.emptyList()));
+            enumerator.addReader(1);
+
+            context.runNextOneTimeCallable();
+
+            List<DynamicKafkaSourceSplit> returnedRetainedSplits =
+                    context.getSplitsAssignmentSequence().stream()
+                            .flatMap(
+                                    assignment ->
+                                            assignment.assignment().values().stream()
+                                                    .flatMap(List::stream))
+                            .filter(DynamicKafkaSourceSplit::isRetained)
+                            .collect(java.util.stream.Collectors.toList());
+            assertThat(returnedRetainedSplits)
+                    .extracting(DynamicKafkaSourceSplit::splitId)
+                    .containsExactlyInAnyOrderElementsOf(
+                            retainedSplits.stream()
+                                    .map(DynamicKafkaSourceSplit::splitId)
+                                    .collect(java.util.stream.Collectors.toList()));
+
+            RequestRetainedSplitOffsetsEvent handoffRequest =
+                    context.getSentSourceEvent().get(0).stream()
+                            .filter(RequestRetainedSplitOffsetsEvent.class::isInstance)
+                            .map(RequestRetainedSplitOffsetsEvent.class::cast)
+                            .findFirst()
+                            .orElseThrow(AssertionError::new);
+            Map<String, Long> reportedOffsets = new HashMap<>();
+            reportedOffsets.put(retainedSplits.get(0).splitId(), 123L);
+            reportedOffsets.put(retainedSplits.get(1).splitId(), 124L);
+            int assignmentsBeforeHandoff = context.getSplitsAssignmentSequence().size();
+            enumerator.handleSourceEvent(
+                    0,
+                    new RetainedSplitOffsetsEvent(
+                            handoffRequest.getHandoffId(), clusterId, reportedOffsets));
+            assertThat(context.getSplitsAssignmentSequence()).hasSize(assignmentsBeforeHandoff);
+            enumerator.handleSourceEvent(
+                    1,
+                    new RetainedSplitOffsetsEvent(
+                            handoffRequest.getHandoffId(), clusterId, Collections.emptyMap()));
+
+            Map<Integer, Integer> activeAssignmentsByReader = new HashMap<>();
+            List<DynamicKafkaSourceSplit> activeAssignments = new ArrayList<>();
+            for (SplitsAssignment<DynamicKafkaSourceSplit> assignment :
+                    context.getSplitsAssignmentSequence()) {
+                for (Map.Entry<Integer, List<DynamicKafkaSourceSplit>> entry :
+                        assignment.assignment().entrySet()) {
+                    for (DynamicKafkaSourceSplit split : entry.getValue()) {
+                        if (!split.isRetained()) {
+                            activeAssignments.add(split);
+                            activeAssignmentsByReader.merge(entry.getKey(), 1, Integer::sum);
+                        }
+                    }
+                }
+            }
+            assertThat(activeAssignments)
+                    .extracting(split -> split.getKafkaPartitionSplit().getStartingOffset())
+                    .containsExactlyInAnyOrder(123L, 124L);
+            assertThat(activeAssignmentsByReader).containsEntry(0, 1).containsEntry(1, 1);
+        }
+    }
+
+    @Test
+    public void testRetainedReportedSplitWithoutRetainedStateUsesActiveRecovery() throws Throwable {
+        int parallelism = 2;
+        String streamId = "stream";
+        String clusterId = "cluster-0";
+        String topic = "topic";
+        DynamicKafkaSourceSplit retainedSplit =
+                new DynamicKafkaSourceSplit(
+                                clusterId,
+                                new KafkaPartitionSplit(new TopicPartition(topic, 0), 123L))
+                        .retainUntil(System.currentTimeMillis() + 60_000L);
+        KafkaStream kafkaStream = createKafkaStream(streamId, clusterId, topic);
+        Properties properties = createGlobalModeProperties();
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
+                "60000");
+
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(parallelism);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                streamId,
+                                new MockKafkaMetadataService(Collections.singleton(kafkaStream)),
+                                context,
+                                properties,
+                                createRestoredState(
+                                        kafkaStream, clusterId, Collections.emptyList()))) {
+            enumerator.start();
+            context.registerReader(
+                    ReaderInfo.createReaderInfo(0, "location-0", List.of(retainedSplit)));
+            enumerator.addReader(0);
+            context.registerReader(
+                    ReaderInfo.createReaderInfo(1, "location-1", Collections.emptyList()));
+            enumerator.addReader(1);
+
+            context.runNextOneTimeCallable();
+
+            List<DynamicKafkaSourceSplit> assignedSplits =
+                    context.getSplitsAssignmentSequence().stream()
+                            .flatMap(
+                                    assignment ->
+                                            assignment.assignment().values().stream()
+                                                    .flatMap(List::stream))
+                            .collect(java.util.stream.Collectors.toList());
+            assertThat(assignedSplits)
+                    .singleElement()
+                    .satisfies(
+                            split -> {
+                                assertThat(split.isRetained()).isFalse();
+                                assertThat(split.getKafkaPartitionSplit().getStartingOffset())
+                                        .isEqualTo(123L);
+                            });
         }
     }
 

@@ -242,6 +242,10 @@ By default, metadata removal also removes that cluster's split offsets from subs
 To keep removed cluster offsets available for a later re-add or restore, set
 `stream-metadata-removed-cluster-retention-ms` to a positive duration. For example,
 `604800000` retains removed cluster state for seven days before the source stops checkpointing it.
+If the cluster is re-added, the source uses the retained offsets but computes fresh reader
+assignments instead of reusing their previous owners.
+If a previously retained split no longer has a reader-side retained offset, that split falls back
+to the effective configured starting offsets initializer.
 
 ### Additional Properties
 There are configuration options in DynamicKafkaSourceOptions that can be configured in the properties through the builder:
