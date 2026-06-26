@@ -19,27 +19,20 @@ package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.common.state.CheckpointListener;
-import org.apache.flink.api.common.state.ListState;
-import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.connector.sink2.Committer;
 import org.apache.flink.api.connector.sink2.CommitterInitContext;
 import org.apache.flink.api.connector.sink2.WriterInitContext;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.connector.base.DeliveryGuarantee;
-import org.apache.flink.connector.kafka.share.ShareAckCommittable;
+import org.apache.flink.connector.kafka.share.ShareAckPayload;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
 import org.apache.flink.connector.kafka.sink.internal.KafkaCommitter;
-import org.apache.flink.connector.kafka.source.reader.transaction.KafkaShareAckTransactionManager;
-import org.apache.flink.connector.kafka.source.reader.transaction.ShareAckTransactionClient;
-import org.apache.flink.connector.kafka.source.reader.transaction.ShareAckTransactionHandle;
 import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.core.testutils.CommonTestUtils;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
-import org.apache.flink.streaming.api.connector.sink2.CommittableMessage;
-import org.apache.flink.streaming.api.connector.sink2.StandardSinkTopologies;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.source.legacy.RichParallelSourceFunction;
 import org.apache.flink.streaming.api.functions.source.legacy.SourceFunction;
@@ -74,8 +67,6 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.testcontainers.utility.DockerImageName;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.io.Serializable;
 import java.lang.reflect.Method;
@@ -84,15 +75,12 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Properties;
 import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -115,27 +103,12 @@ class KafkaShareEosPipelineITCase {
     private static final int PARALLELISM = 4;
     private static final int NO_CHECKPOINT = -1;
 
-    private static final Map<String, FlinkKafkaInternalProducer<byte[], byte[]>>
-            SOURCE_ACK_PRODUCERS = new ConcurrentHashMap<>();
-    private static final Set<String> SINK_COMMITTED_SHARE_ACKS = ConcurrentHashMap.newKeySet();
-    private static final Set<String> COMMITTED_SHARE_ACKS = ConcurrentHashMap.newKeySet();
     private static final Queue<String> COMMIT_EVENTS = new ConcurrentLinkedQueue<>();
 
     private TestKafkaContainer kafkaContainer;
 
     @AfterEach
     void tearDown() {
-        SOURCE_ACK_PRODUCERS.values()
-                .forEach(
-                        producer -> {
-                            try {
-                                producer.close();
-                            } catch (Exception ignored) {
-                            }
-                        });
-        SOURCE_ACK_PRODUCERS.clear();
-        SINK_COMMITTED_SHARE_ACKS.clear();
-        COMMITTED_SHARE_ACKS.clear();
         COMMIT_EVENTS.clear();
         if (kafkaContainer != null) {
             kafkaContainer.stop();
@@ -144,7 +117,7 @@ class KafkaShareEosPipelineITCase {
     }
 
     @Test
-    void testShareSourceOperatorToKafkaSinkExactlyOnceCommitsSinkBeforeShareAcks()
+    void testShareSourceOperatorToKafkaSinkExactlyOnceCommitsShareAcksInSinkTransaction()
             throws Exception {
         int partitionCount = 6;
         int recordsPerPartition = 5;
@@ -170,7 +143,7 @@ class KafkaShareEosPipelineITCase {
             env.enableCheckpointing(100L);
 
             env.addSource(
-                            new CheckpointedTransactionalShareSource(
+                            new CheckpointedShareSource(
                                     context.bootstrapServers,
                                     context.shareGroupId,
                                     context.inputTopic))
@@ -218,25 +191,8 @@ class KafkaShareEosPipelineITCase {
             }
 
             List<String> commitEvents = new ArrayList<>(COMMIT_EVENTS);
-            List<String> sinkCommits =
-                    commitEvents.stream()
-                            .filter(event -> event.startsWith("sink:"))
-                            .collect(Collectors.toList());
-            List<String> shareCommits =
-                    commitEvents.stream()
-                            .filter(event -> event.startsWith("share:"))
-                            .collect(Collectors.toList());
-            assertThat(sinkCommits).isNotEmpty();
-            assertThat(shareCommits).isNotEmpty();
-            assertThat(shareCommits).doesNotHaveDuplicates();
-            assertThat(COMMITTED_SHARE_ACKS).hasSameSizeAs(shareCommits);
-            assertThat(SINK_COMMITTED_SHARE_ACKS).containsAll(COMMITTED_SHARE_ACKS);
-            for (String shareAckCommitKey : COMMITTED_SHARE_ACKS) {
-                int sinkCommitIndex = commitEvents.indexOf("sink-share:" + shareAckCommitKey);
-                int shareCommitIndex = commitEvents.indexOf("share:" + shareAckCommitKey);
-                assertThat(sinkCommitIndex).isGreaterThanOrEqualTo(0);
-                assertThat(shareCommitIndex).isGreaterThan(sinkCommitIndex);
-            }
+            assertThat(commitEvents).isNotEmpty();
+            assertThat(commitEvents).allMatch(event -> event.startsWith("sink:"));
         } finally {
             miniCluster.after();
         }
@@ -445,14 +401,6 @@ class KafkaShareEosPipelineITCase {
         return invoke(target, methodName, new Class<?>[0]);
     }
 
-    private static String shareAckCommitKey(ShareAckCommittable committable) {
-        return committable.getTransactionalId()
-                + "-"
-                + committable.getTransactionOwnerId()
-                + "-"
-                + committable.getTransactionOwnerEpoch();
-    }
-
     private static final class SharePipelineContext {
         private final String bootstrapServers;
         private final String suffix;
@@ -477,7 +425,7 @@ class KafkaShareEosPipelineITCase {
         }
     }
 
-    private static final class CheckpointedTransactionalShareSource
+    private static final class CheckpointedShareSource
             extends RichParallelSourceFunction<ShareSourceRecord>
             implements CheckpointedFunction, CheckpointListener {
 
@@ -487,18 +435,14 @@ class KafkaShareEosPipelineITCase {
         private final String groupId;
         private final String topic;
 
-        private transient ListState<ShareAckCommittable> pendingState;
-        private transient KafkaShareAckTransactionManager transactionManager;
-        private transient List<ShareAckCommittable> restoredPendingCommittables;
-
         private volatile boolean running = true;
         private volatile boolean hasUncheckpointedAcks;
         private volatile long lastSnapshotCheckpointId = NO_CHECKPOINT;
         private volatile long completedCheckpointId = NO_CHECKPOINT;
         private int emittedRecords;
+        private int ackPayloadSequence;
 
-        private CheckpointedTransactionalShareSource(
-                String bootstrapServers, String groupId, String topic) {
+        private CheckpointedShareSource(String bootstrapServers, String groupId, String topic) {
             this.bootstrapServers = bootstrapServers;
             this.groupId = groupId;
             this.topic = topic;
@@ -506,53 +450,28 @@ class KafkaShareEosPipelineITCase {
 
         @Override
         public void initializeState(
-                org.apache.flink.runtime.state.FunctionInitializationContext context)
-                throws Exception {
-            pendingState =
-                    context.getOperatorStateStore()
-                            .getListState(
-                                    new ListStateDescriptor<>(
-                                            "pending-share-ack-committables",
-                                            ShareAckCommittable.class));
-            restoredPendingCommittables = new ArrayList<>();
-            for (ShareAckCommittable committable : pendingState.get()) {
-                restoredPendingCommittables.add(committable);
-            }
-        }
+                org.apache.flink.runtime.state.FunctionInitializationContext context) {}
 
         @Override
         public void snapshotState(org.apache.flink.runtime.state.FunctionSnapshotContext context)
                 throws Exception {
-            if (transactionManager == null) {
-                return;
-            }
-            List<ShareAckCommittable> pending =
-                    transactionManager.snapshotState(context.getCheckpointId());
-            pendingState.update(pending);
-            hasUncheckpointedAcks = false;
-            if (!pending.isEmpty()) {
+            if (hasUncheckpointedAcks) {
                 lastSnapshotCheckpointId = context.getCheckpointId();
+                hasUncheckpointedAcks = false;
             }
         }
 
         @Override
-        public void notifyCheckpointComplete(long checkpointId) throws Exception {
+        public void notifyCheckpointComplete(long checkpointId) {
             completedCheckpointId = checkpointId;
-            if (transactionManager != null) {
-                transactionManager.markCommittedUpTo(checkpointId);
-            }
         }
 
         @Override
         public void run(SourceFunction.SourceContext<ShareSourceRecord> context) throws Exception {
             int subtaskId = getRuntimeContext().getTaskInfo().getIndexOfThisSubtask();
-            ReflectiveShareAckTransactionClient client =
-                    new ReflectiveShareAckTransactionClient(
-                            bootstrapServers, groupId, topic, subtaskId);
-            transactionManager =
-                    new KafkaShareAckTransactionManager(
-                            client, groupId, subtaskId, restoredPendingCommittables);
-            try (KafkaShareAckTransactionManager ignored = transactionManager) {
+            ReflectiveShareConsumerClient client =
+                    new ReflectiveShareConsumerClient(bootstrapServers, groupId, topic);
+            try (ReflectiveShareConsumerClient ignored = client) {
                 int emptyPolls = 0;
                 while (running) {
                     ConsumerRecords<byte[], byte[]> records = client.poll(POLL_TIMEOUT);
@@ -572,18 +491,13 @@ class KafkaShareEosPipelineITCase {
                         for (ConsumerRecord<byte[], byte[]> record : batch) {
                             client.acknowledgeAccept(record);
                         }
-                        ShareAckTransactionHandle transaction =
-                                transactionManager.stageAcknowledgementsForTransaction();
-                        ShareAckCommittable shareAck =
-                                new ShareAckCommittable(
-                                        NO_CHECKPOINT,
-                                        transaction.getTransactionalId(),
-                                        transaction.getTransactionOwnerId(),
-                                        transaction.getTransactionOwnerEpoch(),
-                                        groupId,
-                                        subtaskId);
+                        ShareAckPayload shareAckPayload =
+                                client.shareAckPayload(
+                                        subtaskId + "-" + ackPayloadSequence++);
                         for (ConsumerRecord<byte[], byte[]> record : batch) {
-                            context.collect(ShareSourceRecord.from(subtaskId, record, shareAck));
+                            context.collect(
+                                    ShareSourceRecord.from(
+                                            subtaskId, record, shareAckPayload));
                         }
                         emittedRecords += batch.size();
                         hasUncheckpointedAcks = true;
@@ -605,75 +519,17 @@ class KafkaShareEosPipelineITCase {
         }
     }
 
-    private static final class ReflectiveShareAckTransactionClient
-            implements ShareAckTransactionClient {
+    private static final class ReflectiveShareConsumerClient implements AutoCloseable {
 
-        private final String topic;
-        private final int sourceSubtaskId;
         private final KafkaShareConsumer<byte[], byte[]> consumer;
-        private final Properties producerProperties;
 
-        @Nullable private FlinkKafkaInternalProducer<byte[], byte[]> producer;
-        @Nullable private ShareAckTransactionHandle activeHandle;
-        private boolean transactionOpen;
-
-        private ReflectiveShareAckTransactionClient(
-                String bootstrapServers, String groupId, String topic, int sourceSubtaskId) {
-            this.topic = topic;
-            this.sourceSubtaskId = sourceSubtaskId;
+        private ReflectiveShareConsumerClient(String bootstrapServers, String groupId, String topic) {
             this.consumer =
                     new KafkaShareConsumer<>(
                             shareConsumerProperties(bootstrapServers, groupId),
                             new ByteArrayDeserializer(),
                             new ByteArrayDeserializer());
             this.consumer.subscribe(List.of(topic));
-            this.producerProperties = producerProperties(bootstrapServers);
-        }
-
-        @Override
-        public ShareAckTransactionHandle beginTransaction() {
-            String transactionalId =
-                    "flink-share-eos-source-"
-                            + sourceSubtaskId
-                            + "-"
-                            + UUID.randomUUID();
-            producer = new FlinkKafkaInternalProducer<>(producerProperties, transactionalId);
-            producer.initTransactions();
-            producer.partitionsFor(topic);
-            producer.beginTransaction();
-            transactionOpen = true;
-            activeHandle =
-                    new ShareAckTransactionHandle(
-                            transactionalId, producer.getProducerId(), producer.getEpoch());
-            return activeHandle;
-        }
-
-        @Override
-        public void stageAcknowledgements(ShareAckTransactionHandle transaction) throws IOException {
-            try {
-                assertThat(transaction).isEqualTo(activeHandle);
-                Object acknowledgements = invoke(consumer, "acknowledgementsForTransaction");
-                assertThat((Boolean) invoke(acknowledgements, "isEmpty")).isFalse();
-                Object groupMetadata = invoke(consumer, "shareGroupMetadata");
-                invoke(
-                        producer,
-                        "sendShareAcknowledgementsToTransaction",
-                        new Class<?>[] {acknowledgements.getClass(), groupMetadata.getClass()},
-                        acknowledgements,
-                        groupMetadata);
-            } catch (Exception e) {
-                throw new IOException(e);
-            }
-        }
-
-        @Override
-        public void preCommit(ShareAckTransactionHandle transaction) {
-            assertThat(transaction).isEqualTo(activeHandle);
-            producer.flush();
-            SOURCE_ACK_PRODUCERS.put(transaction.getTransactionalId(), producer);
-            producer = null;
-            activeHandle = null;
-            transactionOpen = false;
         }
 
         private ConsumerRecords<byte[], byte[]> poll(Duration timeout) {
@@ -684,14 +540,19 @@ class KafkaShareEosPipelineITCase {
             consumer.acknowledge(record, AcknowledgeType.ACCEPT);
         }
 
+        private ShareAckPayload shareAckPayload(String payloadId) throws IOException {
+            try {
+                Object acknowledgements = invoke(consumer, "acknowledgementsForTransaction");
+                assertThat((Boolean) invoke(acknowledgements, "isEmpty")).isFalse();
+                Object groupMetadata = invoke(consumer, "shareGroupMetadata");
+                return ShareAckPayload.fromKafkaObjects(payloadId, acknowledgements, groupMetadata);
+            } catch (Exception e) {
+                throw new IOException(e);
+            }
+        }
+
         @Override
         public void close() {
-            if (producer != null) {
-                if (transactionOpen) {
-                    producer.abortTransaction();
-                }
-                producer.close();
-            }
             consumer.close(Duration.ZERO);
         }
     }
@@ -708,9 +569,7 @@ class KafkaShareEosPipelineITCase {
 
     private static final class ShareAwareExactlyOnceKafkaSink
             implements TwoPhaseCommittingStatefulSink<
-                            ShareSourceRecord, KafkaWriterState, KafkaShareEosCommittable>,
-                    org.apache.flink.streaming.api.connector.sink2.SupportsPostCommitTopology<
-                            KafkaShareEosCommittable> {
+                    ShareSourceRecord, KafkaWriterState, KafkaCommittable> {
 
         private final Properties kafkaProducerConfig;
         private final String transactionalIdPrefix;
@@ -724,15 +583,13 @@ class KafkaShareEosPipelineITCase {
         }
 
         @Override
-        public PrecommittingStatefulSinkWriter<
-                        ShareSourceRecord, KafkaWriterState, KafkaShareEosCommittable>
+        public PrecommittingStatefulSinkWriter<ShareSourceRecord, KafkaWriterState, KafkaCommittable>
                 createWriter(WriterInitContext context) throws IOException {
             return restoreWriter(context, Collections.emptyList());
         }
 
         @Override
-        public PrecommittingStatefulSinkWriter<
-                        ShareSourceRecord, KafkaWriterState, KafkaShareEosCommittable>
+        public PrecommittingStatefulSinkWriter<ShareSourceRecord, KafkaWriterState, KafkaCommittable>
                 restoreWriter(WriterInitContext context, Collection<KafkaWriterState> recoveredState)
                         throws IOException {
             ExactlyOnceKafkaWriter<ShareSourceRecord> writer =
@@ -746,14 +603,16 @@ class KafkaShareEosPipelineITCase {
                             TransactionNamingStrategy.DEFAULT.getAbortImpl(),
                             TransactionNamingStrategy.DEFAULT.getImpl(),
                             recoveredState);
-            ShareAwareKafkaWriter shareAwareWriter = new ShareAwareKafkaWriter(writer);
+            SameTransactionShareAckKafkaWriter<ShareSourceRecord> shareAwareWriter =
+                    new SameTransactionShareAckKafkaWriter<>(
+                            writer, record -> List.of(record.shareAckPayload));
             shareAwareWriter.initialize();
             return shareAwareWriter;
         }
 
         @Override
-        public Committer<KafkaShareEosCommittable> createCommitter(CommitterInitContext context) {
-            return new SinkOnlyKafkaCommitter(
+        public Committer<KafkaCommittable> createCommitter(CommitterInitContext context) {
+            return new RecordingKafkaCommitter(
                     new KafkaCommitter(
                             kafkaProducerConfig,
                             transactionalIdPrefix,
@@ -764,128 +623,41 @@ class KafkaShareEosPipelineITCase {
         }
 
         @Override
-        public SimpleVersionedSerializer<KafkaShareEosCommittable> getCommittableSerializer() {
-            return new KafkaShareEosCommittableSerializer();
+        public SimpleVersionedSerializer<KafkaCommittable> getCommittableSerializer() {
+            return new KafkaCommittableSerializer();
         }
 
         @Override
         public SimpleVersionedSerializer<KafkaWriterState> getWriterStateSerializer() {
             return new KafkaWriterStateSerializer();
         }
-
-        @Override
-        public void addPostCommitTopology(
-                org.apache.flink.streaming.api.datastream.DataStream<
-                                CommittableMessage<KafkaShareEosCommittable>>
-                        committables) {
-            StandardSinkTopologies.addGlobalCommitter(
-                    committables,
-                    context -> new ShareAckPostCommitter(),
-                    KafkaShareEosCommittableSerializer::new);
-        }
     }
 
-    private static final class ShareAwareKafkaWriter
-            implements TwoPhaseCommittingStatefulSink.PrecommittingStatefulSinkWriter<
-                    ShareSourceRecord, KafkaWriterState, KafkaShareEosCommittable> {
-
-        private final ExactlyOnceKafkaWriter<ShareSourceRecord> delegate;
-        private final Set<ShareAckCommittable> currentShareAckCommittables =
-                new LinkedHashSet<>();
-
-        private ShareAwareKafkaWriter(ExactlyOnceKafkaWriter<ShareSourceRecord> delegate) {
-            this.delegate = delegate;
-        }
-
-        private void initialize() {
-            delegate.initialize();
-        }
-
-        @Override
-        public void write(ShareSourceRecord element, Context context)
-                throws IOException, InterruptedException {
-            delegate.write(element, context);
-            currentShareAckCommittables.add(element.shareAckCommittable);
-        }
-
-        @Override
-        public void flush(boolean endOfInput) throws IOException, InterruptedException {
-            delegate.flush(endOfInput);
-        }
-
-        @Override
-        public Collection<KafkaShareEosCommittable> prepareCommit()
-                throws IOException, InterruptedException {
-            Collection<KafkaCommittable> kafkaCommittables = delegate.prepareCommit();
-            if (kafkaCommittables.isEmpty()) {
-                currentShareAckCommittables.clear();
-                return Collections.emptyList();
-            }
-            KafkaShareEosCommittable committable =
-                    KafkaShareEosCommittable.ready(
-                            NO_CHECKPOINT, kafkaCommittables, currentShareAckCommittables);
-            currentShareAckCommittables.clear();
-            return List.of(committable);
-        }
-
-        @Override
-        public List<KafkaWriterState> snapshotState(long checkpointId) throws IOException {
-            return delegate.snapshotState(checkpointId);
-        }
-
-        @Override
-        public void close() throws Exception {
-            delegate.close();
-        }
-    }
-
-    private static final class SinkOnlyKafkaCommitter
-            implements Committer<KafkaShareEosCommittable> {
+    private static final class RecordingKafkaCommitter implements Committer<KafkaCommittable> {
 
         private final KafkaCommitter kafkaCommitter;
 
-        private SinkOnlyKafkaCommitter(KafkaCommitter kafkaCommitter) {
+        private RecordingKafkaCommitter(KafkaCommitter kafkaCommitter) {
             this.kafkaCommitter = kafkaCommitter;
         }
 
         @Override
-        public void commit(Collection<CommitRequest<KafkaShareEosCommittable>> requests)
+        public void commit(Collection<CommitRequest<KafkaCommittable>> requests)
                 throws IOException, InterruptedException {
-            for (CommitRequest<KafkaShareEosCommittable> request : requests) {
-                KafkaShareEosCommittable committable = request.getCommittable();
-                List<ForwardingKafkaCommitRequest> kafkaRequests =
-                        committable.getKafkaCommittables().stream()
-                                .map(ForwardingKafkaCommitRequest::new)
-                                .collect(Collectors.toList());
-                List<Committer.CommitRequest<KafkaCommittable>> kafkaCommitRequests =
-                        new ArrayList<>(kafkaRequests);
-                kafkaCommitter.commit(kafkaCommitRequests);
-                Optional<ForwardingKafkaCommitRequest> retry =
-                        kafkaRequests.stream()
-                                .filter(kafkaRequest -> kafkaRequest.retry)
-                                .findFirst();
-                if (retry.isPresent()) {
+            for (CommitRequest<KafkaCommittable> request : requests) {
+                ForwardingKafkaCommitRequest kafkaRequest =
+                        new ForwardingKafkaCommitRequest(request.getCommittable());
+                kafkaCommitter.commit(List.of(kafkaRequest));
+                if (kafkaRequest.retry) {
                     request.retryLater();
                     continue;
                 }
-                Optional<ForwardingKafkaCommitRequest> failed =
-                        kafkaRequests.stream()
-                                .filter(kafkaRequest -> kafkaRequest.failure.get() != null)
-                                .findFirst();
-                if (failed.isPresent()) {
-                    request.signalFailedWithUnknownReason(failed.get().failure.get());
+                Throwable failure = kafkaRequest.failure.get();
+                if (failure != null) {
+                    request.signalFailedWithUnknownReason(failure);
                     continue;
                 }
-                committable.getKafkaCommittables().stream()
-                        .map(KafkaCommittable::getTransactionalId)
-                        .forEach(transactionalId -> COMMIT_EVENTS.add("sink:" + transactionalId));
-                committable.getShareAckCommittables().stream()
-                        .map(KafkaShareEosPipelineITCase::shareAckCommitKey)
-                        .forEach(
-                                shareAckCommitKey -> {
-                                    SINK_COMMITTED_SHARE_ACKS.add(shareAckCommitKey);
-                                    COMMIT_EVENTS.add("sink-share:" + shareAckCommitKey);
-                                });
+                COMMIT_EVENTS.add("sink:" + request.getCommittable().getTransactionalId());
             }
         }
 
@@ -942,43 +714,6 @@ class KafkaShareEosPipelineITCase {
         public void signalAlreadyCommitted() {}
     }
 
-    private static final class ShareAckPostCommitter
-            implements Committer<KafkaShareEosCommittable> {
-
-        @Override
-        public void commit(Collection<CommitRequest<KafkaShareEosCommittable>> requests) {
-            Set<ShareAckCommittable> shareAckCommittables =
-                    requests.stream()
-                            .flatMap(
-                                    request ->
-                                            request.getCommittable()
-                                                    .getShareAckCommittables()
-                                                    .stream())
-                            .collect(Collectors.toCollection(LinkedHashSet::new));
-            for (ShareAckCommittable shareAckCommittable : shareAckCommittables) {
-                commitShareAck(shareAckCommittable);
-            }
-        }
-
-        private void commitShareAck(ShareAckCommittable committable) {
-            String commitKey = shareAckCommitKey(committable);
-            assertThat(SINK_COMMITTED_SHARE_ACKS).contains(commitKey);
-            if (!COMMITTED_SHARE_ACKS.add(commitKey)) {
-                return;
-            }
-
-            FlinkKafkaInternalProducer<byte[], byte[]> producer =
-                    SOURCE_ACK_PRODUCERS.remove(committable.getTransactionalId());
-            assertThat(producer).isNotNull();
-            producer.commitTransaction();
-            producer.close();
-            COMMIT_EVENTS.add("share:" + commitKey);
-        }
-
-        @Override
-        public void close() {}
-    }
-
     private static final class ShareRecordSerializationSchema
             implements KafkaRecordSerializationSchema<ShareSourceRecord> {
 
@@ -1010,7 +745,7 @@ class KafkaShareEosPipelineITCase {
         private final int inputPartition;
         private final long inputOffset;
         private final String inputValue;
-        private final ShareAckCommittable shareAckCommittable;
+        private final ShareAckPayload shareAckPayload;
 
         private ShareSourceRecord(
                 int sourceSubtaskId,
@@ -1018,26 +753,26 @@ class KafkaShareEosPipelineITCase {
                 int inputPartition,
                 long inputOffset,
                 String inputValue,
-                ShareAckCommittable shareAckCommittable) {
+                ShareAckPayload shareAckPayload) {
             this.sourceSubtaskId = sourceSubtaskId;
             this.mapSubtaskId = mapSubtaskId;
             this.inputPartition = inputPartition;
             this.inputOffset = inputOffset;
             this.inputValue = inputValue;
-            this.shareAckCommittable = shareAckCommittable;
+            this.shareAckPayload = shareAckPayload;
         }
 
         private static ShareSourceRecord from(
                 int sourceSubtaskId,
                 ConsumerRecord<byte[], byte[]> record,
-                ShareAckCommittable shareAckCommittable) {
+                ShareAckPayload shareAckPayload) {
             return new ShareSourceRecord(
                     sourceSubtaskId,
                     NO_CHECKPOINT,
                     record.partition(),
                     record.offset(),
                     new String(record.value(), StandardCharsets.UTF_8),
-                    shareAckCommittable);
+                    shareAckPayload);
         }
 
         private ShareSourceRecord withMapSubtaskId(int mapSubtaskId) {
@@ -1047,7 +782,7 @@ class KafkaShareEosPipelineITCase {
                     inputPartition,
                     inputOffset,
                     inputValue,
-                    shareAckCommittable);
+                    shareAckPayload);
         }
 
         private String outputValue() {
