@@ -106,6 +106,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     private int availabilityHelperSize;
     private boolean isActivelyConsumingSplits;
     private boolean isNoMoreSplits;
+    private boolean dynamicOutputIdle;
     private AtomicBoolean restartingReaders;
     private ReaderOutput<T> latestReaderOutput;
 
@@ -132,6 +133,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                 new MultipleFuturesAvailabilityHelper(this.availabilityHelperSize = 0);
         this.isNoMoreSplits = false;
         this.isActivelyConsumingSplits = false;
+        this.dynamicOutputIdle = false;
         this.restartingReaders = new AtomicBoolean();
         this.clustersProperties = new HashMap<>();
         this.pendingSplitOutputReleases = new HashSet<>();
@@ -157,6 +159,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     public InputStatus pollNext(ReaderOutput<T> readerOutput) throws Exception {
         latestReaderOutput = readerOutput;
         releasePendingSplitOutputs(readerOutput);
+        maybeUpdateNoActiveSplitOutputIdleness(readerOutput);
 
         // at startup, do not return end of input if metadata event has not been received
         if (clusterReaderMap.isEmpty()) {
@@ -605,6 +608,12 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                         this.availabilityHelperSize = clusterReaderMap.size());
         syncAvailabilityHelperWithReaders();
 
+        if (getNumberOfActiveSplits() == 0) {
+            restartingReaders.set(false);
+            cachedPreviousFuture.complete(null);
+            return;
+        }
+
         // We cannot immediately complete the previous future here. We must complete it only when
         // the new readers have finished handling the split assignment. Completing the future too
         // early can cause WakeupException (implicitly woken up by invocation to pollNext()) if the
@@ -707,6 +716,23 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         retainedSplits.removeIf(
                 split -> split.isRetained() && !split.isRetained(currentTimeMillis));
         pendingSplits.removeIf(split -> split.isRetained() && !split.isRetained(currentTimeMillis));
+    }
+
+    private int getNumberOfActiveSplits() {
+        return clusterReaderMap.values().stream()
+                .mapToInt(KafkaSourceReader::getNumberOfCurrentlyAssignedSplits)
+                .sum();
+    }
+
+    private void maybeUpdateNoActiveSplitOutputIdleness(ReaderOutput<T> readerOutput) {
+        boolean hasActiveSplits = getNumberOfActiveSplits() > 0;
+        if (!hasActiveSplits && isActivelyConsumingSplits && !dynamicOutputIdle) {
+            readerOutput.markIdle();
+            dynamicOutputIdle = true;
+        } else if (hasActiveSplits && dynamicOutputIdle) {
+            readerOutput.markActive();
+            dynamicOutputIdle = false;
+        }
     }
 
     static Configuration toConfiguration(Properties props) {

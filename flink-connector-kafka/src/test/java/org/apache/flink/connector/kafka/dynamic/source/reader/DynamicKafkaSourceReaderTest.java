@@ -87,6 +87,12 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
         private final List<String> releasedSplitIds = new ArrayList<>();
 
         @Override
+        public void markIdle() {}
+
+        @Override
+        public void markActive() {}
+
+        @Override
         public void releaseOutputForSplit(String splitId) {
             releasedSplitIds.add(splitId);
         }
@@ -314,7 +320,7 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
     void testNoSubReadersInputStatus() throws Exception {
         try (DynamicKafkaSourceReader<Integer> reader =
                 (DynamicKafkaSourceReader<Integer>) createReader()) {
-            TestingReaderOutput<Integer> readerOutput = new TestingReaderOutput<>();
+            TrackingReaderOutput<Integer> readerOutput = new TrackingReaderOutput<>();
             InputStatus inputStatus = reader.pollNext(readerOutput);
             assertEquals(
                     InputStatus.NOTHING_AVAILABLE,
