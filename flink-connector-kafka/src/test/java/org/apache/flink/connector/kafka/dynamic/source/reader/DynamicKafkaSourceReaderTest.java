@@ -342,7 +342,7 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
     void testNotifyNoMoreSplits() throws Exception {
         TestingReaderContext context = new TestingReaderContext();
         try (DynamicKafkaSourceReader<Integer> reader = createReaderWithoutStart(context)) {
-            TestingReaderOutput<Integer> readerOutput = new TestingReaderOutput<>();
+            TrackingReaderOutput<Integer> readerOutput = new TrackingReaderOutput<>();
             reader.start();
 
             // Splits assigned
