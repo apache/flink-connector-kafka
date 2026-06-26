@@ -31,18 +31,21 @@ class SameTransactionShareAckKafkaWriter<IN>
         implements TwoPhaseCommittingStatefulSink.PrecommittingStatefulSinkWriter<
                 IN, KafkaWriterState, KafkaCommittable> {
 
-    private final ExactlyOnceKafkaWriter<IN> delegate;
+    private final SameTransactionWriterDelegate<IN> delegate;
     private final Function<IN, Collection<ShareAckPayload>> shareAckPayloadExtractor;
     private final ShareAckPayloadBuffer payloadBuffer;
 
     SameTransactionShareAckKafkaWriter(
             ExactlyOnceKafkaWriter<IN> delegate,
             Function<IN, Collection<ShareAckPayload>> shareAckPayloadExtractor) {
-        this(delegate, shareAckPayloadExtractor, new ShareAckPayloadBuffer());
+        this(
+                new ExactlyOnceWriterDelegate<>(delegate),
+                shareAckPayloadExtractor,
+                new ShareAckPayloadBuffer());
     }
 
     SameTransactionShareAckKafkaWriter(
-            ExactlyOnceKafkaWriter<IN> delegate,
+            SameTransactionWriterDelegate<IN> delegate,
             Function<IN, Collection<ShareAckPayload>> shareAckPayloadExtractor,
             ShareAckPayloadBuffer payloadBuffer) {
         this.delegate = delegate;
@@ -69,9 +72,9 @@ class SameTransactionShareAckKafkaWriter<IN>
 
     @Override
     public Collection<KafkaCommittable> prepareCommit() throws IOException, InterruptedException {
-        boolean transactionHasRecords = delegate.getCurrentProducer().hasRecordsInTransaction();
+        boolean transactionHasRecords = delegate.currentTransactionHasRecords();
         payloadBuffer.stage(
-                delegate.getCurrentProducer(), transactionHasRecords, ShareAckPayloadStager::stage);
+                delegate.currentProducer(), transactionHasRecords, ShareAckPayloadStager::stage);
         Collection<KafkaCommittable> committables = delegate.prepareCommit();
         if (!committables.isEmpty()) {
             payloadBuffer.clear();
@@ -87,5 +90,67 @@ class SameTransactionShareAckKafkaWriter<IN>
     @Override
     public void close() throws Exception {
         delegate.close();
+    }
+
+    interface SameTransactionWriterDelegate<IN>
+            extends TwoPhaseCommittingStatefulSink.PrecommittingStatefulSinkWriter<
+                    IN, KafkaWriterState, KafkaCommittable> {
+
+        void initialize();
+
+        Object currentProducer();
+
+        boolean currentTransactionHasRecords();
+    }
+
+    private static final class ExactlyOnceWriterDelegate<IN>
+            implements SameTransactionWriterDelegate<IN> {
+
+        private final ExactlyOnceKafkaWriter<IN> writer;
+
+        private ExactlyOnceWriterDelegate(ExactlyOnceKafkaWriter<IN> writer) {
+            this.writer = writer;
+        }
+
+        @Override
+        public void initialize() {
+            writer.initialize();
+        }
+
+        @Override
+        public Object currentProducer() {
+            return writer.getCurrentProducer();
+        }
+
+        @Override
+        public boolean currentTransactionHasRecords() {
+            return writer.getCurrentProducer().hasRecordsInTransaction();
+        }
+
+        @Override
+        public void write(IN element, Context context) throws IOException, InterruptedException {
+            writer.write(element, context);
+        }
+
+        @Override
+        public void flush(boolean endOfInput) throws IOException, InterruptedException {
+            writer.flush(endOfInput);
+        }
+
+        @Override
+        public Collection<KafkaCommittable> prepareCommit()
+                throws IOException, InterruptedException {
+            return writer.prepareCommit();
+        }
+
+        @Override
+        public List<KafkaWriterState> snapshotState(long checkpointId) throws IOException {
+            return writer.snapshotState(checkpointId);
+        }
+
+        @Override
+        public void close() throws Exception {
+            writer.close();
+        }
     }
 }
