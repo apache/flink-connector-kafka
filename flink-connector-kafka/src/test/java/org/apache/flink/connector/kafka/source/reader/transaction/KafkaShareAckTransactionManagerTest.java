@@ -42,7 +42,13 @@ class KafkaShareAckTransactionManagerTest {
         assertThat(manager.snapshotState(42L))
                 .containsExactly(
                         new ShareAckCommittable(
-                                42L, "share-txn-0", 100L, (short) 0, "share-group", 7));
+                                42L,
+                                "share-txn-0",
+                                100L,
+                                (short) 0,
+                                "prepared:share-txn-0",
+                                "share-group",
+                                7));
         assertThat(client.events)
                 .containsExactly(
                         "begin:share-txn-0",
@@ -103,7 +109,13 @@ class KafkaShareAckTransactionManagerTest {
         assertThat(manager.snapshotState(43L))
                 .containsExactly(
                         new ShareAckCommittable(
-                                43L, "share-txn-0", 100L, (short) 0, "share-group", 7));
+                                43L,
+                                "share-txn-0",
+                                100L,
+                                (short) 0,
+                                "prepared:share-txn-0",
+                                "share-group",
+                                7));
         assertThat(client.events)
                 .containsExactly(
                         "begin:share-txn-0",
@@ -136,12 +148,13 @@ class KafkaShareAckTransactionManagerTest {
         }
 
         @Override
-        public void preCommit(ShareAckTransactionHandle transaction) throws IOException {
+        public String preCommit(ShareAckTransactionHandle transaction) throws IOException {
             events.add("preCommit:" + transaction.getTransactionalId());
             if (failNextPreCommit) {
                 failNextPreCommit = false;
                 throw new IOException("preCommit failed");
             }
+            return "prepared:" + transaction.getTransactionalId();
         }
     }
 }

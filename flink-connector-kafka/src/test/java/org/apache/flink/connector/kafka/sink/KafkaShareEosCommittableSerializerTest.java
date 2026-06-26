@@ -21,6 +21,8 @@ import org.apache.flink.connector.kafka.share.ShareAckCommittable;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.List;
 
@@ -39,12 +41,67 @@ class KafkaShareEosCommittableSerializerTest {
                         List.of(new KafkaCommittable(1L, (short) 2, "sink-txn", null)),
                         List.of(
                                 new ShareAckCommittable(
-                                        42L, "share-txn", 3L, (short) 4, "share-group", 5)),
+                                        42L,
+                                        "share-txn",
+                                        3L,
+                                        (short) 4,
+                                        "3:4",
+                                        "share-group",
+                                        5)),
                         KafkaShareEosCommittable.CommitPhase.SINK_COMMITTED);
 
         byte[] serialized = SERIALIZER.serialize(committable);
 
         assertThat(SERIALIZER.deserialize(SERIALIZER.getVersion(), serialized))
                 .isEqualTo(committable);
+    }
+
+    @Test
+    void testDeserializeVersionOneCommittable() throws IOException {
+        byte[] serialized = versionOneCommittableBytes();
+
+        KafkaShareEosCommittable restored = SERIALIZER.deserialize(1, serialized);
+
+        assertThat(restored.getCheckpointId()).isEqualTo(42L);
+        assertThat(restored.getKafkaCommittables())
+                .containsExactly(new KafkaCommittable(1L, (short) 2, "sink-txn", null));
+        assertThat(restored.getShareAckCommittables())
+                .containsExactly(
+                        new ShareAckCommittable(
+                                42L, "share-txn", 3L, (short) 4, "share-group", 5));
+        assertThat(restored.getShareAckCommittables().get(0).getPreparedTransactionState())
+                .isEmpty();
+    }
+
+    private static byte[] versionOneCommittableBytes() throws IOException {
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                DataOutputStream out = new DataOutputStream(baos)) {
+            out.writeLong(42L);
+            out.writeInt(KafkaShareEosCommittable.CommitPhase.SINK_COMMITTED.ordinal());
+            out.writeInt(1);
+            byte[] kafkaCommittableBytes = versionOneKafkaCommittableBytes();
+            out.writeInt(kafkaCommittableBytes.length);
+            out.write(kafkaCommittableBytes);
+            out.writeInt(1);
+            out.writeLong(42L);
+            out.writeUTF("share-txn");
+            out.writeLong(3L);
+            out.writeShort(4);
+            out.writeUTF("share-group");
+            out.writeInt(5);
+            out.flush();
+            return baos.toByteArray();
+        }
+    }
+
+    private static byte[] versionOneKafkaCommittableBytes() throws IOException {
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                DataOutputStream out = new DataOutputStream(baos)) {
+            out.writeShort(2);
+            out.writeLong(1L);
+            out.writeUTF("sink-txn");
+            out.flush();
+            return baos.toByteArray();
+        }
     }
 }

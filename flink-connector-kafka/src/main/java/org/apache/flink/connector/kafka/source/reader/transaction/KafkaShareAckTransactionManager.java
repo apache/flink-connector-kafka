@@ -62,8 +62,9 @@ public class KafkaShareAckTransactionManager implements AutoCloseable {
     public List<ShareAckCommittable> snapshotState(long checkpointId)
             throws IOException, InterruptedException {
         if (activeTransactionHasAcknowledgements) {
-            client.preCommit(activeTransaction);
-            pendingCommittables.add(toCommittable(checkpointId, activeTransaction));
+            String preparedTransactionState = client.preCommit(activeTransaction);
+            pendingCommittables.add(
+                    toCommittable(checkpointId, activeTransaction, preparedTransactionState));
             activeTransaction = null;
             activeTransactionHasAcknowledgements = false;
         }
@@ -83,12 +84,15 @@ public class KafkaShareAckTransactionManager implements AutoCloseable {
     }
 
     private ShareAckCommittable toCommittable(
-            long checkpointId, ShareAckTransactionHandle transaction) {
+            long checkpointId,
+            ShareAckTransactionHandle transaction,
+            String preparedTransactionState) {
         return new ShareAckCommittable(
                 checkpointId,
                 transaction.getTransactionalId(),
                 transaction.getTransactionOwnerId(),
                 transaction.getTransactionOwnerEpoch(),
+                preparedTransactionState,
                 groupId,
                 sourceSubtaskId);
     }

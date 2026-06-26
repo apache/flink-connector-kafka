@@ -31,12 +31,14 @@ import java.util.List;
 class KafkaShareEosCommittableSerializer
         implements SimpleVersionedSerializer<KafkaShareEosCommittable> {
 
+    private static final int VERSION_WITH_PREPARED_TRANSACTION_STATE = 2;
+
     private static final KafkaCommittableSerializer KAFKA_COMMITTABLE_SERIALIZER =
             new KafkaCommittableSerializer();
 
     @Override
     public int getVersion() {
-        return 1;
+        return VERSION_WITH_PREPARED_TRANSACTION_STATE;
     }
 
     @Override
@@ -58,6 +60,10 @@ class KafkaShareEosCommittableSerializer
                 out.writeUTF(shareAckCommittable.getTransactionalId());
                 out.writeLong(shareAckCommittable.getTransactionOwnerId());
                 out.writeShort(shareAckCommittable.getTransactionOwnerEpoch());
+                out.writeBoolean(shareAckCommittable.getPreparedTransactionState().isPresent());
+                if (shareAckCommittable.getPreparedTransactionState().isPresent()) {
+                    out.writeUTF(shareAckCommittable.getPreparedTransactionState().get());
+                }
                 out.writeUTF(shareAckCommittable.getGroupId());
                 out.writeInt(shareAckCommittable.getSourceSubtaskId());
             }
@@ -69,7 +75,7 @@ class KafkaShareEosCommittableSerializer
     @Override
     public KafkaShareEosCommittable deserialize(int version, byte[] serialized)
             throws IOException {
-        if (version > getVersion()) {
+        if (version < 1 || version > getVersion()) {
             throw new IOException("Unknown version: " + version);
         }
 
@@ -85,19 +91,33 @@ class KafkaShareEosCommittableSerializer
                 in.readFully(bytes);
                 kafkaCommittables.add(
                         KAFKA_COMMITTABLE_SERIALIZER.deserialize(
-                                KAFKA_COMMITTABLE_SERIALIZER.getVersion(), bytes));
+                                version >= VERSION_WITH_PREPARED_TRANSACTION_STATE
+                                        ? KAFKA_COMMITTABLE_SERIALIZER.getVersion()
+                                        : 1,
+                                bytes));
             }
             List<ShareAckCommittable> shareAckCommittables = new ArrayList<>();
             int shareAckCommittablesSize = in.readInt();
             for (int i = 0; i < shareAckCommittablesSize; i++) {
+                long shareAckCheckpointId = in.readLong();
+                String transactionalId = in.readUTF();
+                long transactionOwnerId = in.readLong();
+                short transactionOwnerEpoch = in.readShort();
+                String preparedTransactionState =
+                        version >= VERSION_WITH_PREPARED_TRANSACTION_STATE && in.readBoolean()
+                                ? in.readUTF()
+                                : null;
+                String groupId = in.readUTF();
+                int sourceSubtaskId = in.readInt();
                 shareAckCommittables.add(
                         new ShareAckCommittable(
-                                in.readLong(),
-                                in.readUTF(),
-                                in.readLong(),
-                                in.readShort(),
-                                in.readUTF(),
-                                in.readInt()));
+                                shareAckCheckpointId,
+                                transactionalId,
+                                transactionOwnerId,
+                                transactionOwnerEpoch,
+                                preparedTransactionState,
+                                groupId,
+                                sourceSubtaskId));
             }
             return new KafkaShareEosCommittable(
                     checkpointId, kafkaCommittables, shareAckCommittables, phase);

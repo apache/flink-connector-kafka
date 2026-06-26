@@ -19,8 +19,11 @@ package org.apache.flink.connector.kafka.share;
 
 import org.apache.flink.annotation.Internal;
 
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
 import java.util.Objects;
+import java.util.Optional;
 
 @Internal
 public class ShareAckCommittable implements Serializable {
@@ -31,6 +34,7 @@ public class ShareAckCommittable implements Serializable {
     private final String transactionalId;
     private final long transactionOwnerId;
     private final short transactionOwnerEpoch;
+    @Nullable private final String preparedTransactionState;
     private final String groupId;
     private final int sourceSubtaskId;
 
@@ -41,10 +45,29 @@ public class ShareAckCommittable implements Serializable {
             short transactionOwnerEpoch,
             String groupId,
             int sourceSubtaskId) {
+        this(
+                checkpointId,
+                transactionalId,
+                transactionOwnerId,
+                transactionOwnerEpoch,
+                null,
+                groupId,
+                sourceSubtaskId);
+    }
+
+    public ShareAckCommittable(
+            long checkpointId,
+            String transactionalId,
+            long transactionOwnerId,
+            short transactionOwnerEpoch,
+            @Nullable String preparedTransactionState,
+            String groupId,
+            int sourceSubtaskId) {
         this.checkpointId = checkpointId;
         this.transactionalId = transactionalId;
         this.transactionOwnerId = transactionOwnerId;
         this.transactionOwnerEpoch = transactionOwnerEpoch;
+        this.preparedTransactionState = preparedTransactionState;
         this.groupId = groupId;
         this.sourceSubtaskId = sourceSubtaskId;
     }
@@ -63,6 +86,10 @@ public class ShareAckCommittable implements Serializable {
 
     public short getTransactionOwnerEpoch() {
         return transactionOwnerEpoch;
+    }
+
+    public Optional<String> getPreparedTransactionState() {
+        return Optional.ofNullable(preparedTransactionState);
     }
 
     public String getGroupId() {
@@ -87,6 +114,7 @@ public class ShareAckCommittable implements Serializable {
                 && transactionOwnerEpoch == that.transactionOwnerEpoch
                 && sourceSubtaskId == that.sourceSubtaskId
                 && transactionalId.equals(that.transactionalId)
+                && Objects.equals(preparedTransactionState, that.preparedTransactionState)
                 && groupId.equals(that.groupId);
     }
 
@@ -97,6 +125,7 @@ public class ShareAckCommittable implements Serializable {
                 transactionalId,
                 transactionOwnerId,
                 transactionOwnerEpoch,
+                preparedTransactionState,
                 groupId,
                 sourceSubtaskId);
     }
@@ -113,6 +142,8 @@ public class ShareAckCommittable implements Serializable {
                 + transactionOwnerId
                 + ", transactionOwnerEpoch="
                 + transactionOwnerEpoch
+                + ", preparedTransactionState="
+                + preparedTransactionState
                 + ", groupId='"
                 + groupId
                 + '\''

@@ -29,7 +29,7 @@ public interface ShareAckTransactionClient extends AutoCloseable {
     void stageAcknowledgements(ShareAckTransactionHandle transaction)
             throws IOException, InterruptedException;
 
-    void preCommit(ShareAckTransactionHandle transaction) throws IOException, InterruptedException;
+    String preCommit(ShareAckTransactionHandle transaction) throws IOException, InterruptedException;
 
     @Override
     default void close() throws Exception {}

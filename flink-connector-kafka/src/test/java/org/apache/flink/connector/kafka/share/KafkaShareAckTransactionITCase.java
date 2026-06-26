@@ -629,9 +629,18 @@ class KafkaShareAckTransactionITCase {
         }
 
         @Override
-        public void preCommit(ShareAckTransactionHandle transaction) {
+        public String preCommit(ShareAckTransactionHandle transaction) {
             assertThat(transaction).isEqualTo(activeHandle);
-            producer.flush();
+            try {
+                return invoke(producer, "prepareTransaction").toString();
+            } catch (NoSuchMethodException e) {
+                producer.flush();
+                return transaction.getTransactionOwnerId()
+                        + ":"
+                        + transaction.getTransactionOwnerEpoch();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
 
         private ConsumerRecord<byte[], byte[]> pollOne() throws Exception {
