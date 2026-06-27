@@ -21,53 +21,48 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.connector.kafka.share.ShareAckPayload;
 
 import java.io.IOException;
-import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/**
+ * Tracks the share acknowledgement payloads already staged into the current Kafka transaction so
+ * that each payload is staged at most once per transaction window, and conflicting payloads sharing
+ * an id are rejected.
+ *
+ * <p>Payloads are staged incrementally as records reach the sink (see {@link
+ * SameTransactionShareAckKafkaWriter}); this buffer only deduplicates, it does not hold payloads for
+ * a later bulk stage. It is reset (via {@link #clear()}) when a transaction is committed and a new
+ * window begins.
+ */
 @Internal
 class ShareAckPayloadBuffer {
 
-    private final Map<String, ShareAckPayload> payloadsById = new LinkedHashMap<>();
+    private final Map<String, ShareAckPayload> stagedById = new LinkedHashMap<>();
 
-    void addAll(Collection<ShareAckPayload> payloads) throws IOException {
-        for (ShareAckPayload payload : payloads) {
-            add(payload);
+    /**
+     * Registers a payload for the current transaction window.
+     *
+     * @return {@code true} if the payload is new and the caller should stage it; {@code false} if a
+     *     payload with the same id and content was already registered (already staged).
+     * @throws IOException if a different payload with the same id was already registered.
+     */
+    boolean register(ShareAckPayload payload) throws IOException {
+        ShareAckPayload previous = stagedById.putIfAbsent(payload.getId(), payload);
+        if (previous == null) {
+            return true;
         }
-    }
-
-    void add(ShareAckPayload payload) throws IOException {
-        ShareAckPayload previous = payloadsById.putIfAbsent(payload.getId(), payload);
-        if (previous != null && !previous.equals(payload)) {
+        if (!previous.equals(payload)) {
             throw new IOException(
                     "Conflicting share acknowledgement payload for id " + payload.getId());
         }
+        return false;
     }
 
     boolean isEmpty() {
-        return payloadsById.isEmpty();
-    }
-
-    void stage(Object producer, boolean transactionHasRecords, ShareAckPayloadStageFunction stager)
-            throws IOException {
-        if (payloadsById.isEmpty()) {
-            return;
-        }
-        if (!transactionHasRecords) {
-            throw new IOException(
-                    "Cannot commit share acknowledgements without sink records in the same Kafka transaction.");
-        }
-        for (ShareAckPayload payload : payloadsById.values()) {
-            stager.stage(producer, payload);
-        }
+        return stagedById.isEmpty();
     }
 
     void clear() {
-        payloadsById.clear();
-    }
-
-    @FunctionalInterface
-    interface ShareAckPayloadStageFunction {
-        void stage(Object producer, ShareAckPayload payload) throws IOException;
+        stagedById.clear();
     }
 }

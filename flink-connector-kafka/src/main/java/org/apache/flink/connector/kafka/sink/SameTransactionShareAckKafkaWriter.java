@@ -26,6 +26,21 @@ import java.util.Collection;
 import java.util.List;
 import java.util.function.Function;
 
+/**
+ * A sink writer that commits Kafka share-group acknowledgements (KIP-1289) in the <em>same</em> Kafka
+ * transaction as the sink output records, so that source acknowledgement and sink output are made
+ * durable atomically by a single transaction-commit marker.
+ *
+ * <p>Acknowledgements are staged into the current producer transaction <em>as soon as each record
+ * reaches the sink</em> (in {@link #write}), not batched until {@code prepareCommit}. Staging moves
+ * the broker-side records from {@code ACQUIRED} to {@code TX_PENDING}, which cancels the
+ * acquisition-lock timer immediately and shrinks the window in which a record's lock could expire (or
+ * its member epoch could be fenced) while held inside the Flink pipeline.
+ *
+ * <p>v1 scope is forwarding-only: acks ride on the data record, so every ack-bearing record must
+ * reach the sink. Pipelines that drop ack-bearing records before the sink (filter/aggregate/join) are
+ * not yet supported.
+ */
 @Internal
 class SameTransactionShareAckKafkaWriter<IN>
         implements TwoPhaseCommittingStatefulSink.PrecommittingStatefulSinkWriter<
@@ -34,6 +49,7 @@ class SameTransactionShareAckKafkaWriter<IN>
     private final SameTransactionWriterDelegate<IN> delegate;
     private final Function<IN, Collection<ShareAckPayload>> shareAckPayloadExtractor;
     private final ShareAckPayloadBuffer payloadBuffer;
+    private final ShareAckStager stager;
 
     SameTransactionShareAckKafkaWriter(
             ExactlyOnceKafkaWriter<IN> delegate,
@@ -41,16 +57,19 @@ class SameTransactionShareAckKafkaWriter<IN>
         this(
                 new ExactlyOnceWriterDelegate<>(delegate),
                 shareAckPayloadExtractor,
-                new ShareAckPayloadBuffer());
+                new ShareAckPayloadBuffer(),
+                ShareAckPayloadStager::stage);
     }
 
     SameTransactionShareAckKafkaWriter(
             SameTransactionWriterDelegate<IN> delegate,
             Function<IN, Collection<ShareAckPayload>> shareAckPayloadExtractor,
-            ShareAckPayloadBuffer payloadBuffer) {
+            ShareAckPayloadBuffer payloadBuffer,
+            ShareAckStager stager) {
         this.delegate = delegate;
         this.shareAckPayloadExtractor = shareAckPayloadExtractor;
         this.payloadBuffer = payloadBuffer;
+        this.stager = stager;
     }
 
     void initialize() {
@@ -60,8 +79,18 @@ class SameTransactionShareAckKafkaWriter<IN>
     @Override
     public void write(IN element, Context context) throws IOException, InterruptedException {
         delegate.write(element, context);
-        if (element != null) {
-            payloadBuffer.addAll(shareAckPayloadExtractor.apply(element));
+        if (element == null) {
+            return;
+        }
+        // Stage each record's share acknowledgements into the same (open) transaction immediately.
+        // If staging fails, the exception propagates and the checkpoint fails, so the transaction is
+        // aborted wholesale on recovery (all-or-nothing): sink output for this window is never made
+        // visible and the records are redelivered. We never commit output while dropping an ack.
+        for (ShareAckPayload payload : shareAckPayloadExtractor.apply(element)) {
+            if (payloadBuffer.register(payload)) {
+                stager.stage(delegate.currentProducer(), payload);
+                delegate.markShareAcksStaged();
+            }
         }
     }
 
@@ -72,11 +101,10 @@ class SameTransactionShareAckKafkaWriter<IN>
 
     @Override
     public Collection<KafkaCommittable> prepareCommit() throws IOException, InterruptedException {
-        boolean transactionHasRecords = delegate.currentTransactionHasRecords();
-        payloadBuffer.stage(
-                delegate.currentProducer(), transactionHasRecords, ShareAckPayloadStager::stage);
         Collection<KafkaCommittable> committables = delegate.prepareCommit();
         if (!committables.isEmpty()) {
+            // The transaction (with its staged acks) has been precommitted; start tracking the next
+            // window's payloads afresh.
             payloadBuffer.clear();
         }
         return committables;
@@ -100,7 +128,13 @@ class SameTransactionShareAckKafkaWriter<IN>
 
         Object currentProducer();
 
-        boolean currentTransactionHasRecords();
+        void markShareAcksStaged();
+    }
+
+    /** Stages a single share acknowledgement payload into the given producer's transaction. */
+    @FunctionalInterface
+    interface ShareAckStager {
+        void stage(Object producer, ShareAckPayload payload) throws IOException;
     }
 
     private static final class ExactlyOnceWriterDelegate<IN>
@@ -123,8 +157,8 @@ class SameTransactionShareAckKafkaWriter<IN>
         }
 
         @Override
-        public boolean currentTransactionHasRecords() {
-            return writer.getCurrentProducer().hasRecordsInTransaction();
+        public void markShareAcksStaged() {
+            writer.getCurrentProducer().markShareAcksStaged();
         }
 
         @Override
