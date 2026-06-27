@@ -83,10 +83,29 @@ Key Kafka primitives (in the `apache_stream/kafka` fork, KIP-1289 + KIP-939):
 | --- | --- | --- | --- |
 | 01 | 🔴 HIGH | Acquisition-lock expiry vs. checkpoint/topology dwell time | `01-acquisition-lock-expiry.md` |
 | 02 | 🔴 HIGH | Delivery-count limit → silent data loss | `02-delivery-count-data-loss.md` |
+| 07 | 🔴 HIGH | Records that produce no sink output cannot be acknowledged | `07-no-output-records-cannot-ack.md` |
 | 03 | 🟠 MED | Member-epoch staleness between fetch and stage | `03-member-epoch-staleness.md` |
 | 04 | 🟠 MED | One `ShareGroupMetadata` per ack vs. topology shuffles | `04-multi-member-per-transaction.md` |
-| 05 | 🟠 MED | Transaction timeout now governs record holding | `05-transaction-timeout-holding.md` |
+| 05 | 🟠 MED | Transaction timeout & prepared-transaction holding (2PC) | `05-transaction-timeout-holding.md` |
 | 06 | ⚪ LOW | `groupId` NPE + missing crash-recovery test | `06-hardening-and-tests.md` |
+
+## Validation status
+
+The claims behind these docs were re-checked against the actual code (Kafka fork
+`kip-1289-txn-ack-share-groups` and this connector). Summary:
+
+- **CONFIRMED:** staging cancels the acquisition-lock timer and is state/owner-matched (01); lock
+  duration 30s default and delivery-count limit 5 with archive-at-limit + REJECT→DLQ (02);
+  **member epoch is validated at stage time, NOT at commit time** (03 — so once staged, recovery is
+  safe even if membership changed); the broker accepts a transaction containing **only share-acks
+  and no data records** ("Claim C" — relevant to 07 and to engine-agnostic Spark/Druid use).
+- **SHARPENED:** multi-member-per-transaction is unconstrained by the broker (no per-txn member
+  binding) but untested (04).
+- **CORRECTED:** prepared **2PC** transactions are *exempt* from the timeout sweeper
+  (`txnTimeoutMs = MAX`) and are recoverable only when `transaction.2pc.enable=true`; the risk is
+  therefore *indefinite holding of abandoned transactions*, not premature abort (05, rewritten).
+- **NEW:** the same-transaction model cannot acknowledge records that produce no sink output — a HIGH
+  functional gap the broker does not impose (07).
 
 > Scope note: as of this branch, Mechanism A exists as library primitives + tests and is **not yet
 > wired** into the `KafkaSink`/`KafkaSource` builders. Several fixes below are therefore "design +
