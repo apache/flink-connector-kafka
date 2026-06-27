@@ -21,8 +21,6 @@ import org.apache.flink.connector.kafka.share.ShareAckPayload;
 
 import org.junit.jupiter.api.Test;
 
-import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,52 +29,37 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ShareAckPayloadBufferTest {
 
     @Test
-    void testStagesEachPayloadOnce() throws Exception {
+    void testRegisterReturnsTrueOnlyForNewPayload() throws Exception {
         ShareAckPayloadBuffer buffer = new ShareAckPayloadBuffer();
         ShareAckPayload payload = payload("ack-0", "group", 0);
-        List<String> stagedPayloads = new ArrayList<>();
 
-        buffer.add(payload);
-        buffer.add(payload);
-        buffer.stage(
-                new Object(),
-                true,
-                (producer, shareAckPayload) -> stagedPayloads.add(shareAckPayload.getId()));
-
-        assertThat(stagedPayloads).containsExactly("ack-0");
-
-        buffer.clear();
-
-        assertThat(buffer.isEmpty()).isTrue();
+        assertThat(buffer.register(payload)).isTrue();
+        assertThat(buffer.register(payload)).isFalse();
+        assertThat(buffer.isEmpty()).isFalse();
     }
 
     @Test
     void testRejectsConflictingPayloadWithSameId() throws Exception {
         ShareAckPayloadBuffer buffer = new ShareAckPayloadBuffer();
 
-        buffer.add(payload("ack-0", "group", 0));
+        assertThat(buffer.register(payload("ack-0", "group", 0))).isTrue();
 
-        assertThatThrownBy(() -> buffer.add(payload("ack-0", "group", 1)))
-                .isInstanceOf(IOException.class)
+        assertThatThrownBy(() -> buffer.register(payload("ack-0", "group", 1)))
+                .isInstanceOf(java.io.IOException.class)
                 .hasMessageContaining("Conflicting share acknowledgement payload");
     }
 
     @Test
-    void testRejectsShareAckOnlyTransaction() throws Exception {
+    void testClearResetsDeduplication() throws Exception {
         ShareAckPayloadBuffer buffer = new ShareAckPayloadBuffer();
-        buffer.add(payload("ack-0", "group", 0));
-        List<String> stagedPayloads = new ArrayList<>();
+        ShareAckPayload payload = payload("ack-0", "group", 0);
 
-        assertThatThrownBy(
-                        () ->
-                                buffer.stage(
-                                        new Object(),
-                                        false,
-                                        (producer, shareAckPayload) ->
-                                                stagedPayloads.add(shareAckPayload.getId())))
-                .isInstanceOf(IOException.class)
-                .hasMessageContaining("without sink records");
-        assertThat(stagedPayloads).isEmpty();
+        assertThat(buffer.register(payload)).isTrue();
+        buffer.clear();
+
+        assertThat(buffer.isEmpty()).isTrue();
+        // After a new window begins the same id may be staged again.
+        assertThat(buffer.register(payload)).isTrue();
     }
 
     private static ShareAckPayload payload(String id, String groupId, int memberEpoch) {

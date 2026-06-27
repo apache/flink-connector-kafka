@@ -33,69 +33,67 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class SameTransactionShareAckKafkaWriterTest {
 
     @Test
-    void testStagesShareAcksBeforePreparingSinkTransaction() throws Exception {
+    void testStagesShareAcksIntoTransactionAtWrite() throws Exception {
         List<String> events = new ArrayList<>();
         RecordingDelegate delegate = new RecordingDelegate(events);
-        RecordingPayloadBuffer payloadBuffer = new RecordingPayloadBuffer(events);
+        RecordingStager stager = new RecordingStager(events);
         SameTransactionShareAckKafkaWriter<String> writer =
                 new SameTransactionShareAckKafkaWriter<>(
-                        delegate, ignored -> List.of(payload("ack-0")), payloadBuffer);
+                        delegate,
+                        ignored -> List.of(payload("ack-0")),
+                        new ShareAckPayloadBuffer(),
+                        stager);
 
         writer.write("record", null);
         Collection<KafkaCommittable> committables = writer.prepareCommit();
 
         assertThat(committables).containsExactly(RecordingDelegate.COMMITTABLE);
+        // Staging happens at write() (before prepareCommit), and marks the producer.
         assertThat(events)
                 .containsExactly(
                         "delegate-write:record",
-                        "buffer-add:ack-0",
-                        "buffer-stage:true:producer",
-                        "delegate-prepare",
-                        "buffer-clear");
+                        "stage:ack-0:producer",
+                        "delegate-mark",
+                        "delegate-prepare");
     }
 
     @Test
-    void testKeepsShareAcksBufferedWhenSinkPrepareFails() throws Exception {
+    void testStagesEachPayloadOncePerTransaction() throws Exception {
         List<String> events = new ArrayList<>();
         RecordingDelegate delegate = new RecordingDelegate(events);
-        RecordingPayloadBuffer payloadBuffer = new RecordingPayloadBuffer(events);
+        RecordingStager stager = new RecordingStager(events);
         SameTransactionShareAckKafkaWriter<String> writer =
                 new SameTransactionShareAckKafkaWriter<>(
-                        delegate, ignored -> List.of(payload("ack-0")), payloadBuffer);
-        writer.write("record", null);
-        delegate.failPrepare = true;
+                        delegate,
+                        ignored -> List.of(payload("ack-0")),
+                        new ShareAckPayloadBuffer(),
+                        stager);
 
-        assertThatThrownBy(writer::prepareCommit)
-                .isInstanceOf(IOException.class)
-                .hasMessageContaining("prepare failed");
+        // Two records carrying the same ack payload id stage it only once.
+        writer.write("r1", null);
+        writer.write("r2", null);
 
-        assertThat(payloadBuffer.clearCount).isZero();
-        assertThat(payloadBuffer.stageCount).isOne();
-
-        delegate.failPrepare = false;
-        writer.prepareCommit();
-
-        assertThat(payloadBuffer.stageCount).isEqualTo(2);
-        assertThat(payloadBuffer.clearCount).isOne();
+        assertThat(stager.stagedIds).containsExactly("ack-0");
     }
 
     @Test
-    void testRejectsShareAcksWithoutSinkRecordsBeforePreparingSinkTransaction() throws Exception {
+    void testAbortsWholeTransactionWhenStageFails() throws Exception {
         List<String> events = new ArrayList<>();
         RecordingDelegate delegate = new RecordingDelegate(events);
-        delegate.transactionHasRecords = false;
-        RecordingPayloadBuffer payloadBuffer = new RecordingPayloadBuffer(events);
+        ShareAckStagerFailure stager = new ShareAckStagerFailure();
         SameTransactionShareAckKafkaWriter<String> writer =
                 new SameTransactionShareAckKafkaWriter<>(
-                        delegate, ignored -> List.of(payload("ack-0")), payloadBuffer);
-        writer.write("record", null);
+                        delegate,
+                        ignored -> List.of(payload("ack-0")),
+                        new ShareAckPayloadBuffer(),
+                        stager);
 
-        assertThatThrownBy(writer::prepareCommit)
+        // A failed stage must surface from write() so the checkpoint fails and the transaction is
+        // aborted wholesale; no committable may be produced for this window.
+        assertThatThrownBy(() -> writer.write("record", null))
                 .isInstanceOf(IOException.class)
-                .hasMessageContaining("without sink records");
-
+                .hasMessageContaining("stage boom");
         assertThat(delegate.prepareCalls).isZero();
-        assertThat(payloadBuffer.clearCount).isZero();
     }
 
     private static ShareAckPayload payload(String id) {
@@ -114,6 +112,30 @@ class SameTransactionShareAckKafkaWriterTest {
                                                 0L, 0L, List.of((byte) 1))))));
     }
 
+    private static final class RecordingStager
+            implements SameTransactionShareAckKafkaWriter.ShareAckStager {
+        private final List<String> events;
+        private final List<String> stagedIds = new ArrayList<>();
+
+        private RecordingStager(List<String> events) {
+            this.events = events;
+        }
+
+        @Override
+        public void stage(Object producer, ShareAckPayload payload) {
+            stagedIds.add(payload.getId());
+            events.add("stage:" + payload.getId() + ":" + producer);
+        }
+    }
+
+    private static final class ShareAckStagerFailure
+            implements SameTransactionShareAckKafkaWriter.ShareAckStager {
+        @Override
+        public void stage(Object producer, ShareAckPayload payload) throws IOException {
+            throw new IOException("stage boom");
+        }
+    }
+
     private static final class RecordingDelegate
             implements SameTransactionShareAckKafkaWriter.SameTransactionWriterDelegate<String> {
 
@@ -121,8 +143,6 @@ class SameTransactionShareAckKafkaWriterTest {
                 new KafkaCommittable(1L, (short) 0, "txn", null);
 
         private final List<String> events;
-        private boolean transactionHasRecords = true;
-        private boolean failPrepare;
         private int prepareCalls;
 
         private RecordingDelegate(List<String> events) {
@@ -138,8 +158,8 @@ class SameTransactionShareAckKafkaWriterTest {
         }
 
         @Override
-        public boolean currentTransactionHasRecords() {
-            return transactionHasRecords;
+        public void markShareAcksStaged() {
+            events.add("delegate-mark");
         }
 
         @Override
@@ -151,12 +171,9 @@ class SameTransactionShareAckKafkaWriterTest {
         public void flush(boolean endOfInput) {}
 
         @Override
-        public Collection<KafkaCommittable> prepareCommit() throws IOException {
+        public Collection<KafkaCommittable> prepareCommit() {
             prepareCalls++;
             events.add("delegate-prepare");
-            if (failPrepare) {
-                throw new IOException("prepare failed");
-            }
             return List.of(COMMITTABLE);
         }
 
@@ -167,49 +184,5 @@ class SameTransactionShareAckKafkaWriterTest {
 
         @Override
         public void close() {}
-    }
-
-    private static final class RecordingPayloadBuffer extends ShareAckPayloadBuffer {
-
-        private final List<String> events;
-        private final List<ShareAckPayload> buffered = new ArrayList<>();
-        private int stageCount;
-        private int clearCount;
-
-        private RecordingPayloadBuffer(List<String> events) {
-            this.events = events;
-        }
-
-        @Override
-        void addAll(Collection<ShareAckPayload> payloads) throws IOException {
-            super.addAll(payloads);
-            buffered.addAll(payloads);
-            payloads.forEach(payload -> events.add("buffer-add:" + payload.getId()));
-        }
-
-        @Override
-        void stage(
-                Object producer,
-                boolean transactionHasRecords,
-                ShareAckPayloadStageFunction stager)
-                throws IOException {
-            if (buffered.isEmpty()) {
-                return;
-            }
-            if (!transactionHasRecords) {
-                throw new IOException(
-                        "Cannot commit share acknowledgements without sink records in the same Kafka transaction.");
-            }
-            stageCount++;
-            events.add("buffer-stage:" + transactionHasRecords + ":" + producer);
-        }
-
-        @Override
-        void clear() {
-            super.clear();
-            buffered.clear();
-            clearCount++;
-            events.add("buffer-clear");
-        }
     }
 }
