@@ -4,6 +4,11 @@
 > *functional* limitation of the same-transaction (Mechanism A) design, because it bites any pipeline
 > that filters or aggregates — i.e. almost all of them.
 
+> **Status:** Half 2 (sink can commit acks-only transactions) is **implemented** — see doc 08,
+> Workstream B. Half 1 (ack propagation surviving record-dropping operators) is **not** implemented:
+> v1 is forwarding-only (A1), so filter/aggregate pipelines remain unsupported until the A2 union
+> side-channel lands.
+
 ## 1. Design background
 
 Mechanism A acknowledges a source record by **staging its ack into the same producer transaction that

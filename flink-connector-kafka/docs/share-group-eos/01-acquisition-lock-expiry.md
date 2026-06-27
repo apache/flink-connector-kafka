@@ -1,5 +1,9 @@
 # 01 — Acquisition-lock expiry vs. checkpoint/topology dwell time 🔴 HIGH
 
+> **Status:** mitigation implemented — acks are now staged incrementally at `write()` (not batched at
+> `prepareCommit()`), shrinking the `ACQUIRED` dwell to topology latency, and the all-or-nothing abort
+> invariant is unit-tested. See doc 08. Operational guardrails (config + metrics) still pending.
+
 ## 1. Design background
 
 A share group does not hand a consumer a sticky partition with an offset cursor. Instead, on each

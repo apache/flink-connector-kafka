@@ -1,5 +1,12 @@
 # 08 — Implementation plan: incremental staging (#01) + acks-only / real-pipeline support (#07)
 
+> **Status (v1 = A1, forwarding-only):** Workstreams **B, C, D done** — `FlinkKafkaInternalProducer`
+> tracks staged acks (`markShareAcksStaged`/`hasWorkInTransaction`) so acks-only transactions can
+> commit; `SameTransactionShareAckKafkaWriter` stages incrementally at `write()`; the all-or-nothing
+> abort and dedup are unit-tested. **Not yet done:** Workstream A2 (union side-channel for
+> filter/aggregate pipelines), Workstream E (config preconditions — lands with builder wiring), and
+> the recovery IT matrix (doc 06 §B).
+
 Goal: make the same-transaction (Mechanism A) model correct for **real** pipelines (filter / window /
 aggregate), and shrink the lock-expiry (#01) and member-epoch (#03) windows — in one coherent change.
 
