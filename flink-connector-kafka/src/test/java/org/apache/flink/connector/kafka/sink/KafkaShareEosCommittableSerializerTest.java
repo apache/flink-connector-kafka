@@ -57,6 +57,54 @@ class KafkaShareEosCommittableSerializerTest {
     }
 
     @Test
+    void testReadyPartialSinkRetryStateSerDe() throws IOException {
+        KafkaShareEosCommittable committable =
+                new KafkaShareEosCommittable(
+                        42L,
+                        List.of(
+                                new KafkaCommittable(
+                                        1L, (short) 2, "sink-txn-remaining", "1:2", null)),
+                        List.of(
+                                new ShareAckCommittable(
+                                        42L,
+                                        "share-txn-0",
+                                        3L,
+                                        (short) 4,
+                                        "3:4",
+                                        "share-group",
+                                        5)),
+                        KafkaShareEosCommittable.CommitPhase.READY);
+
+        byte[] serialized = SERIALIZER.serialize(committable);
+
+        assertThat(SERIALIZER.deserialize(SERIALIZER.getVersion(), serialized))
+                .isEqualTo(committable);
+    }
+
+    @Test
+    void testSinkCommittedPartialShareAckRetryStateSerDe() throws IOException {
+        KafkaShareEosCommittable committable =
+                new KafkaShareEosCommittable(
+                        42L,
+                        List.of(),
+                        List.of(
+                                new ShareAckCommittable(
+                                        42L,
+                                        "share-txn-remaining",
+                                        3L,
+                                        (short) 4,
+                                        "3:4",
+                                        "share-group",
+                                        5)),
+                        KafkaShareEosCommittable.CommitPhase.SINK_COMMITTED);
+
+        byte[] serialized = SERIALIZER.serialize(committable);
+
+        assertThat(SERIALIZER.deserialize(SERIALIZER.getVersion(), serialized))
+                .isEqualTo(committable);
+    }
+
+    @Test
     void testDeserializeVersionOneCommittable() throws IOException {
         byte[] serialized = versionOneCommittableBytes();
 
