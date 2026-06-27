@@ -89,6 +89,24 @@ public class KafkaShareEosCommittable {
                 CommitPhase.SINK_COMMITTED);
     }
 
+    public KafkaShareEosCommittable withKafkaCommittables(
+            Collection<KafkaCommittable> kafkaCommittables) {
+        return new KafkaShareEosCommittable(
+                checkpointId,
+                kafkaCommittables,
+                shareAckCommittables,
+                commitPhase);
+    }
+
+    public KafkaShareEosCommittable withShareAckCommittables(
+            Collection<ShareAckCommittable> shareAckCommittables) {
+        return new KafkaShareEosCommittable(
+                checkpointId,
+                kafkaCommittables,
+                shareAckCommittables,
+                commitPhase);
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {

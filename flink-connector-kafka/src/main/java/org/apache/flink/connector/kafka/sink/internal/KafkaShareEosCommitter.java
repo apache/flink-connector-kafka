@@ -25,7 +25,9 @@ import org.apache.flink.connector.kafka.share.ShareAckCommittable;
 import org.apache.flink.util.IOUtils;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 
 @Internal
 public class KafkaShareEosCommitter implements Committer<KafkaShareEosCommittable> {
@@ -51,27 +53,57 @@ public class KafkaShareEosCommitter implements Committer<KafkaShareEosCommittabl
     private void commit(CommitRequest<KafkaShareEosCommittable> request)
             throws IOException, InterruptedException {
         KafkaShareEosCommittable committable = request.getCommittable();
-        boolean sinkCommitted =
-                committable.getCommitPhase()
-                        == KafkaShareEosCommittable.CommitPhase.SINK_COMMITTED;
-        if (!sinkCommitted) {
-            try {
-                kafkaCommitter.commit(committable.getKafkaCommittables());
-                sinkCommitted = true;
-                committable = committable.withSinkCommitted();
-            } catch (IOException e) {
-                request.retryLater();
+        if (committable.getCommitPhase() != KafkaShareEosCommittable.CommitPhase.SINK_COMMITTED) {
+            committable = commitSinkTransactions(request, committable);
+            if (committable == null) {
                 return;
             }
         }
 
-        try {
-            shareAckCommitter.commit(committable.getShareAckCommittables());
-        } catch (IOException e) {
-            if (sinkCommitted) {
-                request.updateAndRetryLater(committable);
-            } else {
-                request.retryLater();
+        commitShareAckTransactions(request, committable);
+    }
+
+    private KafkaShareEosCommittable commitSinkTransactions(
+            CommitRequest<KafkaShareEosCommittable> request,
+            KafkaShareEosCommittable committable)
+            throws InterruptedException {
+        List<KafkaCommittable> remainingCommittables =
+                new ArrayList<>(committable.getKafkaCommittables());
+        boolean committedAny = false;
+        while (!remainingCommittables.isEmpty()) {
+            KafkaCommittable nextCommittable = remainingCommittables.get(0);
+            try {
+                kafkaCommitter.commit(List.of(nextCommittable));
+                remainingCommittables.remove(0);
+                committedAny = true;
+            } catch (IOException e) {
+                if (committedAny) {
+                    request.updateAndRetryLater(
+                            committable.withKafkaCommittables(remainingCommittables));
+                } else {
+                    request.retryLater();
+                }
+                return null;
+            }
+        }
+        return committable.withKafkaCommittables(List.of()).withSinkCommitted();
+    }
+
+    private void commitShareAckTransactions(
+            CommitRequest<KafkaShareEosCommittable> request,
+            KafkaShareEosCommittable committable)
+            throws InterruptedException {
+        List<ShareAckCommittable> remainingCommittables =
+                new ArrayList<>(committable.getShareAckCommittables());
+        while (!remainingCommittables.isEmpty()) {
+            ShareAckCommittable nextCommittable = remainingCommittables.get(0);
+            try {
+                shareAckCommitter.commit(List.of(nextCommittable));
+                remainingCommittables.remove(0);
+            } catch (IOException e) {
+                request.updateAndRetryLater(
+                        committable.withShareAckCommittables(remainingCommittables));
+                return;
             }
         }
     }

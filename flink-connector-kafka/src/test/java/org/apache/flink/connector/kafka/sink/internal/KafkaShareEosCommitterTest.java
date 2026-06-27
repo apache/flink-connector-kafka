@@ -39,16 +39,28 @@ class KafkaShareEosCommitterTest {
                 new KafkaShareEosCommitter(
                         committables -> recordKafkaCommit(commits, committables.iterator().next()),
                         committables ->
-                                recordShareAckCommit(commits, committables.iterator().next()));
+                                committables.forEach(
+                                        committable -> recordShareAckCommit(commits, committable)));
 
         RecordingCommitRequest request =
                 new RecordingCommitRequest(
                         KafkaShareEosCommittable.ready(
-                                42L, List.of(kafkaCommittable()), List.of(shareAckCommittable())));
+                                42L,
+                                List.of(
+                                        kafkaCommittable("sink-txn-0"),
+                                        kafkaCommittable("sink-txn-1")),
+                                List.of(
+                                        shareAckCommittable("share-txn-0"),
+                                        shareAckCommittable("share-txn-1"))));
 
         committer.commit(List.of(request));
 
-        assertThat(commits).containsExactly("sink:sink-txn", "share:share-txn");
+        assertThat(commits)
+                .containsExactly(
+                        "sink:sink-txn-0",
+                        "sink:sink-txn-1",
+                        "share:share-txn-0",
+                        "share:share-txn-1");
         assertThat(request.retryCount).isZero();
         assertThat(request.updatedCommittable).isNull();
     }
@@ -96,6 +108,9 @@ class KafkaShareEosCommitterTest {
         assertThat(firstRequest.retryCount).isOne();
         assertThat(firstRequest.updatedCommittable.getCommitPhase())
                 .isEqualTo(KafkaShareEosCommittable.CommitPhase.SINK_COMMITTED);
+        assertThat(firstRequest.updatedCommittable.getKafkaCommittables()).isEmpty();
+        assertThat(firstRequest.updatedCommittable.getShareAckCommittables())
+                .containsExactly(shareAckCommittable());
 
         KafkaShareEosCommitter secondAttempt =
                 new KafkaShareEosCommitter(
@@ -110,12 +125,123 @@ class KafkaShareEosCommitterTest {
         assertThat(secondRequest.retryCount).isZero();
     }
 
+    @Test
+    void testShareAckRetryRemembersCommittedShareAckTransactions() throws Exception {
+        List<String> commits = new ArrayList<>();
+        KafkaShareEosCommitter firstAttempt =
+                new KafkaShareEosCommitter(
+                        committables -> recordKafkaCommit(commits, committables.iterator().next()),
+                        committables -> {
+                            ShareAckCommittable committable = committables.iterator().next();
+                            commits.add("share:" + committable.getTransactionalId());
+                            if (committable.getTransactionalId().equals("share-txn-1")) {
+                                throw new IOException("share ack unavailable");
+                            }
+                        });
+        RecordingCommitRequest firstRequest =
+                new RecordingCommitRequest(
+                        KafkaShareEosCommittable.ready(
+                                42L,
+                                List.of(kafkaCommittable()),
+                                List.of(
+                                        shareAckCommittable("share-txn-0"),
+                                        shareAckCommittable("share-txn-1"))));
+
+        firstAttempt.commit(List.of(firstRequest));
+
+        assertThat(commits)
+                .containsExactly("sink:sink-txn", "share:share-txn-0", "share:share-txn-1");
+        assertThat(firstRequest.retryCount).isOne();
+        assertThat(firstRequest.updatedCommittable.getCommitPhase())
+                .isEqualTo(KafkaShareEosCommittable.CommitPhase.SINK_COMMITTED);
+        assertThat(firstRequest.updatedCommittable.getKafkaCommittables()).isEmpty();
+        assertThat(firstRequest.updatedCommittable.getShareAckCommittables())
+                .containsExactly(shareAckCommittable("share-txn-1"));
+
+        KafkaShareEosCommitter secondAttempt =
+                new KafkaShareEosCommitter(
+                        committables -> commits.add("sink-retry"),
+                        committables ->
+                                recordShareAckCommit(commits, committables.iterator().next()));
+        RecordingCommitRequest secondRequest =
+                new RecordingCommitRequest(firstRequest.updatedCommittable);
+
+        secondAttempt.commit(List.of(secondRequest));
+
+        assertThat(commits)
+                .containsExactly(
+                        "sink:sink-txn",
+                        "share:share-txn-0",
+                        "share:share-txn-1",
+                        "share:share-txn-1");
+        assertThat(secondRequest.retryCount).isZero();
+    }
+
+    @Test
+    void testSinkRetryRemembersCommittedSinkTransactions() throws Exception {
+        List<String> commits = new ArrayList<>();
+        KafkaShareEosCommitter firstAttempt =
+                new KafkaShareEosCommitter(
+                        committables -> {
+                            KafkaCommittable committable = committables.iterator().next();
+                            commits.add("sink:" + committable.getTransactionalId());
+                            if (committable.getTransactionalId().equals("sink-txn-1")) {
+                                throw new IOException("sink unavailable");
+                            }
+                        },
+                        committables -> commits.add("share"));
+        RecordingCommitRequest firstRequest =
+                new RecordingCommitRequest(
+                        KafkaShareEosCommittable.ready(
+                                42L,
+                                List.of(
+                                        kafkaCommittable("sink-txn-0"),
+                                        kafkaCommittable("sink-txn-1")),
+                                List.of(shareAckCommittable())));
+
+        firstAttempt.commit(List.of(firstRequest));
+
+        assertThat(commits).containsExactly("sink:sink-txn-0", "sink:sink-txn-1");
+        assertThat(firstRequest.retryCount).isOne();
+        assertThat(firstRequest.updatedCommittable.getCommitPhase())
+                .isEqualTo(KafkaShareEosCommittable.CommitPhase.READY);
+        assertThat(firstRequest.updatedCommittable.getKafkaCommittables())
+                .containsExactly(kafkaCommittable("sink-txn-1"));
+
+        KafkaShareEosCommitter secondAttempt =
+                new KafkaShareEosCommitter(
+                        committables ->
+                                recordKafkaCommit(commits, committables.iterator().next()),
+                        committables ->
+                                recordShareAckCommit(commits, committables.iterator().next()));
+        RecordingCommitRequest secondRequest =
+                new RecordingCommitRequest(firstRequest.updatedCommittable);
+
+        secondAttempt.commit(List.of(secondRequest));
+
+        assertThat(commits)
+                .containsExactly(
+                        "sink:sink-txn-0",
+                        "sink:sink-txn-1",
+                        "sink:sink-txn-1",
+                        "share:share-txn");
+        assertThat(secondRequest.retryCount).isZero();
+    }
+
     private static KafkaCommittable kafkaCommittable() {
-        return new KafkaCommittable(1L, (short) 2, "sink-txn", null);
+        return kafkaCommittable("sink-txn");
+    }
+
+    private static KafkaCommittable kafkaCommittable(String transactionalId) {
+        return new KafkaCommittable(1L, (short) 2, transactionalId, null);
     }
 
     private static ShareAckCommittable shareAckCommittable() {
-        return new ShareAckCommittable(42L, "share-txn", 3L, (short) 4, "share-group", 5);
+        return shareAckCommittable("share-txn");
+    }
+
+    private static ShareAckCommittable shareAckCommittable(String transactionalId) {
+        return new ShareAckCommittable(42L, transactionalId, 3L, (short) 4, "share-group", 5);
     }
 
     private static void recordKafkaCommit(List<String> commits, KafkaCommittable committable) {
