@@ -60,6 +60,7 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
     private volatile TransactionState transactionState = TransactionState.NOT_IN_TRANSACTION;
     private volatile boolean closed;
     private final boolean twoPhaseCommitEnabled;
+    private volatile boolean shareAcksStagedInTransaction;
 
     public FlinkKafkaInternalProducer(Properties properties) {
         super(properties);
@@ -110,6 +111,7 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         super.beginTransaction();
         LOG.debug("beginTransaction {}", transactionalId);
         transactionState = TransactionState.IN_TRANSACTION;
+        shareAcksStagedInTransaction = false;
     }
 
     @Override
@@ -117,6 +119,7 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         LOG.debug("abortTransaction {}", transactionalId);
         checkState(isInTransaction(), "Transaction was not started");
         transactionState = TransactionState.NOT_IN_TRANSACTION;
+        shareAcksStagedInTransaction = false;
         super.abortTransaction();
     }
 
@@ -125,6 +128,7 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         LOG.debug("commitTransaction {}", transactionalId);
         checkState(isInTransaction(), "Transaction was not started");
         transactionState = TransactionState.NOT_IN_TRANSACTION;
+        shareAcksStagedInTransaction = false;
         super.commitTransaction();
     }
 
@@ -136,12 +140,32 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         return transactionState == TransactionState.DATA_IN_TRANSACTION;
     }
 
+    /**
+     * Marks that transactional share-group acknowledgements (KIP-1289) have been staged into the
+     * current transaction. Together with {@link #hasRecordsInTransaction()} this lets a transaction
+     * that carries only share acknowledgements (and no produced records) still be precommitted and
+     * committed, which the broker supports.
+     */
+    public void markShareAcksStaged() {
+        checkState(isInTransaction(), "Transaction was not started");
+        shareAcksStagedInTransaction = true;
+    }
+
+    /**
+     * Whether the current transaction has work to commit: either produced records or staged share
+     * acknowledgements. Non-share sinks never stage acks, so this is equivalent to {@link
+     * #hasRecordsInTransaction()} for them.
+     */
+    public boolean hasWorkInTransaction() {
+        return hasRecordsInTransaction() || shareAcksStagedInTransaction;
+    }
+
     public boolean isPrecommitted() {
         return transactionState == TransactionState.PRECOMMITTED;
     }
 
     public Optional<String> precommitTransaction() {
-        checkState(hasRecordsInTransaction(), "Transaction was not started");
+        checkState(hasWorkInTransaction(), "Transaction was not started");
         if (twoPhaseCommitEnabled) {
             String preparedTransactionState = PreparedTransactionRecovery.prepare(this);
             transactionState = TransactionState.PRECOMMITTED;
