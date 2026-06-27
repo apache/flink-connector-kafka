@@ -1,101 +1,129 @@
-# 05 — Transaction timeout now governs record holding 🟠 MED
+# 05 — Transaction timeout & prepared-transaction holding 🟠 MED
+
+> **Corrected after code validation.** An earlier draft of this doc claimed the broker aborts a
+> prepared transaction once `transaction.max.timeout.ms` elapses. That is **wrong for 2PC
+> transactions**, which are the ones this design relies on. See §3.
 
 ## 1. Design background
 
-In the classic offset-based EOS sink, the producer-transaction timeout (`transaction.timeout.ms`)
-only governs the **output** transaction: if Flink fails to commit within the window, the broker
-aborts the transaction and the buffered output is discarded. The source's *position* is unaffected —
-offsets just stay un-committed.
+In the classic offset-based EOS sink, `transaction.timeout.ms` only bounds the **output** transaction;
+the source position is unaffected. In the share-group design, staging an ack cancels the per-record
+acquisition-lock timer (`InFlightState.stageTxnAcknowledge`, verified), so the **transaction**, not
+the record lock, holds the staged records in `TX_PENDING`. One transaction lifecycle now governs both
+the buffered output and the held source records.
 
-In the share-group design, staging an ack cancels the per-record acquisition-lock timer
-(`InFlightState.stageTxnAcknowledge`), and the **producer-transaction timeout becomes the clock that
-holds the staged records** in `TX_PENDING`. So one timeout now bounds **two** things at once:
+Two transaction modes exist in the producer, and they behave **very differently** under timeout:
 
-- how long the sink may hold buffered output before committing, **and**
-- how long the source's acquired records stay held (un-redeliverable) on the broker.
+| Mode | How entered | Broker timeout (`txnTimeoutMs`) | Recoverable after crash? |
+| --- | --- | --- | --- |
+| Ordinary txn | `transaction.2pc.enable=false` | the configured `transaction.timeout.ms` | **No** — see §3 |
+| **2PC / distributed** | `transaction.2pc.enable=true` + `initTransactions(keepPreparedTxn=true)` | **`Integer.MAX_VALUE`** (effectively never) | **Yes** via `completeTransaction` |
 
-Relevant settings: client `transaction.timeout.ms`, and broker ceiling
-`transaction.max.timeout.ms` (default 15 min). KIP-939 adds prepared transactions
-(`initTransactions(keepPreparedTxn=true)` + `prepareTransaction()`/`completeTransaction()`), which is
-what lets a *prepared* transaction be re-attached and completed by a different process after a crash.
+Verified in the fork:
+- `TransactionMetadata.isDistributedTwoPhaseCommitTxn()` is defined as `txnTimeoutMs == Integer.MAX_VALUE`
+  (`TransactionMetadata.java:308-310`), set when `enableTwoPCFlag` is true
+  (`TransactionCoordinator.scala:152`).
+- The timeout sweeper **explicitly exempts** 2PC txns from abort:
+  `TransactionStateManager.scala:138-140` — *"Do not apply timeout to distributed two phase commit
+  transactions"*.
+- `recoverPreparedTransaction` **refuses** to recover a txn that is not 2PC:
+  `TransactionCoordinator.scala:243-244` → `INVALID_TXN_STATE`.
+
+Verified on the Flink side: `FlinkKafkaInternalProducer.precommitTransaction()` only performs the real
+KIP-939 prepare (and returns a `PreparedTxnState` string) when `twoPhaseCommitEnabled`
+(`transaction.2pc.enable`) is set (`FlinkKafkaInternalProducer.java:143-152`). Otherwise it returns
+`Optional.empty()` and falls back to legacy resume-by-id/epoch.
 
 ## 2. Current flow
 
-- The sink writer precommits via `prepareTransaction()` at the checkpoint barrier (inside
-  `ExactlyOnceKafkaWriter.prepareCommit()`), producing a `KafkaCommittable` with the prepared state.
-- `KafkaCommitter.commit()` finalizes the prepared transaction with `completeTransaction(...)` on
-  checkpoint completion / recovery.
-- Standard Flink EOS already requires `transaction.timeout.ms > checkpoint interval`. The new wrinkle
-  is that this same timeout now also governs the **held share records**, and it must additionally
-  cover the **recovery window** (time from crash to the committer re-attaching and completing the
-  prepared transaction).
+- `ExactlyOnceKafkaWriter.prepareCommit()` precommits and emits the `KafkaCommittable`
+  (`ExactlyOnceKafkaWriter.java:221-234`).
+- `KafkaCommitter.commit()` finalizes via `completePreparedTransaction(...)` (2PC) or resume+commit.
+- Standard Flink EOS already requires `transaction.timeout.ms > checkpoint interval`. The new wrinkle:
+  with **2PC enabled**, the prepared transaction is parked at `txnTimeoutMs = MAX` and the held share
+  records ride along with it.
 
-## 3. The issue
+## 3. The issue (corrected)
 
-If recovery (or any stall between prepare and complete) outlasts the transaction timeout, the broker
-aborts the prepared transaction:
+The danger is **not** "the broker aborts the prepared transaction after 15 minutes." It is the
+opposite, and it splits by mode:
+
+**If 2PC is NOT enabled (the misconfiguration trap):**
 
 ```
-t0  checkpoint N: sink prepareTransaction(); acks staged → TX_PENDING; output buffered
-t1  job crashes before KafkaCommitter completes the transaction
-t2  recovery takes longer than transaction.max.timeout.ms
-t3  broker aborts the transaction → output discarded AND staged acks → AVAILABLE
-t4  records redelivered → reprocessed on the new run
+t0  checkpoint N: precommit (legacy) → producer in PRECOMMITTED, txn still ONGOING on broker
+t1  crash before KafkaCommitter commits
+t2  broker timeout sweeper finds the ONGOING txn past transaction.timeout.ms → ABORTS it
+t3  recovery tries to re-attach via keepPreparedTxn → broker returns INVALID_TXN_STATE
+result  the committable cannot be completed; output lost-or-aborted, acks aborted, records
+        redelivered (exactly-once preserved by replay, but the committer errors are ugly)
 ```
 
-Because output and acks share the one transaction, t3 is **consistent**: the output never became
-visible and the records come back for reprocessing — exactly-once is preserved, it is just
-*reprocessing*, not loss. The risk is therefore mainly **operational surprise** (a long outage
-silently rolls back a checkpoint's worth of work and replays it) plus a subtle dependency: the
-timeout must be sized for the worst-case recovery, and the broker ceiling must allow it.
+So **the whole prepared-transaction recovery story only works if `transaction.2pc.enable=true`.**
+Running this feature on ordinary transactions is a latent correctness/operability bug.
 
-The sharper danger is **misconfiguration**: if `transaction.timeout.ms` is set below the checkpoint
-interval (or below realistic recovery time), transactions abort routinely and the job thrashes; and
-holding many records in `TX_PENDING` for a long timeout ties up share-partition capacity.
+**If 2PC IS enabled (the correct config) — the real trade-off:**
+
+The prepared transaction is exempt from timeout and is **held indefinitely** until a commit/abort
+marker arrives. That makes recovery robust, but it means a job that **crashes and never recovers**
+leaves its share records pinned in `TX_PENDING` **forever** — never redelivered, because (verified in
+doc 01/06) the *only* thing that releases `TX_PENDING` is the transaction marker, and there is no
+independent timeout on `TX_PENDING`. Those records become unavailable to every other member of the
+share group until someone aborts the abandoned transaction.
+
+```
+t0  2PC prepare; share records in TX_PENDING; txnTimeoutMs = MAX
+t1  job dies permanently (no restart)
+t2  no marker ever arrives → records stay TX_PENDING indefinitely → share-partition capacity pinned
+```
+
+So the timeout concern **flips**: with 2PC you no longer fear premature abort; you fear *never*
+releasing. This is a share-group availability problem, not a data-loss problem.
 
 ## 4. Classes & modules
 
 | Layer | Class | Role |
 | --- | --- | --- |
-| Flink sink | `ExactlyOnceKafkaWriter` (`sink/`) | `prepareTransaction()` at barrier. |
-| Flink sink | `KafkaCommitter` (`sink/internal/`) | `completeTransaction()` on commit/recovery. |
-| Flink sink | `FlinkKafkaInternalProducer` (`sink/internal/`) | Wraps prepare/complete + `initTransactions(keepPreparedTxn)`. |
-| Kafka broker | transaction coordinator | Enforces `transaction.max.timeout.ms`; aborts on expiry; supports prepared-txn recovery. |
-| Kafka broker | `InFlightState` / share coordinator | Holds `TX_PENDING` until the marker; releases on abort. |
+| Flink sink | `ExactlyOnceKafkaWriter` (`sink/`) | precommit at barrier. |
+| Flink sink | `FlinkKafkaInternalProducer` (`sink/internal/`) | `twoPhaseCommitEnabled` gate; precommit/complete. |
+| Flink sink | `KafkaCommitter` (`sink/internal/`) | completes prepared txn on commit/recovery. |
+| Kafka broker | `TransactionCoordinator` / `TransactionStateManager` | 2PC exemption from timeout; `recoverPreparedTransaction`. |
+| Kafka broker | `TransactionMetadata` | `isDistributedTwoPhaseCommitTxn` (`txnTimeoutMs == MAX`). |
 
 ## 5. Client/server involvement
 
-- **Client (Flink):** chooses `transaction.timeout.ms`; controls checkpoint interval and how fast the
-  committer re-attaches on recovery.
-- **Server (broker):** enforces the ceiling, runs the abort-on-timeout, and (KIP-939) preserves the
-  prepared transaction so it can be completed post-restart rather than auto-aborted immediately.
+- **Client (Flink):** must set `transaction.2pc.enable=true` and call
+  `initTransactions(keepPreparedTxn=true)` for recovery to be possible; otherwise it silently runs in
+  the non-recoverable mode.
+- **Server (broker):** parks 2PC txns at MAX timeout, exempts them from the sweeper, and re-attaches
+  them on `recoverPreparedTransaction`. It will **never** auto-release an abandoned 2PC txn's records.
 
 ## 6. How it is solved
 
-1. **Size the timeout for the worst case and validate it at startup.** Require
-   `transaction.timeout.ms ≥ checkpoint interval + max expected recovery time + margin`, and
-   `transaction.max.timeout.ms` on the broker ≥ that. Add a builder-time precondition that rejects a
-   configuration where the timeout is smaller than the checkpoint interval (fail fast instead of
-   thrashing in production).
+1. **Require 2PC; fail fast otherwise.** Make `transaction.2pc.enable=true` mandatory for share-EOS
+   and add a builder precondition that rejects the configuration if it is off (and likewise rejects
+   `transaction.timeout.ms < checkpoint interval` for the non-2PC output bound). This closes the §3
+   misconfiguration trap.
 
-2. **Confirm prepared-transaction survival semantics.** Verify in the fork that a *prepared*
-   transaction is held (not eagerly aborted) until the timeout, and that
-   `initTransactions(keepPreparedTxn=true)` on recovery re-attaches it for completion. Document the
-   exact survival window so operators know how long an outage may last before a checkpoint rolls back.
+2. **Bound the abandoned-transaction blast radius.** Because 2PC removes the safety-net timeout,
+   provide an operational cleanup path for permanently-dead jobs: the existing lingering-transaction
+   abort on restart (`ExactlyOnceKafkaWriter.abortLingeringTransactions`,
+   `ExactlyOnceKafkaWriter.java:310-337`) covers restart-with-same-prefix; for jobs that never come
+   back, document a manual/admin abort of open transactions by `transactionalId` prefix so pinned
+   share records are released. Surface a metric for open prepared transactions.
 
-3. **Make rollback observable.** When the committer finds a prepared transaction already aborted by
-   timeout on recovery, log it explicitly and emit a metric `expiredPreparedTxnCount` so a "long
-   outage rolled back checkpoint N, replaying" event is visible rather than mysterious.
+3. **Keep `TX_PENDING` dwell short in steady state.** Short checkpoint intervals mean records sit in
+   `TX_PENDING` only briefly between prepare and commit, limiting pinned share-partition capacity.
 
-4. **Keep `TX_PENDING` dwell short in steady state.** Short checkpoint intervals mean records sit in
-   `TX_PENDING` only briefly, limiting how much share-partition capacity is tied up by held records.
+4. **Make rollback/abandonment observable.** Log explicitly when recovery completes a prepared txn vs.
+   when it finds one already gone, and expose `openPreparedTxnCount` / `expiredPreparedTxnCount`.
 
 ## 7. How to verify
 
-- **IT — recovery within timeout:** crash the job after prepare, restart within the timeout; assert
-  the committer completes the prepared transaction and output + acks commit exactly once.
-- **IT — recovery beyond timeout:** crash after prepare, delay restart past `transaction.max.timeout.ms`;
-  assert the transaction aborted, `expiredPreparedTxnCount` incremented, records were redelivered, and
-  the final output is still exactly-once (reprocessed, not duplicated or lost).
-- **Config precondition test:** assert the builder rejects `transaction.timeout.ms < checkpoint
-  interval`.
+- **Config precondition test:** builder rejects share-EOS with `transaction.2pc.enable=false`, and
+  rejects `transaction.timeout.ms < checkpoint interval`.
+- **IT — recovery (2PC on):** crash after prepare, restart; assert the committer completes the prepared
+  txn and output + acks commit exactly once — even after a delay far exceeding a normal txn timeout
+  (proves the MAX-timeout exemption).
+- **IT — abandoned txn:** prepare, then never recover; assert the records remain `TX_PENDING` and that
+  the documented admin abort releases them back to `AVAILABLE` for redelivery.
