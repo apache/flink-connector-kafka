@@ -99,6 +99,36 @@ class KafkaSinkBuilderTest {
                         "EXACTLY_ONCE delivery guarantee requires a transactionalIdPrefix to be set to provide unique transaction names across multiple KafkaSinks writing to the same Kafka cluster.");
     }
 
+    @Test
+    void testDefaultTransactionTimeoutRemovedForTwoPhaseCommit() {
+        validateProducerConfig(
+                getBasicBuilder()
+                        .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
+                        .setTransactionalIdPrefix("prefix")
+                        .setProperty(
+                                ProducerConfig.TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG, "true"),
+                p -> assertThat(p).doesNotContainKey(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG));
+    }
+
+    @Test
+    void testExplicitTransactionTimeoutRejectedForTwoPhaseCommit() {
+        assertThatThrownBy(
+                        () ->
+                                getBasicBuilder()
+                                        .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
+                                        .setTransactionalIdPrefix("prefix")
+                                        .setProperty(
+                                                ProducerConfig.TRANSACTION_TIMEOUT_CONFIG, "1000")
+                                        .setProperty(
+                                                ProducerConfig
+                                                        .TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG,
+                                                "true")
+                                        .build())
+                .isExactlyInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG)
+                .hasMessageContaining(ProducerConfig.TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG);
+    }
+
     private void validateProducerConfig(
             KafkaSinkBuilder<?> builder, Consumer<Properties> validator) {
         validator.accept(builder.build().getKafkaProducerConfig());
