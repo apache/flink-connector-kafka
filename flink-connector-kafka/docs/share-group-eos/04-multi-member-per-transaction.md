@@ -31,12 +31,17 @@ constraint is respected by sending N calls, not one.
 
 Two residual risks remain:
 
-1. **Unverified broker assumption.** We *assume* the broker accepts multiple
-   `sendShareAcknowledgementsToTransaction` calls for **different members** within **one** producer
-   transaction, all resolved by the same commit marker. If the broker instead binds a transaction to
-   a single member, or rejects a second member's acks, then any topology that mixes members into one
-   sink subtask's transaction breaks. This needs to be confirmed against the fork's broker code /
-   tests, not presumed.
+1. **Multi-member-per-transaction is supported by construction but untested (validated).** Code review
+   of the fork confirms there is **no per-transaction member binding**: the client carries member
+   identity *per `TxnShareAcknowledge` request* (`TransactionManager` sets `memberId`/`memberEpoch`
+   from the `ShareGroupMetadata` of each call, not per transaction), and the broker enrolment
+   (`AddPartitionsToTxnManager.addOrVerifyTransaction`) and marker completion
+   (`ShareCoordinatorShard.completeTransaction`, resolves by producerId/epoch only) have **no member
+   field at all**. So nothing forbids multiple members' acks in one producer transaction. **But** no
+   test exercises the multi-member case, so treat it as "works by construction, unverified in
+   practice" — add the broker contract test in §7 before relying on it. (Caveat: under TV2 the staged
+   epoch is matched as `producerEpoch − 1`; all staging in one txn shares one producer epoch, which is
+   normal.)
 
 2. **Payload identity / dedup under shuffles.** When the source→sink edge is a shuffle
    (`keyBy`/rebalance/rescale), one sink subtask's transaction aggregates payloads from many source
