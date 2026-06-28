@@ -107,6 +107,16 @@ The claims behind these docs were re-checked against the actual code (Kafka fork
 - **NEW:** the same-transaction model cannot acknowledge records that produce no sink output — a HIGH
   functional gap the broker does not impose (07).
 
+## Design records
+
+- `08-implementation-plan-01-and-07.md` — incremental staging + acks-only commit (A1 hardening; B/C/D done).
+- `09-adr-general-2pc-recovery-model.md` — **ADR**: arbitrary pipelines (fanout/joins/drops/multi-sink)
+  use the checkpoint as the unit of work; the share-ack becomes a durable committable participant
+  ("Mechanism B done right"). A1 kept as the 1:1 optimization.
+- `10-component-design-general-2pc.md` — concrete components: the ack as its **own** `Sink`
+  (`ShareAckSink` = `ShareAckWriter` + `ShareAckCommitter`), `ShareAckCommittable` + serializer, the
+  source side-output ack channel, wiring, multi-sink, and the recovery IT matrix.
+
 > Scope note: as of this branch, Mechanism A exists as library primitives + tests and is **not yet
 > wired** into the `KafkaSink`/`KafkaSource` builders. Several fixes below are therefore "design +
 > where to put it when wiring," not "edit an existing call site."
