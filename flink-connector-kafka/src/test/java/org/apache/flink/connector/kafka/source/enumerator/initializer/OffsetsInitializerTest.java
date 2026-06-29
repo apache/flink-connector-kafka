@@ -22,7 +22,6 @@ import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumerator;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.connector.kafka.testutils.KafkaSourceTestEnv;
 
-import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.AfterAll;
@@ -132,27 +131,23 @@ class OffsetsInitializerTest {
     void testSpecificOffsetsInitializer() {
         Map<TopicPartition, Long> specifiedOffsets = new HashMap<>();
         List<TopicPartition> partitions = KafkaSourceTestEnv.getPartitionsForTopic(TOPIC);
-        Map<TopicPartition, OffsetAndMetadata> committedOffsets =
-                KafkaSourceTestEnv.getCommittedOffsets(partitions);
         partitions.forEach(tp -> specifiedOffsets.put(tp, (long) tp.partition()));
         // Remove the specified offsets for partition 0.
-        TopicPartition partitionSetToCommitted = new TopicPartition(TOPIC, 0);
-        specifiedOffsets.remove(partitionSetToCommitted);
+        TopicPartition partitionSetToEarliest = new TopicPartition(TOPIC, 0);
+        specifiedOffsets.remove(partitionSetToEarliest);
         OffsetsInitializer initializer = OffsetsInitializer.offsets(specifiedOffsets);
 
         assertThat(initializer.getAutoOffsetResetStrategy())
                 .isEqualTo(OffsetResetStrategy.EARLIEST);
-        // The partition without committed offset should fallback to offset reset strategy.
-        TopicPartition partitionSetToEarliest = new TopicPartition(TOPIC2, 0);
-        partitions.add(partitionSetToEarliest);
+        // The partitions without specified offsets should fallback to offset reset strategy.
+        TopicPartition partitionWithoutSpecifiedOffset = new TopicPartition(TOPIC2, 0);
+        partitions.add(partitionWithoutSpecifiedOffset);
 
         Map<TopicPartition, Long> offsets = initializer.getPartitionOffsets(partitions, retriever);
         for (TopicPartition tp : partitions) {
             Long offset = offsets.get(tp);
             long expectedOffset;
-            if (tp.equals(partitionSetToCommitted)) {
-                expectedOffset = committedOffsets.get(tp).offset();
-            } else if (tp.equals(partitionSetToEarliest)) {
+            if (tp.equals(partitionSetToEarliest) || tp.equals(partitionWithoutSpecifiedOffset)) {
                 expectedOffset = 0L;
             } else {
                 expectedOffset = specifiedOffsets.get(tp);

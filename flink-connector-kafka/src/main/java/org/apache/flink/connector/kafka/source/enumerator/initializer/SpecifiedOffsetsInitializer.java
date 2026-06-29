@@ -38,8 +38,8 @@ import static org.apache.flink.util.Preconditions.checkState;
  * An implementation of {@link OffsetsInitializer} which initializes the offsets of the partition
  * according to the user specified offsets.
  *
- * <p>Use specified offsets for specified partitions while use commit offsets or offsetResetStrategy
- * for unspecified partitions. Specified partition's offset should be less than its latest offset,
+ * <p>Use specified offsets for specified partitions while using the offsetResetStrategy for
+ * unspecified partitions. Specified partition's offset should be less than its latest offset,
  * otherwise it will start from the offsetResetStrategy. The default value of offsetResetStrategy is
  * earliest.
  *
@@ -61,32 +61,27 @@ class SpecifiedOffsetsInitializer implements OffsetsInitializer, OffsetsInitiali
             Collection<TopicPartition> partitions,
             PartitionOffsetsRetriever partitionOffsetsRetriever) {
         Map<TopicPartition, Long> offsets = new HashMap<>();
-        List<TopicPartition> toLookup = new ArrayList<>();
+        List<TopicPartition> unspecifiedPartitions = new ArrayList<>();
         for (TopicPartition tp : partitions) {
             Long offset = initialOffsets.get(tp);
             if (offset == null) {
-                toLookup.add(tp);
+                unspecifiedPartitions.add(tp);
             } else {
                 offsets.put(tp, offset);
             }
         }
-        if (!toLookup.isEmpty()) {
-            // First check the committed offsets.
-            Map<TopicPartition, Long> committedOffsets =
-                    partitionOffsetsRetriever.committedOffsets(toLookup);
-            offsets.putAll(committedOffsets);
-            toLookup.removeAll(committedOffsets.keySet());
-
+        if (!unspecifiedPartitions.isEmpty()) {
             switch (offsetResetStrategy) {
                 case EARLIEST:
-                    offsets.putAll(partitionOffsetsRetriever.beginningOffsets(toLookup));
+                    offsets.putAll(
+                            partitionOffsetsRetriever.beginningOffsets(unspecifiedPartitions));
                     break;
                 case LATEST:
-                    offsets.putAll(partitionOffsetsRetriever.endOffsets(toLookup));
+                    offsets.putAll(partitionOffsetsRetriever.endOffsets(unspecifiedPartitions));
                     break;
                 default:
                     throw new IllegalStateException(
-                            "Cannot find initial offsets for partitions: " + toLookup);
+                            "Cannot find initial offsets for partitions: " + unspecifiedPartitions);
             }
         }
         return offsets;
