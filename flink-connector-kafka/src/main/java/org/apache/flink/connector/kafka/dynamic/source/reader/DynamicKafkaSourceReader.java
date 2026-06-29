@@ -286,7 +286,10 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                         clusterMetadataMapEntry.getValue().getProperties(), clusterProperties);
                 OffsetsInitializer startingOffsetsInitializer =
                         clusterMetadataMapEntry.getValue().getStartingOffsetsInitializer();
-                if (startingOffsetsInitializer != null) {
+                if (startingOffsetsInitializer != null
+                        && !properties.containsKey(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG)
+                        && !clusterProperties.containsKey(
+                                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG)) {
                     clusterProperties.setProperty(
                             ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
                             startingOffsetsInitializer
