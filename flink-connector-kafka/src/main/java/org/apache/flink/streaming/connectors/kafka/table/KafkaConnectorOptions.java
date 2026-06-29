@@ -110,6 +110,25 @@ public class KafkaConnectorOptions {
     public static final ConfigOption<Integer> SCAN_PARALLELISM = FactoryUtil.SOURCE_PARALLELISM;
     public static final ConfigOption<Integer> SINK_PARALLELISM = FactoryUtil.SINK_PARALLELISM;
 
+    private static final String PROJECTION_PUSHDOWN_DESCRIPTION =
+            "Controls whether projections are pushed down into the format, so it only "
+                    + "deserializes the required fields. Projections are always pushed down into the "
+                    + "connector regardless of this setting. Only formats implementing "
+                    + "ProjectableDecodingFormat are affected; others deserialize all fields and are "
+                    + "projected afterwards.";
+
+    public static final ConfigOption<Boolean> KEY_PROJECTION_PUSHDOWN_ENABLED =
+            ConfigOptions.key("key" + FORMAT_SUFFIX + ".projection-pushdown.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(PROJECTION_PUSHDOWN_DESCRIPTION);
+
+    public static final ConfigOption<Boolean> VALUE_PROJECTION_PUSHDOWN_ENABLED =
+            ConfigOptions.key("value" + FORMAT_SUFFIX + ".projection-pushdown.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(PROJECTION_PUSHDOWN_DESCRIPTION);
+
     // --------------------------------------------------------------------------------------------
     // Kafka specific options
     // --------------------------------------------------------------------------------------------
