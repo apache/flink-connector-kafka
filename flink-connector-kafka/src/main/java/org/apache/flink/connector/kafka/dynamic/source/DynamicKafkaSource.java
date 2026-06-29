@@ -28,6 +28,7 @@ import org.apache.flink.api.connector.source.SourceReader;
 import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
+import org.apache.flink.api.connector.source.SupportsSplitReassignmentOnRecovery;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.source.enumerator.DynamicKafkaSourceEnumState;
@@ -78,6 +79,7 @@ import java.util.Properties;
 @Experimental
 public class DynamicKafkaSource<T>
         implements Source<T, DynamicKafkaSourceSplit, DynamicKafkaSourceEnumState>,
+                SupportsSplitReassignmentOnRecovery,
                 ResultTypeQueryable<T> {
 
     private final KafkaStreamSubscriber kafkaStreamSubscriber;
