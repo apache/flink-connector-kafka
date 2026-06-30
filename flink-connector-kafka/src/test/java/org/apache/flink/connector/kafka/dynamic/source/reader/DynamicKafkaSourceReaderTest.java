@@ -30,6 +30,8 @@ import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
 import org.apache.flink.connector.kafka.dynamic.source.DynamicKafkaSourceOptions;
 import org.apache.flink.connector.kafka.dynamic.source.MetadataUpdateEvent;
+import org.apache.flink.connector.kafka.dynamic.source.RequestRetainedSplitOffsetsEvent;
+import org.apache.flink.connector.kafka.dynamic.source.RetainedSplitOffsetsEvent;
 import org.apache.flink.connector.kafka.dynamic.source.metrics.KafkaClusterMetricGroup;
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
 import org.apache.flink.connector.kafka.source.metrics.KafkaSourceReaderMetrics;
@@ -178,7 +180,18 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
             kafkaStream.getClusterMetadataMap().put(kafkaClusterId1, cluster1Metadata);
             reader.handleSourceEvents(new MetadataUpdateEvent(Collections.singleton(kafkaStream)));
             assertThat(activeSplitCountGauge.orElseThrow().getValue())
-                    .as("reactivated retained splits become active again")
+                    .as("re-added retained splits wait for fresh assignment")
+                    .isZero();
+            reader.addSplits(
+                    getSplits(
+                                    getNumSplits(),
+                                    NUM_RECORDS_PER_SPLIT,
+                                    Boundedness.CONTINUOUS_UNBOUNDED)
+                            .stream()
+                            .filter(split -> split.getKafkaClusterId().equals(kafkaClusterId1))
+                            .collect(Collectors.toList()));
+            assertThat(activeSplitCountGauge.orElseThrow().getValue())
+                    .as("freshly assigned retained splits become active again")
                     .isEqualTo(NUM_SPLITS_PER_CLUSTER);
         }
     }
@@ -264,7 +277,7 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
     }
 
     @Test
-    void testHandleSourceEventRetainsRemovedClusterOffsetsUntilExpired() throws Exception {
+    void testRetainedRemovedClusterOffsetsAreReportedWithoutReactivation() throws Exception {
         DynamicKafkaSourceSplit cluster0Split =
                 new DynamicKafkaSourceSplit(
                         kafkaClusterId0, new KafkaPartitionSplit(new TopicPartition(TOPIC, 0), 10));
@@ -297,22 +310,119 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
             assertThat(reader.snapshotState(-1))
                     .containsExactlyInAnyOrder(retainedCluster0Split, cluster1Split);
 
+            long handoffId = 7L;
+            reader.handleSourceEvents(
+                    new RequestRetainedSplitOffsetsEvent(handoffId, kafkaClusterId0));
+            RetainedSplitOffsetsEvent retainedSplitOffsetsEvent =
+                    context.getSentEvents().stream()
+                            .filter(RetainedSplitOffsetsEvent.class::isInstance)
+                            .map(RetainedSplitOffsetsEvent.class::cast)
+                            .findFirst()
+                            .orElseThrow();
+            assertThat(retainedSplitOffsetsEvent.getHandoffId()).isEqualTo(handoffId);
+            assertThat(retainedSplitOffsetsEvent.getKafkaClusterId()).isEqualTo(kafkaClusterId0);
+            assertThat(retainedSplitOffsetsEvent.getRetainedSplitOffsets())
+                    .containsExactlyEntriesOf(
+                            Collections.singletonMap(cluster0Split.splitId(), 10L));
+
+            long emptyHandoffId = 8L;
+            reader.handleSourceEvents(
+                    new RequestRetainedSplitOffsetsEvent(emptyHandoffId, kafkaClusterId1));
+            RetainedSplitOffsetsEvent emptyRetainedSplitOffsetsEvent =
+                    context.getSentEvents().stream()
+                            .filter(RetainedSplitOffsetsEvent.class::isInstance)
+                            .map(RetainedSplitOffsetsEvent.class::cast)
+                            .reduce((first, second) -> second)
+                            .orElseThrow();
+            assertThat(emptyRetainedSplitOffsetsEvent.getHandoffId()).isEqualTo(emptyHandoffId);
+            assertThat(emptyRetainedSplitOffsetsEvent.getRetainedSplitOffsets()).isEmpty();
+
             reader.handleSourceEvents(new MetadataUpdateEvent(Collections.singleton(kafkaStream)));
             assertThat(reader.snapshotState(-1))
-                    .containsExactlyInAnyOrder(cluster0Split, cluster1Split);
+                    .containsExactlyInAnyOrder(retainedCluster0Split, cluster1Split);
+
+            reader.addSplits(Collections.singletonList(cluster0Split));
+            reader.handleSourceEvents(
+                    new RequestRetainedSplitOffsetsEvent(emptyHandoffId + 1, kafkaClusterId0));
+            RetainedSplitOffsetsEvent clearedRetainedSplitOffsetsEvent =
+                    context.getSentEvents().stream()
+                            .filter(RetainedSplitOffsetsEvent.class::isInstance)
+                            .map(RetainedSplitOffsetsEvent.class::cast)
+                            .reduce((first, second) -> second)
+                            .orElseThrow();
+            assertThat(clearedRetainedSplitOffsetsEvent.getRetainedSplitOffsets()).isEmpty();
         }
 
         TestingReaderContext restoredContext = new TestingReaderContext();
+        DynamicKafkaSourceSplit cluster1SecondSplit =
+                new DynamicKafkaSourceSplit(
+                        kafkaClusterId1, new KafkaPartitionSplit(new TopicPartition(TOPIC, 1), 30));
         try (DynamicKafkaSourceReader<Integer> restoredReader =
                 createReaderWithoutStartWithRemovedClusterRetention(restoredContext)) {
+            // Rescale restore can deliver active and stale retained copies in either order.
+            long retainedUntilMs = System.currentTimeMillis() + 60_000;
             restoredReader.addSplits(
                     ImmutableList.of(
-                            cluster0Split.retainUntil(System.currentTimeMillis() - 1),
-                            cluster1Split));
+                            cluster1SecondSplit.retainUntil(retainedUntilMs),
+                            cluster1SecondSplit,
+                            cluster1Split,
+                            cluster1Split.retainUntil(retainedUntilMs),
+                            cluster0Split.retainUntil(System.currentTimeMillis() - 1)));
+            assertThat(restoredReader.snapshotState(-1))
+                    .containsExactlyInAnyOrder(cluster1Split, cluster1SecondSplit);
             restoredReader.start();
             restoredReader.handleSourceEvents(
                     new MetadataUpdateEvent(Collections.singleton(shrunkKafkaStream)));
-            assertThat(restoredReader.snapshotState(-1)).containsExactly(cluster1Split);
+            assertThat(restoredReader.snapshotState(-1))
+                    .containsExactlyInAnyOrder(cluster1Split, cluster1SecondSplit);
+        }
+    }
+
+    @Test
+    void testRestoredRetainedSplitsAreDroppedWhenRetentionIsDisabled() throws Exception {
+        DynamicKafkaSourceSplit retainedSplit =
+                new DynamicKafkaSourceSplit(
+                                kafkaClusterId0,
+                                new KafkaPartitionSplit(new TopicPartition(TOPIC, 0), 10))
+                        .retainUntil(System.currentTimeMillis() + 60_000);
+
+        try (DynamicKafkaSourceReader<Integer> reader =
+                createReaderWithoutStart(new TestingReaderContext())) {
+            reader.addSplits(Collections.singletonList(retainedSplit));
+            assertThat(reader.snapshotState(-1)).isEmpty();
+        }
+    }
+
+    @Test
+    void testRetainedSplitRequestKeepsLargestRestoredOffset() throws Exception {
+        long retainedUntilMs = System.currentTimeMillis() + 60_000;
+        DynamicKafkaSourceSplit newerRetainedSplit =
+                new DynamicKafkaSourceSplit(
+                                kafkaClusterId0,
+                                new KafkaPartitionSplit(new TopicPartition(TOPIC, 0), 200))
+                        .retainUntil(retainedUntilMs);
+        DynamicKafkaSourceSplit staleRetainedSplit =
+                new DynamicKafkaSourceSplit(
+                                kafkaClusterId0,
+                                new KafkaPartitionSplit(new TopicPartition(TOPIC, 0), 100))
+                        .retainUntil(retainedUntilMs);
+
+        TestingReaderContext context = new TestingReaderContext();
+        try (DynamicKafkaSourceReader<Integer> reader =
+                createReaderWithoutStartWithRemovedClusterRetention(context)) {
+            // Rescale can restore multiple dormant copies to one reader in either order.
+            reader.addSplits(ImmutableList.of(newerRetainedSplit, staleRetainedSplit));
+            reader.handleSourceEvents(new RequestRetainedSplitOffsetsEvent(1L, kafkaClusterId0));
+
+            RetainedSplitOffsetsEvent response =
+                    context.getSentEvents().stream()
+                            .filter(RetainedSplitOffsetsEvent.class::isInstance)
+                            .map(RetainedSplitOffsetsEvent.class::cast)
+                            .findFirst()
+                            .orElseThrow();
+            assertThat(response.getRetainedSplitOffsets())
+                    .containsExactlyEntriesOf(
+                            Collections.singletonMap(newerRetainedSplit.splitId(), 200L));
         }
     }
 

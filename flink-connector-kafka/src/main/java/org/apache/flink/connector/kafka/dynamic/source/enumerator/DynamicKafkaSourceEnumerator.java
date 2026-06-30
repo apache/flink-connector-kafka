@@ -30,9 +30,12 @@ import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
 import org.apache.flink.connector.kafka.dynamic.source.DynamicKafkaSourceOptions;
 import org.apache.flink.connector.kafka.dynamic.source.GetMetadataUpdateEvent;
 import org.apache.flink.connector.kafka.dynamic.source.MetadataUpdateEvent;
+import org.apache.flink.connector.kafka.dynamic.source.RequestRetainedSplitOffsetsEvent;
+import org.apache.flink.connector.kafka.dynamic.source.RetainedSplitOffsetsEvent;
 import org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.KafkaStreamSubscriber;
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
 import org.apache.flink.connector.kafka.source.KafkaPropertiesUtil;
+import org.apache.flink.connector.kafka.source.enumerator.AssignmentStatus;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumerator;
 import org.apache.flink.connector.kafka.source.enumerator.SplitAndAssignmentStatus;
@@ -75,6 +78,7 @@ import java.util.stream.Collectors;
 @Internal
 public class DynamicKafkaSourceEnumerator
         implements SplitEnumerator<DynamicKafkaSourceSplit, DynamicKafkaSourceEnumState> {
+    private static final long RETAINED_SPLIT_OFFSET_HANDOFF_MIN_TIMEOUT_MS = 60_000L;
     private static final Logger logger =
             LoggerFactory.getLogger(DynamicKafkaSourceEnumerator.class);
 
@@ -110,7 +114,34 @@ public class DynamicKafkaSourceEnumerator
     private Set<KafkaStream> latestKafkaStreams;
     private Map<String, DynamicKafkaSourceEnumState.RetainedClusterState>
             retainedClusterEnumeratorStates;
+    private final Map<String, RetainedSplitOffsetHandoff> retainedSplitOffsetHandoffs;
+    private long nextRetainedSplitOffsetHandoffId;
+    private boolean retainedSplitOffsetHandoffRetryScheduled;
     private boolean firstDiscoveryComplete;
+
+    private static class RetainedSplitOffsetHandoff {
+        private final long handoffId;
+        private final long deadlineMs;
+        private final Map<Integer, Map<String, Long>> offsetsByReader = new HashMap<>();
+
+        private RetainedSplitOffsetHandoff(long handoffId, long deadlineMs) {
+            this.handoffId = handoffId;
+            this.deadlineMs = deadlineMs;
+        }
+
+        private boolean isExpired(long currentTimeMillis) {
+            return deadlineMs <= currentTimeMillis;
+        }
+
+        private Map<String, Long> mergedOffsets() {
+            Map<String, Long> offsets = new HashMap<>();
+            for (Map<String, Long> reportedOffsets : offsetsByReader.values()) {
+                reportedOffsets.forEach(
+                        (splitId, offset) -> offsets.merge(splitId, offset, Math::max));
+            }
+            return offsets;
+        }
+    }
 
     public DynamicKafkaSourceEnumerator(
             KafkaStreamSubscriber kafkaStreamSubscriber,
@@ -227,6 +258,9 @@ public class DynamicKafkaSourceEnumerator
         }
         this.retainedClusterEnumeratorStates =
                 new HashMap<>(dynamicKafkaSourceEnumState.getRetainedClusterEnumeratorStates());
+        this.retainedSplitOffsetHandoffs = new HashMap<>();
+        this.nextRetainedSplitOffsetHandoffId = 0L;
+        this.retainedSplitOffsetHandoffRetryScheduled = false;
         pruneExpiredRetainedClusterEnumeratorStates();
 
         Map<String, Properties> clusterProperties = new HashMap<>();
@@ -377,7 +411,8 @@ public class DynamicKafkaSourceEnumerator
 
     private void handleNoMoreSplits() {
         if (Boundedness.BOUNDED.equals(boundedness)) {
-            boolean allEnumeratorsHaveSignalledNoMoreSplits = true;
+            boolean allEnumeratorsHaveSignalledNoMoreSplits =
+                    clusterEnumContextMap.keySet().containsAll(latestClusterTopicsMap.keySet());
             for (StoppableKafkaEnumContextProxy context : clusterEnumContextMap.values()) {
                 allEnumeratorsHaveSignalledNoMoreSplits =
                         allEnumeratorsHaveSignalledNoMoreSplits && context.isNoMoreSplits();
@@ -418,6 +453,7 @@ public class DynamicKafkaSourceEnumerator
         Set<KafkaStream> handledFetchKafkaStreams =
                 handleFetchSubscribedStreamsError(fetchedKafkaStreams, t);
         pruneExpiredRetainedClusterEnumeratorStates();
+        pruneExpiredRetainedSplitOffsetHandoffs();
 
         Map<String, Set<String>> newClustersTopicsMap = new HashMap<>();
         Map<String, Properties> clusterProperties = new HashMap<>();
@@ -446,6 +482,8 @@ public class DynamicKafkaSourceEnumerator
 
         // don't do anything if no change
         if (latestClusterTopicsMap.equals(newClustersTopicsMap)) {
+            latestKafkaStreams = handledFetchKafkaStreams;
+            maybeStartReadyRetainedClusterEnumerators();
             return;
         }
 
@@ -474,6 +512,9 @@ public class DynamicKafkaSourceEnumerator
         retainRemovedClusterEnumeratorStates(
                 dynamicKafkaSourceEnumState.getClusterEnumeratorStates(),
                 latestClusterTopicsMap.keySet());
+        retainedSplitOffsetHandoffs
+                .keySet()
+                .removeIf(kafkaClusterId -> !latestClusterTopicsMap.containsKey(kafkaClusterId));
 
         // create enumerators
         Set<String> activeSplitIds = new HashSet<>();
@@ -481,14 +522,13 @@ public class DynamicKafkaSourceEnumerator
             String kafkaClusterId = activeClusterTopics.getKey();
             KafkaSourceEnumState kafkaSourceEnumState =
                     dynamicKafkaSourceEnumState.getClusterEnumeratorStates().get(kafkaClusterId);
-            if (kafkaSourceEnumState == null) {
-                DynamicKafkaSourceEnumState.RetainedClusterState retainedClusterState =
-                        retainedClusterEnumeratorStates.remove(kafkaClusterId);
-                if (retainedClusterState != null) {
-                    kafkaSourceEnumState = retainedClusterState.getKafkaSourceEnumState();
-                }
-            } else {
+            if (kafkaSourceEnumState == null
+                    && retainedClusterEnumeratorStates.containsKey(kafkaClusterId)) {
+                continue;
+            }
+            if (kafkaSourceEnumState != null) {
                 retainedClusterEnumeratorStates.remove(kafkaClusterId);
+                retainedSplitOffsetHandoffs.remove(kafkaClusterId);
             }
 
             final KafkaSourceEnumState newKafkaSourceEnumState;
@@ -499,7 +539,6 @@ public class DynamicKafkaSourceEnumerator
                         splitStatus ->
                                 activeSplitIds.add(
                                         toDynamicSplitId(kafkaClusterId, splitStatus.split())));
-
                 newKafkaSourceEnumState =
                         new KafkaSourceEnumState(
                                 partitions, kafkaSourceEnumState.initialDiscoveryFinished());
@@ -507,10 +546,8 @@ public class DynamicKafkaSourceEnumerator
                 newKafkaSourceEnumState = new KafkaSourceEnumState(Collections.emptySet(), false);
             }
 
-            // Restart the enumerator from the active topic partitions already known in state. The
-            // reader restores those splits from its own checkpointed offsets during metadata
-            // reconciliation, so the enumerator must not send them again as newly discovered
-            // splits.
+            // Restart the enumerator from active topic partitions already known in state. Retained
+            // clusters are started separately after their reader offsets have been handed off.
             createEnumeratorWithAssignedTopicPartitions(
                     kafkaClusterId,
                     activeClusterTopics.getValue(),
@@ -522,6 +559,7 @@ public class DynamicKafkaSourceEnumerator
 
         splitAssignmentStrategy.onMetadataRefresh(activeSplitIds);
         startAllEnumerators();
+        maybeStartReadyRetainedClusterEnumerators();
     }
 
     private Set<KafkaStream> handleFetchSubscribedStreamsError(
@@ -547,10 +585,14 @@ public class DynamicKafkaSourceEnumerator
     /** NOTE: Must run on coordinator thread. */
     private void sendMetadataUpdateEventToAvailableReaders() {
         for (int readerId : enumContext.registeredReaders().keySet()) {
-            MetadataUpdateEvent metadataUpdateEvent = new MetadataUpdateEvent(latestKafkaStreams);
-            logger.debug("sending metadata update to reader {}: {}", readerId, metadataUpdateEvent);
-            enumContext.sendEventToSourceReader(readerId, metadataUpdateEvent);
+            sendMetadataUpdateEventToReader(readerId);
         }
+    }
+
+    private void sendMetadataUpdateEventToReader(int readerId) {
+        MetadataUpdateEvent metadataUpdateEvent = new MetadataUpdateEvent(latestKafkaStreams);
+        logger.debug("sending metadata update to reader {}: {}", readerId, metadataUpdateEvent);
+        enumContext.sendEventToSourceReader(readerId, metadataUpdateEvent);
     }
 
     /**
@@ -627,27 +669,33 @@ public class DynamicKafkaSourceEnumerator
 
     private void startAllEnumerators() {
         for (String kafkaClusterId : latestClusterTopicsMap.keySet()) {
-            try {
-                // starts enumerators and handles split discovery and assignment
-                clusterEnumeratorMap.get(kafkaClusterId).start();
-            } catch (KafkaException e) {
-                if (kafkaMetadataService.isClusterActive(kafkaClusterId)) {
+            if (clusterEnumeratorMap.containsKey(kafkaClusterId)) {
+                startEnumerator(kafkaClusterId);
+            }
+        }
+    }
+
+    private void startEnumerator(String kafkaClusterId) {
+        try {
+            // starts enumerators and handles split discovery and assignment
+            clusterEnumeratorMap.get(kafkaClusterId).start();
+        } catch (KafkaException e) {
+            if (kafkaMetadataService.isClusterActive(kafkaClusterId)) {
+                throw new RuntimeException(
+                        String.format("Failed to create enumerator for %s", kafkaClusterId), e);
+            } else {
+                logger.info(
+                        "Found inactive cluster {} while initializing, removing enumerator",
+                        kafkaClusterId,
+                        e);
+                try {
+                    clusterEnumContextMap.remove(kafkaClusterId).close();
+                    clusterEnumeratorMap.remove(kafkaClusterId).close();
+                } catch (Exception ex) {
+                    // closing enumerator throws an exception, let error propagate and restart
+                    // the job
                     throw new RuntimeException(
-                            String.format("Failed to create enumerator for %s", kafkaClusterId), e);
-                } else {
-                    logger.info(
-                            "Found inactive cluster {} while initializing, removing enumerator",
-                            kafkaClusterId,
-                            e);
-                    try {
-                        clusterEnumContextMap.remove(kafkaClusterId).close();
-                        clusterEnumeratorMap.remove(kafkaClusterId).close();
-                    } catch (Exception ex) {
-                        // closing enumerator throws an exception, let error propagate and restart
-                        // the job
-                        throw new RuntimeException(
-                                "Failed to close enum context for " + kafkaClusterId, ex);
-                    }
+                            "Failed to close enum context for " + kafkaClusterId, ex);
                 }
             }
         }
@@ -748,6 +796,19 @@ public class DynamicKafkaSourceEnumerator
         // assign pending splits from the sub enumerator
         clusterEnumeratorMap.forEach(
                 (cluster, subEnumerator) -> subEnumerator.addReader(subtaskId));
+        if (!retainedSplitOffsetHandoffs.isEmpty()) {
+            pruneExpiredRetainedSplitOffsetHandoffs();
+            // A reader can join while a re-added cluster is waiting for offset handoff. Send
+            // metadata first so the reader has reconciled its local retained state before it
+            // answers the request. Restart the attempt so delayed responses from the reader's
+            // previous attempt cannot count as its replacement report.
+            retainedSplitOffsetHandoffs
+                    .values()
+                    .forEach(handoff -> handoff.offsetsByReader.clear());
+            retainedSplitOffsetHandoffs.clear();
+            sendMetadataUpdateEventToReader(subtaskId);
+            maybeStartReadyRetainedClusterEnumerators();
+        }
         handleNoMoreSplits();
     }
 
@@ -796,19 +857,22 @@ public class DynamicKafkaSourceEnumerator
         }
 
         long retainedUntilMs = System.currentTimeMillis() + removedClusterStateRetentionMs;
-        activeClusterEnumeratorStates.entrySet().stream()
-                .filter(entry -> !activeKafkaClusterIds.contains(entry.getKey()))
-                .forEach(
-                        entry ->
-                                retainedClusterEnumeratorStates.put(
-                                        entry.getKey(),
-                                        new DynamicKafkaSourceEnumState.RetainedClusterState(
-                                                entry.getValue(), retainedUntilMs)));
+        for (Entry<String, KafkaSourceEnumState> entry : activeClusterEnumeratorStates.entrySet()) {
+            if (activeKafkaClusterIds.contains(entry.getKey())) {
+                continue;
+            }
+            retainedClusterEnumeratorStates.put(
+                    entry.getKey(),
+                    new DynamicKafkaSourceEnumState.RetainedClusterState(
+                            entry.getValue(), retainedUntilMs));
+            retainedSplitOffsetHandoffs.remove(entry.getKey());
+        }
     }
 
     private void pruneExpiredRetainedClusterEnumeratorStates() {
         if (removedClusterStateRetentionMs <= 0) {
             retainedClusterEnumeratorStates.clear();
+            retainedSplitOffsetHandoffs.clear();
             return;
         }
 
@@ -816,6 +880,280 @@ public class DynamicKafkaSourceEnumerator
         retainedClusterEnumeratorStates
                 .entrySet()
                 .removeIf(entry -> entry.getValue().getRetainedUntilMs() <= currentTimeMillis);
+        retainedSplitOffsetHandoffs.keySet().retainAll(retainedClusterEnumeratorStates.keySet());
+    }
+
+    private void pruneExpiredRetainedSplitOffsetHandoffs() {
+        long currentTimeMillis = System.currentTimeMillis();
+        retainedSplitOffsetHandoffs
+                .entrySet()
+                .removeIf(
+                        entry -> {
+                            RetainedSplitOffsetHandoff handoff = entry.getValue();
+                            if (!handoff.isExpired(currentTimeMillis)) {
+                                return false;
+                            }
+                            logger.debug(
+                                    "Discarding timed out retained split offset handoff for cluster {}: handoffId={}",
+                                    entry.getKey(),
+                                    handoff.handoffId);
+                            handoff.offsetsByReader.clear();
+                            return true;
+                        });
+    }
+
+    private boolean isRetainedClusterReadyForAssignment(
+            String kafkaClusterId,
+            DynamicKafkaSourceEnumState.RetainedClusterState retainedClusterState) {
+        Set<String> activeTopics =
+                latestClusterTopicsMap.getOrDefault(kafkaClusterId, Collections.emptySet());
+        return filterStateByTopics(retainedClusterState.getKafkaSourceEnumState(), activeTopics)
+                .stream()
+                .noneMatch(
+                        splitStatus ->
+                                splitStatus.assignmentStatus().equals(AssignmentStatus.ASSIGNED));
+    }
+
+    private void startRetainedSplitOffsetHandoff(String kafkaClusterId) {
+        if (retainedSplitOffsetHandoffs.containsKey(kafkaClusterId)) {
+            return;
+        }
+
+        // Keep the attempt bounded without making a fast metadata refresh interval shorter than a
+        // reader source-event round trip.
+        long handoffTimeoutMs =
+                Math.max(
+                        kafkaMetadataServiceDiscoveryIntervalMs,
+                        RETAINED_SPLIT_OFFSET_HANDOFF_MIN_TIMEOUT_MS);
+        long deadlineMs = System.currentTimeMillis() + handoffTimeoutMs;
+        RetainedSplitOffsetHandoff handoff =
+                new RetainedSplitOffsetHandoff(++nextRetainedSplitOffsetHandoffId, deadlineMs);
+        retainedSplitOffsetHandoffs.put(kafkaClusterId, handoff);
+        scheduleRetainedSplitOffsetHandoffRetryIfNeeded();
+        for (int readerId : enumContext.registeredReaders().keySet()) {
+            sendRetainedSplitOffsetRequestToReader(kafkaClusterId, handoff, readerId);
+        }
+    }
+
+    private void scheduleRetainedSplitOffsetHandoffRetryIfNeeded() {
+        if (kafkaMetadataServiceDiscoveryIntervalMs > 0
+                || retainedSplitOffsetHandoffRetryScheduled) {
+            return;
+        }
+
+        // One-time metadata discovery has no later refresh to discard an expired handoff. Keep a
+        // single lightweight retry loop after the first handoff; it does not fetch metadata.
+        retainedSplitOffsetHandoffRetryScheduled = true;
+        kafkaMetadataServiceDiscoveryContext.<Void>callAsync(
+                () -> null,
+                (ignored, t) -> {
+                    if (t != null) {
+                        throw new RuntimeException("Retained split offset handoff retry failed", t);
+                    }
+                    pruneExpiredRetainedClusterEnumeratorStates();
+                    pruneExpiredRetainedSplitOffsetHandoffs();
+                    maybeStartReadyRetainedClusterEnumerators();
+                },
+                RETAINED_SPLIT_OFFSET_HANDOFF_MIN_TIMEOUT_MS,
+                RETAINED_SPLIT_OFFSET_HANDOFF_MIN_TIMEOUT_MS);
+    }
+
+    private void sendPendingRetainedSplitOffsetRequestsToReader(int readerId) {
+        retainedSplitOffsetHandoffs.forEach(
+                (kafkaClusterId, handoff) ->
+                        sendRetainedSplitOffsetRequestToReader(kafkaClusterId, handoff, readerId));
+    }
+
+    private void sendRetainedSplitOffsetRequestToReader(
+            String kafkaClusterId, RetainedSplitOffsetHandoff handoff, int readerId) {
+        RequestRetainedSplitOffsetsEvent requestEvent =
+                new RequestRetainedSplitOffsetsEvent(handoff.handoffId, kafkaClusterId);
+        logger.debug(
+                "Requesting retained split offsets from reader {}: {}", readerId, requestEvent);
+        enumContext.sendEventToSourceReader(readerId, requestEvent);
+    }
+
+    private void handleRetainedSplitOffsetsEvent(
+            int subtaskId, RetainedSplitOffsetsEvent retainedSplitOffsetsEvent) {
+        if (!enumContext.registeredReaders().containsKey(subtaskId)) {
+            logger.debug("Ignoring retained split offsets from unavailable reader {}", subtaskId);
+            return;
+        }
+        pruneExpiredRetainedClusterEnumeratorStates();
+        String kafkaClusterId = retainedSplitOffsetsEvent.getKafkaClusterId();
+        RetainedSplitOffsetHandoff handoff = retainedSplitOffsetHandoffs.get(kafkaClusterId);
+        if (handoff == null || handoff.handoffId != retainedSplitOffsetsEvent.getHandoffId()) {
+            logger.debug(
+                    "Ignoring stale retained split offsets from reader {}: {}",
+                    subtaskId,
+                    retainedSplitOffsetsEvent);
+            return;
+        }
+        if (handoff.isExpired(System.currentTimeMillis())) {
+            logger.debug(
+                    "Ignoring retained split offsets from timed out handoff {}: {}",
+                    handoff.handoffId,
+                    retainedSplitOffsetsEvent);
+            clearRetainedSplitOffsetHandoff(kafkaClusterId, handoff);
+            return;
+        }
+
+        handoff.offsetsByReader.put(subtaskId, retainedSplitOffsetsEvent.getRetainedSplitOffsets());
+        if (handoff.offsetsByReader.size() >= enumContext.currentParallelism()) {
+            applyRetainedSplitOffsetHandoff(kafkaClusterId, handoff);
+        }
+        maybeStartReadyRetainedClusterEnumerators();
+    }
+
+    private void applyRetainedSplitOffsetHandoff(
+            String kafkaClusterId, RetainedSplitOffsetHandoff handoff) {
+        DynamicKafkaSourceEnumState.RetainedClusterState retainedClusterState =
+                retainedClusterEnumeratorStates.get(kafkaClusterId);
+        if (retainedClusterState == null) {
+            clearRetainedSplitOffsetHandoff(kafkaClusterId, handoff);
+            return;
+        }
+
+        KafkaSourceEnumState kafkaSourceEnumState = retainedClusterState.getKafkaSourceEnumState();
+        Map<String, Long> retainedSplitOffsets = handoff.mergedOffsets();
+        Set<String> activeTopics =
+                latestClusterTopicsMap.getOrDefault(kafkaClusterId, Collections.emptySet());
+        Set<SplitAndAssignmentStatus> updatedSplits = new HashSet<>();
+        for (SplitAndAssignmentStatus splitStatus : kafkaSourceEnumState.splits()) {
+            if (!activeTopics.contains(splitStatus.split().getTopic())) {
+                updatedSplits.add(splitStatus);
+                continue;
+            }
+            if (splitStatus.assignmentStatus().equals(AssignmentStatus.ASSIGNED)) {
+                Long retainedSplitOffset =
+                        retainedSplitOffsets.get(
+                                toDynamicSplitId(kafkaClusterId, splitStatus.split()));
+                if (retainedSplitOffset == null) {
+                    // No reader retains this offset anymore; let normal discovery recreate it.
+                    continue;
+                }
+                updatedSplits.add(
+                        new SplitAndAssignmentStatus(
+                                new KafkaPartitionSplit(
+                                        splitStatus.split().getTopicPartition(),
+                                        retainedSplitOffset,
+                                        splitStatus
+                                                .split()
+                                                .getStoppingOffset()
+                                                .orElse(KafkaPartitionSplit.NO_STOPPING_OFFSET)),
+                                AssignmentStatus.UNASSIGNED));
+            } else {
+                updatedSplits.add(splitStatus);
+            }
+        }
+
+        retainedClusterEnumeratorStates.put(
+                kafkaClusterId,
+                new DynamicKafkaSourceEnumState.RetainedClusterState(
+                        new KafkaSourceEnumState(
+                                updatedSplits, kafkaSourceEnumState.initialDiscoveryFinished()),
+                        retainedClusterState.getRetainedUntilMs()));
+        clearRetainedSplitOffsetHandoff(kafkaClusterId, handoff);
+    }
+
+    private void clearRetainedSplitOffsetHandoff(
+            String kafkaClusterId, RetainedSplitOffsetHandoff handoff) {
+        if (retainedSplitOffsetHandoffs.remove(kafkaClusterId, handoff)) {
+            handoff.offsetsByReader.clear();
+        }
+    }
+
+    private void maybeStartReadyRetainedClusterEnumerators() {
+        for (String kafkaClusterId : latestClusterTopicsMap.keySet()) {
+            if (clusterEnumeratorMap.containsKey(kafkaClusterId)) {
+                continue;
+            }
+
+            DynamicKafkaSourceEnumState.RetainedClusterState retainedClusterState =
+                    retainedClusterEnumeratorStates.get(kafkaClusterId);
+            if (retainedClusterState == null) {
+                startFreshClusterEnumerator(kafkaClusterId);
+            } else if (isRetainedClusterReadyForAssignment(kafkaClusterId, retainedClusterState)) {
+                startReadyRetainedClusterEnumerator(kafkaClusterId, retainedClusterState);
+            } else {
+                startRetainedSplitOffsetHandoff(kafkaClusterId);
+            }
+        }
+    }
+
+    private void startFreshClusterEnumerator(String kafkaClusterId) {
+        ClusterMetadata clusterMetadata = findClusterMetadata(kafkaClusterId);
+        if (clusterMetadata == null) {
+            return;
+        }
+
+        createEnumeratorWithAssignedTopicPartitions(
+                kafkaClusterId,
+                latestClusterTopicsMap.get(kafkaClusterId),
+                new KafkaSourceEnumState(Collections.emptySet(), false),
+                clusterMetadata.getProperties(),
+                clusterMetadata.getStartingOffsetsInitializer(),
+                clusterMetadata.getStoppingOffsetsInitializer());
+        startEnumerator(kafkaClusterId);
+        addRegisteredReadersToEnumerator(kafkaClusterId);
+    }
+
+    private void startReadyRetainedClusterEnumerator(
+            String kafkaClusterId,
+            DynamicKafkaSourceEnumState.RetainedClusterState retainedClusterState) {
+        ClusterMetadata clusterMetadata = findClusterMetadata(kafkaClusterId);
+        if (clusterMetadata == null) {
+            logger.warn(
+                    "Cannot start re-added retained cluster {} because metadata is unavailable",
+                    kafkaClusterId);
+            return;
+        }
+
+        KafkaSourceEnumState retainedState = retainedClusterState.getKafkaSourceEnumState();
+        Set<SplitAndAssignmentStatus> activeTopicSplits =
+                filterStateByTopics(retainedState, latestClusterTopicsMap.get(kafkaClusterId));
+        List<KafkaPartitionSplit> retainedSplits =
+                activeTopicSplits.stream()
+                        .map(SplitAndAssignmentStatus::split)
+                        .collect(Collectors.toList());
+        retainedClusterEnumeratorStates.remove(kafkaClusterId);
+        retainedSplitOffsetHandoffs.remove(kafkaClusterId);
+
+        createEnumeratorWithAssignedTopicPartitions(
+                kafkaClusterId,
+                latestClusterTopicsMap.get(kafkaClusterId),
+                new KafkaSourceEnumState(
+                        Collections.emptyList(),
+                        retainedSplits,
+                        retainedState.initialDiscoveryFinished()),
+                clusterMetadata.getProperties(),
+                clusterMetadata.getStartingOffsetsInitializer(),
+                clusterMetadata.getStoppingOffsetsInitializer());
+        startEnumerator(kafkaClusterId);
+        addRegisteredReadersToEnumerator(kafkaClusterId);
+    }
+
+    @Nullable
+    private ClusterMetadata findClusterMetadata(String kafkaClusterId) {
+        for (KafkaStream kafkaStream : latestKafkaStreams) {
+            ClusterMetadata clusterMetadata =
+                    kafkaStream.getClusterMetadataMap().get(kafkaClusterId);
+            if (clusterMetadata != null) {
+                return clusterMetadata;
+            }
+        }
+        return null;
+    }
+
+    private void addRegisteredReadersToEnumerator(String kafkaClusterId) {
+        SplitEnumerator<KafkaPartitionSplit, KafkaSourceEnumState> enumerator =
+                clusterEnumeratorMap.get(kafkaClusterId);
+        if (enumerator == null) {
+            return;
+        }
+        for (int reader : enumContext.registeredReaders().keySet()) {
+            enumerator.addReader(reader);
+        }
     }
 
     private Set<SplitAndAssignmentStatus> filterStateByTopics(
@@ -837,15 +1175,19 @@ public class DynamicKafkaSourceEnumerator
 
     @Override
     public void handleSourceEvent(int subtaskId, SourceEvent sourceEvent) {
+        if (sourceEvent instanceof RetainedSplitOffsetsEvent) {
+            handleRetainedSplitOffsetsEvent(subtaskId, (RetainedSplitOffsetsEvent) sourceEvent);
+            return;
+        }
+
         Preconditions.checkArgument(
                 sourceEvent instanceof GetMetadataUpdateEvent,
                 "Received invalid source event: " + sourceEvent);
 
         if (enumContext.registeredReaders().containsKey(subtaskId)) {
-            MetadataUpdateEvent metadataUpdateEvent = new MetadataUpdateEvent(latestKafkaStreams);
-            logger.debug(
-                    "sending metadata update to reader {}: {}", subtaskId, metadataUpdateEvent);
-            enumContext.sendEventToSourceReader(subtaskId, metadataUpdateEvent);
+            sendMetadataUpdateEventToReader(subtaskId);
+            pruneExpiredRetainedSplitOffsetHandoffs();
+            sendPendingRetainedSplitOffsetRequestsToReader(subtaskId);
         } else {
             logger.warn("Got get metadata update but subtask was unavailable");
         }
