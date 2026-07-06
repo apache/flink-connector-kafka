@@ -453,7 +453,7 @@ public class DynamicKafkaSourceEnumerator
             }
         }
 
-        // don't do anything if no change
+        // An unchanged refresh can still unblock deferred recovery registration.
         if (latestClusterTopicsMap.equals(newClustersTopicsMap)) {
             tryCompletePendingReaderRegistration();
             return;
