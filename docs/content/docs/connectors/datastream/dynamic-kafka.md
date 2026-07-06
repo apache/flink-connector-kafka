@@ -148,22 +148,16 @@ starting_offsets = KafkaOffsetsInitializer.offsets({
     KafkaTopicPartition("input-stream", 0): 100,
     KafkaTopicPartition("input-stream", 1): 200,
 })
-stopping_offsets = KafkaOffsetsInitializer.offsets({
-    KafkaTopicPartition("input-stream", 0): 1000,
-    KafkaTopicPartition("input-stream", 1): 2000,
-})
 
 metadata_service = SingleClusterTopicMetadataService(
     "cluster-a",
     {"bootstrap.servers": "localhost:9092"},
-    starting_offsets_initializer=starting_offsets,
-    stopping_offsets_initializer=stopping_offsets)
+    starting_offsets_initializer=starting_offsets)
 
 source = DynamicKafkaSource.builder() \
     .set_kafka_metadata_service(metadata_service) \
     .set_stream_ids({"input-stream"}) \
     .set_starting_offsets(KafkaOffsetsInitializer.latest()) \
-    .set_bounded(KafkaOffsetsInitializer.latest()) \
     .set_value_only_deserializer(SimpleStringSchema()) \
     .build()
 ```
