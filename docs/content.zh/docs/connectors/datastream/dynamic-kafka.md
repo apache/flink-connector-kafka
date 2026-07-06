@@ -141,11 +141,20 @@ DynamicKafkaSource<String> source =
 {{< /tab >}}
 {{< tab "Python" >}}
 ```python
+starting_offsets = KafkaOffsetsInitializer.offsets({
+    KafkaTopicPartition("input-stream", 0): 100,
+    KafkaTopicPartition("input-stream", 1): 200,
+})
+stopping_offsets = KafkaOffsetsInitializer.offsets({
+    KafkaTopicPartition("input-stream", 0): 1000,
+    KafkaTopicPartition("input-stream", 1): 2000,
+})
+
 metadata_service = SingleClusterTopicMetadataService(
     "cluster-a",
     {"bootstrap.servers": "localhost:9092"},
-    starting_offsets_initializer=KafkaOffsetsInitializer.earliest(),
-    stopping_offsets_initializer=KafkaOffsetsInitializer.latest())
+    starting_offsets_initializer=starting_offsets,
+    stopping_offsets_initializer=stopping_offsets)
 
 source = DynamicKafkaSource.builder() \
     .set_kafka_metadata_service(metadata_service) \
