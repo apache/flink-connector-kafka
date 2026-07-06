@@ -74,6 +74,7 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -330,6 +331,7 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
             reader.handleSourceEvents(new MetadataUpdateEvent(Collections.singleton(kafkaStream)));
 
             reader.addSplits(ImmutableList.of(cluster0Split, cluster1Split));
+            waitForSplitState(reader, ImmutableList.of(cluster0Split, cluster1Split));
 
             reader.handleSourceEvents(
                     new MetadataUpdateEvent(Collections.singleton(shrunkKafkaStream)));
@@ -711,6 +713,21 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
         NavigableMap<String, KafkaSourceReader<?>> clusterReaderMap =
                 (NavigableMap<String, KafkaSourceReader<?>>) clusterReaderMapField.get(reader);
         return new HashSet<>(clusterReaderMap.keySet());
+    }
+
+    private static void waitForSplitState(
+            DynamicKafkaSourceReader<?> reader, List<DynamicKafkaSourceSplit> expectedSplits)
+            throws Exception {
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        List<DynamicKafkaSourceSplit> splitState = Collections.emptyList();
+        while (System.nanoTime() < deadlineNanos) {
+            splitState = reader.snapshotState(-1);
+            if (splitState.containsAll(expectedSplits)) {
+                return;
+            }
+            Thread.sleep(10);
+        }
+        assertThat(splitState).containsAll(expectedSplits);
     }
 }
 
