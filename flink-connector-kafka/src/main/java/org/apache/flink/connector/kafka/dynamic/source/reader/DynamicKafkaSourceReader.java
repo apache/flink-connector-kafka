@@ -395,7 +395,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         if (latestReaderOutput == null) {
             pendingSplitOutputReleases.add(splitId);
         } else {
-            latestReaderOutput.releaseOutputForSplit(splitId);
+            markSplitIdleAndReleaseOutput(latestReaderOutput, splitId);
         }
     }
 
@@ -405,9 +405,16 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         }
 
         for (String splitId : pendingSplitOutputReleases) {
-            readerOutput.releaseOutputForSplit(splitId);
+            markSplitIdleAndReleaseOutput(readerOutput, splitId);
         }
         pendingSplitOutputReleases.clear();
+    }
+
+    private void markSplitIdleAndReleaseOutput(ReaderOutput<T> readerOutput, String splitId) {
+        // Unregistering a split output does not recompute Flink's split-local watermark or
+        // idleness. Mark it idle first so a removed split cannot keep the source output active.
+        readerOutput.createOutputForSplit(splitId).markIdle();
+        readerOutput.releaseOutputForSplit(splitId);
     }
 
     private static boolean isSplitForActiveClusters(
