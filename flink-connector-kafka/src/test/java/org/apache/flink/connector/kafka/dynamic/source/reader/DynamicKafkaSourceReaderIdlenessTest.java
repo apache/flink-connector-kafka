@@ -33,6 +33,7 @@ import org.apache.flink.core.io.InputStatus;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -63,13 +64,7 @@ class DynamicKafkaSourceReaderIdlenessTest {
             reader.start();
             reader.handleSourceEvents(getMetadataUpdateEvent());
 
-            DynamicKafkaSourceSplit split =
-                    new DynamicKafkaSourceSplit(
-                            KAFKA_CLUSTER_ID,
-                            new KafkaPartitionSplit(
-                                    new TopicPartition(TOPIC, 0),
-                                    0L,
-                                    KafkaPartitionSplit.NO_STOPPING_OFFSET));
+            DynamicKafkaSourceSplit split = getSplit(TOPIC);
             reader.addSplits(Collections.singletonList(split));
 
             CompletableFuture<Void> availabilityFuture = reader.isAvailable();
@@ -95,6 +90,39 @@ class DynamicKafkaSourceReaderIdlenessTest {
         }
     }
 
+    @Test
+    void testSplitReassignmentBeforeIdlePollReactivatesReaderOutput() throws Exception {
+        TestingReaderContext context = new TestingReaderContext();
+        try (DynamicKafkaSourceReader<byte[]> reader =
+                new DynamicKafkaSourceReader<>(
+                        context,
+                        KafkaRecordDeserializationSchema.valueOnly(ByteArrayDeserializer.class),
+                        getRequiredProperties())) {
+            reader.start();
+            reader.handleSourceEvents(getMetadataUpdateEvent());
+
+            DynamicKafkaSourceSplit removedSplit = getSplit(TOPIC);
+            reader.addSplits(Collections.singletonList(removedSplit));
+
+            TrackingReaderOutputWithIdleness<byte[]> readerOutput =
+                    new TrackingReaderOutputWithIdleness<>();
+            assertThat(reader.pollNext(readerOutput)).isEqualTo(InputStatus.NOTHING_AVAILABLE);
+
+            reader.handleSourceEvents(getMetadataUpdateEvent(REMAINING_TOPIC));
+            assertThat(readerOutput.isIdle()).isTrue();
+
+            reader.addSplits(Collections.singletonList(getSplit(REMAINING_TOPIC)));
+            assertThat(reader.pollNext(readerOutput)).isEqualTo(InputStatus.NOTHING_AVAILABLE);
+
+            assertThat(readerOutput.splitOutputEvents())
+                    .containsExactly(
+                            "idle:" + removedSplit.splitId(), "release:" + removedSplit.splitId());
+            assertThat(readerOutput.idleCount()).isEqualTo(1);
+            assertThat(readerOutput.activeCount()).isEqualTo(1);
+            assertThat(readerOutput.isIdle()).isFalse();
+        }
+    }
+
     private static MetadataUpdateEvent getMetadataUpdateEvent() {
         return getMetadataUpdateEvent(TOPIC);
     }
@@ -109,6 +137,13 @@ class DynamicKafkaSourceReaderIdlenessTest {
                         new KafkaStream(
                                 TOPIC,
                                 Collections.singletonMap(KAFKA_CLUSTER_ID, clusterMetadata))));
+    }
+
+    private static DynamicKafkaSourceSplit getSplit(String topic) {
+        return new DynamicKafkaSourceSplit(
+                KAFKA_CLUSTER_ID,
+                new KafkaPartitionSplit(
+                        new TopicPartition(topic, 0), 0L, KafkaPartitionSplit.NO_STOPPING_OFFSET));
     }
 
     private static Properties getRequiredProperties() {
@@ -143,6 +178,8 @@ class DynamicKafkaSourceReaderIdlenessTest {
                 @Override
                 public void markIdle() {
                     splitOutputEvents.add("idle:" + splitId);
+                    // Model the split-output multiplexer publishing aggregate idleness.
+                    idle = true;
                 }
 
                 @Override

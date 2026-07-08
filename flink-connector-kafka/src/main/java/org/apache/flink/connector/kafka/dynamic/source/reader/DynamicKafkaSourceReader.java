@@ -389,6 +389,12 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                 notifyNoMoreSplits();
             }
         }
+
+        // Releasing the last split output can expose the runtime output as idle immediately. Keep
+        // the reader-level state in sync so a replacement split is reactivated before polling it.
+        if (latestReaderOutput != null) {
+            maybeUpdateNoActiveSplitOutputIdleness(latestReaderOutput);
+        }
     }
 
     private void releaseOrDeferSplitOutput(String splitId) {
