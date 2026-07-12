@@ -62,6 +62,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit.MIGRATED;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Unit tests for {@link KafkaSourceEnumerator}. */
 @ResourceLock("KafkaTestBase")
@@ -945,6 +946,46 @@ public class KafkaSourceEnumeratorTest {
         // Initialize offsets for discovered partitions
         if (!context.getOneTimeCallables().isEmpty()) {
             context.runNextOneTimeCallable();
+        }
+    }
+
+    @Test
+    public void testCheckSourceIntegrityFromProperties() throws Exception {
+        // Test that properties are used when job configuration doesn't have the setting
+        final boolean propertiesCheckSourceIntegrity = true;
+
+        Properties properties = new Properties();
+        properties.setProperty(
+                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key(),
+                String.valueOf(propertiesCheckSourceIntegrity));
+        try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                KafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                context,
+                                ENABLE_PERIODIC_PARTITION_DISCOVERY ? 1 : -1,
+                                OffsetsInitializer.earliest(),
+                                Collections.emptySet(),
+                                Collections.emptySet(),
+                                Collections.emptySet(),
+                                true,
+                                properties)) {
+
+            // Verify that the properties value is used
+            assertEquals(propertiesCheckSourceIntegrity, enumerator.topicIntegrityCheckEnabled());
+        }
+    }
+
+    @Test
+    public void testCheckSourceIntegrityDefaultValue() throws Exception {
+        final boolean defaultCheckSourceIntegrity = false;
+        try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                KafkaSourceEnumerator enumerator =
+                        createEnumerator(context, DISABLE_PERIODIC_PARTITION_DISCOVERY)) {
+
+            // Verify partition discovery is disabled
+            assertEquals(defaultCheckSourceIntegrity, enumerator.topicIntegrityCheckEnabled());
         }
     }
 }

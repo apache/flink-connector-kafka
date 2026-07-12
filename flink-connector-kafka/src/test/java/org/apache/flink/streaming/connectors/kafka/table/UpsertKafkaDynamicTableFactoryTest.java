@@ -138,6 +138,7 @@ class UpsertKafkaDynamicTableFactoryTest {
     static {
         UPSERT_KAFKA_SOURCE_PROPERTIES.setProperty("bootstrap.servers", "dummy");
         UPSERT_KAFKA_SOURCE_PROPERTIES.setProperty("partition.discovery.interval.ms", "1000");
+        UPSERT_KAFKA_SOURCE_PROPERTIES.setProperty("scan.topic-integrity-check.enabled", "false");
 
         UPSERT_KAFKA_SINK_PROPERTIES.setProperty("bootstrap.servers", "dummy");
     }
@@ -242,6 +243,36 @@ class UpsertKafkaDynamicTableFactoryTest {
         ScanTableSource.ScanRuntimeProvider provider =
                 actualUpsertKafkaSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
         assertKafkaSource(provider);
+    }
+
+    public void testTableSourceTopicIntegrity() {
+        final Map<String, String> modifiedOptions =
+                getModifiedOptions(
+                        getFullSourceOptions(),
+                        options -> {
+                            options.put("scan.topic-integrity-check.enabled", "true");
+                        });
+        final DynamicTableSource actualSource = createTableSource(SOURCE_SCHEMA, modifiedOptions);
+
+        final DataType producedDataType = SOURCE_SCHEMA.toPhysicalRowDataType();
+
+        final Properties props = new Properties();
+        props.putAll(UPSERT_KAFKA_SOURCE_PROPERTIES);
+        props.setProperty("scan.topic-integrity-check.enabled", "true");
+        // Test scan source equals
+        final KafkaDynamicSource expectedKafkaSource =
+                createExpectedScanSource(
+                        producedDataType,
+                        keyDecodingFormat,
+                        valueDecodingFormat,
+                        SOURCE_KEY_FIELDS,
+                        SOURCE_VALUE_FIELDS,
+                        null,
+                        Collections.singletonList(SOURCE_TOPIC),
+                        props,
+                        null);
+        final KafkaDynamicSource actualKafkaSource = (KafkaDynamicSource) actualSource;
+        assertThat(actualKafkaSource).isEqualTo(expectedKafkaSource);
     }
 
     @Test

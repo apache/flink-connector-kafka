@@ -21,6 +21,7 @@ package org.apache.flink.connector.kafka.source;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.connector.source.Boundedness;
+import org.apache.flink.connector.kafka.integrity.TopicIntegrityAware;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.NoStoppingOffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializerValidator;
@@ -375,6 +376,19 @@ public class KafkaSourceBuilder<OUT> {
     }
 
     /**
+     * Whether perform a check for the integrity of source topics, and fail the job if the topic was
+     * deleted or recreated. For the check to be performed periodically during source runtime,
+     * partition discovery must be enabled (KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS set
+     * to a positive number)
+     *
+     * @return {@link KafkaSourceBuilder}
+     */
+    public KafkaSourceBuilder<OUT> enableTopicIntegrityCheck() {
+        this.setProperty(KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key(), "true");
+        return this;
+    }
+
+    /**
      * Set an arbitrary property for the KafkaSource and KafkaConsumer. The valid keys can be found
      * in {@link ConsumerConfig} and {@link KafkaSourceOptions}.
      *
@@ -538,6 +552,12 @@ public class KafkaSourceBuilder<OUT> {
         if (props.containsKey(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG)) {
             checkDeserializer(props.getProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG));
         }
+        if (topicIntegrityCheckEnabled()) {
+            checkState(
+                    subscriber instanceof TopicIntegrityAware,
+                    "Topic integrity check is not supported for non topic-id aware subscriber %s",
+                    subscriber.getClass().getName());
+        }
     }
 
     private void checkDeserializer(String deserializer) {
@@ -586,5 +606,11 @@ public class KafkaSourceBuilder<OUT> {
                                 props.getProperty(
                                         KafkaSourceOptions.COMMIT_OFFSETS_ON_CHECKPOINT.key()));
         return autoCommit || commitOnCheckpoint;
+    }
+
+    private boolean topicIntegrityCheckEnabled() {
+        return props.containsKey(KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key())
+                && Boolean.parseBoolean(
+                        props.getProperty(KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()));
     }
 }

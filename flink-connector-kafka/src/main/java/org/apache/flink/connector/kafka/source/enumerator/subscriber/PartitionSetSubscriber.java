@@ -18,6 +18,7 @@
 
 package org.apache.flink.connector.kafka.source.enumerator.subscriber;
 
+import org.apache.flink.connector.kafka.integrity.TopicIntegrityAware;
 import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetIdentifier;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifierProvider;
 
@@ -27,6 +28,7 @@ import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
@@ -36,13 +38,23 @@ import java.util.stream.Collectors;
 import static org.apache.flink.connector.kafka.util.AdminUtils.getTopicMetadata;
 
 /** A subscriber for a partition set. */
-class PartitionSetSubscriber implements KafkaSubscriber, KafkaDatasetIdentifierProvider {
+class PartitionSetSubscriber
+        implements KafkaSubscriber, KafkaDatasetIdentifierProvider, TopicIntegrityAware {
     private static final long serialVersionUID = 390970375272146036L;
     private static final Logger LOG = LoggerFactory.getLogger(PartitionSetSubscriber.class);
     private final Set<TopicPartition> subscribedPartitions;
+    private final TopicIntegrityProvider topicIntegrityProvider;
+    private volatile boolean topicIntegrityCheckEnabled = false;
 
     PartitionSetSubscriber(Set<TopicPartition> partitions) {
         this.subscribedPartitions = partitions;
+        this.topicIntegrityProvider = new TopicIntegrityProvider();
+    }
+
+    @Override
+    public void open(InitializationContext initializationContext) {
+        this.topicIntegrityCheckEnabled = initializationContext.topicIntegrityCheckEnabled();
+        topicIntegrityProvider.open(initializationContext.topicIntegrityMapping());
     }
 
     @Override
@@ -54,8 +66,9 @@ class PartitionSetSubscriber implements KafkaSubscriber, KafkaDatasetIdentifierP
 
         LOG.debug("Fetching descriptions for topics: {}", topicNames);
         final Map<String, TopicDescription> topicMetadata =
-                getTopicMetadata(adminClient, topicNames);
-
+                topicIntegrityCheckEnabled
+                        ? topicIntegrityProvider.getVerifiedTopicMetadata(adminClient, topicNames)
+                        : getTopicMetadata(adminClient, topicNames);
         Set<TopicPartition> existingSubscribedPartitions = new HashSet<>();
 
         for (TopicPartition subscribedPartition : this.subscribedPartitions) {
@@ -86,5 +99,12 @@ class PartitionSetSubscriber implements KafkaSubscriber, KafkaDatasetIdentifierP
                                 .map(TopicPartition::topic)
                                 .distinct()
                                 .collect(Collectors.toList())));
+    }
+
+    @Override
+    public Map<String, String> getTopicIntegrityMapping() {
+        return topicIntegrityCheckEnabled
+                ? topicIntegrityProvider.getTopicIntegrityMapping()
+                : Collections.emptyMap();
     }
 }
