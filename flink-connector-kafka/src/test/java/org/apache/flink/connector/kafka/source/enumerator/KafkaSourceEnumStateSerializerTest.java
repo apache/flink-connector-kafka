@@ -23,6 +23,7 @@ import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplitSerializer;
 
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.Uuid;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -77,7 +78,20 @@ class KafkaSourceEnumStateSerializerTest {
                                         new SplitAndAssignmentStatus(
                                                 split, getAssignmentStatus(split)))
                         .collect(Collectors.toList());
-
+        final Set<SplitAndAssignmentStatus> splitAndAssignmentStatusesSet =
+                splits.stream()
+                        .map(
+                                split ->
+                                        new SplitAndAssignmentStatus(
+                                                split, getAssignmentStatus(split)))
+                        .collect(Collectors.toSet());
+        final Map<String, String> trackedTopicIdsByName =
+                splits.stream()
+                        .map(KafkaPartitionSplit::getTopic)
+                        .distinct()
+                        .collect(
+                                Collectors.toMap(
+                                        topic -> topic, topic -> Uuid.randomUuid().toString()));
         // Create bytes in the way of KafkaEnumStateSerializer version 0 doing serialization
         final byte[] bytesV0 =
                 SerdeUtils.serializeSplitAssignments(
@@ -86,6 +100,13 @@ class KafkaSourceEnumStateSerializerTest {
         final byte[] bytesV1 = KafkaSourceEnumStateSerializer.serializeV1(splits);
         final byte[] bytesV2 =
                 KafkaSourceEnumStateSerializer.serializeV2(splitAndAssignmentStatuses, false);
+        final byte[] bytesV3 =
+                KafkaSourceEnumStateSerializer.serializeV3(
+                        new KafkaSourceEnumState(splitAndAssignmentStatusesSet, false));
+        final byte[] bytesV4 =
+                KafkaSourceEnumStateSerializer.serializeV4(
+                        new KafkaSourceEnumState(
+                                splitAndAssignmentStatusesSet, false, trackedTopicIdsByName));
 
         // Deserialize above bytes with KafkaEnumStateSerializer version 2 to check backward
         // compatibility
@@ -95,6 +116,10 @@ class KafkaSourceEnumStateSerializerTest {
                 new KafkaSourceEnumStateSerializer().deserialize(1, bytesV1);
         final KafkaSourceEnumState kafkaSourceEnumStateV2 =
                 new KafkaSourceEnumStateSerializer().deserialize(2, bytesV2);
+        final KafkaSourceEnumState kafkaSourceEnumStateV3 =
+                new KafkaSourceEnumStateSerializer().deserialize(3, bytesV3);
+        final KafkaSourceEnumState kafkaSourceEnumStateV4 =
+                new KafkaSourceEnumStateSerializer().deserialize(4, bytesV4);
 
         assertThat(kafkaSourceEnumStateV0.assignedSplits())
                 .containsExactlyInAnyOrderElementsOf(splits);
@@ -120,6 +145,21 @@ class KafkaSourceEnumStateSerializerTest {
                 .containsExactlyInAnyOrderElementsOf(
                         splitsByStatus.get(AssignmentStatus.UNASSIGNED));
         assertThat(kafkaSourceEnumStateV2.initialDiscoveryFinished()).isFalse();
+
+        assertThat(kafkaSourceEnumStateV3.assignedSplits())
+                .containsExactlyInAnyOrderElementsOf(splitsByStatus.get(AssignmentStatus.ASSIGNED));
+        assertThat(kafkaSourceEnumStateV3.unassignedSplits())
+                .containsExactlyInAnyOrderElementsOf(
+                        splitsByStatus.get(AssignmentStatus.UNASSIGNED));
+        assertThat(kafkaSourceEnumStateV3.initialDiscoveryFinished()).isFalse();
+
+        assertThat(kafkaSourceEnumStateV4.assignedSplits())
+                .containsExactlyInAnyOrderElementsOf(splitsByStatus.get(AssignmentStatus.ASSIGNED));
+        assertThat(kafkaSourceEnumStateV4.unassignedSplits())
+                .containsExactlyInAnyOrderElementsOf(
+                        splitsByStatus.get(AssignmentStatus.UNASSIGNED));
+        assertThat(kafkaSourceEnumStateV4.initialDiscoveryFinished()).isFalse();
+        assertThat(kafkaSourceEnumStateV4.trackedTopicIdsByName()).isEqualTo(trackedTopicIdsByName);
     }
 
     private static AssignmentStatus getAssignmentStatus(KafkaPartitionSplit split) {
