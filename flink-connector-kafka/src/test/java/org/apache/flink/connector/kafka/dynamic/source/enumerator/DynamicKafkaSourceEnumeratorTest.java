@@ -61,6 +61,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.ConcurrentModificationException;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -2411,6 +2412,11 @@ public class DynamicKafkaSourceEnumeratorTest {
     @SuppressWarnings("unchecked")
     private MetadataUpdateEvent getLatestMetadataUpdateEventWithoutContextSync(
             MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context, int readerId) {
+        // Reflection is required here because MockSplitEnumeratorContext#getSentSourceEvent()
+        // dispatches to workerExecutor and blocks on Future#get(). In tests that intentionally
+        // block workerExecutor (e.g.
+        // testProductionMetadataRefreshBypassesBlockedSourceCoordinatorAsyncCallable),
+        // calling getSentSourceEvent() deadlocks.
         Map<Integer, List<SourceEvent>> sentSourceEvents =
                 (Map<Integer, List<SourceEvent>>)
                         Whitebox.getInternalState(context, "sentSourceEvent");
@@ -2430,6 +2436,9 @@ public class DynamicKafkaSourceEnumeratorTest {
                                                 readerId)));
     }
 
+    // Polling predicate: retries on AssertionError ("not ready yet") as well as
+    // ConcurrentModificationException because sentSourceEvent's inner event lists are modified
+    // concurrently by the main executor thread (see FLINK-40543).
     private boolean hasLatestMetadataUpdateEvent(
             MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context,
             int readerId,
@@ -2438,7 +2447,7 @@ public class DynamicKafkaSourceEnumeratorTest {
             return getLatestMetadataUpdateEventWithoutContextSync(context, readerId)
                     .getKafkaStreams()
                     .equals(Collections.singleton(expectedKafkaStream));
-        } catch (AssertionError e) {
+        } catch (AssertionError | ConcurrentModificationException e) {
             return false;
         }
     }
