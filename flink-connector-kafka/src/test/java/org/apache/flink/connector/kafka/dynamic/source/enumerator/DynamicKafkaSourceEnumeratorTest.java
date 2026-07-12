@@ -47,6 +47,7 @@ import org.apache.flink.runtime.state.OperatorStreamStateHandle;
 import org.apache.flink.runtime.state.memory.ByteStreamStateHandle;
 import org.apache.flink.streaming.connectors.kafka.DynamicKafkaSourceTestHelper;
 import org.apache.flink.testutils.logging.LoggerAuditingExtension;
+import org.apache.flink.util.ExceptionUtils;
 
 import com.google.common.collect.ImmutableSet;
 import org.apache.kafka.clients.CommonClientConfigs;
@@ -61,6 +62,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.ConcurrentModificationException;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -2408,12 +2410,10 @@ public class DynamicKafkaSourceEnumeratorTest {
                                                 readerId)));
     }
 
-    @SuppressWarnings("unchecked")
     private MetadataUpdateEvent getLatestMetadataUpdateEventWithoutContextSync(
-            MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context, int readerId) {
-        Map<Integer, List<SourceEvent>> sentSourceEvents =
-                (Map<Integer, List<SourceEvent>>)
-                        Whitebox.getInternalState(context, "sentSourceEvent");
+            MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context, int readerId)
+            throws Exception {
+        Map<Integer, List<SourceEvent>> sentSourceEvents = context.getSentSourceEvent();
         List<SourceEvent> sourceEvents = sentSourceEvents.get(readerId);
         assertThat(sourceEvents)
                 .as("reader %s should have received source events", readerId)
@@ -2430,6 +2430,10 @@ public class DynamicKafkaSourceEnumeratorTest {
                                                 readerId)));
     }
 
+    // Polling predicate: retries on AssertionError ("not ready yet") as well as
+    // ConcurrentModificationException because MockSplitEnumeratorContext#getSentSourceEvent
+    // performs an unsynchronized shallow copy whose inner event lists are modified
+    // concurrently by the main executor thread (see FLINK-40543).
     private boolean hasLatestMetadataUpdateEvent(
             MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context,
             int readerId,
@@ -2438,7 +2442,14 @@ public class DynamicKafkaSourceEnumeratorTest {
             return getLatestMetadataUpdateEventWithoutContextSync(context, readerId)
                     .getKafkaStreams()
                     .equals(Collections.singleton(expectedKafkaStream));
-        } catch (AssertionError e) {
+        } catch (AssertionError | ConcurrentModificationException e) {
+            return false;
+        } catch (Exception e) {
+            if (ExceptionUtils.findThrowable(e, ConcurrentModificationException.class)
+                    .isPresent()) {
+                return false;
+            }
+            ExceptionUtils.rethrow(e);
             return false;
         }
     }
