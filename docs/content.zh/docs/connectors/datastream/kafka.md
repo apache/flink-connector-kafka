@@ -220,6 +220,8 @@ Kafka Source 支持流式和批式两种运行模式。默认情况下，KafkaSo
 - ```commit.offsets.on.checkpoint``` 指定是否在进行 checkpoint 时将消费位点提交至 Kafka broker
 - ```poll.timeout.ms``` 指定 Kafka Consumer 单次 poll 等待数据的最长时间（毫秒），默认为 10 秒。
   减小该值可以让空闲的 Source 更快地响应分片变更，但 poll 会更频繁
+- ```scan.topic-integrity-check.enabled``` 指定是否在运行时校验订阅 Topic 的 id，并在 Topic 缺失或被重建时使作业失败。
+  默认关闭。详见下面的<a href="#topic-integrity-check">Topic 完整性检查</a>一节
 
 Kafka consumer 的配置可以参考 [Apache Kafka 文档](http://kafka.apache.org/documentation/#consumerconfigs)。
 
@@ -250,6 +252,36 @@ KafkaSource.builder() \
 {{< hint warning >}}
 分区检查间隔默认为5分钟。需要显式地设置分区检查间隔为非正数才能关闭此功能。
 {{< /hint >}}
+
+### Topic 完整性检查
+如果某个订阅的 Topic 被删除后又以相同的名称重建，Kafka Source 默认会像什么都没发生一样，继续从新的 Topic 静默地消费数据，
+而这通常并非用户所期望的行为。Topic 完整性检查通过跟踪每个订阅 Topic 的 topic id 来防止这种情况：一旦检测到 topic id
+不匹配（Topic 被重建）或 Topic 缺失，就会使作业失败，而不是静默地继续从不同的底层 Topic 中读取数据。
+
+要启用该功能，可以在 ```KafkaSourceBuilder``` 上调用 ```enableTopicIntegrityCheck()```，或者将属性
+```scan.topic-integrity-check.enabled``` 设置为 ```true```：
+
+{{< tabs "KafkaSource#TopicIntegrityCheck" >}}
+{{< tab "Java" >}}
+```java
+KafkaSource.builder()
+    .enableTopicIntegrityCheck();
+```
+{{< /tab >}}
+{{< /tabs >}}
+
+{{< hint info >}}
+Topic 完整性检查仅在通过 ```setTopics(String...)```、```setTopicPattern(Pattern)``` 或
+```setPartitions(Set)``` 订阅 Topic 时受支持。如果将此选项与未实现 ```TopicMetadataSettable``` 接口的
+自定义 ```KafkaSubscriber```（通过 ```setKafkaSubscriber``` 设置）一起启用，构建器会在构建时抛出异常。
+{{< /hint >}}
+
+该检查会在 Source 每次从 Kafka 拉取 Topic / Partition 元数据时执行，即启动时执行一次；如果启用了
+<a href="#dynamic-partition-discovery">动态分区检查</a>，之后每个检查周期还会再执行一次。要在作业运行期间
+周期性地执行该检查，请确保 ```partition.discovery.interval.ms``` 被设置为正值；否则该检查只会在
+Source 启动或恢复时执行一次。
+
+当某个 Topic 被检测为缺失或被重建时，Source 会抛出 ```TopicIntegrityException``` 并使作业失败。
 
 ### 事件时间和水印
 默认情况下，Kafka Source 使用 Kafka 消息中的时间戳作为事件时间。您可以定义自己的水印策略（Watermark Strategy）

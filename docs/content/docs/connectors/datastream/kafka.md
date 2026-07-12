@@ -231,6 +231,9 @@ metric group
 - ```poll.timeout.ms``` defines the maximum time in milliseconds the Kafka consumer blocks in a
   single poll while waiting for records, 10 seconds by default. Lowering it makes an idle source
   react faster to split changes, at the cost of polling more often
+- ```scan.topic-integrity-check.enabled``` specifies whether to verify the id of the subscribed
+  topics during runtime and fail the job if a topic is missing or was recreated. Disabled by
+  default. See <a href="#topic-integrity-check">Topic Integrity Check</a> below for more details.
 
 For configurations of KafkaConsumer, you can refer to
 <a href="http://kafka.apache.org/documentation/#consumerconfigs">Apache Kafka documentation</a>
@@ -268,6 +271,40 @@ KafkaSource.builder() \
 {{< hint warning >}}
 The partition discovery interval is 5 minutes by default. To **disable** this feature, you need to explicitly set the partition discovery interval to a non-positive value.
 {{< /hint >}}
+
+### Topic Integrity Check
+If a subscribed topic is deleted and later recreated with the same name, the Kafka source would by
+default silently keep consuming from the new topic as if nothing happened, which is often not what
+users want. Topic integrity check protects against this scenario by tracking the topic id of every
+subscribed topic and failing the job as soon as a mismatch (topic recreated) or a missing topic is
+detected, instead of silently continuing to read from a different underlying topic.
+
+To enable this feature, either call ```enableTopicIntegrityCheck()``` on the ```KafkaSourceBuilder```,
+or set the property ```scan.topic-integrity-check.enabled``` to ```true```:
+
+{{< tabs "KafkaSource#TopicIntegrityCheck" >}}
+{{< tab "Java" >}}
+```java
+KafkaSource.builder()
+    .enableTopicIntegrityCheck();
+```
+{{< /tab >}}
+{{< /tabs >}}
+
+{{< hint info >}}
+Topic integrity check is only supported when the source subscribes to topics using
+```setTopics(String...)```, ```setTopicPattern(Pattern)``` or ```setPartitions(Set)```. Enabling
+this option together with a custom ```KafkaSubscriber``` (via ```setKafkaSubscriber```) that does
+not implement ```TopicMetadataSettable``` will cause the builder to throw an exception at build time.
+{{< /hint >}}
+
+The check is performed every time the source fetches topic/partition metadata from Kafka, i.e. once
+at startup and, if <a href="#dynamic-partition-discovery">partition discovery</a> is enabled, once
+per discovery interval afterwards. To have the check performed periodically while the job is
+running, make sure ```partition.discovery.interval.ms``` is set to a positive value; otherwise the
+topics are only checked once during source startup or recovery.
+
+When a topic is found missing or recreated, the source fails with a ```TopicIntegrityException```.
 
 ### Event Time and Watermarks
 By default, the record will use the timestamp embedded in Kafka ```ConsumerRecord``` as the event
