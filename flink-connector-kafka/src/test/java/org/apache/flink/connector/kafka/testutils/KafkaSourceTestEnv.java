@@ -19,21 +19,24 @@
 package org.apache.flink.connector.kafka.testutils;
 
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
+import org.apache.flink.core.testutils.CommonTestUtils;
 import org.apache.flink.streaming.connectors.kafka.KafkaTestBase;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsSpec;
 import org.apache.kafka.clients.admin.RecordsToDelete;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.IntegerDeserializer;
 import org.apache.kafka.common.serialization.IntegerSerializer;
-import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -52,6 +55,9 @@ public class KafkaSourceTestEnv extends KafkaTestBase {
     public static final String GROUP_ID = "KafkaSourceTestEnv";
     public static final int NUM_PARTITIONS = 10;
     public static final int NUM_RECORDS_PER_PARTITION = 10;
+
+    private static final Duration WAIT_DATA_TIMEOUT = Duration.ofMinutes(2);
+    private static final Duration WAIT_DATA_INTERVAL = Duration.ofSeconds(2);
 
     private static AdminClient adminClient;
     private static KafkaConsumer<String, Integer> consumer;
@@ -77,15 +83,7 @@ public class KafkaSourceTestEnv extends KafkaTestBase {
     }
 
     public static KafkaConsumer<String, Integer> getConsumer() {
-        Properties props = new Properties();
-        props.putAll(standardProps);
-        props.setProperty(ConsumerConfig.GROUP_ID_CONFIG, GROUP_ID);
-        props.setProperty(
-                ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-        props.setProperty(
-                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
-                IntegerDeserializer.class.getName());
-        return new KafkaConsumer<>(props);
+        return new KafkaConsumer<>(getConsumerProperties(IntegerDeserializer.class));
     }
 
     public static Properties getConsumerProperties(Class<?> deserializerClass) {
@@ -273,5 +271,58 @@ public class KafkaSourceTestEnv extends KafkaTestBase {
         if (setupCommittedOffsets) {
             setupCommittedOffsets(topic);
         }
+    }
+
+    public static String getTopicId(String topicName)
+            throws InterruptedException, ExecutionException {
+        return getAdminClient()
+                .listTopics()
+                .namesToListings()
+                .get()
+                .get(topicName)
+                .topicId()
+                .toString();
+    }
+
+    private static long getRecordCountInTopic(String topicName) {
+        try (Consumer<String, Integer> consumer = getConsumer()) {
+            List<TopicPartition> partitions =
+                    consumer.partitionsFor(topicName).stream()
+                            .map(info -> new TopicPartition(topicName, info.partition()))
+                            .collect(Collectors.toList());
+
+            consumer.assign(partitions);
+            consumer.seekToBeginning(partitions);
+
+            long totalRecords = 0;
+            ConsumerRecords<String, Integer> records;
+            do {
+                records = consumer.poll(Duration.ofSeconds(1));
+                totalRecords += records.count();
+            } while (!records.isEmpty());
+
+            return totalRecords;
+        }
+    }
+
+    public static void waitForRecordsInTopic(String topicName, int expectedCount) throws Exception {
+        CommonTestUtils.waitUtil(
+                () -> {
+                    long count = KafkaSourceTestEnv.getRecordCountInTopic(topicName);
+                    LOG.info(
+                            "Found {} records in topic {} (expected: {})",
+                            count,
+                            topicName,
+                            expectedCount);
+                    if (count == expectedCount) {
+                        return true;
+                    }
+                    return false;
+                },
+                WAIT_DATA_TIMEOUT,
+                WAIT_DATA_INTERVAL,
+                String.format(
+                        "Timeout waiting for %d records in topic %s after %s",
+                        expectedCount, topicName, WAIT_DATA_TIMEOUT));
     }
 }
