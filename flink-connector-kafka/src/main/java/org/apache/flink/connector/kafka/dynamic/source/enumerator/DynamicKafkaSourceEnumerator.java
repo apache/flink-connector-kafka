@@ -113,9 +113,7 @@ public class DynamicKafkaSourceEnumerator
     private Map<String, DynamicKafkaSourceEnumState.RetainedClusterState>
             retainedClusterEnumeratorStates;
     private boolean firstDiscoveryComplete;
-    private boolean initialReaderRegistrationPending;
-    private final Map<Integer, List<DynamicKafkaSourceSplit>> pendingReportedSplitsByReader;
-    private final Set<Integer> pendingMetadataUpdateReaders;
+    private final ReaderRecoveryGate readerRecoveryGate;
 
     public DynamicKafkaSourceEnumerator(
             KafkaStreamSubscriber kafkaStreamSubscriber,
@@ -217,10 +215,8 @@ public class DynamicKafkaSourceEnumerator
                                         runnable, "dynamic-kafka-enumerator-closing-worker"));
         this.asynchronousEnumeratorCloseFailure = new AtomicReference<>();
         this.splitAssignmentStrategy = createSplitAssignmentStrategy(properties);
-        this.initialReaderRegistrationPending =
-                hasRestoredEnumeratorState(dynamicKafkaSourceEnumState);
-        this.pendingReportedSplitsByReader = new HashMap<>();
-        this.pendingMetadataUpdateReaders = new HashSet<>();
+        this.readerRecoveryGate =
+                new ReaderRecoveryGate(hasRestoredEnumeratorState(dynamicKafkaSourceEnumState));
 
         if (!dynamicKafkaSourceEnumState.getClusterEnumeratorStates().isEmpty()) {
             logger.info("Dynamic Kafka source restored from checkpointed enumerator state");
@@ -558,7 +554,7 @@ public class DynamicKafkaSourceEnumerator
     /** NOTE: Must run on coordinator thread. */
     private void sendMetadataUpdateEventToAvailableReaders() {
         if (shouldDeferMetadataUpdateEvents()) {
-            pendingMetadataUpdateReaders.addAll(enumContext.registeredReaders().keySet());
+            readerRecoveryGate.deferMetadataUpdates(enumContext.registeredReaders().keySet());
             return;
         }
 
@@ -768,11 +764,8 @@ public class DynamicKafkaSourceEnumerator
         logger.debug("Adding reader {}", subtaskId);
         ReaderInfo readerInfo = enumContext.registeredReaders().get(subtaskId);
         if (readerInfo != null) {
-            List<DynamicKafkaSourceSplit> reportedSplits =
-                    readerInfo.getReportedSplitsOnRegistration();
-            if (!reportedSplits.isEmpty()) {
-                pendingReportedSplitsByReader.put(subtaskId, new ArrayList<>(reportedSplits));
-            }
+            readerRecoveryGate.recordReportedSplits(
+                    subtaskId, readerInfo.getReportedSplitsOnRegistration());
         }
 
         if (tryCompletePendingReaderRegistration()) {
@@ -784,19 +777,15 @@ public class DynamicKafkaSourceEnumerator
     }
 
     private boolean tryCompletePendingReaderRegistration() {
-        boolean hasPendingRecovery =
-                initialReaderRegistrationPending || !pendingReportedSplitsByReader.isEmpty();
-        if (!hasPendingRecovery) {
+        if (!readerRecoveryGate.hasPendingRecovery()) {
             return false;
         }
         if (!firstDiscoveryComplete || !allReadersRegistered()) {
             return true;
         }
 
-        if (initialReaderRegistrationPending) {
-            initialReaderRegistrationPending = false;
-        }
-        if (!pendingReportedSplitsByReader.isEmpty()) {
+        readerRecoveryGate.markInitialRegistrationComplete();
+        if (readerRecoveryGate.hasReportedSplits()) {
             reassignReportedSplits();
         } else {
             flushPendingSplitAssignmentsForRegisteredReaders();
@@ -830,7 +819,7 @@ public class DynamicKafkaSourceEnumerator
         long currentTimeMillis = System.currentTimeMillis();
 
         for (Entry<Integer, List<DynamicKafkaSourceSplit>> readerSplits :
-                new TreeMap<>(pendingReportedSplitsByReader).entrySet()) {
+                readerRecoveryGate.drainReportedSplits().entrySet()) {
             int readerId = readerSplits.getKey();
             for (DynamicKafkaSourceSplit split : readerSplits.getValue()) {
                 if (isSplitActive(split)) {
@@ -875,19 +864,14 @@ public class DynamicKafkaSourceEnumerator
         if (!retainedSplitsByReader.isEmpty()) {
             enumContext.assignSplits(new SplitsAssignment<>(retainedSplitsByReader));
         }
-        pendingReportedSplitsByReader.clear();
     }
 
     private boolean shouldDeferMetadataUpdateEvents() {
-        return initialReaderRegistrationPending
-                || (!pendingReportedSplitsByReader.isEmpty() && !allReadersRegistered());
+        return readerRecoveryGate.shouldDeferMetadataUpdateEvents(allReadersRegistered());
     }
 
     private void flushPendingMetadataUpdateEvents() {
-        List<Integer> readers = new ArrayList<>(pendingMetadataUpdateReaders);
-        Collections.sort(readers);
-        pendingMetadataUpdateReaders.clear();
-        for (int readerId : readers) {
+        for (int readerId : readerRecoveryGate.drainDeferredMetadataUpdateReaders()) {
             if (enumContext.registeredReaders().containsKey(readerId)) {
                 sendMetadataUpdateEvent(readerId);
             }
@@ -1043,7 +1027,7 @@ public class DynamicKafkaSourceEnumerator
 
         if (enumContext.registeredReaders().containsKey(subtaskId)) {
             if (shouldDeferMetadataUpdateEvents()) {
-                pendingMetadataUpdateReaders.add(subtaskId);
+                readerRecoveryGate.deferMetadataUpdate(subtaskId);
             } else {
                 sendMetadataUpdateEvent(subtaskId);
             }
