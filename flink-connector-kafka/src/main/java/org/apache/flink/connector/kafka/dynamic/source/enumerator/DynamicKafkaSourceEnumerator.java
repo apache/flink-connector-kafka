@@ -949,12 +949,28 @@ public class DynamicKafkaSourceEnumerator
                                 && retainedClusterEnumeratorStates.containsKey(
                                         split.getKafkaClusterId());
                 if (!retainedClusterWaitingForHandoff && isSplitActive(split)) {
+                    boolean retainedReport = split.isRetained();
                     DynamicKafkaSourceSplit activeSplit = split.clearRetention();
+                    ReportedSplit reportedSplit =
+                            new ReportedSplit(activeSplit, readerId, retainedReport);
                     ReportedSplit previous =
-                            activeReportedSplits.putIfAbsent(
-                                    activeSplit.splitId(),
-                                    new ReportedSplit(activeSplit, readerId));
+                            activeReportedSplits.putIfAbsent(activeSplit.splitId(), reportedSplit);
                     if (previous != null) {
+                        if (previous.retained || retainedReport) {
+                            // Re-add can leave retained copies on old owners. Prefer the active
+                            // owner, or the furthest retained offset if no active owner reports.
+                            if (previous.retained
+                                    && (!retainedReport
+                                            || activeSplit
+                                                            .getKafkaPartitionSplit()
+                                                            .getStartingOffset()
+                                                    > previous.split
+                                                            .getKafkaPartitionSplit()
+                                                            .getStartingOffset())) {
+                                activeReportedSplits.put(activeSplit.splitId(), reportedSplit);
+                            }
+                            continue;
+                        }
                         throw new IllegalStateException(
                                 String.format(
                                         "Split %s was reported by both reader %d and reader %d",
@@ -1059,10 +1075,12 @@ public class DynamicKafkaSourceEnumerator
     private static class ReportedSplit {
         private final DynamicKafkaSourceSplit split;
         private final int readerId;
+        private final boolean retained;
 
-        private ReportedSplit(DynamicKafkaSourceSplit split, int readerId) {
+        private ReportedSplit(DynamicKafkaSourceSplit split, int readerId, boolean retained) {
             this.split = split;
             this.readerId = readerId;
+            this.retained = retained;
         }
     }
 

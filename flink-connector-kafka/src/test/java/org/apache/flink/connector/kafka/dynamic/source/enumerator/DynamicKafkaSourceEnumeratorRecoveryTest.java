@@ -353,6 +353,66 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
     }
 
     @Test
+    public void testRecoveryPrefersActiveSplitOverRetainedDuplicate() throws Throwable {
+        int parallelism = 2;
+        String streamId = "stream";
+        String clusterId = "cluster-0";
+        String topic = "topic";
+        TopicPartition topicPartition = new TopicPartition(topic, 0);
+        DynamicKafkaSourceSplit retainedSplit =
+                new DynamicKafkaSourceSplit(
+                                clusterId, new KafkaPartitionSplit(topicPartition, 123L))
+                        .retainUntil(System.currentTimeMillis() + 60_000L);
+        DynamicKafkaSourceSplit activeSplit =
+                new DynamicKafkaSourceSplit(
+                        clusterId, new KafkaPartitionSplit(topicPartition, 456L));
+        KafkaStream kafkaStream = createKafkaStream(streamId, clusterId, topic);
+        Properties properties = createGlobalModeProperties();
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
+                "60000");
+
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(parallelism);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                streamId,
+                                new MockKafkaMetadataService(Collections.singleton(kafkaStream)),
+                                context,
+                                properties,
+                                createRestoredState(
+                                        kafkaStream,
+                                        clusterId,
+                                        Collections.singletonList(activeSplit)))) {
+            enumerator.start();
+            context.registerReader(
+                    ReaderInfo.createReaderInfo(0, "location-0", List.of(retainedSplit)));
+            enumerator.addReader(0);
+            context.registerReader(
+                    ReaderInfo.createReaderInfo(1, "location-1", List.of(activeSplit)));
+            enumerator.addReader(1);
+
+            context.runNextOneTimeCallable();
+
+            List<DynamicKafkaSourceSplit> assignedSplits =
+                    context.getSplitsAssignmentSequence().stream()
+                            .flatMap(
+                                    assignment ->
+                                            assignment.assignment().values().stream()
+                                                    .flatMap(List::stream))
+                            .collect(java.util.stream.Collectors.toList());
+            assertThat(assignedSplits)
+                    .singleElement()
+                    .satisfies(
+                            split -> {
+                                assertThat(split.isRetained()).isFalse();
+                                assertThat(split.getKafkaPartitionSplit().getStartingOffset())
+                                        .isEqualTo(456L);
+                            });
+        }
+    }
+
+    @Test
     public void testReassignsReportedSplitsWithPerClusterOwnerSelection() throws Throwable {
         int parallelism = 2;
         String streamId = "stream";
