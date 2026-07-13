@@ -32,10 +32,10 @@ import org.apache.flink.util.FlinkRuntimeException;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.KafkaAdminClient;
-import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsSpec;
 import org.apache.kafka.clients.admin.ListOffsetsResult;
 import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.consumer.OffsetAndTimestamp;
 import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
@@ -685,23 +685,11 @@ public class KafkaSourceEnumerator
 
         @Override
         public Map<TopicPartition, Long> committedOffsets(Collection<TopicPartition> partitions) {
-            ListConsumerGroupOffsetsSpec offsetsSpec =
-                    new ListConsumerGroupOffsetsSpec().topicPartitions(partitions);
             try {
                 return adminClient
-                        .listConsumerGroupOffsets(Collections.singletonMap(groupId, offsetsSpec))
+                        .listConsumerGroupOffsets(groupId)
                         .partitionsToOffsetAndMetadata()
-                        .thenApply(
-                                result -> {
-                                    Map<TopicPartition, Long> offsets = new HashMap<>();
-                                    result.forEach(
-                                            (tp, oam) -> {
-                                                if (oam != null) {
-                                                    offsets.put(tp, oam.offset());
-                                                }
-                                            });
-                                    return offsets;
-                                })
+                        .thenApply(result -> filterCommittedOffsets(partitions, result))
                         .get();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -714,6 +702,20 @@ public class KafkaSourceEnumerator
                                 + " due to",
                         e);
             }
+        }
+
+        @VisibleForTesting
+        static Map<TopicPartition, Long> filterCommittedOffsets(
+                Collection<TopicPartition> partitions,
+                Map<TopicPartition, OffsetAndMetadata> committedOffsets) {
+            Map<TopicPartition, Long> offsets = new HashMap<>();
+            for (TopicPartition partition : partitions) {
+                OffsetAndMetadata offsetAndMetadata = committedOffsets.get(partition);
+                if (offsetAndMetadata != null) {
+                    offsets.put(partition, offsetAndMetadata.offset());
+                }
+            }
+            return offsets;
         }
 
         /**
