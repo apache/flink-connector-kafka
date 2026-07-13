@@ -370,6 +370,34 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
     }
 
     @Test
+    void testIdleReaderFinishesWhenNoMoreSplitsArrivesBeforeMetadata() throws Exception {
+        TestingReaderContext context = new TestingReaderContext();
+        try (DynamicKafkaSourceReader<Integer> reader = createReaderWithoutStart(context)) {
+            TrackingReaderOutput<Integer> readerOutput = new TrackingReaderOutput<>();
+            reader.start();
+
+            // The enumerator signals no more splits before the reader receives the metadata
+            // update event, e.g. when an idle reader registers after all bounded
+            // sub-enumerators have already finished split discovery.
+            reader.notifyNoMoreSplits();
+
+            MetadataUpdateEvent metadata =
+                    DynamicKafkaSourceTestHelper.getMetadataUpdateEvent(TOPIC);
+            reader.handleSourceEvents(metadata);
+
+            long deadline = System.currentTimeMillis() + 10_000;
+            InputStatus status = reader.pollNext(readerOutput);
+            while (status != InputStatus.END_OF_INPUT && System.currentTimeMillis() < deadline) {
+                status = reader.pollNext(readerOutput);
+            }
+            assertThat(status)
+                    .as(
+                            "idle reader must reach END_OF_INPUT even when no-more-splits precedes the metadata update event")
+                    .isEqualTo(InputStatus.END_OF_INPUT);
+        }
+    }
+
+    @Test
     void testAvailabilityFutureUpdates() throws Exception {
         TestingReaderContext context = new TestingReaderContext();
         try (DynamicKafkaSourceReader<Integer> reader = createReaderWithoutStart(context)) {
