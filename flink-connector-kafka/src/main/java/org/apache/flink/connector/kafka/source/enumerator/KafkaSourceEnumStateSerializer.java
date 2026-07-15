@@ -33,6 +33,7 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
@@ -62,9 +63,16 @@ public class KafkaSourceEnumStateSerializer
      */
     private static final int VERSION_2 = 2;
 
+    /**
+     * state of VERSION_3 contains splits with status: ASSIGNED or UNASSIGNED_INITIAL and
+     * initialDiscoveryFinished.
+     */
     private static final int VERSION_3 = 3;
 
-    private static final int CURRENT_VERSION = VERSION_3;
+    /** state of version 4 contains additional topicIntegrityMapping field for topic id tracking. */
+    private static final int VERSION_4 = 4;
+
+    private static final int CURRENT_VERSION = VERSION_4;
 
     private static final KafkaPartitionSplitSerializer SPLIT_SERIALIZER =
             new KafkaPartitionSplitSerializer();
@@ -76,7 +84,7 @@ public class KafkaSourceEnumStateSerializer
 
     @Override
     public byte[] serialize(KafkaSourceEnumState enumState) throws IOException {
-        return serializeV3(enumState);
+        return serializeV4(enumState);
     }
 
     @VisibleForTesting
@@ -102,6 +110,8 @@ public class KafkaSourceEnumStateSerializer
     @Override
     public KafkaSourceEnumState deserialize(int version, byte[] serialized) throws IOException {
         switch (version) {
+            case VERSION_4:
+                return deserializeVersion4(serialized);
             case VERSION_3:
                 return deserializeVersion3(serialized);
             case VERSION_2:
@@ -244,6 +254,67 @@ public class KafkaSourceEnumStateSerializer
             }
 
             return new KafkaSourceEnumState(partitions, initialDiscoveryFinished);
+        }
+    }
+
+    @VisibleForTesting
+    static byte[] serializeV4(KafkaSourceEnumState enumState) throws IOException {
+        Set<SplitAndAssignmentStatus> splits = enumState.splits();
+        boolean initialDiscoveryFinished = enumState.initialDiscoveryFinished();
+        Map<String, String> topicIntegrityMapping = enumState.topicIntegrityMapping();
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                DataOutputStream out = new DataOutputStream(baos)) {
+            out.writeInt(splits.size());
+            out.writeInt(SPLIT_SERIALIZER.getVersion());
+            for (SplitAndAssignmentStatus split : splits) {
+                final byte[] splitBytes = SPLIT_SERIALIZER.serialize(split.split());
+                out.writeInt(splitBytes.length);
+                out.write(splitBytes);
+                out.writeInt(split.assignmentStatus().getStatusCode());
+            }
+            out.writeBoolean(initialDiscoveryFinished);
+            out.writeInt(topicIntegrityMapping.size());
+            for (Map.Entry<String, String> entry : topicIntegrityMapping.entrySet()) {
+                out.writeUTF(entry.getKey());
+                out.writeUTF(entry.getValue());
+            }
+            out.flush();
+            return baos.toByteArray();
+        }
+    }
+
+    private static KafkaSourceEnumState deserializeVersion4(byte[] serialized) throws IOException {
+
+        final KafkaPartitionSplitSerializer splitSerializer = new KafkaPartitionSplitSerializer();
+
+        try (ByteArrayInputStream bais = new ByteArrayInputStream(serialized);
+                DataInputStream in = new DataInputStream(bais)) {
+
+            final int numPartitions = in.readInt();
+            final int splitVersion = in.readInt();
+            Set<SplitAndAssignmentStatus> partitions = new HashSet<>(numPartitions);
+
+            for (int i = 0; i < numPartitions; i++) {
+                final KafkaPartitionSplit split =
+                        splitSerializer.deserialize(splitVersion, in.readNBytes(in.readInt()));
+                final int statusCode = in.readInt();
+                partitions.add(
+                        new SplitAndAssignmentStatus(
+                                split, AssignmentStatus.ofStatusCode(statusCode)));
+            }
+            final boolean initialDiscoveryFinished = in.readBoolean();
+            final int topicIntegrityMappingSize = in.readInt();
+            final Map<String, String> topicIntegrityMapping =
+                    new HashMap<>(topicIntegrityMappingSize);
+            for (int i = 0; i < topicIntegrityMappingSize; i++) {
+                topicIntegrityMapping.put(in.readUTF(), in.readUTF());
+            }
+            if (in.available() > 0) {
+                throw new IOException("Unexpected trailing bytes in serialized topic partitions");
+            }
+
+            return new KafkaSourceEnumState(
+                    partitions, initialDiscoveryFinished, topicIntegrityMapping);
         }
     }
 }

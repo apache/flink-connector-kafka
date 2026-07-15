@@ -136,10 +136,13 @@ class KafkaDynamicTableFactoryTest {
     private static final Properties KAFKA_SINK_PROPERTIES = new Properties();
     private static final Properties KAFKA_FINAL_SINK_PROPERTIES = new Properties();
 
+    private static final String SOURCE_TOPIC_INTEGRITY_CHECK_ENABLED_DEFAULT = "false";
+
     static {
         KAFKA_SOURCE_PROPERTIES.setProperty("group.id", "dummy");
         KAFKA_SOURCE_PROPERTIES.setProperty("bootstrap.servers", "dummy");
         KAFKA_SOURCE_PROPERTIES.setProperty("partition.discovery.interval.ms", "1000");
+        KAFKA_SOURCE_PROPERTIES.setProperty("scan.topic-integrity-check.enabled", "false");
 
         KAFKA_SINK_PROPERTIES.setProperty("group.id", "dummy");
         KAFKA_SINK_PROPERTIES.setProperty("bootstrap.servers", "dummy");
@@ -483,6 +486,46 @@ class KafkaDynamicTableFactoryTest {
                         String.format(
                                 "%s can not be set to %s. Valid values: [latest,earliest,none]",
                                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, errorStrategy));
+    }
+
+    @Test
+    public void testTableSourceTopicIntegrity() {
+        final Map<String, String> modifiedOptions =
+                getModifiedOptions(
+                        getBasicSourceOptions(),
+                        options -> {
+                            options.put(
+                                    "scan.startup.mode",
+                                    ScanStartupMode.EARLIEST_OFFSET.toString());
+                            options.remove("scan.startup.specific-offsets");
+                            options.put("scan.topic-integrity-check.enabled", "true");
+                        });
+        final DynamicTableSource actualSource = createTableSource(SCHEMA, modifiedOptions);
+
+        DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat =
+                new DecodingFormatMock(",", true);
+
+        final Properties props = new Properties();
+        props.putAll(KAFKA_SOURCE_PROPERTIES);
+        props.setProperty("scan.topic-integrity-check.enabled", "true");
+        // Test scan source equals
+        final KafkaDynamicSource expectedKafkaSource =
+                createExpectedScanSource(
+                        SCHEMA_DATA_TYPE,
+                        null,
+                        valueDecodingFormat,
+                        new int[0],
+                        new int[] {0, 1, 2},
+                        null,
+                        Collections.singletonList(TOPIC),
+                        null,
+                        props,
+                        StartupMode.EARLIEST,
+                        Collections.emptyMap(),
+                        0,
+                        null);
+        final KafkaDynamicSource actualKafkaSource = (KafkaDynamicSource) actualSource;
+        assertThat(actualKafkaSource).isEqualTo(expectedKafkaSource);
     }
 
     private void testSetOffsetResetForStartFromGroupOffsets(String value) {
@@ -1504,6 +1547,8 @@ class KafkaDynamicTableFactoryTest {
         tableOptions.put("scan.startup.mode", "specific-offsets");
         tableOptions.put("scan.startup.specific-offsets", PROPS_SCAN_OFFSETS);
         tableOptions.put("scan.topic-partition-discovery.interval", DISCOVERY_INTERVAL);
+        tableOptions.put(
+                "scan.topic-integrity-check.enabled", SOURCE_TOPIC_INTEGRITY_CHECK_ENABLED_DEFAULT);
         // Format options.
         tableOptions.put("format", TestFormatFactory.IDENTIFIER);
         final String formatDelimiterKey =

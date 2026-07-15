@@ -64,6 +64,7 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_BOUNDED_SPECIFIC_OFFSETS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_BOUNDED_TIMESTAMP_MILLIS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_PARALLELISM;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_TOPIC_INTEGRITY_CHECK_ENABLED;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_TOPIC_PARTITION_DISCOVERY;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SINK_BUFFER_FLUSH_INTERVAL;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SINK_BUFFER_FLUSH_MAX_ROWS;
@@ -122,6 +123,7 @@ public class UpsertKafkaDynamicTableFactory
         options.add(SCAN_PARALLELISM);
         options.add(TRANSACTION_NAMING_STRATEGY);
         options.add(SCAN_TOPIC_PARTITION_DISCOVERY);
+        options.add(SCAN_TOPIC_INTEGRITY_CHECK_ENABLED);
         return options;
     }
 
@@ -165,6 +167,12 @@ public class UpsertKafkaDynamicTableFactory
         properties.setProperty(
                 KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(),
                 Long.toString(partitionDiscoveryInterval.toMillis()));
+
+        final boolean topicIntegrityCheckEnabled =
+                tableOptions.get(SCAN_TOPIC_INTEGRITY_CHECK_ENABLED);
+        properties.setProperty(
+                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key(),
+                Boolean.toString(topicIntegrityCheckEnabled));
 
         return new KafkaDynamicSource(
                 context.getPhysicalRowDataType(),

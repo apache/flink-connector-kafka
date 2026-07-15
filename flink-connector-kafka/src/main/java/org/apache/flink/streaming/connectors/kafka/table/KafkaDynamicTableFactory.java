@@ -79,6 +79,7 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_MODE;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_SPECIFIC_OFFSETS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_TIMESTAMP_MILLIS;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_TOPIC_INTEGRITY_CHECK_ENABLED;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_TOPIC_PARTITION_DISCOVERY;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SINK_PARALLELISM;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SINK_PARTITIONER;
@@ -157,6 +158,7 @@ public class KafkaDynamicTableFactory
         options.add(SCAN_BOUNDED_TIMESTAMP_MILLIS);
         options.add(SCAN_PARALLELISM);
         options.add(TRANSACTION_NAMING_STRATEGY);
+        options.add(SCAN_TOPIC_INTEGRITY_CHECK_ENABLED);
         return options;
     }
 
@@ -223,6 +225,12 @@ public class KafkaDynamicTableFactory
         final String keyPrefix = tableOptions.getOptional(KEY_FIELDS_PREFIX).orElse(null);
 
         final Integer parallelism = tableOptions.getOptional(SCAN_PARALLELISM).orElse(null);
+
+        final boolean topicIntegrityCheckEnabled =
+                tableOptions.get(SCAN_TOPIC_INTEGRITY_CHECK_ENABLED);
+        properties.setProperty(
+                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key(),
+                Boolean.toString(topicIntegrityCheckEnabled));
 
         return createKafkaTableSource(
                 physicalDataType,
