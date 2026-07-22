@@ -85,6 +85,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     private static final Logger logger = LoggerFactory.getLogger(DynamicKafkaSourceReader.class);
     private final KafkaRecordDeserializationSchema<T> deserializationSchema;
     private final Properties properties;
+    private final OffsetsInitializer startingOffsetsInitializer;
     private final MetricGroup dynamicKafkaSourceMetricGroup;
     private final Gauge<Integer> kafkaClusterCount;
     private final SourceReaderContext readerContext;
@@ -108,11 +109,13 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     public DynamicKafkaSourceReader(
             SourceReaderContext readerContext,
             KafkaRecordDeserializationSchema<T> deserializationSchema,
-            Properties properties) {
+            Properties properties,
+            OffsetsInitializer startingOffsetsInitializer) {
         this.readerContext = readerContext;
         this.clusterReaderMap = new TreeMap<>();
         this.deserializationSchema = deserializationSchema;
         this.properties = properties;
+        this.startingOffsetsInitializer = startingOffsetsInitializer;
         this.kafkaClusterCount = clusterReaderMap::size;
         this.dynamicKafkaSourceMetricGroup =
                 readerContext
@@ -270,19 +273,18 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                 Properties clusterProperties = new Properties();
                 KafkaPropertiesUtil.copyProperties(
                         clusterMetadataMapEntry.getValue().getProperties(), clusterProperties);
-                OffsetsInitializer startingOffsetsInitializer =
+                OffsetsInitializer clusterStartingOffsetsInitializer =
                         clusterMetadataMapEntry.getValue().getStartingOffsetsInitializer();
-                if (startingOffsetsInitializer != null
-                        && !properties.containsKey(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG)
-                        && !clusterProperties.containsKey(
-                                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG)) {
-                    clusterProperties.setProperty(
-                            ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                            startingOffsetsInitializer
-                                    .getAutoOffsetResetStrategy()
-                                    .name()
-                                    .toLowerCase());
-                }
+                OffsetsInitializer effectiveStartingOffsetsInitializer =
+                        clusterStartingOffsetsInitializer != null
+                                ? clusterStartingOffsetsInitializer
+                                : startingOffsetsInitializer;
+                clusterProperties.setProperty(
+                        ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                        KafkaPropertiesUtil.resolveAutoOffsetResetStrategy(
+                                properties,
+                                clusterProperties,
+                                effectiveStartingOffsetsInitializer));
                 newClustersProperties.put(clusterMetadataMapEntry.getKey(), clusterProperties);
             }
         }

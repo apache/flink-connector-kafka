@@ -19,6 +19,9 @@
 package org.apache.flink.connector.kafka.source;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
+
+import org.apache.kafka.clients.consumer.ConsumerConfig;
 
 import javax.annotation.Nonnull;
 
@@ -34,6 +37,25 @@ public class KafkaPropertiesUtil {
         for (String key : from.stringPropertyNames()) {
             to.setProperty(key, from.getProperty(key));
         }
+    }
+
+    /** Resolves an explicit global or cluster reset strategy before the initializer default. */
+    public static String resolveAutoOffsetResetStrategy(
+            @Nonnull Properties globalProperties,
+            @Nonnull Properties clusterProperties,
+            @Nonnull OffsetsInitializer startingOffsetsInitializer) {
+        String globalReset = globalProperties.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
+        if (globalReset != null) {
+            return globalReset;
+        }
+
+        String clusterReset =
+                clusterProperties.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
+        if (clusterReset != null) {
+            return clusterReset;
+        }
+
+        return startingOffsetsInitializer.getAutoOffsetResetStrategy().name().toLowerCase();
     }
 
     /**

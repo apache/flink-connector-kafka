@@ -534,13 +534,10 @@ public class DynamicKafkaSourceEnumerator
         KafkaPropertiesUtil.copyProperties(properties, consumerProps);
         DynamicKafkaSourceOptions.removeRemovedClusterRetentionOption(consumerProps);
         KafkaPropertiesUtil.setClientIdPrefix(consumerProps, kafkaClusterId);
-        consumerProps.computeIfAbsent(
+        consumerProps.setProperty(
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                ignored ->
-                        effectiveStartingOffsetsInitializer
-                                .getAutoOffsetResetStrategy()
-                                .name()
-                                .toLowerCase());
+                KafkaPropertiesUtil.resolveAutoOffsetResetStrategy(
+                        properties, fetchedProperties, effectiveStartingOffsetsInitializer));
 
         KafkaSourceEnumerator enumerator =
                 new KafkaSourceEnumerator(

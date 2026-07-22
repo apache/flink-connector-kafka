@@ -40,11 +40,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DynamicKafkaSourceBuilderTest {
 
     @Test
-    void testAutoOffsetResetDefaultsToInitializerStrategy() throws Exception {
+    void testAutoOffsetResetIsNotMaterializedWhenAbsent() throws Exception {
         assertThat(
                         extractProperties(baseBuilder().build())
                                 .getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG))
-                .isEqualTo("earliest");
+                .isNull();
     }
 
     @Test

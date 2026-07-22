@@ -30,6 +30,7 @@ import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
 import org.apache.flink.connector.kafka.dynamic.source.DynamicKafkaSourceOptions;
 import org.apache.flink.connector.kafka.dynamic.source.MetadataUpdateEvent;
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.metrics.KafkaSourceReaderMetrics;
 import org.apache.flink.connector.kafka.source.reader.KafkaSourceReader;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
@@ -396,7 +397,8 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
         return new DynamicKafkaSourceReader<>(
                 context,
                 KafkaRecordDeserializationSchema.valueOnly(IntegerDeserializer.class),
-                properties);
+                properties,
+                OffsetsInitializer.earliest());
     }
 
     private DynamicKafkaSourceReader<Integer> createReaderWithoutStartWithRemovedClusterRetention(
@@ -408,7 +410,8 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
         return new DynamicKafkaSourceReader<>(
                 context,
                 KafkaRecordDeserializationSchema.valueOnly(IntegerDeserializer.class),
-                properties);
+                properties,
+                OffsetsInitializer.earliest());
     }
 
     private SourceReader<Integer, DynamicKafkaSourceSplit> startReader(
@@ -552,7 +555,8 @@ class DynamicKafkaSourceReaderPauseResumeTest {
         return new DynamicKafkaSourceReader<>(
                 new TestingReaderContext(),
                 KafkaRecordDeserializationSchema.valueOnly(IntegerDeserializer.class),
-                properties);
+                properties,
+                OffsetsInitializer.earliest());
     }
 
     private static DynamicKafkaSourceSplit createSplit(

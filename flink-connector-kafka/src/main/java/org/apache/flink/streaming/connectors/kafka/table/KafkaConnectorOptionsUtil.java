@@ -44,15 +44,19 @@ import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.Preconditions;
 
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.DELIVERY_GUARANTEE;
@@ -113,6 +117,28 @@ class KafkaConnectorOptionsUtil {
     public static void validateTableSinkOptions(ReadableConfig tableOptions) {
         validateTopic(tableOptions);
         validateSinkPartitioner(tableOptions);
+    }
+
+    static void validateAutoOffsetResetStrategy(Properties properties) {
+        String resetStrategy = properties.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
+        if (resetStrategy == null) {
+            return;
+        }
+
+        boolean valid =
+                Arrays.stream(OffsetResetStrategy.values())
+                        .anyMatch(strategy -> strategy.name().equalsIgnoreCase(resetStrategy));
+        if (!valid) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "%s can not be set to %s. Valid values: [%s]",
+                            ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                            resetStrategy,
+                            Arrays.stream(OffsetResetStrategy.values())
+                                    .map(Enum::name)
+                                    .map(value -> value.toLowerCase(Locale.ROOT))
+                                    .collect(Collectors.joining(","))));
+        }
     }
 
     public static void validateTopic(ReadableConfig tableOptions) {
