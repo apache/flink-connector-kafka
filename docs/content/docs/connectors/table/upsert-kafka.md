@@ -144,7 +144,7 @@ Connector Options
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>
       <td>
-         This can set and pass arbitrary Kafka configurations. Suffix names must match the configuration key defined in <a href="https://kafka.apache.org/documentation/#configuration">Kafka Configuration documentation</a>. Flink will remove the "properties." key prefix and pass the transformed key and values to the underlying KafkaClient. For example, you can disable automatic topic creation via <code>'properties.allow.auto.create.topics' = 'false'</code>. The <code>'auto.offset.reset'</code> property configures how the source handles initialized starting offsets that are not available in Kafka. It is independent of <code>'scan.startup.mode'</code>. Other configurations may not be supported because Flink overrides them.
+         This can set and pass arbitrary Kafka configurations. Suffix names must match the configuration key defined in <a href="https://kafka.apache.org/documentation/#configuration">Kafka Configuration documentation</a>. Flink will remove the "properties." key prefix and pass the transformed key and values to the underlying KafkaClient. For example, you can disable automatic topic creation via <code>'properties.allow.auto.create.topics' = 'false'</code>. The <code>'auto.offset.reset'</code> property configures how the source handles initialized starting offsets that are not available in Kafka. It is independent of <code>'scan.startup.mode'</code>. Because these options control different phases, they may intentionally use different values. Other configurations may not be supported because Flink overrides them.
       </td>
     </tr>
     <tr>
