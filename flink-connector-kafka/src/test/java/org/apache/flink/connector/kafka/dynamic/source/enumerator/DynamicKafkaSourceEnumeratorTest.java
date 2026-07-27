@@ -58,6 +58,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -690,8 +692,10 @@ public class DynamicKafkaSourceEnumeratorTest {
         }
     }
 
-    @Test
-    public void testEnumeratorStateRetainsRemovedClusterUntilExpired() throws Throwable {
+    @ParameterizedTest
+    @EnumSource(DynamicKafkaSourceOptions.EnumeratorMode.class)
+    public void testEnumeratorStateRetainsRemovedClusterUntilExpired(
+            DynamicKafkaSourceOptions.EnumeratorMode enumeratorMode) throws Throwable {
         int restoredParallelism = NUM_SUBTASKS + 1;
         KafkaStream initialStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
         KafkaStream shrunkStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
@@ -717,11 +721,13 @@ public class DynamicKafkaSourceEnumeratorTest {
                                                     .STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS
                                                     .key(),
                                             "60000");
-                                    properties.setProperty(
-                                            DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE.key(),
-                                            DynamicKafkaSourceOptions.EnumeratorMode.GLOBAL
-                                                    .name()
-                                                    .toLowerCase());
+                                    if (enumeratorMode
+                                            == DynamicKafkaSourceOptions.EnumeratorMode.GLOBAL) {
+                                        properties.setProperty(
+                                                DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE
+                                                        .key(),
+                                                enumeratorMode.name().toLowerCase());
+                                    }
                                 })) {
             enumerator.start();
             context.runPeriodicCallable(0);
@@ -769,9 +775,11 @@ public class DynamicKafkaSourceEnumeratorTest {
             restoredProperties.setProperty(
                     DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
                     "60000");
-            restoredProperties.setProperty(
-                    DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE.key(),
-                    DynamicKafkaSourceOptions.EnumeratorMode.GLOBAL.name().toLowerCase());
+            if (enumeratorMode == DynamicKafkaSourceOptions.EnumeratorMode.GLOBAL) {
+                restoredProperties.setProperty(
+                        DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE.key(),
+                        enumeratorMode.name().toLowerCase());
+            }
             try (MockKafkaMetadataService restoredMetadataService =
                             new MockKafkaMetadataService(Collections.singleton(shrunkStream));
                     MockSplitEnumeratorContext<DynamicKafkaSourceSplit> restoredContext =
@@ -885,13 +893,19 @@ public class DynamicKafkaSourceEnumeratorTest {
                 assertThat(assignedSplitIdsAfterReAdd)
                         .as("re-added cluster should freshly assign every retained split")
                         .containsExactlyInAnyOrderElementsOf(retainedSplitIds);
-                assertThat(
-                                assignmentsAfterReAdd.stream()
-                                        .flatMap(
-                                                assignment ->
-                                                        assignment.assignment().keySet().stream()))
-                        .as("fresh assignment can use readers added after the split was removed")
-                        .contains(restoredParallelism - 1);
+                if (enumeratorMode == DynamicKafkaSourceOptions.EnumeratorMode.GLOBAL) {
+                    assertThat(
+                                    assignmentsAfterReAdd.stream()
+                                            .flatMap(
+                                                    assignment ->
+                                                            assignment
+                                                                    .assignment()
+                                                                    .keySet()
+                                                                    .stream()))
+                            .as(
+                                    "fresh assignment can use readers added after the split was removed")
+                            .contains(restoredParallelism - 1);
+                }
                 Map<String, Long> assignedOffsetsBySplitId =
                         assignedSplitsAfterReAdd.stream()
                                 .collect(
