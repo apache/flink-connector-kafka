@@ -54,13 +54,13 @@ class KafkaPropertiesUtilTest {
     }
 
     @Test
-    void testGlobalResetPropertyOverridesClusterAndInitializerStrategies() {
+    void testClusterResetPropertyOverridesGlobalAndInitializerStrategies() {
         assertThat(
                         KafkaPropertiesUtil.resolveAutoOffsetResetStrategy(
                                 resetProperties("none"),
                                 resetProperties("earliest"),
                                 OffsetsInitializer.latest()))
-                .isEqualTo("none");
+                .isEqualTo("earliest");
     }
 
     private static Properties resetProperties(String resetStrategy) {

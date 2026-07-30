@@ -39,20 +39,20 @@ public class KafkaPropertiesUtil {
         }
     }
 
-    /** Resolves an explicit global or cluster reset strategy before the initializer default. */
+    /** Resolves an explicit cluster or global reset strategy before the initializer default. */
     public static String resolveAutoOffsetResetStrategy(
             @Nonnull Properties globalProperties,
             @Nonnull Properties clusterProperties,
             @Nonnull OffsetsInitializer startingOffsetsInitializer) {
-        String globalReset = globalProperties.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
-        if (globalReset != null) {
-            return globalReset;
-        }
-
         String clusterReset =
                 clusterProperties.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
         if (clusterReset != null) {
             return clusterReset;
+        }
+
+        String globalReset = globalProperties.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
+        if (globalReset != null) {
+            return globalReset;
         }
 
         return startingOffsetsInitializer.getAutoOffsetResetStrategy().name().toLowerCase();

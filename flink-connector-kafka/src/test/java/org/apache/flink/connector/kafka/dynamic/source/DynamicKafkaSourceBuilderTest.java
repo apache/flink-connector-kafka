@@ -27,11 +27,9 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.IntegerDeserializer;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Field;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
-import java.util.Properties;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,36 +38,34 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DynamicKafkaSourceBuilderTest {
 
     @Test
-    void testAutoOffsetResetIsNotMaterializedWhenAbsent() throws Exception {
+    void testAutoOffsetResetIsNotMaterializedWhenAbsent() {
         assertThat(
-                        extractProperties(baseBuilder().build())
+                        baseBuilder()
+                                .build()
+                                .getProperties()
                                 .getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG))
                 .isNull();
     }
 
     @Test
-    void testAutoOffsetResetUsesExplicitProperty() throws Exception {
+    void testAutoOffsetResetUsesExplicitProperty() {
         assertThat(
-                        extractProperties(
-                                        baseBuilder()
-                                                .setProperty(
-                                                        ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                                                        "none")
-                                                .build())
+                        baseBuilder()
+                                .setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "none")
+                                .build()
+                                .getProperties()
                                 .getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG))
                 .isEqualTo("none");
     }
 
     @Test
-    void testAutoOffsetResetExplicitPropertyOverridesInitializerStrategy() throws Exception {
+    void testAutoOffsetResetExplicitPropertyOverridesInitializerStrategy() {
         assertThat(
-                        extractProperties(
-                                        baseBuilder()
-                                                .setStartingOffsets(OffsetsInitializer.latest())
-                                                .setProperty(
-                                                        ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                                                        "none")
-                                                .build())
+                        baseBuilder()
+                                .setStartingOffsets(OffsetsInitializer.latest())
+                                .setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "none")
+                                .build()
+                                .getProperties()
                                 .getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG))
                 .isEqualTo("none");
     }
@@ -80,12 +76,6 @@ class DynamicKafkaSourceBuilderTest {
                 .setKafkaMetadataService(NoOpKafkaMetadataService.INSTANCE)
                 .setDeserializer(
                         KafkaRecordDeserializationSchema.valueOnly(IntegerDeserializer.class));
-    }
-
-    private static Properties extractProperties(DynamicKafkaSource<?> source) throws Exception {
-        Field field = DynamicKafkaSource.class.getDeclaredField("properties");
-        field.setAccessible(true);
-        return (Properties) field.get(source);
     }
 
     private enum NoOpKafkaMetadataService implements KafkaMetadataService {

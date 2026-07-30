@@ -428,7 +428,7 @@ public class KafkaDynamicSource
             DeserializationSchema<RowData> keyDeserialization,
             DeserializationSchema<RowData> valueDeserialization,
             TypeInformation<RowData> producedTypeInfo) {
-        KafkaConnectorOptionsUtil.validateAutoOffsetResetStrategy(properties);
+        KafkaConnectorOptionsUtil.validateAndNormalizeAutoOffsetResetStrategy(properties);
 
         final KafkaRecordDeserializationSchema<RowData> kafkaDeserializer =
                 createKafkaDeserializationSchema(

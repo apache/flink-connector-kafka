@@ -119,15 +119,20 @@ class KafkaConnectorOptionsUtil {
         validateSinkPartitioner(tableOptions);
     }
 
-    static void validateAutoOffsetResetStrategy(Properties properties) {
+    static void validateAndNormalizeAutoOffsetResetStrategy(Properties properties) {
         String resetStrategy = properties.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
         if (resetStrategy == null) {
             return;
         }
+        String normalizedResetStrategy = resetStrategy.toLowerCase(Locale.ROOT);
 
         boolean valid =
                 Arrays.stream(OffsetResetStrategy.values())
-                        .anyMatch(strategy -> strategy.name().equalsIgnoreCase(resetStrategy));
+                        .anyMatch(
+                                strategy ->
+                                        strategy.name()
+                                                .toLowerCase(Locale.ROOT)
+                                                .equals(normalizedResetStrategy));
         if (!valid) {
             throw new IllegalArgumentException(
                     String.format(
@@ -139,6 +144,7 @@ class KafkaConnectorOptionsUtil {
                                     .map(value -> value.toLowerCase(Locale.ROOT))
                                     .collect(Collectors.joining(","))));
         }
+        properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, normalizedResetStrategy);
     }
 
     public static void validateTopic(ReadableConfig tableOptions) {

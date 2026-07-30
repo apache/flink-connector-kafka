@@ -88,6 +88,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
@@ -468,7 +469,7 @@ class KafkaDynamicTableFactoryTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"none", "earliest", "latest"})
+    @ValueSource(strings = {"none", "earliest", "latest", "EARLIEST"})
     @NullSource
     public void testTableSourceSetOffsetReset(final String strategyName) {
         testSetOffsetResetForStartFromGroupOffsets(strategyName);
@@ -551,7 +552,7 @@ class KafkaDynamicTableFactoryTest {
                         });
         final DynamicTableSource tableSource = createTableSource(SCHEMA, modifiedOptions);
         assertThat(getTableSourceAutoOffsetReset(tableSource))
-                .isEqualTo(value == null ? "none" : value);
+                .isEqualTo(value == null ? "none" : value.toLowerCase(Locale.ROOT));
     }
 
     private String getTableSourceAutoOffsetReset(Map<String, String> options) {

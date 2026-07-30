@@ -124,6 +124,11 @@ public class DynamicKafkaSource<T>
         return boundedness;
     }
 
+    @VisibleForTesting
+    Properties getProperties() {
+        return properties;
+    }
+
     /**
      * Create the {@link DynamicKafkaSourceReader}.
      *
