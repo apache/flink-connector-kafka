@@ -468,6 +468,21 @@ public class KafkaSourceBuilder<OUT> {
             maybeOverride(KafkaSourceOptions.COMMIT_OFFSETS_ON_CHECKPOINT.key(), "false", false);
         }
         maybeOverride(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false", false);
+        String configuredOffsetResetStrategy =
+                props.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
+        if (configuredOffsetResetStrategy != null
+                && KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
+                        configuredOffsetResetStrategy, startingOffsetsInitializer)) {
+            LOG.warn(
+                    "Configured {}={} differs from the {} strategy derived from the starting "
+                            + "offsets initializer. The source will use the initializer for "
+                            + "startup, but Kafka may reset to {} if an initialized offset "
+                            + "becomes unavailable.",
+                    ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                    configuredOffsetResetStrategy,
+                    startingOffsetsInitializer.getAutoOffsetResetStrategy().name().toLowerCase(),
+                    configuredOffsetResetStrategy);
+        }
         maybeOverride(
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
                 startingOffsetsInitializer.getAutoOffsetResetStrategy().name().toLowerCase(),

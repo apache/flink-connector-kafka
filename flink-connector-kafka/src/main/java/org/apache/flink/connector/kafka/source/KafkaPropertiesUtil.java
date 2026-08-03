@@ -58,6 +58,22 @@ public class KafkaPropertiesUtil {
         return startingOffsetsInitializer.getAutoOffsetResetStrategy().name().toLowerCase();
     }
 
+    /** Returns whether the configured strategy opposes a positional initializer strategy. */
+    public static boolean hasOpposingOffsetResetStrategies(
+            @Nonnull String configuredResetStrategy,
+            @Nonnull OffsetsInitializer startingOffsetsInitializer) {
+        String initializerResetStrategy =
+                startingOffsetsInitializer.getAutoOffsetResetStrategy().name();
+        return isPositionalResetStrategy(configuredResetStrategy)
+                && isPositionalResetStrategy(initializerResetStrategy)
+                && !configuredResetStrategy.equalsIgnoreCase(initializerResetStrategy);
+    }
+
+    private static boolean isPositionalResetStrategy(String resetStrategy) {
+        return "earliest".equalsIgnoreCase(resetStrategy)
+                || "latest".equalsIgnoreCase(resetStrategy);
+    }
+
     /**
      * client.id is used for Kafka server side logging, see
      * https://docs.confluent.io/platform/current/installation/configuration/consumer-configs.html#consumerconfigs_client.id

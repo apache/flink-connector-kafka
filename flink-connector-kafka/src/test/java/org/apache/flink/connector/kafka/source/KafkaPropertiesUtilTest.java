@@ -63,6 +63,31 @@ class KafkaPropertiesUtilTest {
                 .isEqualTo("earliest");
     }
 
+    @Test
+    void testDetectsOnlyOpposingPositionalResetStrategies() {
+        assertThat(
+                        KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
+                                "latest", OffsetsInitializer.earliest()))
+                .isTrue();
+        assertThat(
+                        KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
+                                "earliest", OffsetsInitializer.latest()))
+                .isTrue();
+
+        assertThat(
+                        KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
+                                "none", OffsetsInitializer.earliest()))
+                .isFalse();
+        assertThat(
+                        KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
+                                "earliest", OffsetsInitializer.earliest()))
+                .isFalse();
+        assertThat(
+                        KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
+                                "latest", OffsetsInitializer.committedOffsets()))
+                .isFalse();
+    }
+
     private static Properties resetProperties(String resetStrategy) {
         Properties properties = new Properties();
         properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, resetStrategy);
