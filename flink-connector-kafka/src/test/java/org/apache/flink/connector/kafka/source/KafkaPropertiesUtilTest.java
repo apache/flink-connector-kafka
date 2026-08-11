@@ -21,9 +21,15 @@ package org.apache.flink.connector.kafka.source;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
+import java.util.Arrays;
 import java.util.Properties;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -33,14 +39,14 @@ class KafkaPropertiesUtilTest {
     @Test
     void testUsesInitializerStrategyWhenResetPropertiesAreAbsent() {
         assertThat(
-                        KafkaPropertiesUtil.resolveAutoOffsetResetStrategy(
-                                new Properties(), new Properties(), OffsetsInitializer.earliest()))
-                .isEqualTo("earliest");
+                KafkaPropertiesUtil.resolveAutoOffsetResetStrategy(
+                        new Properties(), new Properties(), OffsetsInitializer.earliest()))
+                .isEqualTo(OffsetResetStrategy.EARLIEST);
 
         assertThat(
                         KafkaPropertiesUtil.resolveAutoOffsetResetStrategy(
                                 new Properties(), new Properties(), OffsetsInitializer.latest()))
-                .isEqualTo("latest");
+                .isEqualTo(OffsetResetStrategy.LATEST);
     }
 
     @Test
@@ -50,7 +56,7 @@ class KafkaPropertiesUtilTest {
                                 new Properties(),
                                 resetProperties("none"),
                                 OffsetsInitializer.earliest()))
-                .isEqualTo("none");
+                .isEqualTo(OffsetResetStrategy.NONE);
     }
 
     @Test
@@ -60,32 +66,37 @@ class KafkaPropertiesUtilTest {
                                 resetProperties("none"),
                                 resetProperties("earliest"),
                                 OffsetsInitializer.latest()))
-                .isEqualTo("earliest");
+                .isEqualTo(OffsetResetStrategy.EARLIEST);
     }
 
-    @Test
-    void testDetectsOnlyOpposingPositionalResetStrategies() {
-        assertThat(
-                        KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
-                                "latest", OffsetsInitializer.earliest()))
-                .isTrue();
-        assertThat(
-                        KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
-                                "earliest", OffsetsInitializer.latest()))
-                .isTrue();
+    @ParameterizedTest
+    @MethodSource("allOffsetResetStrategyPairs")
+    void testDetectsOnlyOpposingPositionalResetStrategies(
+            OffsetResetStrategy configuredResetStrategy,
+            OffsetResetStrategy initializerResetStrategy) {
+        boolean expected =
+                (configuredResetStrategy == OffsetResetStrategy.EARLIEST
+                                && initializerResetStrategy == OffsetResetStrategy.LATEST)
+                        || (configuredResetStrategy == OffsetResetStrategy.LATEST
+                                && initializerResetStrategy == OffsetResetStrategy.EARLIEST);
 
         assertThat(
                         KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
-                                "none", OffsetsInitializer.earliest()))
-                .isFalse();
-        assertThat(
-                        KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
-                                "earliest", OffsetsInitializer.earliest()))
-                .isFalse();
-        assertThat(
-                        KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
-                                "latest", OffsetsInitializer.committedOffsets()))
-                .isFalse();
+                                configuredResetStrategy,
+                                OffsetsInitializer.committedOffsets(initializerResetStrategy)))
+                .isEqualTo(expected);
+    }
+
+    private static Stream<Arguments> allOffsetResetStrategyPairs() {
+        return Arrays.stream(OffsetResetStrategy.values())
+                .flatMap(
+                        configuredResetStrategy ->
+                                Arrays.stream(OffsetResetStrategy.values())
+                                        .map(
+                                                initializerResetStrategy ->
+                                                        Arguments.of(
+                                                                configuredResetStrategy,
+                                                                initializerResetStrategy)));
     }
 
     private static Properties resetProperties(String resetStrategy) {

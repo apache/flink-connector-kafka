@@ -29,6 +29,7 @@ import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDe
 import org.apache.flink.util.function.SerializableSupplier;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.Deserializer;
@@ -468,20 +469,26 @@ public class KafkaSourceBuilder<OUT> {
             maybeOverride(KafkaSourceOptions.COMMIT_OFFSETS_ON_CHECKPOINT.key(), "false", false);
         }
         maybeOverride(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false", false);
-        String configuredOffsetResetStrategy =
+        String configuredOffsetReset =
                 props.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
-        if (configuredOffsetResetStrategy != null
-                && KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
-                        configuredOffsetResetStrategy, startingOffsetsInitializer)) {
-            LOG.warn(
-                    "Configured {}={} differs from the {} strategy derived from the starting "
-                            + "offsets initializer. The source will use the initializer for "
-                            + "startup, but Kafka may reset to {} if an initialized offset "
-                            + "becomes unavailable.",
-                    ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                    configuredOffsetResetStrategy,
-                    startingOffsetsInitializer.getAutoOffsetResetStrategy().name().toLowerCase(),
-                    configuredOffsetResetStrategy);
+        if (configuredOffsetReset != null) {
+            OffsetResetStrategy configuredOffsetResetStrategy =
+                    KafkaPropertiesUtil.getResetStrategy(configuredOffsetReset);
+            if (KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
+                    configuredOffsetResetStrategy, startingOffsetsInitializer)) {
+                LOG.warn(
+                        "Configured {}={} differs from the {} strategy derived from the starting "
+                                + "offsets initializer. The source will use the initializer for "
+                                + "startup, but Kafka may reset to {} if an initialized offset "
+                                + "becomes unavailable.",
+                        ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                        configuredOffsetReset,
+                        startingOffsetsInitializer
+                                .getAutoOffsetResetStrategy()
+                                .name()
+                                .toLowerCase(),
+                        configuredOffsetReset);
+            }
         }
         maybeOverride(
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,

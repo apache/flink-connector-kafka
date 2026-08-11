@@ -24,6 +24,7 @@ import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.KafkaStreamSetSubscriber;
 import org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.KafkaStreamSubscriber;
 import org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.StreamPatternSubscriber;
+import org.apache.flink.connector.kafka.source.KafkaPropertiesUtil;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.NoStoppingOffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
@@ -33,6 +34,7 @@ import org.apache.flink.util.Preconditions;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -313,6 +315,31 @@ public class DynamicKafkaSourceBuilder<T> {
                 String.format(
                         "Property %s is required when offset commit is enabled",
                         ConsumerConfig.GROUP_ID_CONFIG));
+
+        warnIfOffsetResetStrategyOpposesStartingOffsetsInitializer();
+    }
+
+    private void warnIfOffsetResetStrategyOpposesStartingOffsetsInitializer() {
+        String configuredOffsetReset =
+                props.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
+        if (configuredOffsetReset == null) {
+            return;
+        }
+
+        OffsetResetStrategy configuredOffsetResetStrategy =
+                KafkaPropertiesUtil.getResetStrategy(configuredOffsetReset);
+        if (KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
+                configuredOffsetResetStrategy, startingOffsetsInitializer)) {
+            logger.warn(
+                    "Configured {}={} differs from the {} strategy derived from the starting "
+                            + "offsets initializer. The source will use the initializer for "
+                            + "startup, but Kafka may reset to {} if an initialized offset "
+                            + "becomes unavailable.",
+                    ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                    configuredOffsetReset,
+                    startingOffsetsInitializer.getAutoOffsetResetStrategy().name().toLowerCase(),
+                    configuredOffsetReset);
+        }
     }
 
     private boolean offsetCommitEnabledManually() {

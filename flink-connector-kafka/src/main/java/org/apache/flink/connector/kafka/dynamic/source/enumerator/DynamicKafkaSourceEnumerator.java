@@ -43,6 +43,7 @@ import org.apache.flink.util.Preconditions;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.KafkaException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -534,27 +535,12 @@ public class DynamicKafkaSourceEnumerator
         KafkaPropertiesUtil.copyProperties(properties, consumerProps);
         DynamicKafkaSourceOptions.removeRemovedClusterRetentionOption(consumerProps);
         KafkaPropertiesUtil.setClientIdPrefix(consumerProps, kafkaClusterId);
-        String effectiveOffsetResetStrategy =
+        OffsetResetStrategy effectiveOffsetResetStrategy =
                 KafkaPropertiesUtil.resolveAutoOffsetResetStrategy(
                         properties, fetchedProperties, effectiveStartingOffsetsInitializer);
-        if (KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
-                effectiveOffsetResetStrategy, effectiveStartingOffsetsInitializer)) {
-            logger.warn(
-                    "Effective {}={} for Kafka cluster {} differs from the {} strategy derived "
-                            + "from its starting offsets initializer. The source will use the "
-                            + "initializer for startup, but Kafka may reset to {} if an "
-                            + "initialized offset becomes unavailable.",
-                    ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                    effectiveOffsetResetStrategy,
-                    kafkaClusterId,
-                    effectiveStartingOffsetsInitializer
-                            .getAutoOffsetResetStrategy()
-                            .name()
-                            .toLowerCase(),
-                    effectiveOffsetResetStrategy);
-        }
         consumerProps.setProperty(
-                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, effectiveOffsetResetStrategy);
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                effectiveOffsetResetStrategy.name().toLowerCase());
 
         KafkaSourceEnumerator enumerator =
                 new KafkaSourceEnumerator(

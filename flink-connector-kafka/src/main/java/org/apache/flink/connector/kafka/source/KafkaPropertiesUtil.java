@@ -22,10 +22,14 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 
 import javax.annotation.Nonnull;
 
+import java.util.Arrays;
+import java.util.Locale;
 import java.util.Properties;
+import java.util.stream.Collectors;
 
 /** Utility class for modify Kafka properties. */
 @Internal
@@ -40,38 +44,56 @@ public class KafkaPropertiesUtil {
     }
 
     /** Resolves an explicit cluster or global reset strategy before the initializer default. */
-    public static String resolveAutoOffsetResetStrategy(
+    public static OffsetResetStrategy resolveAutoOffsetResetStrategy(
             @Nonnull Properties globalProperties,
             @Nonnull Properties clusterProperties,
             @Nonnull OffsetsInitializer startingOffsetsInitializer) {
-        String clusterReset =
-                clusterProperties.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
-        if (clusterReset != null) {
-            return clusterReset;
-        }
+        return getResetStrategy(
+                clusterProperties.getProperty(
+                        ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                        globalProperties.getProperty(
+                                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                                startingOffsetsInitializer
+                                        .getAutoOffsetResetStrategy()
+                                        .name())));
+    }
 
-        String globalReset = globalProperties.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
-        if (globalReset != null) {
-            return globalReset;
-        }
-
-        return startingOffsetsInitializer.getAutoOffsetResetStrategy().name().toLowerCase();
+    /** Parses the configured auto offset reset strategy. */
+    public static OffsetResetStrategy getResetStrategy(@Nonnull String offsetResetConfig) {
+        return Arrays.stream(OffsetResetStrategy.values())
+                .filter(
+                        offsetResetStrategy ->
+                                offsetResetStrategy
+                                        .name()
+                                        .equals(offsetResetConfig.toUpperCase(Locale.ROOT)))
+                .findAny()
+                .orElseThrow(
+                        () ->
+                                new IllegalArgumentException(
+                                        String.format(
+                                                "%s can not be set to %s. Valid values: [%s]",
+                                                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                                                offsetResetConfig,
+                                                Arrays.stream(OffsetResetStrategy.values())
+                                                        .map(Enum::name)
+                                                        .map(String::toLowerCase)
+                                                        .collect(Collectors.joining(",")))));
     }
 
     /** Returns whether the configured strategy opposes a positional initializer strategy. */
     public static boolean hasOpposingOffsetResetStrategies(
-            @Nonnull String configuredResetStrategy,
+            @Nonnull OffsetResetStrategy configuredResetStrategy,
             @Nonnull OffsetsInitializer startingOffsetsInitializer) {
-        String initializerResetStrategy =
-                startingOffsetsInitializer.getAutoOffsetResetStrategy().name();
+        OffsetResetStrategy initializerResetStrategy =
+                startingOffsetsInitializer.getAutoOffsetResetStrategy();
         return isPositionalResetStrategy(configuredResetStrategy)
                 && isPositionalResetStrategy(initializerResetStrategy)
-                && !configuredResetStrategy.equalsIgnoreCase(initializerResetStrategy);
+                && configuredResetStrategy != initializerResetStrategy;
     }
 
-    private static boolean isPositionalResetStrategy(String resetStrategy) {
-        return "earliest".equalsIgnoreCase(resetStrategy)
-                || "latest".equalsIgnoreCase(resetStrategy);
+    private static boolean isPositionalResetStrategy(OffsetResetStrategy resetStrategy) {
+        return resetStrategy == OffsetResetStrategy.EARLIEST
+                || resetStrategy == OffsetResetStrategy.LATEST;
     }
 
     /**
