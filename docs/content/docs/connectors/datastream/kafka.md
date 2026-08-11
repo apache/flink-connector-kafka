@@ -228,6 +228,9 @@ KafkaSource has following options for configuration:
 - ```register.consumer.metrics``` specifies whether to register metrics of KafkaConsumer in Flink
 metric group
 - ```commit.offsets.on.checkpoint``` specifies whether to commit consuming offsets to Kafka brokers on checkpoint
+- ```poll.timeout.ms``` defines the maximum time in milliseconds the Kafka consumer blocks in a
+  single poll while waiting for records, 10 seconds by default. Lowering it makes an idle source
+  react faster to split changes, at the cost of polling more often
 
 For configurations of KafkaConsumer, you can refer to
 <a href="http://kafka.apache.org/documentation/#consumerconfigs">Apache Kafka documentation</a>

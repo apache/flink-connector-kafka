@@ -218,6 +218,8 @@ Kafka Source 支持流式和批式两种运行模式。默认情况下，KafkaSo
   请参阅下面的<a href="#dynamic-partition-discovery">动态分区检查</a>一节
 - ```register.consumer.metrics``` 指定是否在 Flink 中注册 Kafka Consumer 的指标
 - ```commit.offsets.on.checkpoint``` 指定是否在进行 checkpoint 时将消费位点提交至 Kafka broker
+- ```poll.timeout.ms``` 指定 Kafka Consumer 单次 poll 等待数据的最长时间（毫秒），默认为 10 秒。
+  减小该值可以让空闲的 Source 更快地响应分片变更，但 poll 会更频繁
 
 Kafka consumer 的配置可以参考 [Apache Kafka 文档](http://kafka.apache.org/documentation/#consumerconfigs)。
 
