@@ -47,7 +47,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
  * network I/O, and {@link KafkaPartitionSplitReader#fetch()} tolerates the {@code
  * IllegalStateException}/{@code WakeupException} that polling without an assignment raises.
  */
-class KafkaPartitionSplitReaderConsumerThreadTest {
+class KafkaPartitionSplitReaderLazyConsumerCreationTest {
 
     /** Records the thread the consumer was created on and every {@code wakeup()} call. */
     private static class CreationRecordingReader extends KafkaPartitionSplitReader {
@@ -65,7 +65,7 @@ class KafkaPartitionSplitReaderConsumerThreadTest {
         }
 
         @Override
-        protected KafkaConsumer<byte[], byte[]> createConsumer(Properties consumerProps) {
+        KafkaConsumer<byte[], byte[]> createConsumer(Properties consumerProps) {
             creationThread.set(Thread.currentThread());
             return new KafkaConsumer<byte[], byte[]>(consumerProps) {
                 @Override

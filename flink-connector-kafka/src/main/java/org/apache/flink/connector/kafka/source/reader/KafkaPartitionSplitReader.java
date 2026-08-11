@@ -43,6 +43,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+import javax.annotation.concurrent.GuardedBy;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -83,9 +84,12 @@ public class KafkaPartitionSplitReader
      * that uses it (FLINK-36434). Access outside {@link #ensureConsumer()} / {@link #wakeUp()} is
      * only safe after a call to {@link #ensureConsumer()} on the same thread.
      */
-    @Nullable private volatile KafkaConsumer<byte[], byte[]> consumer;
+    @GuardedBy("consumerLock")
+    @Nullable
+    private volatile KafkaConsumer<byte[], byte[]> consumer;
 
-    /** Set when {@link #wakeUp()} is called before the consumer exists; guarded by the lock. */
+    /** Set when {@link #wakeUp()} is called before the consumer exists. */
+    @GuardedBy("consumerLock")
     private boolean pendingWakeup;
 
     // Tracking empty splits that has not been added to finished splits in fetch()
@@ -150,9 +154,9 @@ public class KafkaPartitionSplitReader
         }
     }
 
-    /** Creates the {@link KafkaConsumer}. Overridable for tests to observe the creation. */
+    /** Creates the {@link KafkaConsumer}. Overridable by same-package tests to observe creation. */
     @VisibleForTesting
-    protected KafkaConsumer<byte[], byte[]> createConsumer(Properties consumerProps) {
+    KafkaConsumer<byte[], byte[]> createConsumer(Properties consumerProps) {
         return new KafkaConsumer<>(consumerProps);
     }
 
