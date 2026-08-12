@@ -26,6 +26,7 @@ import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.source.DynamicKafkaSource;
 import org.apache.flink.connector.kafka.dynamic.source.DynamicKafkaSourceBuilder;
+import org.apache.flink.connector.kafka.source.KafkaPropertiesUtil;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -51,7 +52,9 @@ import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.util.Preconditions;
 
+import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Header;
 
@@ -494,7 +497,14 @@ public class DynamicKafkaTableSource
                 startingOffsetsInitializer = OffsetsInitializer.latest();
                 break;
             case GROUP_OFFSETS:
-                startingOffsetsInitializer = OffsetsInitializer.committedOffsets();
+                String offsetResetConfig =
+                        properties.getProperty(
+                                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                                OffsetResetStrategy.NONE.name());
+                OffsetResetStrategy offsetResetStrategy =
+                        KafkaPropertiesUtil.getResetStrategy(offsetResetConfig);
+                startingOffsetsInitializer =
+                        OffsetsInitializer.committedOffsets(offsetResetStrategy);
                 break;
             case SPECIFIC_OFFSETS:
                 startingOffsetsInitializer = OffsetsInitializer.offsets(specificStartupOffsets);
