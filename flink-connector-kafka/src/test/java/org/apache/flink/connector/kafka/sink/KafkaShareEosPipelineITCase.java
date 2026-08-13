@@ -97,6 +97,7 @@ class KafkaShareEosPipelineITCase {
             "flink.kafka.share.it.bootstrap.servers";
     private static final String KAFKA_IMAGE_PROPERTY = "flink.kafka.share.it.image";
     private static final String SHARE_ACK_MODE_CONFIG = "share.acknowledgement.mode";
+    private static final String SHARE_ACQUIRE_MODE_CONFIG = "share.acquire.mode";
     private static final String SHARE_AUTO_OFFSET_RESET_CONFIG = "share.auto.offset.reset";
     private static final Duration POLL_TIMEOUT = Duration.ofMillis(500);
     private static final Duration WAIT_TIMEOUT = Duration.ofSeconds(45);
@@ -331,6 +332,8 @@ class KafkaShareEosPipelineITCase {
         properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class);
         properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class);
         properties.put(SHARE_ACK_MODE_CONFIG, "explicit");
+        properties.put(SHARE_ACQUIRE_MODE_CONFIG, "record_limit");
+        properties.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "1");
         return properties;
     }
 

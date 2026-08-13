@@ -40,12 +40,12 @@ is redelivered by the broker, so the source is a near-stateless forwarder.
 ```
                         Flink job (the transaction coordinator)
    ┌─────────────────┐     ShareAckPayload      ┌──────────────────────────────┐
-   │  share-group     │  rides on each record    │ SameTransactionShareAckKafka │
-   │  source reader   │ ───────────────────────► │ Writer (sink)                │
-   │  (KafkaShare     │                          │  - write(): buffer payloads  │
-   │   Consumer)      │                          │  - prepareCommit(): stage    │
-   └─────────────────┘                          │    acks INTO sink producer   │
-          │ poll + explicit-ack mode             │    txn, then precommit       │
+   │  share-group     │  carried with emitted    │ SameTransactionShareAckKafka │
+   │  source reader   │  records                 │ Writer (sink)                │
+   │  (KafkaShare     │ ───────────────────────► │  - initialize(): begin txn   │
+   │   Consumer)      │                          │  - write(): send output and │
+   └─────────────────┘                          │    stage share acks inline  │
+          │ poll + explicit-ack mode             │  - prepareCommit(): prepare │
           │ acknowledgementsForTransaction()     └──────────────┬───────────────┘
           ▼                                                      │ KafkaCommittable
    Kafka broker (server)                                         ▼ (producerId, epoch,
@@ -66,6 +66,22 @@ Key Kafka primitives (in the `apache_stream/kafka` fork, KIP-1289 + KIP-939):
 - Broker record state machine adds `TX_PENDING`; staging an ack moves `ACQUIRED → TX_PENDING` and
   **cancels the acquisition-lock timer** so the producer-transaction timeout governs the hold.
 
+## Component and thread map
+
+| Step | Module / component | Thread that runs it | Notes |
+| --- | --- | --- | --- |
+| Poll share records | `KafkaShareConsumer` in the share source | Current IT: legacy source task thread. Future FLIP-27 source: split-fetcher I/O thread. | Records become `ACQUIRED` on the broker and the acquisition-lock timer starts. |
+| Local ack | Share source | Same thread as `poll()` | `acknowledge(record, ACCEPT/REJECT)` updates client-local state only. |
+| Build ack payload | `ShareAckPayload.fromKafkaObjects(...)` | Same source-side thread as local ack extraction | `acknowledgementsForTransaction()` drains all acknowledged in-flight records and requires explicit mode. |
+| Emit to Flink | Share source / source record emitter | Current IT: legacy source task thread under checkpoint lock. Future FLIP-27 source: reader/operator main thread emits fetched records. | Payload routing must ensure a payload is staged by one sink transaction only. |
+| Open sink transaction | `ExactlyOnceKafkaWriter.initialize()` and `snapshotState(...)` | Sink writer task thread | `startTransaction(...)` calls `producer.beginTransaction()` before any `write(...)`. |
+| Write output | `KafkaWriter.write(...)` | Sink writer task thread | `producer.send(...)` buffers output records in the Kafka producer sender path. |
+| Stage share ack | `SameTransactionShareAckKafkaWriter.write(...)` + `ShareAckPayloadStager` | Sink writer task thread blocks; Kafka producer sender performs the RPC | `sendShareAcknowledgementsToTransaction(...)` waits for the broker response; broker stages `ACQUIRED -> TX_PENDING` and cancels the lock timer. |
+| Prepare checkpoint transaction | `ExactlyOnceKafkaWriter.prepareCommit()` | Sink writer task thread during checkpoint prepare | With Kafka 2PC enabled, `prepareTransaction()` flushes pending records and returns `PreparedTxnState`; no share-ack staging should happen here. |
+| Start next transaction | `ExactlyOnceKafkaWriter.snapshotState(...)` | Sink writer task thread | After snapshotting transaction state, the writer opens the producer transaction for the next checkpoint window. |
+| Complete transaction | `KafkaCommitter.commit(...)` | Sink committer operator thread after checkpoint completion | Calls `completePreparedTransaction(...)` for prepared 2PC or `commitTransaction()` otherwise. |
+| Finalize broker state | Kafka transaction coordinator, output partition leaders, share coordinator | Kafka broker network/coordinator threads | EndTxn writes `PREPARE_COMMIT`; WriteTxnMarkers makes output visible and resolves `__share_group_state`. |
+
 ## Glossary
 
 | Term | Meaning |
@@ -83,7 +99,7 @@ Key Kafka primitives (in the `apache_stream/kafka` fork, KIP-1289 + KIP-939):
 | --- | --- | --- | --- |
 | 01 | 🔴 HIGH | Acquisition-lock expiry vs. checkpoint/topology dwell time | `01-acquisition-lock-expiry.md` |
 | 02 | 🔴 HIGH | Delivery-count limit → silent data loss | `02-delivery-count-data-loss.md` |
-| 07 | 🔴 HIGH | Records that produce no sink output cannot be acknowledged | `07-no-output-records-cannot-ack.md` |
+| 07 | 🔴 HIGH | Record-carried acks do not cover records that produce no sink output | `07-no-output-records-cannot-ack.md` |
 | 03 | 🟠 MED | Member-epoch staleness between fetch and stage | `03-member-epoch-staleness.md` |
 | 04 | 🟠 MED | One `ShareGroupMetadata` per ack vs. topology shuffles | `04-multi-member-per-transaction.md` |
 | 05 | 🟠 MED | Transaction timeout & prepared-transaction holding (2PC) | `05-transaction-timeout-holding.md` |
@@ -104,8 +120,9 @@ The claims behind these docs were re-checked against the actual code (Kafka fork
 - **CORRECTED:** prepared **2PC** transactions are *exempt* from the timeout sweeper
   (`txnTimeoutMs = MAX`) and are recoverable only when `transaction.2pc.enable=true`; the risk is
   therefore *indefinite holding of abandoned transactions*, not premature abort (05, rewritten).
-- **NEW:** the same-transaction model cannot acknowledge records that produce no sink output — a HIGH
-  functional gap the broker does not impose (07).
+- **NEW:** the current record-carried A1 wiring cannot route acks for records that produce no sink
+  output; the producer path itself supports ack-only transactions, so the general fix is a separate
+  share-ack committable participant (07).
 
 ## Design records
 
