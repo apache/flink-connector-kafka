@@ -1066,11 +1066,11 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
     }
 
     /**
-     * Waits until the last stable offset of {@code tp} reaches {@code expectedOffset},
-     * and returns it. In most cases, this will return the expected value on the first
-     * check, but the transaction coordinator propagates it to partition leaders
-     * asynchronously, so LSO can briefly lag behind a committed transaction. To avoid
-     * introducing a test race condition, this method checks again after a brief wait.
+     * Waits until the last stable offset of {@code tp} reaches {@code expectedOffset}, and returns
+     * it. In most cases, this will return the expected value on the first check, but the
+     * transaction coordinator propagates it to partition leaders asynchronously, so LSO can briefly
+     * lag behind a committed transaction. To avoid introducing a test race condition, this method
+     * checks again after a brief wait.
      */
     private static long awaitLastStableOffset(TopicPartition tp, long expectedOffset)
             throws Exception {
