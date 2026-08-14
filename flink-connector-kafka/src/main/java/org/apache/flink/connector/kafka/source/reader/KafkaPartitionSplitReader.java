@@ -64,12 +64,12 @@ import java.util.stream.Collectors;
 public class KafkaPartitionSplitReader
         implements SplitReader<ConsumerRecord<byte[], byte[]>, KafkaPartitionSplit> {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaPartitionSplitReader.class);
-    private static final long POLL_TIMEOUT = 10000L;
 
     private final KafkaConsumer<byte[], byte[]> consumer;
     private final Map<TopicPartition, Long> stoppingOffsets;
     private final String groupId;
     private final int subtaskId;
+    private final Duration pollTimeout;
 
     private final KafkaSourceReaderMetrics kafkaSourceReaderMetrics;
 
@@ -90,6 +90,8 @@ public class KafkaPartitionSplitReader
             String rackIdSupplier) {
         this.subtaskId = context.getIndexOfSubtask();
         this.kafkaSourceReaderMetrics = kafkaSourceReaderMetrics;
+        // Parsed before creating the consumer so that an invalid value does not leak a consumer.
+        this.pollTimeout = parsePollTimeout(props);
         Properties consumerProps = new Properties();
         consumerProps.putAll(props);
         consumerProps.setProperty(ConsumerConfig.CLIENT_ID_CONFIG, createConsumerClientId(props));
@@ -107,7 +109,7 @@ public class KafkaPartitionSplitReader
     public RecordsWithSplitIds<ConsumerRecord<byte[], byte[]>> fetch() throws IOException {
         ConsumerRecords<byte[], byte[]> consumerRecords;
         try {
-            consumerRecords = consumer.poll(Duration.ofMillis(POLL_TIMEOUT));
+            consumerRecords = consumer.poll(pollTimeout);
         } catch (WakeupException | IllegalStateException e) {
             // IllegalStateException will be thrown if the consumer is not assigned any partitions.
             // This happens if all assigned partitions are invalid or empty (starting offset >=
@@ -278,7 +280,27 @@ public class KafkaPartitionSplitReader
         return consumer;
     }
 
+    @VisibleForTesting
+    Duration getPollTimeout() {
+        return pollTimeout;
+    }
+
     // --------------- private helper method ----------------------
+
+    private static Duration parsePollTimeout(Properties props) {
+        long pollTimeoutMs =
+                KafkaSourceOptions.getOption(
+                        props, KafkaSourceOptions.POLL_TIMEOUT_MS, Long::parseLong);
+        // KafkaConsumer#poll only rejects negative timeouts, so validate the same bound here. Doing
+        // it eagerly turns a misconfiguration into a readable error instead of an exception thrown
+        // from the split fetcher thread on the first poll.
+        Preconditions.checkArgument(
+                pollTimeoutMs >= 0,
+                "Property %s should not be negative, but is %s",
+                KafkaSourceOptions.POLL_TIMEOUT_MS.key(),
+                pollTimeoutMs);
+        return Duration.ofMillis(pollTimeoutMs);
+    }
 
     /**
      * This Method performs Null and empty Rack Id validation and sets the rack id to the
