@@ -79,6 +79,9 @@ public class KafkaPartitionSplitReader
     // Offset of the last record that fetch() handed to the source reader, per partition
     private final Map<TopicPartition, Long> lastFetchedOffsets = new HashMap<>();
 
+    // Consumer position observed at the end of the most recent fetch(), per partition.
+    private final Map<TopicPartition, Long> lastKnownPositions = new HashMap<>();
+
     public KafkaPartitionSplitReader(
             Properties props,
             SourceReaderContext context,
@@ -130,6 +133,7 @@ public class KafkaPartitionSplitReader
         for (TopicPartition tp : consumer.assignment()) {
             long stoppingOffset = getStoppingOffset(tp);
             long consumerPosition = getConsumerPosition(tp, "retrieving consumer position");
+            lastKnownPositions.put(tp, consumerPosition);
             // Stop fetching when the consumer's position reaches the stoppingOffset.
             // Control messages may follow the last record; therefore, using the last record's
             // offset as a stopping condition could result in indefinite blocking.
@@ -343,6 +347,11 @@ public class KafkaPartitionSplitReader
      * the offset stops at the first entry that Kafka does not deliver, for as long as the partition
      * is idle. The consumer's own position accounts for those entries, so it is the offset that
      * external tooling expects to see.
+     *
+     * <p>This relies on {@link #lastKnownPositions}, populated as a side effect of the regular
+     * {@link #fetch()} poll loop, rather than querying the consumer for the position again here.
+     * {@link #notifyCheckpointComplete} runs on this same split fetcher thread, but at a point
+     * outside that poll loop, so this allows us to avoid a separate blocking call to the consumer.
      */
     private Map<TopicPartition, OffsetAndMetadata> reconcileOffsetsToCommit(
             Map<TopicPartition, OffsetAndMetadata> offsetsToCommit) {
@@ -358,8 +367,8 @@ public class KafkaPartitionSplitReader
                             || offsetAndMetadata.offset() != lastFetchedOffset + 1) {
                         return;
                     }
-                    long position = getConsumerPosition(tp, "reconciling the offset to commit");
-                    if (position > offsetAndMetadata.offset()) {
+                    Long position = lastKnownPositions.get(tp);
+                    if (position != null && position > offsetAndMetadata.offset()) {
                         LOG.debug(
                                 "Advancing offset to commit for {} from {} to the consumer position {}.",
                                 tp,
