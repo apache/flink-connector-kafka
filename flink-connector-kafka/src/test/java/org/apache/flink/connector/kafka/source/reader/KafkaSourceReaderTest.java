@@ -59,6 +59,9 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -76,6 +79,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 import static org.apache.flink.connector.kafka.source.metrics.KafkaSourceReaderMetrics.COMMITS_SUCCEEDED_METRIC_COUNTER;
 import static org.apache.flink.connector.kafka.source.metrics.KafkaSourceReaderMetrics.COMMITTED_OFFSET_METRIC_GAUGE;
@@ -273,86 +277,139 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
         }
     }
 
-    @Test
-    void testCommittedOffsetConvergesWithLogEndOffsetForTransactionalTopic() throws Throwable {
-        final String topic = TOPIC + "Transactional";
-        final String groupId = "TransactionalOffsetCommitGroup";
-        final TopicPartition tp = new TopicPartition(topic, 0);
-        KafkaSourceTestEnv.createTestTopic(topic, 1, 1);
-
-        // transaction containing one record and a Kafka commit marker
-        // offset 0 = record
-        // offset 1 = commit marker
-        // offset 2 << log end offset
-        KafkaSourceTestEnv.produceToKafka(
-                Collections.singletonList(new ProducerRecord<>(topic, 0, topic + "-key", 0)),
-                kafkaServer.getTransactionalProducerConfig());
-
-        // assert state of Kafka
-        final long lastStableOffset = awaitLastStableOffset(tp, 2L);
-        final int numReadableOffsets = getReadCommittedRecordsCount(tp);
-        assertThat(numReadableOffsets).as("Exactly one record should be readable").isEqualTo(1);
-
-        // run KafkaSourceReader and check the last offset committed
-        final int recordsToRead = numReadableOffsets;
-        final long committedOffset =
-                readAndCommitOffset(tp, groupId, recordsToRead, 1, Long.MIN_VALUE);
-        assertThat(committedOffset)
-                .as("The committed offset should converge with the log end offset")
-                .isEqualTo(lastStableOffset);
+    /** Writes the records that a {@link #offsetConvergenceScenarios} scenario needs. */
+    @FunctionalInterface
+    private interface RecordProducer {
+        void produce(String topic) throws Throwable;
     }
 
-    @Test
-    void testCommittedOffsetConvergesWithLogEndOffsetForNonTransactionalTopic() throws Throwable {
-        final String topic = TOPIC + "NonTransactional";
-        final String groupId = "NonTransactionalOffsetCommitGroup";
-        final TopicPartition tp = new TopicPartition(topic, 0);
-        KafkaSourceTestEnv.createTestTopic(topic, 1, 1);
-
-        // no transaction and just one record
-        // offset 0 = record
-        // offset 1 << log end offset
-        KafkaSourceTestEnv.produceToKafka(
-                Collections.singletonList(new ProducerRecord<>(topic, 0, topic + "-key", 0)));
-
-        // assert state of Kafka
-        final long lastStableOffset = awaitLastStableOffset(tp, 1L);
-        final int numReadableOffsets = getReadCommittedRecordsCount(tp);
-        assertThat(numReadableOffsets).as("Exactly one record should be readable").isEqualTo(1);
-
-        // run KafkaSourceReader and check the last offset committed
-        final int recordsToRead = numReadableOffsets;
-        final long committedOffset =
-                readAndCommitOffset(tp, groupId, recordsToRead, 1, Long.MIN_VALUE);
-        assertThat(committedOffset)
-                .as("The committed offset should converge with the log end offset")
-                .isEqualTo(lastStableOffset);
+    private static Stream<Arguments> offsetConvergenceScenarios() {
+        return Stream.of(
+                // no transaction and just one record
+                // offset 0 = record
+                // offset 1 << log end offset
+                Arguments.of(
+                        "NonTransactional",
+                        1L,
+                        1,
+                        1,
+                        (RecordProducer)
+                                topic ->
+                                        KafkaSourceTestEnv.produceToKafka(
+                                                Collections.singletonList(
+                                                        new ProducerRecord<>(
+                                                                topic, 0, topic + "-key", 0)))),
+                // transaction containing one record and a Kafka commit marker
+                // offset 0 = record
+                // offset 1 = commit marker
+                // offset 2 << log end offset
+                Arguments.of(
+                        "Transactional",
+                        2L,
+                        1,
+                        1,
+                        (RecordProducer)
+                                topic ->
+                                        KafkaSourceTestEnv.produceToKafka(
+                                                Collections.singletonList(
+                                                        new ProducerRecord<>(
+                                                                topic, 0, topic + "-key", 0)),
+                                                kafkaServer.getTransactionalProducerConfig())),
+                // transaction containing three records
+                // offset 0 = record
+                // offset 1 = record
+                // offset 2 = record
+                // offset 3 = commit marker
+                // offset 4 << log end offset
+                Arguments.of(
+                        "MultiRecordTransaction",
+                        4L,
+                        3,
+                        10,
+                        (RecordProducer) topic -> produceInTransaction(topic, 0, 3, true)),
+                // committed transaction containing two records
+                // aborted transaction containing three records
+                // offset 0 = record
+                // offset 1 = record
+                // offset 2 = commit marker
+                // offset 3 = record
+                // offset 4 = record
+                // offset 5 = record
+                // offset 6 = abort marker
+                // offset 7 << log end offset
+                Arguments.of(
+                        "AbortedTransaction",
+                        7L,
+                        2,
+                        10,
+                        (RecordProducer)
+                                topic -> {
+                                    produceInTransaction(topic, 0, 2, true);
+                                    produceInTransaction(topic, 0, 3, false);
+                                }),
+                // three separate transactions each containing one record
+                // offset 0 = record
+                // offset 1 = commit marker
+                // offset 2 = record
+                // offset 3 = commit marker
+                // offset 4 = record
+                // offset 5 = commit marker
+                // offset 6 << log end offset
+                Arguments.of(
+                        "MultipleTransactions",
+                        6L,
+                        3,
+                        10,
+                        (RecordProducer)
+                                topic -> {
+                                    produceInTransaction(topic, 0, 1, true);
+                                    produceInTransaction(topic, 0, 1, true);
+                                    produceInTransaction(topic, 0, 1, true);
+                                }),
+                // two transactional producers interleaving records on the same partition before
+                // either commits, so the two commit markers do not immediately follow their own
+                // records
+                // offset 0 = producer A record
+                // offset 1 = producer B record
+                // offset 2 = producer A record
+                // offset 3 = producer B record
+                // offset 4 = producer A commit marker
+                // offset 5 = producer B commit marker
+                // offset 6 << log end offset
+                Arguments.of(
+                        "InterleavedTransactions",
+                        6L,
+                        4,
+                        10,
+                        (RecordProducer) topic -> produceInterleavedTransactions(topic, 0, 2)));
     }
 
-    @Test
-    void testCommittedOffsetConvergesWithLogEndOffsetForMultiRecordTransaction() throws Throwable {
-        final String topic = TOPIC + "MultiRecordTransaction";
-        final String groupId = "MultiRecordTransactionOffsetCommitGroup";
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("offsetConvergenceScenarios")
+    void testCommittedOffsetConvergesWithLogEndOffset(
+            String scenario,
+            long expectedLastStableOffset,
+            int expectedReadableRecords,
+            int maxCheckpoints,
+            RecordProducer recordProducer)
+            throws Throwable {
+        final String topic = TOPIC + scenario;
+        final String groupId = scenario + "OffsetCommitGroup";
         final TopicPartition tp = new TopicPartition(topic, 0);
         KafkaSourceTestEnv.createTestTopic(topic, 1, 1);
 
-        // transaction containing three records
-        // offset 0 = record
-        // offset 1 = record
-        // offset 2 = record
-        // offset 3 = commit marker
-        // offset 4 << log end offset
-        produceInTransaction(topic, 0, 3, true);
+        recordProducer.produce(topic);
 
         // assert state of Kafka
-        final long lastStableOffset = awaitLastStableOffset(tp, 4L);
-        final int numReadableOffsets = getReadCommittedRecordsCount(tp);
-        assertThat(numReadableOffsets).as("Three records should be readable").isEqualTo(3);
+        final long lastStableOffset = awaitLastStableOffset(tp, expectedLastStableOffset);
+        assertThat(getReadCommittedRecordsCount(tp))
+                .as("Number of readable records")
+                .isEqualTo(expectedReadableRecords);
 
         // run KafkaSourceReader and check the last offset committed
-        final int recordsToRead = numReadableOffsets;
         final long committedOffset =
-                readAndCommitOffset(tp, groupId, recordsToRead, 10, lastStableOffset);
+                readAndCommitOffset(
+                        tp, groupId, expectedReadableRecords, maxCheckpoints, lastStableOffset);
         assertThat(committedOffset)
                 .as("The committed offset should converge with the log end offset")
                 .isEqualTo(lastStableOffset);
@@ -385,105 +442,6 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
         assertThat(committedOffset)
                 .as("The committed offset should be the next offset after the two read records")
                 .isEqualTo(2);
-    }
-
-    @Test
-    void testCommittedOffsetConvergesWithLogEndOffsetAfterAbortedTransaction() throws Throwable {
-        final String topic = TOPIC + "AbortedTransaction";
-        final String groupId = "AbortedTransactionOffsetCommitGroup";
-        final TopicPartition tp = new TopicPartition(topic, 0);
-        KafkaSourceTestEnv.createTestTopic(topic, 1, 1);
-
-        // committed transaction containing two records
-        // aborted transaction containing three records
-        // offset 0 = record
-        // offset 1 = record
-        // offset 2 = commit marker
-        // offset 3 = record
-        // offset 4 = record
-        // offset 5 = record
-        // offset 6 = abort marker
-        // offset 7 << log end offset
-        produceInTransaction(topic, 0, 2, true);
-        produceInTransaction(topic, 0, 3, false);
-
-        // assert state of Kafka
-        final long lastStableOffset = awaitLastStableOffset(tp, 7L);
-        final int numReadableOffsets = getReadCommittedRecordsCount(tp);
-        assertThat(numReadableOffsets).as("Two records should be readable").isEqualTo(2);
-
-        // run KafkaSourceReader and check the last offset committed
-        final int recordsToRead = 2; // first two committed records
-        final long committedOffset =
-                readAndCommitOffset(tp, groupId, recordsToRead, 10, lastStableOffset);
-        assertThat(committedOffset)
-                .as("The committed offset should converge with the log end offset")
-                .isEqualTo(lastStableOffset);
-    }
-
-    @Test
-    void testCommittedOffsetConvergesWithLogEndOffsetForMultipleTransactions() throws Throwable {
-        final String topic = TOPIC + "MultipleTransactions";
-        final String groupId = "MultipleTransactionsOffsetCommitGroup";
-        final TopicPartition tp = new TopicPartition(topic, 0);
-        KafkaSourceTestEnv.createTestTopic(topic, 1, 1);
-
-        // three separate transactions each containing one record
-        // offset 0 = record
-        // offset 1 = commit marker
-        // offset 2 = record
-        // offset 3 = commit marker
-        // offset 4 = record
-        // offset 5 = commit marker
-        // offset 6 << log end offset
-        produceInTransaction(topic, 0, 1, true);
-        produceInTransaction(topic, 0, 1, true);
-        produceInTransaction(topic, 0, 1, true);
-
-        // assert state of Kafka
-        final long lastStableOffset = awaitLastStableOffset(tp, 6L);
-        final int numReadableOffsets = getReadCommittedRecordsCount(tp);
-        assertThat(numReadableOffsets).as("Three records should be readable").isEqualTo(3);
-
-        // run KafkaSourceReader and check the last offset committed
-        final int recordsToRead = numReadableOffsets;
-        final long committedOffset =
-                readAndCommitOffset(tp, groupId, recordsToRead, 10, lastStableOffset);
-        assertThat(committedOffset)
-                .as("The committed offset should converge with the log end offset")
-                .isEqualTo(lastStableOffset);
-    }
-
-    @Test
-    void testCommittedOffsetConvergesWithLogEndOffsetForInterleavedTransactions() throws Throwable {
-        final String topic = TOPIC + "InterleavedTransactions";
-        final String groupId = "InterleavedTransactionsOffsetCommitGroup";
-        final TopicPartition tp = new TopicPartition(topic, 0);
-        KafkaSourceTestEnv.createTestTopic(topic, 1, 1);
-
-        // two transactional producers interleaving records on the same partition before either
-        // commits, so the two commit markers do not immediately follow their own records
-        // offset 0 = producer A record
-        // offset 1 = producer B record
-        // offset 2 = producer A record
-        // offset 3 = producer B record
-        // offset 4 = producer A commit marker
-        // offset 5 = producer B commit marker
-        // offset 6 << log end offset
-        produceInterleavedTransactions(topic, 0, 2);
-
-        // assert state of Kafka
-        final long lastStableOffset = awaitLastStableOffset(tp, 6L);
-        final int numReadableOffsets = getReadCommittedRecordsCount(tp);
-        assertThat(numReadableOffsets).as("Four records should be readable").isEqualTo(4);
-
-        // run KafkaSourceReader and check the last offset committed
-        final int recordsToRead = numReadableOffsets;
-        final long committedOffset =
-                readAndCommitOffset(tp, groupId, recordsToRead, 10, lastStableOffset);
-        assertThat(committedOffset)
-                .as("The committed offset should converge with the log end offset")
-                .isEqualTo(lastStableOffset);
     }
 
     /**
