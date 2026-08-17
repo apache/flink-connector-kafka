@@ -39,8 +39,8 @@ class KafkaPropertiesUtilTest {
     @Test
     void testUsesInitializerStrategyWhenResetPropertiesAreAbsent() {
         assertThat(
-                KafkaPropertiesUtil.resolveAutoOffsetResetStrategy(
-                        new Properties(), new Properties(), OffsetsInitializer.earliest()))
+                        KafkaPropertiesUtil.resolveAutoOffsetResetStrategy(
+                                new Properties(), new Properties(), OffsetsInitializer.earliest()))
                 .isEqualTo(OffsetResetStrategy.EARLIEST);
 
         assertThat(

@@ -469,8 +469,7 @@ public class KafkaSourceBuilder<OUT> {
             maybeOverride(KafkaSourceOptions.COMMIT_OFFSETS_ON_CHECKPOINT.key(), "false", false);
         }
         maybeOverride(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false", false);
-        String configuredOffsetReset =
-                props.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
+        String configuredOffsetReset = props.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
         if (configuredOffsetReset != null) {
             OffsetResetStrategy configuredOffsetResetStrategy =
                     KafkaPropertiesUtil.getResetStrategy(configuredOffsetReset);

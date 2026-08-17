@@ -53,9 +53,7 @@ public class KafkaPropertiesUtil {
                         ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
                         globalProperties.getProperty(
                                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                                startingOffsetsInitializer
-                                        .getAutoOffsetResetStrategy()
-                                        .name())));
+                                startingOffsetsInitializer.getAutoOffsetResetStrategy().name())));
     }
 
     /** Parses the configured auto offset reset strategy. */

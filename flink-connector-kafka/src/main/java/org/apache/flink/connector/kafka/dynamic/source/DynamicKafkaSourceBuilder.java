@@ -320,8 +320,7 @@ public class DynamicKafkaSourceBuilder<T> {
     }
 
     private void warnIfOffsetResetStrategyOpposesStartingOffsetsInitializer() {
-        String configuredOffsetReset =
-                props.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
+        String configuredOffsetReset = props.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
         if (configuredOffsetReset == null) {
             return;
         }
