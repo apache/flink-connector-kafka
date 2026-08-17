@@ -109,6 +109,13 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     public DynamicKafkaSourceReader(
             SourceReaderContext readerContext,
             KafkaRecordDeserializationSchema<T> deserializationSchema,
+            Properties properties) {
+        this(readerContext, deserializationSchema, properties, OffsetsInitializer.earliest());
+    }
+
+    public DynamicKafkaSourceReader(
+            SourceReaderContext readerContext,
+            KafkaRecordDeserializationSchema<T> deserializationSchema,
             Properties properties,
             OffsetsInitializer startingOffsetsInitializer) {
         this.readerContext = readerContext;
