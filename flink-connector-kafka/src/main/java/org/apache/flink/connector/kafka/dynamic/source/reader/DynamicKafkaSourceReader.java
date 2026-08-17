@@ -282,9 +282,11 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                 clusterProperties.setProperty(
                         ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
                         KafkaPropertiesUtil.resolveAutoOffsetResetStrategy(
-                                properties,
-                                clusterProperties,
-                                effectiveStartingOffsetsInitializer));
+                                        properties,
+                                        clusterProperties,
+                                        effectiveStartingOffsetsInitializer)
+                                .name()
+                                .toLowerCase());
                 newClustersProperties.put(clusterMetadataMapEntry.getKey(), clusterProperties);
             }
         }
