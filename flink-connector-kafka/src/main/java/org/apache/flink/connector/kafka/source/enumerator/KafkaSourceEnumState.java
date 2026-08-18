@@ -22,7 +22,9 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -38,10 +40,24 @@ public class KafkaSourceEnumState {
      */
     private final boolean initialDiscoveryFinished;
 
+    /**
+     * Removed splits retained as tombstones for potential resurrection. Maps split ID to removal
+     * info.
+     */
+    private final Map<String, RemovedSplitInfo> removedSplits;
+
     public KafkaSourceEnumState(
             Set<SplitAndAssignmentStatus> splits, boolean initialDiscoveryFinished) {
+        this(splits, initialDiscoveryFinished, Collections.emptyMap());
+    }
+
+    public KafkaSourceEnumState(
+            Set<SplitAndAssignmentStatus> splits,
+            boolean initialDiscoveryFinished,
+            Map<String, RemovedSplitInfo> removedSplits) {
         this.splits = splits;
         this.initialDiscoveryFinished = initialDiscoveryFinished;
+        this.removedSplits = removedSplits;
     }
 
     public KafkaSourceEnumState(
@@ -64,6 +80,7 @@ public class KafkaSourceEnumState {
                                                 topicPartition, AssignmentStatus.UNASSIGNED))
                         .collect(Collectors.toSet()));
         this.initialDiscoveryFinished = initialDiscoveryFinished;
+        this.removedSplits = Collections.emptyMap();
     }
 
     public Set<SplitAndAssignmentStatus> splits() {
@@ -80,6 +97,10 @@ public class KafkaSourceEnumState {
 
     public boolean initialDiscoveryFinished() {
         return initialDiscoveryFinished;
+    }
+
+    public Map<String, RemovedSplitInfo> removedSplits() {
+        return removedSplits;
     }
 
     private Collection<KafkaPartitionSplit> filterByAssignmentStatus(

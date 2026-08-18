@@ -33,6 +33,7 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
@@ -64,7 +65,13 @@ public class KafkaSourceEnumStateSerializer
 
     private static final int VERSION_3 = 3;
 
-    private static final int CURRENT_VERSION = VERSION_3;
+    /**
+     * state of VERSION_4 contains tombstoned splits (removed splits retained for potential
+     * resurrection).
+     */
+    private static final int VERSION_4 = 4;
+
+    private static final int CURRENT_VERSION = VERSION_4;
 
     private static final KafkaPartitionSplitSerializer SPLIT_SERIALIZER =
             new KafkaPartitionSplitSerializer();
@@ -76,7 +83,41 @@ public class KafkaSourceEnumStateSerializer
 
     @Override
     public byte[] serialize(KafkaSourceEnumState enumState) throws IOException {
-        return serializeV3(enumState);
+        return serializeV4(enumState);
+    }
+
+    @VisibleForTesting
+    static byte[] serializeV4(KafkaSourceEnumState enumState) throws IOException {
+        Set<SplitAndAssignmentStatus> splits = enumState.splits();
+        boolean initialDiscoveryFinished = enumState.initialDiscoveryFinished();
+        Map<String, RemovedSplitInfo> removedSplits = enumState.removedSplits();
+
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                DataOutputStream out = new DataOutputStream(baos)) {
+            // Write active splits
+            out.writeInt(splits.size());
+            out.writeInt(SPLIT_SERIALIZER.getVersion());
+            for (SplitAndAssignmentStatus split : splits) {
+                final byte[] splitBytes = SPLIT_SERIALIZER.serialize(split.split());
+                out.writeInt(splitBytes.length);
+                out.write(splitBytes);
+                out.writeInt(split.assignmentStatus().getStatusCode());
+            }
+            out.writeBoolean(initialDiscoveryFinished);
+
+            // Write tombstoned splits
+            out.writeInt(removedSplits.size());
+            for (Map.Entry<String, RemovedSplitInfo> entry : removedSplits.entrySet()) {
+                out.writeUTF(entry.getKey()); // split ID
+                final byte[] splitBytes = SPLIT_SERIALIZER.serialize(entry.getValue().getSplit());
+                out.writeInt(splitBytes.length);
+                out.write(splitBytes);
+                out.writeLong(entry.getValue().getRemovalTimestamp());
+            }
+
+            out.flush();
+            return baos.toByteArray();
+        }
     }
 
     @VisibleForTesting
@@ -102,6 +143,8 @@ public class KafkaSourceEnumStateSerializer
     @Override
     public KafkaSourceEnumState deserialize(int version, byte[] serialized) throws IOException {
         switch (version) {
+            case VERSION_4:
+                return deserializeVersion4(serialized);
             case VERSION_3:
                 return deserializeVersion3(serialized);
             case VERSION_2:
@@ -116,6 +159,47 @@ public class KafkaSourceEnumStateSerializer
                                 "The bytes are serialized with version %d, "
                                         + "while this deserializer only supports version up to %d",
                                 version, CURRENT_VERSION));
+        }
+    }
+
+    private static KafkaSourceEnumState deserializeVersion4(byte[] serialized) throws IOException {
+        final KafkaPartitionSplitSerializer splitSerializer = new KafkaPartitionSplitSerializer();
+
+        try (ByteArrayInputStream bais = new ByteArrayInputStream(serialized);
+                DataInputStream in = new DataInputStream(bais)) {
+
+            // Read active splits
+            final int numPartitions = in.readInt();
+            final int splitVersion = in.readInt();
+            Set<SplitAndAssignmentStatus> partitions = new HashSet<>(numPartitions);
+
+            for (int i = 0; i < numPartitions; i++) {
+                final KafkaPartitionSplit split =
+                        splitSerializer.deserialize(splitVersion, in.readNBytes(in.readInt()));
+                final int statusCode = in.readInt();
+                partitions.add(
+                        new SplitAndAssignmentStatus(
+                                split, AssignmentStatus.ofStatusCode(statusCode)));
+            }
+            final boolean initialDiscoveryFinished = in.readBoolean();
+
+            // Read tombstoned splits
+            final int numRemovedSplits = in.readInt();
+            Map<String, RemovedSplitInfo> removedSplits = new HashMap<>(numRemovedSplits);
+
+            for (int i = 0; i < numRemovedSplits; i++) {
+                final String splitId = in.readUTF();
+                final KafkaPartitionSplit split =
+                        splitSerializer.deserialize(splitVersion, in.readNBytes(in.readInt()));
+                final long removalTimestamp = in.readLong();
+                removedSplits.put(splitId, new RemovedSplitInfo(split, removalTimestamp));
+            }
+
+            if (in.available() > 0) {
+                throw new IOException("Unexpected trailing bytes in serialized topic partitions");
+            }
+
+            return new KafkaSourceEnumState(partitions, initialDiscoveryFinished, removedSplits);
         }
     }
 
