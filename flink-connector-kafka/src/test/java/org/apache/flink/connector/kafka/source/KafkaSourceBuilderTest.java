@@ -101,6 +101,16 @@ public class KafkaSourceBuilderTest {
     }
 
     @Test
+    public void testAutoOffsetResetNormalizesExplicitProperty() {
+        KafkaSource<String> kafkaSource =
+                getBasicBuilder()
+                        .setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "EARLIEST")
+                        .build();
+
+        assertThat(getAutoOffsetResetStrategy(kafkaSource)).isEqualTo("earliest");
+    }
+
+    @Test
     public void testAutoOffsetResetExplicitPropertyOverridesInitializerStrategy() {
         KafkaSource<String> kafkaSource =
                 getBasicBuilder()

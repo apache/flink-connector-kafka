@@ -473,6 +473,8 @@ public class KafkaSourceBuilder<OUT> {
         if (configuredOffsetReset != null) {
             OffsetResetStrategy configuredOffsetResetStrategy =
                     KafkaPropertiesUtil.getResetStrategy(configuredOffsetReset);
+            String normalizedOffsetReset = configuredOffsetResetStrategy.name().toLowerCase();
+            props.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, normalizedOffsetReset);
             if (KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
                     configuredOffsetResetStrategy, startingOffsetsInitializer)) {
                 LOG.warn(
@@ -481,12 +483,12 @@ public class KafkaSourceBuilder<OUT> {
                                 + "startup, but Kafka may reset to {} if an initialized offset "
                                 + "becomes unavailable.",
                         ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                        configuredOffsetReset,
+                        normalizedOffsetReset,
                         startingOffsetsInitializer
                                 .getAutoOffsetResetStrategy()
                                 .name()
                                 .toLowerCase(),
-                        configuredOffsetReset);
+                        normalizedOffsetReset);
             }
         }
         maybeOverride(
