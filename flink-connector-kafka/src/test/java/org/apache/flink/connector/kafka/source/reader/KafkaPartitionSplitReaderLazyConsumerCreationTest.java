@@ -120,15 +120,18 @@ class KafkaPartitionSplitReaderLazyConsumerCreationTest {
     }
 
     @Test
-    void testWakeUpBeforeConsumerCreationIsAppliedOnCreation() throws Exception {
+    void testWakeUpBeforeConsumerCreationIsSafelyDropped() throws Exception {
         CreationRecordingReader reader = new CreationRecordingReader();
 
-        // wakeUp() before the consumer exists: no NPE, no consumer created.
+        // wakeUp() before the consumer exists: no NPE, no consumer created. The base
+        // SplitFetcher only wakes a running fetch task, which cannot exist before
+        // handleSplitsChanges() has created the consumer, so a pre-creation wakeup has
+        // nothing to interrupt and is dropped rather than deferred.
         assertThatCode(reader::wakeUp).doesNotThrowAnyException();
         assertThat(reader.creationThread.get()).isNull();
         assertThat(reader.wakeups.get()).isZero();
 
-        // First use creates the consumer and applies the pending wakeup.
+        // First use creates the consumer; the dropped wakeup is NOT replayed against it.
         CompletableFuture.runAsync(
                         () -> {
                             try {
@@ -140,7 +143,7 @@ class KafkaPartitionSplitReaderLazyConsumerCreationTest {
                 .get();
 
         assertThat(reader.creationThread.get()).isNotNull();
-        assertThat(reader.wakeups.get()).isEqualTo(1);
+        assertThat(reader.wakeups.get()).isZero();
         reader.close();
     }
 

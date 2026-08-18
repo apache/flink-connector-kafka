@@ -43,7 +43,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
-import javax.annotation.concurrent.GuardedBy;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -74,23 +73,15 @@ public class KafkaPartitionSplitReader
 
     private final KafkaSourceReaderMetrics kafkaSourceReaderMetrics;
 
-    /** Guards lazy creation of {@link #consumer} and the {@link #pendingWakeup} flag. */
-    private final Object consumerLock = new Object();
-
     /**
      * The Kafka consumer. Created lazily on the first thread that actually uses it — the split
      * fetcher thread — rather than on the thread constructing this reader (the source-reader or
      * checkpoint thread). {@link KafkaConsumer} is not thread-safe, so it must live on the thread
-     * that uses it (FLINK-36434). Access outside {@link #ensureConsumer()} / {@link #wakeUp()} is
-     * only safe after a call to {@link #ensureConsumer()} on the same thread.
+     * that uses it (FLINK-36434). Only ever written by {@link #ensureConsumer()} on the fetcher
+     * thread; {@code volatile} solely for the cross-thread reads in {@link #wakeUp()} and {@link
+     * #close()}.
      */
-    @GuardedBy("consumerLock")
-    @Nullable
-    private volatile KafkaConsumer<byte[], byte[]> consumer;
-
-    /** Set when {@link #wakeUp()} is called before the consumer exists. */
-    @GuardedBy("consumerLock")
-    private boolean pendingWakeup;
+    @Nullable private volatile KafkaConsumer<byte[], byte[]> consumer;
 
     // Tracking empty splits that has not been added to finished splits in fetch()
     private final Set<String> emptySplits = new HashSet<>();
@@ -130,28 +121,17 @@ public class KafkaPartitionSplitReader
      * {@link KafkaConsumer} documents as thread-safe.
      */
     private KafkaConsumer<byte[], byte[]> ensureConsumer() {
+        // Single-writer: only the fetcher thread calls this, so the creation branch needs no
+        // guard; the field is volatile solely for the cross-thread reads in wakeUp() and close().
         KafkaConsumer<byte[], byte[]> currentConsumer = this.consumer;
-        if (currentConsumer != null) {
-            return currentConsumer;
+        if (currentConsumer == null) {
+            currentConsumer = createConsumer(consumerProps);
+            maybeRegisterKafkaConsumerMetrics(
+                    consumerProps, kafkaSourceReaderMetrics, currentConsumer);
+            kafkaSourceReaderMetrics.registerNumBytesIn(currentConsumer);
+            this.consumer = currentConsumer;
         }
-        synchronized (consumerLock) {
-            currentConsumer = this.consumer;
-            if (currentConsumer == null) {
-                currentConsumer = createConsumer(consumerProps);
-                maybeRegisterKafkaConsumerMetrics(
-                        consumerProps, kafkaSourceReaderMetrics, currentConsumer);
-                kafkaSourceReaderMetrics.registerNumBytesIn(currentConsumer);
-                if (pendingWakeup) {
-                    // A wakeUp() arrived before the consumer existed. Apply it now so that the
-                    // first blocking call still observes it, matching the behavior of a wakeup
-                    // against an eagerly-created consumer.
-                    currentConsumer.wakeup();
-                    pendingWakeup = false;
-                }
-                this.consumer = currentConsumer;
-            }
-            return currentConsumer;
-        }
+        return currentConsumer;
     }
 
     /** Creates the {@link KafkaConsumer}. Overridable by same-package tests to observe creation. */
@@ -288,25 +268,26 @@ public class KafkaPartitionSplitReader
     @Override
     public void wakeUp() {
         // The only method called from a thread other than the fetcher thread, relying on
-        // KafkaConsumer.wakeup() being the one documented thread-safe consumer call. If the
-        // consumer does not exist yet, record the wakeup and apply it on creation.
-        synchronized (consumerLock) {
-            KafkaConsumer<byte[], byte[]> currentConsumer = this.consumer;
-            if (currentConsumer != null) {
-                currentConsumer.wakeup();
-            } else {
-                pendingWakeup = true;
-            }
+        // KafkaConsumer.wakeup() being the one documented thread-safe consumer call.
+        //
+        // wakeUp() only ever targets a running fetch task (see SplitReader#wakeUp javadoc), which
+        // the base SplitFetcher can only schedule after handleSplitsChanges() — and therefore
+        // ensureConsumer() — has run at least once on the fetcher thread. So the consumer is
+        // always non-null here in practice; a pre-creation wakeup has nothing to interrupt and is
+        // safely dropped. Note this leans on an implementation invariant of
+        // SplitFetcher/AddSplitsTask rather than a documented contract beyond wakeUp()'s own
+        // javadoc scoping.
+        KafkaConsumer<byte[], byte[]> currentConsumer = this.consumer;
+        if (currentConsumer != null) {
+            currentConsumer.wakeup();
         }
     }
 
     @Override
     public void close() throws Exception {
-        synchronized (consumerLock) {
-            KafkaConsumer<byte[], byte[]> currentConsumer = this.consumer;
-            if (currentConsumer != null) {
-                currentConsumer.close();
-            }
+        KafkaConsumer<byte[], byte[]> currentConsumer = this.consumer;
+        if (currentConsumer != null) {
+            currentConsumer.close();
         }
     }
 
