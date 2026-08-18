@@ -223,8 +223,8 @@ Kafka Source 支持流式和批式两种运行模式。默认情况下，KafkaSo
 
 Kafka consumer 的配置可以参考 [Apache Kafka 文档](http://kafka.apache.org/documentation/#consumerconfigs)。
 
-请注意，即使指定了以下配置项，构建器也会将其覆盖：
-- ```auto.offset.reset.strategy``` 被 OffsetsInitializer#getAutoOffsetResetStrategy() 覆盖
+请注意，构建器会设置以下配置项：
+- 如果未显式配置 ```auto.offset.reset```，则会基于 OffsetsInitializer#getAutoOffsetResetStrategy() 设置该配置。起始 offset 初始化器用于选择初始读取位置，而显式配置的 ```auto.offset.reset``` 用于控制已初始化的位置随后变得不可用时的处理方式。
 - ```partition.discovery.interval.ms``` 会在批模式下被覆盖为 -1
 
 ### 动态分区检查

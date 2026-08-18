@@ -126,6 +126,10 @@ public class DynamicKafkaSource<T>
         return boundedness;
     }
 
+    Properties getProperties() {
+        return properties;
+    }
+
     /**
      * Create the {@link DynamicKafkaSourceReader}.
      *
@@ -136,7 +140,8 @@ public class DynamicKafkaSource<T>
     @Override
     public SourceReader<T, DynamicKafkaSourceSplit> createReader(
             SourceReaderContext readerContext) {
-        return new DynamicKafkaSourceReader<>(readerContext, deserializationSchema, properties);
+        return new DynamicKafkaSourceReader<>(
+                readerContext, deserializationSchema, properties, startingOffsetsInitializer);
     }
 
     /**

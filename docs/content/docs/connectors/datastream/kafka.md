@@ -236,10 +236,11 @@ For configurations of KafkaConsumer, you can refer to
 <a href="http://kafka.apache.org/documentation/#consumerconfigs">Apache Kafka documentation</a>
 for more details.
 
-Please note that the following keys will be overridden by the builder even if
-it is configured:
-- ```auto.offset.reset.strategy``` is overridden by ```OffsetsInitializer#getAutoOffsetResetStrategy()```
-  for the starting offsets
+Please note that the following keys will be set by the builder:
+- ```auto.offset.reset``` is set from ```OffsetsInitializer#getAutoOffsetResetStrategy()```
+  for the starting offsets unless it is explicitly configured. The initializer selects the initial
+  position, while an explicitly configured ```auto.offset.reset``` controls what happens if an
+  initialized position later becomes unavailable.
 - ```partition.discovery.interval.ms``` is overridden to -1 when
   ```setBounded(OffsetsInitializer)``` has been invoked
 

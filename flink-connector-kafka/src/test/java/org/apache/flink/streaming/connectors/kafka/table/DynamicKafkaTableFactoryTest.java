@@ -28,6 +28,7 @@ import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.factories.TestFormatFactory;
 
+import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -95,6 +96,18 @@ class DynamicKafkaTableFactoryTest {
                                         .STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS
                                         .key()))
                 .isEqualTo("60000");
+    }
+
+    @Test
+    void testTableSourcePreservesConfiguredOffsetResetStrategy() {
+        final Map<String, String> options = getSingleClusterSourceOptions();
+        options.put("properties." + ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "none");
+
+        final DynamicKafkaTableSource tableSource =
+                (DynamicKafkaTableSource) createTableSource(SCHEMA, options);
+
+        assertThat(tableSource.properties.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG))
+                .isEqualTo("none");
     }
 
     private static Map<String, String> getSingleClusterSourceOptions() {

@@ -45,6 +45,7 @@ import org.apache.flink.util.Preconditions;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.KafkaException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -615,12 +616,12 @@ public class DynamicKafkaSourceEnumerator
         KafkaPropertiesUtil.copyProperties(properties, consumerProps);
         DynamicKafkaSourceOptions.removeRemovedClusterRetentionOption(consumerProps);
         KafkaPropertiesUtil.setClientIdPrefix(consumerProps, kafkaClusterId);
+        OffsetResetStrategy effectiveOffsetResetStrategy =
+                KafkaPropertiesUtil.resolveAutoOffsetResetStrategy(
+                        properties, fetchedProperties, effectiveStartingOffsetsInitializer);
         consumerProps.setProperty(
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                effectiveStartingOffsetsInitializer
-                        .getAutoOffsetResetStrategy()
-                        .name()
-                        .toLowerCase());
+                effectiveOffsetResetStrategy.name().toLowerCase());
 
         KafkaSourceEnumerator enumerator =
                 new KafkaSourceEnumerator(

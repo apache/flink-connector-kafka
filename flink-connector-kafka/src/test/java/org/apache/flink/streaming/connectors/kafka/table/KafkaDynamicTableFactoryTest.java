@@ -88,6 +88,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
@@ -468,21 +469,72 @@ class KafkaDynamicTableFactoryTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"none", "earliest", "latest"})
+    @ValueSource(strings = {"none", "earliest", "latest", "EARLIEST"})
     @NullSource
     public void testTableSourceSetOffsetReset(final String strategyName) {
         testSetOffsetResetForStartFromGroupOffsets(strategyName);
     }
 
-    @Test
-    void testTableSourceSetOffsetResetWithException() {
-        String errorStrategy = "errorStrategy";
-        assertThatThrownBy(() -> testTableSourceSetOffsetReset(errorStrategy))
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "earliest-offset",
+                "latest-offset",
+                "specific-offsets",
+                "timestamp",
+                "group-offsets"
+            })
+    void testTableSourceSetOffsetResetForEveryStartupMode(String startupMode) {
+        final Map<String, String> modifiedOptions =
+                getModifiedOptions(
+                        getBasicSourceOptions(),
+                        options -> {
+                            options.put("scan.startup.mode", startupMode);
+                            options.put(
+                                    PROPERTIES_PREFIX + ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                                    "none");
+                            if (!"specific-offsets".equals(startupMode)) {
+                                options.remove("scan.startup.specific-offsets");
+                            }
+                            if ("timestamp".equals(startupMode)) {
+                                options.put("scan.startup.timestamp-millis", "1000");
+                            }
+                        });
+
+        assertThat(getTableSourceAutoOffsetReset(modifiedOptions)).isEqualTo("none");
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "earliest-offset",
+                "latest-offset",
+                "specific-offsets",
+                "timestamp",
+                "group-offsets"
+            })
+    void testTableSourceRejectsInvalidOffsetResetForEveryStartupMode(String startupMode) {
+        final Map<String, String> modifiedOptions =
+                getModifiedOptions(
+                        getBasicSourceOptions(),
+                        options -> {
+                            options.put("scan.startup.mode", startupMode);
+                            options.put(
+                                    PROPERTIES_PREFIX + ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                                    "errorStrategy");
+                            if (!"specific-offsets".equals(startupMode)) {
+                                options.remove("scan.startup.specific-offsets");
+                            }
+                            if ("timestamp".equals(startupMode)) {
+                                options.put("scan.startup.timestamp-millis", "1000");
+                            }
+                        });
+
+        assertThatThrownBy(() -> getTableSourceAutoOffsetReset(modifiedOptions))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(
-                        String.format(
-                                "%s can not be set to %s. Valid values: [latest,earliest,none]",
-                                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, errorStrategy));
+                        "auto.offset.reset can not be set to errorStrategy. "
+                                + "Valid values: [latest,earliest,none]");
     }
 
     private void testSetOffsetResetForStartFromGroupOffsets(String value) {
@@ -499,6 +551,15 @@ class KafkaDynamicTableFactoryTest {
                                     value);
                         });
         final DynamicTableSource tableSource = createTableSource(SCHEMA, modifiedOptions);
+        assertThat(getTableSourceAutoOffsetReset(tableSource))
+                .isEqualTo(value == null ? "none" : value.toLowerCase(Locale.ROOT));
+    }
+
+    private String getTableSourceAutoOffsetReset(Map<String, String> options) {
+        return getTableSourceAutoOffsetReset(createTableSource(SCHEMA, options));
+    }
+
+    private String getTableSourceAutoOffsetReset(DynamicTableSource tableSource) {
         assertThat(tableSource).isInstanceOf(KafkaDynamicSource.class);
         ScanTableSource.ScanRuntimeProvider provider =
                 ((KafkaDynamicSource) tableSource)
@@ -508,13 +569,7 @@ class KafkaDynamicTableFactoryTest {
         final Configuration configuration =
                 KafkaSourceTestUtils.getKafkaSourceConfiguration(kafkaSource);
 
-        if (value == null) {
-            assertThat(configuration.toMap().get(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG))
-                    .isEqualTo("none");
-        } else {
-            assertThat(configuration.toMap().get(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG))
-                    .isEqualTo(value);
-        }
+        return configuration.toMap().get(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
     }
 
     @Test
