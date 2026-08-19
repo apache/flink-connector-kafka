@@ -134,8 +134,12 @@ public class KafkaPartitionSplitReader
         return currentConsumer;
     }
 
-    /** Creates the {@link KafkaConsumer}. Overridable by same-package tests to observe creation. */
-    @VisibleForTesting
+    /**
+     * Creates the {@link KafkaConsumer}. Overridable by same-package tests to observe creation.
+     *
+     * <p>Deliberately not annotated with {@code @VisibleForTesting}: the freezing ArchUnit rule
+     * flags new uses of the internal annotation in connector production code.
+     */
     KafkaConsumer<byte[], byte[]> createConsumer(Properties consumerProps) {
         return new KafkaConsumer<>(consumerProps);
     }
