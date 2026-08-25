@@ -21,11 +21,14 @@ package org.apache.flink.connector.kafka.dynamic.source.enumerator;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -72,11 +75,42 @@ class ReaderRecoveryGate {
         this.initialReaderRegistrationPending = restoredFromCheckpoint;
     }
 
-    /** Records splits a reader reported on registration; an empty report is ignored. */
+    /** Merges a reader's registration report with pending splits; an empty report is ignored. */
     void recordReportedSplits(int subtaskId, List<DynamicKafkaSourceSplit> reportedSplits) {
         if (!reportedSplits.isEmpty()) {
-            pendingReportedSplitsByReader.put(subtaskId, new ArrayList<>(reportedSplits));
+            pendingReportedSplitsByReader.put(
+                    subtaskId,
+                    mergeReportedSplits(
+                            pendingReportedSplitsByReader.get(subtaskId), reportedSplits));
         }
+    }
+
+    /** Returns a copy of the pending reports without draining them. */
+    Map<Integer, List<DynamicKafkaSourceSplit>> snapshotReportedSplits() {
+        Map<Integer, List<DynamicKafkaSourceSplit>> snapshot = new HashMap<>();
+        pendingReportedSplitsByReader.forEach(
+                (readerId, splits) -> snapshot.put(readerId, new ArrayList<>(splits)));
+        return snapshot;
+    }
+
+    /**
+     * Pending entries can come from earlier registrations or remapped checkpoint state. Merging by
+     * split id, preferring the current report, avoids both losing and duplicating splits.
+     */
+    private static List<DynamicKafkaSourceSplit> mergeReportedSplits(
+            @Nullable List<DynamicKafkaSourceSplit> previousReportedSplits,
+            List<DynamicKafkaSourceSplit> reportedSplits) {
+        if (previousReportedSplits == null || previousReportedSplits.isEmpty()) {
+            return new ArrayList<>(reportedSplits);
+        }
+        Map<String, DynamicKafkaSourceSplit> mergedBySplitId = new LinkedHashMap<>();
+        for (DynamicKafkaSourceSplit split : previousReportedSplits) {
+            mergedBySplitId.put(split.splitId(), split);
+        }
+        for (DynamicKafkaSourceSplit split : reportedSplits) {
+            mergedBySplitId.put(split.splitId(), split);
+        }
+        return new ArrayList<>(mergedBySplitId.values());
     }
 
     /** Whether recovery gating is active and registrations must be deferred. */

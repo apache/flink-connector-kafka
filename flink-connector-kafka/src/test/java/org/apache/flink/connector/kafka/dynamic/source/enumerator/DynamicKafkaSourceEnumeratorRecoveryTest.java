@@ -238,6 +238,441 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
                 .isTrue();
     }
 
+    @Test
+    public void testCheckpointDuringPendingRecoveryPreservesSplitsAndReportedOffsets()
+            throws Throwable {
+        int parallelism = 2;
+        String streamId = "stream";
+        String clusterId = "cluster-0";
+        String topic = "topic";
+        List<DynamicKafkaSourceSplit> enumeratorStateSplits = createSplits(clusterId, topic, 2);
+        List<DynamicKafkaSourceSplit> reportedSplits = new ArrayList<>();
+        // use distinct offsets to verify that recovery preserves the reader-reported positions
+        // instead of the stale EARLIEST offsets
+        for (int partition = 0; partition < 2; partition++) {
+            reportedSplits.add(
+                    new DynamicKafkaSourceSplit(
+                            clusterId,
+                            new KafkaPartitionSplit(
+                                    new TopicPartition(topic, partition), 42 + partition)));
+        }
+        KafkaStream kafkaStream = createKafkaStream(streamId, clusterId, topic);
+        Properties properties = createGlobalModeProperties();
+
+        DynamicKafkaSourceEnumState inWindowCheckpoint;
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(parallelism);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                streamId,
+                                new MockKafkaMetadataService(Collections.singleton(kafkaStream)),
+                                context,
+                                properties,
+                                createRestoredState(
+                                        kafkaStream, clusterId, enumeratorStateSplits))) {
+            enumerator.start();
+            context.registerReader(ReaderInfo.createReaderInfo(0, "location-0", reportedSplits));
+            enumerator.addReader(0);
+            context.registerReader(
+                    ReaderInfo.createReaderInfo(1, "location-1", Collections.emptyList()));
+            enumerator.addReader(1);
+
+            assertThat(context.getSplitsAssignmentSequence()).isEmpty();
+            inWindowCheckpoint = enumerator.snapshotState(1L);
+        }
+
+        DynamicKafkaSourceEnumState restoredCheckpoint = serdeRoundTrip(inWindowCheckpoint);
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(parallelism);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                streamId,
+                                new MockKafkaMetadataService(Collections.singleton(kafkaStream)),
+                                context,
+                                properties,
+                                restoredCheckpoint)) {
+            enumerator.start();
+            registerReadersWithoutReportedSplits(context, enumerator, parallelism);
+            context.runNextOneTimeCallable();
+
+            assertAssignedSplitIdsExactly(context, reportedSplits);
+            Map<Integer, Long> startingOffsetByPartition = new HashMap<>();
+            for (DynamicKafkaSourceSplit split : collectAssignedSplits(context)) {
+                startingOffsetByPartition.put(
+                        split.getKafkaPartitionSplit().getPartition(),
+                        split.getKafkaPartitionSplit().getStartingOffset());
+            }
+            assertThat(startingOffsetByPartition)
+                    .as("assigned splits must carry the reader-reported offsets")
+                    .containsEntry(0, 42L)
+                    .containsEntry(1, 43L);
+        }
+    }
+
+    @Test
+    public void testCheckpointDuringPendingRecoveryKeepsRetainedSplit() throws Throwable {
+        int parallelism = 2;
+        String streamId = "stream";
+        String activeClusterId = "active-cluster";
+        String activeTopic = "active-topic";
+        DynamicKafkaSourceSplit activeSplit = createSplits(activeClusterId, activeTopic, 1).get(0);
+        DynamicKafkaSourceSplit removedSplit =
+                createSplits("removed-cluster", "removed-topic", 1).get(0);
+        KafkaStream kafkaStream = createKafkaStream(streamId, activeClusterId, activeTopic);
+        Properties properties = createGlobalModeProperties();
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
+                "60000");
+
+        DynamicKafkaSourceEnumState inWindowCheckpoint;
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(parallelism);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                streamId,
+                                new MockKafkaMetadataService(Collections.singleton(kafkaStream)),
+                                context,
+                                properties,
+                                createRestoredState(
+                                        kafkaStream,
+                                        activeClusterId,
+                                        Collections.singletonList(activeSplit)))) {
+            enumerator.start();
+            context.registerReader(
+                    ReaderInfo.createReaderInfo(
+                            0, "location-0", List.of(activeSplit, removedSplit)));
+            enumerator.addReader(0);
+            context.registerReader(
+                    ReaderInfo.createReaderInfo(1, "location-1", Collections.emptyList()));
+            enumerator.addReader(1);
+
+            assertThat(context.getSplitsAssignmentSequence()).isEmpty();
+            inWindowCheckpoint = enumerator.snapshotState(1L);
+        }
+
+        DynamicKafkaSourceEnumState restoredCheckpoint = serdeRoundTrip(inWindowCheckpoint);
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(parallelism);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                streamId,
+                                new MockKafkaMetadataService(Collections.singleton(kafkaStream)),
+                                context,
+                                properties,
+                                restoredCheckpoint)) {
+            enumerator.start();
+            registerReadersWithoutReportedSplits(context, enumerator, parallelism);
+            context.runNextOneTimeCallable();
+
+            assertAssignedSplitIdsExactly(context, List.of(activeSplit, removedSplit));
+            DynamicKafkaSourceSplit retainedSplit =
+                    collectAssignedSplits(context).stream()
+                            .filter(split -> split.splitId().equals(removedSplit.splitId()))
+                            .findFirst()
+                            .orElseThrow(AssertionError::new);
+            assertThat(retainedSplit.isRetained()).isTrue();
+        }
+    }
+
+    @Test
+    public void testRestoredPendingReportedSplitsMergeWhenDownscaleCollapsesReaderIds()
+            throws Throwable {
+        int parallelism = 3;
+        String streamId = "stream";
+        String clusterId = "cluster-0";
+        String topic = "topic";
+        List<DynamicKafkaSourceSplit> activeSplits = createSplits(clusterId, topic, 4);
+        DynamicKafkaSourceSplit removedClusterSplit =
+                createSplits("removed-cluster", "removed-topic", 1).get(0);
+        List<DynamicKafkaSourceSplit> reportedByReader4 =
+                new ArrayList<>(activeSplits.subList(2, 4));
+        reportedByReader4.add(removedClusterSplit);
+        List<DynamicKafkaSourceSplit> allReportedSplits = new ArrayList<>(activeSplits);
+        allReportedSplits.add(removedClusterSplit);
+        KafkaStream kafkaStream = createKafkaStream(streamId, clusterId, topic);
+        Properties properties = createGlobalModeProperties();
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
+                "60000");
+        // readers 1 and 4 from a parallelism-5 checkpoint both map to reader floorMod(4, 3) = 1
+        Map<Integer, List<DynamicKafkaSourceSplit>> pendingSplitsByReader = new HashMap<>();
+        pendingSplitsByReader.put(1, activeSplits.subList(0, 2));
+        pendingSplitsByReader.put(4, reportedByReader4);
+        DynamicKafkaSourceEnumState inWindowCheckpoint =
+                new DynamicKafkaSourceEnumState(
+                        Collections.singleton(kafkaStream),
+                        Collections.singletonMap(
+                                clusterId,
+                                new KafkaSourceEnumState(
+                                        unwrapSplits(activeSplits), Collections.emptyList(), true)),
+                        Collections.emptyMap(),
+                        pendingSplitsByReader);
+
+        DynamicKafkaSourceEnumState restoredCheckpoint = serdeRoundTrip(inWindowCheckpoint);
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(parallelism);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                streamId,
+                                new MockKafkaMetadataService(Collections.singleton(kafkaStream)),
+                                context,
+                                properties,
+                                restoredCheckpoint)) {
+            enumerator.start();
+            registerReadersWithoutReportedSplits(context, enumerator, parallelism);
+            context.runNextOneTimeCallable();
+
+            Integer retainedSplitReader = null;
+            for (SplitsAssignment<DynamicKafkaSourceSplit> assignment :
+                    context.getSplitsAssignmentSequence()) {
+                for (Map.Entry<Integer, List<DynamicKafkaSourceSplit>> entry :
+                        assignment.assignment().entrySet()) {
+                    assertThat(entry.getKey()).isBetween(0, parallelism - 1);
+                    for (DynamicKafkaSourceSplit split : entry.getValue()) {
+                        if (split.splitId().equals(removedClusterSplit.splitId())) {
+                            assertThat(split.isRetained()).isTrue();
+                            retainedSplitReader = entry.getKey();
+                        }
+                    }
+                }
+            }
+            assertAssignedSplitIdsExactly(context, allReportedSplits);
+            // the retained split returns to its reporting reader, remapped as floorMod(4, 3)
+            assertThat(retainedSplitReader).isEqualTo(1);
+        }
+    }
+
+    @Test
+    public void testRestoredPendingSplitsMergeWithFreshReport() throws Throwable {
+        int parallelism = 2;
+        String streamId = "stream";
+        String clusterId = "cluster-0";
+        String topic = "topic";
+        // partition 0 is reported both as restored pending (offset 10) and fresh (offset 42),
+        // partition 1 only as restored pending, partition 2 only as fresh
+        DynamicKafkaSourceSplit restoredOverlappingSplit =
+                new DynamicKafkaSourceSplit(
+                        clusterId, new KafkaPartitionSplit(new TopicPartition(topic, 0), 10));
+        DynamicKafkaSourceSplit restoredOnlySplit =
+                new DynamicKafkaSourceSplit(
+                        clusterId, new KafkaPartitionSplit(new TopicPartition(topic, 1), 7));
+        DynamicKafkaSourceSplit freshOverlappingSplit =
+                new DynamicKafkaSourceSplit(
+                        clusterId, new KafkaPartitionSplit(new TopicPartition(topic, 0), 42));
+        DynamicKafkaSourceSplit freshOnlySplit =
+                new DynamicKafkaSourceSplit(
+                        clusterId, new KafkaPartitionSplit(new TopicPartition(topic, 2), 5));
+        KafkaStream kafkaStream = createKafkaStream(streamId, clusterId, topic);
+        DynamicKafkaSourceEnumState restoredCheckpoint =
+                serdeRoundTrip(
+                        new DynamicKafkaSourceEnumState(
+                                Collections.singleton(kafkaStream),
+                                Collections.singletonMap(
+                                        clusterId,
+                                        new KafkaSourceEnumState(
+                                                unwrapSplits(
+                                                        List.of(
+                                                                restoredOverlappingSplit,
+                                                                restoredOnlySplit,
+                                                                freshOnlySplit)),
+                                                Collections.emptyList(),
+                                                true)),
+                                Collections.emptyMap(),
+                                Collections.singletonMap(
+                                        1, List.of(restoredOverlappingSplit, restoredOnlySplit))));
+
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(parallelism);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                streamId,
+                                new MockKafkaMetadataService(Collections.singleton(kafkaStream)),
+                                context,
+                                createGlobalModeProperties(),
+                                restoredCheckpoint)) {
+            enumerator.start();
+            context.registerReader(
+                    ReaderInfo.createReaderInfo(0, "location-0", Collections.emptyList()));
+            enumerator.addReader(0);
+            context.registerReader(
+                    ReaderInfo.createReaderInfo(
+                            1, "location-1", List.of(freshOverlappingSplit, freshOnlySplit)));
+            enumerator.addReader(1);
+            context.runNextOneTimeCallable();
+
+            assertAssignedSplitIdsExactly(
+                    context, List.of(freshOverlappingSplit, restoredOnlySplit, freshOnlySplit));
+            Map<Integer, Long> startingOffsetByPartition = new HashMap<>();
+            for (DynamicKafkaSourceSplit split : collectAssignedSplits(context)) {
+                startingOffsetByPartition.put(
+                        split.getKafkaPartitionSplit().getPartition(),
+                        split.getKafkaPartitionSplit().getStartingOffset());
+            }
+            assertThat(startingOffsetByPartition)
+                    .as("fresh report wins per split id, restored-only splits keep their offsets")
+                    .containsEntry(0, 42L)
+                    .containsEntry(1, 7L)
+                    .containsEntry(2, 5L);
+        }
+    }
+
+    @Test
+    public void testChangedMetadataAfterInWindowCheckpointDropsRemovedTopicSplits()
+            throws Throwable {
+        int parallelism = 2;
+        String streamId = "stream";
+        String clusterId = "cluster-0";
+        String keptTopic = "kept-topic";
+        String removedTopic = "removed-topic";
+        List<DynamicKafkaSourceSplit> keptSplits = createSplits(clusterId, keptTopic, 2);
+        List<DynamicKafkaSourceSplit> reportedSplits = new ArrayList<>(keptSplits);
+        reportedSplits.addAll(createSplits(clusterId, removedTopic, 1));
+        KafkaStream restoredKafkaStream =
+                createKafkaStream(streamId, clusterId, Set.of(keptTopic, removedTopic));
+        KafkaStream currentKafkaStream = createKafkaStream(streamId, clusterId, keptTopic);
+        Properties properties = createGlobalModeProperties();
+        // retention enabled: the split is dropped because its topic was removed while the
+        // cluster stayed active, not because retention is off
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
+                "60000");
+
+        DynamicKafkaSourceEnumState inWindowCheckpoint;
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(parallelism);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                streamId,
+                                new MockKafkaMetadataService(
+                                        Collections.singleton(restoredKafkaStream)),
+                                context,
+                                properties,
+                                createRestoredState(
+                                        restoredKafkaStream, clusterId, reportedSplits))) {
+            enumerator.start();
+            context.registerReader(ReaderInfo.createReaderInfo(0, "location-0", reportedSplits));
+            enumerator.addReader(0);
+            context.registerReader(
+                    ReaderInfo.createReaderInfo(1, "location-1", Collections.emptyList()));
+            enumerator.addReader(1);
+
+            assertThat(context.getSplitsAssignmentSequence()).isEmpty();
+            inWindowCheckpoint = enumerator.snapshotState(1L);
+        }
+
+        DynamicKafkaSourceEnumState restoredCheckpoint = serdeRoundTrip(inWindowCheckpoint);
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(parallelism);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                streamId,
+                                new MockKafkaMetadataService(
+                                        Collections.singleton(currentKafkaStream)),
+                                context,
+                                properties,
+                                restoredCheckpoint)) {
+            enumerator.start();
+            registerReadersWithoutReportedSplits(context, enumerator, parallelism);
+            context.runNextOneTimeCallable();
+
+            assertAssignedSplitIdsExactly(context, keptSplits);
+        }
+    }
+
+    @Test
+    public void testPendingOnlyRestoredStateDefersMetadataUpdatesUntilReassignment()
+            throws Throwable {
+        int parallelism = 2;
+        String streamId = "stream";
+        String clusterId = "cluster-0";
+        String topic = "topic";
+        List<DynamicKafkaSourceSplit> splits = createSplits(clusterId, topic, 2);
+        KafkaStream kafkaStream = createKafkaStream(streamId, clusterId, topic);
+        // the pending splits' cluster appears in neither the cluster nor the retained states
+        DynamicKafkaSourceEnumState restoredCheckpoint =
+                serdeRoundTrip(
+                        new DynamicKafkaSourceEnumState(
+                                Collections.singleton(kafkaStream),
+                                Collections.emptyMap(),
+                                Collections.emptyMap(),
+                                Collections.singletonMap(0, splits)));
+
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(parallelism);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                streamId,
+                                new MockKafkaMetadataService(Collections.singleton(kafkaStream)),
+                                context,
+                                createGlobalModeProperties(),
+                                restoredCheckpoint)) {
+            enumerator.start();
+            registerReadersWithoutReportedSplits(context, enumerator, parallelism);
+            enumerator.handleSourceEvent(0, new GetMetadataUpdateEvent());
+
+            // all readers are registered, but the restored pending splits are not reassigned
+            // yet: the metadata update must stay deferred
+            assertThat(context.getSentSourceEvent().getOrDefault(0, Collections.emptyList()))
+                    .isEmpty();
+
+            context.runNextOneTimeCallable();
+
+            assertAssignedSplitIdsExactly(context, splits);
+            assertThat(context.getSentSourceEvent().get(0))
+                    .hasSize(1)
+                    .allMatch(MetadataUpdateEvent.class::isInstance);
+        }
+    }
+
+    private static void registerReadersWithoutReportedSplits(
+            MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context,
+            DynamicKafkaSourceEnumerator enumerator,
+            int parallelism) {
+        for (int reader = 0; reader < parallelism; reader++) {
+            context.registerReader(
+                    ReaderInfo.createReaderInfo(
+                            reader, "location-" + reader, Collections.emptyList()));
+            enumerator.addReader(reader);
+        }
+    }
+
+    private static DynamicKafkaSourceEnumState serdeRoundTrip(DynamicKafkaSourceEnumState state)
+            throws Exception {
+        DynamicKafkaSourceEnumStateSerializer serializer =
+                new DynamicKafkaSourceEnumStateSerializer();
+        return serializer.deserialize(serializer.getVersion(), serializer.serialize(state));
+    }
+
+    /**
+     * Asserts the assigned splits match the expected splits by id, including multiplicity, so a
+     * duplicate assignment of the same split cannot go unnoticed.
+     */
+    private static void assertAssignedSplitIdsExactly(
+            MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context,
+            List<DynamicKafkaSourceSplit> expectedSplits) {
+        List<String> assignedSplitIds = new ArrayList<>();
+        for (DynamicKafkaSourceSplit split : collectAssignedSplits(context)) {
+            assignedSplitIds.add(split.splitId());
+        }
+        List<String> expectedSplitIds = new ArrayList<>();
+        for (DynamicKafkaSourceSplit split : expectedSplits) {
+            expectedSplitIds.add(split.splitId());
+        }
+        assertThat(assignedSplitIds).containsExactlyInAnyOrderElementsOf(expectedSplitIds);
+    }
+
+    private static List<DynamicKafkaSourceSplit> collectAssignedSplits(
+            MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context) {
+        List<DynamicKafkaSourceSplit> assignedSplits = new ArrayList<>();
+        for (SplitsAssignment<DynamicKafkaSourceSplit> assignment :
+                context.getSplitsAssignmentSequence()) {
+            for (List<DynamicKafkaSourceSplit> readerSplits : assignment.assignment().values()) {
+                assignedSplits.addAll(readerSplits);
+            }
+        }
+        return assignedSplits;
+    }
+
     private static DynamicKafkaSourceEnumState createRestoredState(
             KafkaStream kafkaStream, String clusterId, List<DynamicKafkaSourceSplit> activeSplits) {
         return new DynamicKafkaSourceEnumState(
