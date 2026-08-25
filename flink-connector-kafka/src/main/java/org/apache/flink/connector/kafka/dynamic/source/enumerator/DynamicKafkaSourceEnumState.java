@@ -20,10 +20,12 @@ package org.apache.flink.connector.kafka.dynamic.source.enumerator;
 
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
+import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -36,26 +38,27 @@ public class DynamicKafkaSourceEnumState {
     private final Set<KafkaStream> kafkaStreams;
     private final Map<String, KafkaSourceEnumState> clusterEnumeratorStates;
     private final Map<String, RetainedClusterState> retainedClusterEnumeratorStates;
+    private final Map<Integer, List<DynamicKafkaSourceSplit>> pendingReportedSplitsByReader;
 
     public DynamicKafkaSourceEnumState() {
-        this.kafkaStreams = new HashSet<>();
-        this.clusterEnumeratorStates = new HashMap<>();
-        this.retainedClusterEnumeratorStates = new HashMap<>();
+        this(new HashSet<>(), new HashMap<>(), new HashMap<>(), new HashMap<>());
     }
 
     public DynamicKafkaSourceEnumState(
             Set<KafkaStream> kafkaStreams,
             Map<String, KafkaSourceEnumState> clusterEnumeratorStates) {
-        this(kafkaStreams, clusterEnumeratorStates, new HashMap<>());
+        this(kafkaStreams, clusterEnumeratorStates, new HashMap<>(), new HashMap<>());
     }
 
     public DynamicKafkaSourceEnumState(
             Set<KafkaStream> kafkaStreams,
             Map<String, KafkaSourceEnumState> clusterEnumeratorStates,
-            Map<String, RetainedClusterState> retainedClusterEnumeratorStates) {
+            Map<String, RetainedClusterState> retainedClusterEnumeratorStates,
+            Map<Integer, List<DynamicKafkaSourceSplit>> pendingReportedSplitsByReader) {
         this.kafkaStreams = kafkaStreams;
         this.clusterEnumeratorStates = clusterEnumeratorStates;
         this.retainedClusterEnumeratorStates = retainedClusterEnumeratorStates;
+        this.pendingReportedSplitsByReader = pendingReportedSplitsByReader;
     }
 
     public Set<KafkaStream> getKafkaStreams() {
@@ -68,6 +71,16 @@ public class DynamicKafkaSourceEnumState {
 
     public Map<String, RetainedClusterState> getRetainedClusterEnumeratorStates() {
         return retainedClusterEnumeratorStates;
+    }
+
+    /**
+     * Splits reported by readers on registration that were not yet reassigned when the checkpoint
+     * was taken. Readers hold no splits at that point, and the sub enumerator states mark the
+     * partitions as assigned without tracking the reader-reported offsets. Until reassignment this
+     * map is the only record of those offsets.
+     */
+    public Map<Integer, List<DynamicKafkaSourceSplit>> getPendingReportedSplitsByReader() {
+        return pendingReportedSplitsByReader;
     }
 
     /** Kafka enumerator state that stays checkpointed after its cluster becomes inactive. */
