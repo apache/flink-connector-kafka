@@ -457,6 +457,92 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
                 .isEqualTo(2);
     }
 
+    @Test
+    void testCommittedOffsetForBoundedSplitDoesNotGoBackwards() throws Throwable {
+        final String topic = TOPIC + "BoundedTrailingMarkers";
+        final String groupId = "BoundedTrailingMarkersOffsetCommitGroup";
+        final TopicPartition tp = new TopicPartition(topic, 0);
+        // second partition to keep the fetcher polling after the bounded split finishes
+        final TopicPartition idleTp = new TopicPartition(topic, 1);
+        KafkaSourceTestEnv.createTestTopic(topic, 2, 1);
+
+        // committed transaction containing two records
+        // offset 0 = record
+        // offset 1 = record
+        // offset 2 = commit marker
+        // offset 3 << log end offset
+        produceInTransaction(topic, 0, 2, true);
+        awaitLastStableOffset(tp, 3L);
+
+        final Properties props = new Properties();
+        props.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
+        props.setProperty(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
+
+        final AtomicBoolean splitFinished = new AtomicBoolean(false);
+        try (KafkaSourceReader<Integer> reader =
+                (KafkaSourceReader<Integer>)
+                        createReader(
+                                Boundedness.CONTINUOUS_UNBOUNDED,
+                                new TestingReaderContext(),
+                                (ignore) -> splitFinished.set(true),
+                                props,
+                                null)) {
+            reader.addSplits(
+                    Arrays.asList(
+                            new KafkaPartitionSplit(tp, 0L, 10L),
+                            new KafkaPartitionSplit(
+                                    idleTp, 0L, KafkaPartitionSplit.NO_STOPPING_OFFSET)));
+
+            final TestingReaderOutput<Integer> output = new TestingReaderOutput<>();
+            pollUntil(
+                    reader,
+                    output,
+                    () -> output.getEmittedRecords().size() == 2,
+                    "The reader did not emit all records before timeout.");
+
+            completeCheckpoint(reader, 1L);
+            final long offsetWhileRunning = getCommittedOffset(tp, groupId);
+
+            // aborted transaction that takes the partition up to the split's stopping offset
+            // offsets 3 - 8 = records
+            //     offset  9 = abort marker
+            //     offset 10 = log end offset
+            produceInTransaction(topic, 0, 6, false);
+            awaitLastStableOffset(tp, 10L);
+            pollUntil(
+                    reader, output, splitFinished::get, "The split did not finish before timeout.");
+
+            completeCheckpoint(reader, 2L);
+            final long offsetAfterFinishing = getCommittedOffset(tp, groupId);
+
+            assertThat(offsetAfterFinishing)
+                    .as("The committed offset should not go backwards when the split finishes")
+                    .isGreaterThanOrEqualTo(offsetWhileRunning);
+        }
+    }
+
+    private void completeCheckpoint(KafkaSourceReader<Integer> reader, long checkpointId)
+            throws Exception {
+        try {
+            reader.snapshotState(checkpointId);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        waitUtil(
+                () -> {
+                    try {
+                        reader.notifyCheckpointComplete(checkpointId);
+                    } catch (Exception exception) {
+                        throw new RuntimeException(
+                                "Unexpected exception while committing", exception);
+                    }
+                    return reader.getOffsetsToCommit().isEmpty();
+                },
+                Duration.ofSeconds(30),
+                Duration.ofMillis(500),
+                "Offset commit did not finish before timeout.");
+    }
+
     /**
      * Reads {@code expectedRecords} records from {@code tp} using a read_committed reader, and then
      * completes checkpoints while the partition is idle until either the committed offset reaches
