@@ -159,8 +159,9 @@ public class KafkaSourceReader<T>
                                         "Successfully committed offsets for checkpoint {}",
                                         checkpointId);
                                 kafkaSourceReaderMetrics.recordSucceededCommit();
-                                // offsets committed to Kafka can differ from what was requested, 
-                                // because the split reader reconciles them with the consumer position
+                                // offsets committed to Kafka can differ from what was requested,
+                                // because the split reader reconciles them with the consumer
+                                // position
                                 committedOffsets.forEach(
                                         (tp, offset) ->
                                                 kafkaSourceReaderMetrics.recordCommittedOffset(

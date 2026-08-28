@@ -382,7 +382,7 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
                         4,
                         10,
                         (RecordProducer) topic -> produceInterleavedTransactions(topic, 0, 2)),
-                // a single aborted transaction 
+                // a single aborted transaction
                 // so the partition never delivers a record to the reader
                 // offset 0 = record
                 // offset 1 = record

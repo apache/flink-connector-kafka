@@ -429,7 +429,7 @@ public class KafkaPartitionSplitReaderTest {
     void testTrackedOffsetsAreRemovedWhenPartitionsAreUnassigned() throws Exception {
         KafkaPartitionSplitReader reader = createReader();
         final TopicPartition finishingPartition = new TopicPartition(TOPIC1, 0);
-        // a second partition is kept assigned throughout, which prevents consumer.poll() 
+        // a second partition is kept assigned throughout, which prevents consumer.poll()
         // blocking, and proves that only offsets of the unassigned partition are removed
         final TopicPartition remainingPartition = new TopicPartition(TOPIC1, 1);
         reader.handleSplitsChanges(
