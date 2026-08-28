@@ -381,7 +381,20 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
                         6L,
                         4,
                         10,
-                        (RecordProducer) topic -> produceInterleavedTransactions(topic, 0, 2)));
+                        (RecordProducer) topic -> produceInterleavedTransactions(topic, 0, 2)),
+                // a single aborted transaction 
+                // so the partition never delivers a record to the reader
+                // offset 0 = record
+                // offset 1 = record
+                // offset 2 = record
+                // offset 3 = abort marker
+                // offset 4 << log end offset
+                Arguments.of(
+                        "OnlyAbortedTransaction",
+                        4L,
+                        0,
+                        10,
+                        (RecordProducer) topic -> produceInTransaction(topic, 0, 3, false)));
     }
 
     @ParameterizedTest(name = "{0}")

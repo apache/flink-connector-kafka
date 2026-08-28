@@ -373,8 +373,8 @@ public class KafkaPartitionSplitReader
                         return;
                     }
                     Long lastFetchedOffset = lastFetchedOffsets.get(tp);
-                    if (lastFetchedOffset == null
-                            || offsetAndMetadata.offset() != lastFetchedOffset + 1) {
+                    if (lastFetchedOffset != null
+                            && offsetAndMetadata.offset() != lastFetchedOffset + 1) {
                         return;
                     }
                     Long position = lastKnownPositions.get(tp);
