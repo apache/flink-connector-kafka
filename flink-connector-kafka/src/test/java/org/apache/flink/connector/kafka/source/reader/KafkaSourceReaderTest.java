@@ -474,11 +474,16 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
         props.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         props.setProperty(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
 
+        final MetricListener metricListener = new MetricListener();
+
         try (KafkaSourceReader<Integer> reader =
                 (KafkaSourceReader<Integer>)
                         createReader(
                                 Boundedness.CONTINUOUS_UNBOUNDED,
-                                new TestingReaderContext(),
+                                new TestingReaderContext(
+                                        new Configuration(),
+                                        InternalSourceReaderMetricGroup.mock(
+                                                metricListener.getMetricGroup())),
                                 (ignore) -> {},
                                 props,
                                 null)) {
@@ -518,6 +523,9 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
                         Duration.ofSeconds(1),
                         "Offset commit did not finish before timeout.");
                 committedOffset = getCommittedOffset(tp, groupId);
+                assertThat(getCommittedOffsetMetric(tp, metricListener))
+                        .as("The committedOffsets metric should match the offset held by Kafka")
+                        .isEqualTo(committedOffset);
                 if (committedOffset == targetOffset) {
                     break;
                 }
