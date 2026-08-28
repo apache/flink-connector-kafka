@@ -325,7 +325,7 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
                         "MultiRecordTransaction",
                         4L,
                         3,
-                        10,
+                        1,
                         (RecordProducer) topic -> produceInTransaction(topic, 0, 3, true)),
                 // committed transaction containing two records
                 // aborted transaction containing three records
@@ -341,7 +341,7 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
                         "AbortedTransaction",
                         7L,
                         2,
-                        10,
+                        1,
                         (RecordProducer)
                                 topic -> {
                                     produceInTransaction(topic, 0, 2, true);
@@ -359,7 +359,7 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
                         "MultipleTransactions",
                         6L,
                         3,
-                        10,
+                        1,
                         (RecordProducer)
                                 topic -> {
                                     produceInTransaction(topic, 0, 1, true);
@@ -380,7 +380,7 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
                         "InterleavedTransactions",
                         6L,
                         4,
-                        10,
+                        1,
                         (RecordProducer) topic -> produceInterleavedTransactions(topic, 0, 2)),
                 // a single aborted transaction
                 // so the partition never delivers a record to the reader
@@ -393,7 +393,7 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
                         "OnlyAbortedTransaction",
                         4L,
                         0,
-                        10,
+                        2,
                         (RecordProducer) topic -> produceInTransaction(topic, 0, 3, false)));
     }
 
@@ -455,6 +455,48 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
         assertThat(committedOffset)
                 .as("The committed offset should be the next offset after the two read records")
                 .isEqualTo(2);
+    }
+
+    /**
+     * Simulates a low-traffic bursty transactional topic, where a burst of records are
+     * followed by a commit marker. The result of this could be for a commit marker to
+     * be returned with no records in a poll. The intent of this test is to verify that
+     * the offset converges in such a scenario, and does not get stuck with an incorrect
+     * lag until more records arrive on the topic to allow an update.
+     */
+    @Test
+    void testCommittedOffsetConvergesOnIdlePartitionAfterTrailingCommitMarker() throws Throwable {
+        final String topic = TOPIC + "IdleAfterTrailingMarker";
+        final String groupId = "IdleAfterTrailingMarkerOffsetCommitGroup";
+        final TopicPartition tp = new TopicPartition(topic, 0);
+        KafkaSourceTestEnv.createTestTopic(topic, 1, 1);
+
+        // transaction containing two records
+        // offset 0 = record
+        // offset 1 = record
+        // offset 2 = commit marker
+        // offset 3 << log end offset
+        produceInTransaction(topic, 0, 2, true);
+
+        // assert state of Kafka
+        final long lastStableOffset = awaitLastStableOffset(tp, 3L);
+        assertThat(getReadCommittedRecordsCount(tp)).as("Number of readable records").isEqualTo(2);
+
+        // one record per poll, so that the commit marker is left to a poll of its own
+        final Properties oneRecordPerPoll = new Properties();
+        oneRecordPerPoll.setProperty(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "1");
+
+        // the poll that skips the commit marker is not the poll that delivers the last
+        // record, so allow for the first checkpoint being completed in between the two
+        final int maxCheckpoints = 2;
+
+        // run KafkaSourceReader and check the last offset committed
+        final long committedOffset =
+                readAndCommitOffset(
+                        tp, groupId, 2, maxCheckpoints, lastStableOffset, oneRecordPerPoll);
+        assertThat(committedOffset)
+                .as("The committed offset should converge with the log end offset")
+                .isEqualTo(lastStableOffset);
     }
 
     @Test
@@ -556,9 +598,22 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
             int maxCheckpoints,
             long targetOffset)
             throws Exception {
+        return readAndCommitOffset(
+                tp, groupId, expectedRecords, maxCheckpoints, targetOffset, new Properties());
+    }
+
+    private long readAndCommitOffset(
+            TopicPartition tp,
+            String groupId,
+            int expectedRecords,
+            int maxCheckpoints,
+            long targetOffset,
+            Properties extraConsumerProps)
+            throws Exception {
         final Properties props = new Properties();
         props.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         props.setProperty(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
+        props.putAll(extraConsumerProps);
 
         final MetricListener metricListener = new MetricListener();
 
