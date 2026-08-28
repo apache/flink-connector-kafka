@@ -294,6 +294,16 @@ public class KafkaPartitionSplitReader
         return pollTimeout;
     }
 
+    @VisibleForTesting
+    Map<TopicPartition, Long> lastFetchedOffsets() {
+        return lastFetchedOffsets;
+    }
+
+    @VisibleForTesting
+    Map<TopicPartition, Long> lastKnownPositions() {
+        return lastKnownPositions;
+    }
+
     // --------------- private helper method ----------------------
 
     private static Duration parsePollTimeout(Properties props) {
@@ -520,6 +530,11 @@ public class KafkaPartitionSplitReader
         Collection<TopicPartition> newAssignment = new HashSet<>(consumer.assignment());
         newAssignment.removeAll(partitionsToUnassign);
         consumer.assign(newAssignment);
+        partitionsToUnassign.forEach(
+                tp -> {
+                    lastFetchedOffsets.remove(tp);
+                    lastKnownPositions.remove(tp);
+                });
     }
 
     private String createConsumerClientId(Properties props) {
