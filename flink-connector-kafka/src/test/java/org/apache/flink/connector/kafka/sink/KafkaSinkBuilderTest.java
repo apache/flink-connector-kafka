@@ -23,7 +23,6 @@ import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
 import java.util.Properties;
 import java.util.function.Consumer;
 
@@ -33,8 +32,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Tests for {@link KafkaSinkBuilder}. */
 class KafkaSinkBuilderTest {
 
-    private static final String[] DEFAULT_KEYS =
-            new String[] {
+    private static final Object[] DEFAULT_KEYS =
+            new Object[] {
                 ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
@@ -43,17 +42,11 @@ class KafkaSinkBuilderTest {
 
     @Test
     void testPropertyHandling() {
-        validateProducerConfig(
-                getBasicBuilder(),
-                p -> {
-                    Arrays.stream(DEFAULT_KEYS).forEach(k -> assertThat(p).containsKey(k));
-                });
+        validateProducerConfig(getBasicBuilder(), p -> assertThat(p).containsKeys(DEFAULT_KEYS));
 
         validateProducerConfig(
                 getBasicBuilder().setProperty("k1", "v1"),
-                p -> {
-                    Arrays.stream(DEFAULT_KEYS).forEach(k -> assertThat(p).containsKey(k));
-                });
+                p -> assertThat(p).containsKeys(DEFAULT_KEYS));
 
         Properties testConf = new Properties();
         testConf.put("k1", "v1");
@@ -62,7 +55,7 @@ class KafkaSinkBuilderTest {
         validateProducerConfig(
                 getBasicBuilder().setKafkaProducerConfig(testConf),
                 p -> {
-                    Arrays.stream(DEFAULT_KEYS).forEach(k -> assertThat(p).containsKey(k));
+                    assertThat(p).containsKeys(DEFAULT_KEYS);
                     testConf.forEach((k, v) -> assertThat(p.get(k)).isEqualTo(v));
                 });
 
@@ -72,7 +65,7 @@ class KafkaSinkBuilderTest {
                         .setKafkaProducerConfig(testConf)
                         .setProperty("k2", "correct"),
                 p -> {
-                    Arrays.stream(DEFAULT_KEYS).forEach(k -> assertThat(p).containsKey(k));
+                    assertThat(p).containsKeys(DEFAULT_KEYS);
                     assertThat(p).containsEntry("k1", "v1").containsEntry("k2", "correct");
                 });
     }
