@@ -267,6 +267,22 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
     }
 
     @Test
+    void testInternalSnapshotDoesNotCreateOffsetCommitEntry() throws Exception {
+        try (KafkaSourceReader<Integer> reader = (KafkaSourceReader<Integer>) createReader()) {
+            KafkaPartitionSplit split = new KafkaPartitionSplit(new TopicPartition(TOPIC, 0), 10L);
+            reader.addSplits(Collections.singletonList(split));
+
+            assertThat(reader.snapshotState(-1L)).containsExactly(split);
+            assertThat(reader.getOffsetsToCommit()).isEmpty();
+
+            reader.snapshotState(123L);
+            assertThat(reader.getOffsetsToCommit()).containsOnlyKeys(123L);
+            assertThat(reader.snapshotState(-1L)).containsExactly(split);
+            assertThat(reader.getOffsetsToCommit()).containsOnlyKeys(123L);
+        }
+    }
+
+    @Test
     void testNotCommitOffsetsForUninitializedSplits() throws Exception {
         final long checkpointId = 1234L;
         try (KafkaSourceReader<Integer> reader = (KafkaSourceReader<Integer>) createReader()) {

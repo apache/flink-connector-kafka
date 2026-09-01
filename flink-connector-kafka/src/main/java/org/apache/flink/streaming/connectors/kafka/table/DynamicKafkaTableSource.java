@@ -26,6 +26,7 @@ import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.source.DynamicKafkaSource;
 import org.apache.flink.connector.kafka.dynamic.source.DynamicKafkaSourceBuilder;
+import org.apache.flink.connector.kafka.source.KafkaPropertiesUtil;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -66,7 +67,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -443,6 +443,7 @@ public class DynamicKafkaTableSource
             DeserializationSchema<RowData> keyDeserialization,
             DeserializationSchema<RowData> valueDeserialization,
             TypeInformation<RowData> producedTypeInfo) {
+        KafkaConnectorOptionsUtil.validateAndNormalizeAutoOffsetResetStrategy(properties);
 
         final KafkaRecordDeserializationSchema<RowData> kafkaDeserializer =
                 createKafkaDeserializationSchema(
@@ -462,31 +463,7 @@ public class DynamicKafkaTableSource
                 .setDeserializer(kafkaDeserializer)
                 .setProperties(properties);
 
-        switch (startupMode) {
-            case EARLIEST:
-                dynamicKafkaSourceBuilder.setStartingOffsets(OffsetsInitializer.earliest());
-                break;
-            case LATEST:
-                dynamicKafkaSourceBuilder.setStartingOffsets(OffsetsInitializer.latest());
-                break;
-            case GROUP_OFFSETS:
-                String offsetResetConfig =
-                        properties.getProperty(
-                                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                                OffsetResetStrategy.NONE.name());
-                OffsetResetStrategy offsetResetStrategy = getResetStrategy(offsetResetConfig);
-                dynamicKafkaSourceBuilder.setStartingOffsets(
-                        OffsetsInitializer.committedOffsets(offsetResetStrategy));
-                break;
-            case SPECIFIC_OFFSETS:
-                dynamicKafkaSourceBuilder.setStartingOffsets(
-                        OffsetsInitializer.offsets(specificStartupOffsets));
-                break;
-            case TIMESTAMP:
-                dynamicKafkaSourceBuilder.setStartingOffsets(
-                        OffsetsInitializer.timestamp(startupTimestampMillis));
-                break;
-        }
+        dynamicKafkaSourceBuilder.setStartingOffsets(getStartingOffsetsInitializer());
 
         switch (boundedMode) {
             case UNBOUNDED:
@@ -510,21 +487,36 @@ public class DynamicKafkaTableSource
         return dynamicKafkaSourceBuilder.build();
     }
 
-    private OffsetResetStrategy getResetStrategy(String offsetResetConfig) {
-        return Arrays.stream(OffsetResetStrategy.values())
-                .filter(ors -> ors.name().equals(offsetResetConfig.toUpperCase(Locale.ROOT)))
-                .findAny()
-                .orElseThrow(
-                        () ->
-                                new IllegalArgumentException(
-                                        String.format(
-                                                "%s can not be set to %s. Valid values: [%s]",
-                                                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                                                offsetResetConfig,
-                                                Arrays.stream(OffsetResetStrategy.values())
-                                                        .map(Enum::name)
-                                                        .map(String::toLowerCase)
-                                                        .collect(Collectors.joining(",")))));
+    private OffsetsInitializer getStartingOffsetsInitializer() {
+        final OffsetsInitializer startingOffsetsInitializer;
+        switch (startupMode) {
+            case EARLIEST:
+                startingOffsetsInitializer = OffsetsInitializer.earliest();
+                break;
+            case LATEST:
+                startingOffsetsInitializer = OffsetsInitializer.latest();
+                break;
+            case GROUP_OFFSETS:
+                String offsetResetConfig =
+                        properties.getProperty(
+                                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                                OffsetResetStrategy.NONE.name());
+                OffsetResetStrategy offsetResetStrategy =
+                        KafkaPropertiesUtil.getResetStrategy(offsetResetConfig);
+                startingOffsetsInitializer =
+                        OffsetsInitializer.committedOffsets(offsetResetStrategy);
+                break;
+            case SPECIFIC_OFFSETS:
+                startingOffsetsInitializer = OffsetsInitializer.offsets(specificStartupOffsets);
+                break;
+            case TIMESTAMP:
+                startingOffsetsInitializer = OffsetsInitializer.timestamp(startupTimestampMillis);
+                break;
+            default:
+                throw new IllegalStateException("Unsupported startup mode: " + startupMode);
+        }
+
+        return startingOffsetsInitializer;
     }
 
     private KafkaRecordDeserializationSchema<RowData> createKafkaDeserializationSchema(

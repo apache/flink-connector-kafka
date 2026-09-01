@@ -86,6 +86,42 @@ public class KafkaSourceBuilderTest {
     }
 
     @Test
+    public void testAutoOffsetResetDefaultsToInitializerStrategy() {
+        assertThat(getAutoOffsetResetStrategy(getBasicBuilder().build())).isEqualTo("earliest");
+    }
+
+    @Test
+    public void testAutoOffsetResetUsesExplicitProperty() {
+        KafkaSource<String> kafkaSource =
+                getBasicBuilder()
+                        .setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "none")
+                        .build();
+
+        assertThat(getAutoOffsetResetStrategy(kafkaSource)).isEqualTo("none");
+    }
+
+    @Test
+    public void testAutoOffsetResetNormalizesExplicitProperty() {
+        KafkaSource<String> kafkaSource =
+                getBasicBuilder()
+                        .setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "EARLIEST")
+                        .build();
+
+        assertThat(getAutoOffsetResetStrategy(kafkaSource)).isEqualTo("earliest");
+    }
+
+    @Test
+    public void testAutoOffsetResetExplicitPropertyOverridesInitializerStrategy() {
+        KafkaSource<String> kafkaSource =
+                getBasicBuilder()
+                        .setStartingOffsets(OffsetsInitializer.latest())
+                        .setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "none")
+                        .build();
+
+        assertThat(getAutoOffsetResetStrategy(kafkaSource)).isEqualTo("none");
+    }
+
+    @Test
     public void testEnableCommitOnCheckpointWithoutGroupId() {
         assertThatThrownBy(
                         () ->
@@ -243,6 +279,15 @@ public class KafkaSourceBuilderTest {
                 .setTopics("topic")
                 .setDeserializer(
                         KafkaRecordDeserializationSchema.valueOnly(StringDeserializer.class));
+    }
+
+    private String getAutoOffsetResetStrategy(KafkaSource<?> kafkaSource) {
+        return kafkaSource
+                .getConfiguration()
+                .get(
+                        ConfigOptions.key(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG)
+                                .stringType()
+                                .noDefaultValue());
     }
 
     private static class ExampleCustomSubscriber implements KafkaSubscriber {

@@ -58,6 +58,18 @@ public class KafkaSourceOptions {
                     .defaultValue(true)
                     .withDescription("Whether to commit consuming offset on checkpoint.");
 
+    public static final ConfigOption<Long> POLL_TIMEOUT_MS =
+            ConfigOptions.key("poll.timeout.ms")
+                    .longType()
+                    .defaultValue(Duration.ofSeconds(10).toMillis())
+                    .withDescription(
+                            "The maximum time in milliseconds the Kafka consumer blocks in a single "
+                                    + "poll() call while waiting for records. Since the poll returns "
+                                    + "as soon as records are available, a smaller value mainly makes "
+                                    + "an idle split reader react faster to split changes, at the cost "
+                                    + "of polling more often. 0 polls without blocking. Must not be "
+                                    + "negative.");
+
     @SuppressWarnings("unchecked")
     public static <T> T getOption(
             Properties props, ConfigOption<?> configOption, Function<String, T> parser) {

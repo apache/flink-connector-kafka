@@ -21,16 +21,22 @@ package org.apache.flink.streaming.connectors.kafka;
 import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
 import org.apache.flink.connector.kafka.dynamic.source.MetadataUpdateEvent;
+import org.apache.flink.core.testutils.CommonTestUtils;
 
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.internals.RecordHeader;
+import org.apache.kafka.common.serialization.IntegerDeserializer;
 import org.apache.kafka.common.serialization.IntegerSerializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -54,6 +60,39 @@ public class DynamicKafkaSourceTestHelper extends KafkaTestBase {
 
     public static void tearDown() throws Exception {
         shutDownServices();
+    }
+
+    /** Reads committed integer records from the output topic's only partition. */
+    public static KafkaConsumer<Integer, Integer> committedConsumer(
+            int kafkaClusterIdx, String outputTopic) {
+        Properties properties = new Properties();
+        properties.putAll(getKafkaClusterTestEnvMetadata(kafkaClusterIdx).getStandardProperties());
+        properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, outputTopic + "-validation");
+        properties.setProperty(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
+        properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        properties.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+        KafkaConsumer<Integer, Integer> consumer =
+                new KafkaConsumer<>(
+                        properties, new IntegerDeserializer(), new IntegerDeserializer());
+        consumer.assign(Collections.singleton(new TopicPartition(outputTopic, 0)));
+        consumer.seekToBeginning(consumer.assignment());
+        return consumer;
+    }
+
+    /** Drains the committed output visible after the producing job has stopped. */
+    public static void drainCommittedRecords(
+            KafkaConsumer<Integer, Integer> consumer, List<Integer> records) throws Exception {
+        Map<TopicPartition, Long> endOffsets = consumer.endOffsets(consumer.assignment());
+        CommonTestUtils.waitUtil(
+                () -> {
+                    consumer.poll(Duration.ofMillis(100))
+                            .forEach(record -> records.add(record.value()));
+                    return endOffsets.entrySet().stream()
+                            .allMatch(
+                                    entry -> consumer.position(entry.getKey()) >= entry.getValue());
+                },
+                Duration.ofSeconds(30),
+                "Did not drain all committed Kafka output after cancellation");
     }
 
     public static KafkaClusterTestEnvMetadata getKafkaClusterTestEnvMetadata(int kafkaClusterIdx) {

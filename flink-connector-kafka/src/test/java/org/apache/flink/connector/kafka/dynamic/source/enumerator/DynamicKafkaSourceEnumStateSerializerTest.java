@@ -20,6 +20,7 @@ package org.apache.flink.connector.kafka.dynamic.source.enumerator;
 
 import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
+import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
 import org.apache.flink.connector.kafka.dynamic.source.testutils.DynamicKafkaSourceEnumStateTestUtils;
 import org.apache.flink.connector.kafka.source.enumerator.AssignmentStatus;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
@@ -27,6 +28,7 @@ import org.apache.flink.connector.kafka.source.enumerator.SplitAndAssignmentStat
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import org.apache.kafka.clients.CommonClientConfigs;
@@ -112,7 +114,25 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
                                                 ImmutableSet.of(
                                                         getSplitAssignment("topic6", 0, ASSIGNED)),
                                                 true),
-                                        123L)));
+                                        123L)),
+                        ImmutableMap.of(
+                                0,
+                                ImmutableList.of(
+                                        new DynamicKafkaSourceSplit(
+                                                "cluster0",
+                                                new KafkaPartitionSplit(
+                                                        new TopicPartition("topic0", 0), 100))),
+                                2,
+                                ImmutableList.of(
+                                        new DynamicKafkaSourceSplit(
+                                                "cluster1",
+                                                new KafkaPartitionSplit(
+                                                        new TopicPartition("topic2", 0), 5)),
+                                        new DynamicKafkaSourceSplit(
+                                                "retained-cluster",
+                                                new KafkaPartitionSplit(
+                                                        new TopicPartition("topic6", 0), 7),
+                                                456L))));
 
         DynamicKafkaSourceEnumState dynamicKafkaSourceEnumStateAfterSerde =
                 dynamicKafkaSourceEnumStateSerializer.deserialize(
@@ -210,6 +230,83 @@ public class DynamicKafkaSourceEnumStateSerializerTest {
                 .isEqualTo("cluster0:9092");
         assertThat(clusterMetadata.getStartingOffsetsInitializer()).isNull();
         assertThat(clusterMetadata.getStoppingOffsetsInitializer()).isNull();
+    }
+
+    @Test
+    public void testDeserializeV2State() throws Exception {
+        DynamicKafkaSourceEnumStateSerializer dynamicKafkaSourceEnumStateSerializer =
+                new DynamicKafkaSourceEnumStateSerializer();
+        KafkaSourceEnumState clusterState =
+                new KafkaSourceEnumState(
+                        ImmutableSet.of(
+                                getSplitAssignment("topic0", 0, ASSIGNED),
+                                getSplitAssignment("topic0", 1, UNASSIGNED)),
+                        true);
+
+        byte[] serializedState =
+                DynamicKafkaSourceEnumStateTestUtils.serializeV2State(
+                        "stream0",
+                        "cluster0",
+                        ImmutableSet.of("topic0"),
+                        "cluster0:9092",
+                        clusterState);
+
+        DynamicKafkaSourceEnumState dynamicKafkaSourceEnumState =
+                dynamicKafkaSourceEnumStateSerializer.deserialize(2, serializedState);
+
+        assertThat(dynamicKafkaSourceEnumState.getClusterEnumeratorStates())
+                .containsOnlyKeys("cluster0");
+        assertThat(dynamicKafkaSourceEnumState.getClusterEnumeratorStates().get("cluster0"))
+                .usingRecursiveComparison()
+                .isEqualTo(clusterState);
+        KafkaStream kafkaStream = dynamicKafkaSourceEnumState.getKafkaStreams().iterator().next();
+        assertThat(kafkaStream.getStreamId()).isEqualTo("stream0");
+        assertThat(dynamicKafkaSourceEnumState.getRetainedClusterEnumeratorStates()).isEmpty();
+        assertThat(dynamicKafkaSourceEnumState.getPendingReportedSplitsByReader()).isEmpty();
+    }
+
+    @Test
+    public void testDeserializeV3State() throws Exception {
+        DynamicKafkaSourceEnumStateSerializer dynamicKafkaSourceEnumStateSerializer =
+                new DynamicKafkaSourceEnumStateSerializer();
+        KafkaSourceEnumState clusterState =
+                new KafkaSourceEnumState(
+                        ImmutableSet.of(getSplitAssignment("topic0", 0, ASSIGNED)), true);
+        KafkaSourceEnumState retainedClusterState =
+                new KafkaSourceEnumState(
+                        ImmutableSet.of(getSplitAssignment("topic6", 0, ASSIGNED)), true);
+
+        byte[] serializedState =
+                DynamicKafkaSourceEnumStateTestUtils.serializeV3State(
+                        "stream0",
+                        "cluster0",
+                        ImmutableSet.of("topic0"),
+                        "cluster0:9092",
+                        clusterState,
+                        "retained-cluster",
+                        123L,
+                        retainedClusterState);
+
+        DynamicKafkaSourceEnumState dynamicKafkaSourceEnumState =
+                dynamicKafkaSourceEnumStateSerializer.deserialize(3, serializedState);
+
+        assertThat(dynamicKafkaSourceEnumState.getClusterEnumeratorStates())
+                .containsOnlyKeys("cluster0");
+        assertThat(dynamicKafkaSourceEnumState.getClusterEnumeratorStates().get("cluster0"))
+                .usingRecursiveComparison()
+                .isEqualTo(clusterState);
+        assertThat(dynamicKafkaSourceEnumState.getRetainedClusterEnumeratorStates())
+                .containsOnlyKeys("retained-cluster");
+        DynamicKafkaSourceEnumState.RetainedClusterState retainedState =
+                dynamicKafkaSourceEnumState
+                        .getRetainedClusterEnumeratorStates()
+                        .get("retained-cluster");
+        assertThat(retainedState.getRetainedUntilMs()).isEqualTo(123L);
+        assertThat(retainedState.getKafkaSourceEnumState())
+                .usingRecursiveComparison()
+                .withEqualsForType(TopicPartition::equals, TopicPartition.class)
+                .isEqualTo(retainedClusterState);
+        assertThat(dynamicKafkaSourceEnumState.getPendingReportedSplitsByReader()).isEmpty();
     }
 
     private static SplitAndAssignmentStatus getSplitAssignment(

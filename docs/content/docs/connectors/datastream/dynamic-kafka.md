@@ -142,6 +142,26 @@ DynamicKafkaSource<String> source =
         .build();
 ```
 {{< /tab >}}
+{{< tab "Python" >}}
+```python
+starting_offsets = KafkaOffsetsInitializer.offsets({
+    KafkaTopicPartition("input-stream", 0): 100,
+    KafkaTopicPartition("input-stream", 1): 200,
+})
+
+metadata_service = SingleClusterTopicMetadataService(
+    "cluster-a",
+    {"bootstrap.servers": "localhost:9092"},
+    starting_offsets_initializer=starting_offsets)
+
+source = DynamicKafkaSource.builder() \
+    .set_kafka_metadata_service(metadata_service) \
+    .set_stream_ids({"input-stream"}) \
+    .set_starting_offsets(KafkaOffsetsInitializer.latest()) \
+    .set_value_only_deserializer(SimpleStringSchema()) \
+    .build()
+```
+{{< /tab >}}
 {{< /tabs >}}
 
 ### Split Assignment Mode
@@ -162,7 +182,7 @@ How next owner is chosen for a newly discovered split:
 * `global`: uses one global owner cursor across all clusters:
   `owner = knownActiveSplitIds.size() % numReaders`,
   then adds the split id into `knownActiveSplitIds`.
-  (When a split is returned via `addSplitsBack`, the preferred previous owner is reused when valid.)
+  A recovering reader keeps its current assignments; stale reports from former owners are ignored.
 
 In `global` mode, balancing is **forward-looking**: newly discovered splits are assigned to keep
 future distribution balanced, while already assigned active splits are not proactively migrated only
@@ -242,10 +262,20 @@ By default, metadata removal also removes that cluster's split offsets from subs
 To keep removed cluster offsets available for a later re-add or restore, set
 `stream-metadata-removed-cluster-retention-ms` to a positive duration. For example,
 `604800000` retains removed cluster state for seven days before the source stops checkpointing it.
-If the cluster is re-added, the source uses the retained offsets but computes fresh reader
-assignments instead of reusing their previous owners.
-If a previously retained split no longer has a reader-side retained offset, that split falls back
-to the effective configured starting offsets initializer.
+If the cluster returns during a running job before retention expires, the source collects its
+retained reader offsets
+and waits for a completed checkpoint before assigning those splits again. Periodic checkpointing
+or a manually triggered checkpoint is required for this handoff; other active clusters continue
+consuming while it waits. The accepted handoff keeps its offsets even if the retention deadline
+passes before that checkpoint completes.
+In `global` mode, returning splits fill the least-loaded readers first. Existing active splits do
+not move: for example, two returning splits change reader counts `[4, 0]` to `[4, 2]`.
+In `per_cluster` mode, returning splits use the normal topic-partition assignment.
+Full checkpoint restore can redistribute all active splits, including returning retained splits, using
+their checkpointed offsets without waiting for another checkpoint. A single reader's recovery
+preserves current ownership. Missing offsets for an assigned unbounded split fail recovery rather than
+silently selecting a new starting offset. Completed bounded splits remain completed. Once retention
+has expired, a later re-add starts with the effective configured starting offsets initializer.
 
 ### Additional Properties
 There are configuration options in DynamicKafkaSourceOptions that can be configured in the properties through the builder:
