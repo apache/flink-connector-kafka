@@ -26,6 +26,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Tracks globally known dynamic split ids and computes reader ownership using round-robin order.
@@ -33,20 +34,12 @@ import java.util.Set;
 final class GlobalSplitOwnerAssigner {
 
     private final Set<String> knownActiveSplitIds = new HashSet<>();
-    private final Map<String, Integer> preferredOwnerBySplitId = new HashMap<>();
     private final Map<String, Integer> recoveryOwnerBySplitId = new HashMap<>();
 
     void onMetadataRefresh(Set<String> activeSplitIds) {
         knownActiveSplitIds.clear();
         knownActiveSplitIds.addAll(activeSplitIds);
-        preferredOwnerBySplitId.keySet().retainAll(activeSplitIds);
-    }
-
-    void onSplitsBack(List<DynamicKafkaSourceSplit> splits, int subtaskId) {
-        for (DynamicKafkaSourceSplit split : splits) {
-            knownActiveSplitIds.add(split.splitId());
-            preferredOwnerBySplitId.put(split.splitId(), subtaskId);
-        }
+        recoveryOwnerBySplitId.clear();
     }
 
     void onRecoveredSplits(List<DynamicKafkaSourceSplit> splits, int numReaders) {
@@ -55,7 +48,6 @@ final class GlobalSplitOwnerAssigner {
         recoveryOwnerBySplitId.clear();
         for (DynamicKafkaSourceSplit split : splits) {
             knownActiveSplitIds.remove(split.splitId());
-            preferredOwnerBySplitId.remove(split.splitId());
         }
 
         for (DynamicKafkaSourceSplit split : splits) {
@@ -65,17 +57,64 @@ final class GlobalSplitOwnerAssigner {
         }
     }
 
+    /** Places a returning cohort without moving any currently active split. */
+    void onRetainedSplitsReadded(
+            List<DynamicKafkaSourceSplit> returningSplits,
+            Map<String, Integer> activeOwners,
+            int numReaders) {
+        Preconditions.checkArgument(numReaders > 0, "numReaders must be > 0");
+        Set<String> returningIds = new TreeSet<>();
+        for (DynamicKafkaSourceSplit split : returningSplits) {
+            Preconditions.checkArgument(
+                    !activeOwners.containsKey(split.splitId()),
+                    "Returning split %s already has an active owner",
+                    split.splitId());
+            returningIds.add(split.splitId());
+        }
+
+        int[] loads = new int[numReaders];
+        for (int owner : activeOwners.values()) {
+            Preconditions.checkArgument(
+                    owner >= 0 && owner < numReaders, "Invalid active reader %s", owner);
+            loads[owner]++;
+        }
+        for (String splitId : returningIds) {
+            recoveryOwnerBySplitId.remove(splitId);
+        }
+        // Another returning cluster may have reserved owners before its asynchronous assignment
+        // runs. Count those reservations once, alongside already assigned active splits.
+        recoveryOwnerBySplitId.forEach(
+                (splitId, owner) -> {
+                    if (!activeOwners.containsKey(splitId)) {
+                        Preconditions.checkArgument(
+                                owner >= 0 && owner < numReaders,
+                                "Invalid reserved reader %s",
+                                owner);
+                        loads[owner]++;
+                    }
+                });
+        knownActiveSplitIds.clear();
+        knownActiveSplitIds.addAll(activeOwners.keySet());
+        knownActiveSplitIds.addAll(recoveryOwnerBySplitId.keySet());
+        for (String splitId : returningIds) {
+            int owner = 0;
+            for (int reader = 1; reader < numReaders; reader++) {
+                if (loads[reader] < loads[owner]) {
+                    owner = reader;
+                }
+            }
+            loads[owner]++;
+            recoveryOwnerBySplitId.put(splitId, owner);
+            knownActiveSplitIds.add(splitId);
+        }
+    }
+
     int assignSplitOwner(String splitId, int numReaders) {
         Preconditions.checkArgument(numReaders > 0, "numReaders must be > 0");
 
         Integer recoveryOwner = recoveryOwnerBySplitId.remove(splitId);
         if (recoveryOwner != null) {
             return recoveryOwner;
-        }
-
-        Integer preferredOwner = preferredOwnerBySplitId.remove(splitId);
-        if (preferredOwner != null && preferredOwner >= 0 && preferredOwner < numReaders) {
-            return preferredOwner;
         }
 
         int targetReader = Math.floorMod(knownActiveSplitIds.size(), numReaders);

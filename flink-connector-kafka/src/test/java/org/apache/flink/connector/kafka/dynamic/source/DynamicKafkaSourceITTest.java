@@ -20,16 +20,28 @@ package org.apache.flink.connector.kafka.dynamic.source;
 
 import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.functions.OpenContext;
+import org.apache.flink.api.common.functions.RichMapFunction;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.ReaderInfo;
+import org.apache.flink.api.connector.source.ReaderOutput;
+import org.apache.flink.api.connector.source.Source;
+import org.apache.flink.api.connector.source.SourceEvent;
+import org.apache.flink.api.connector.source.SourceReader;
+import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
+import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.connector.source.SplitsAssignment;
+import org.apache.flink.api.connector.source.SupportsSplitReassignmentOnRecovery;
 import org.apache.flink.api.connector.source.mocks.MockSplitEnumeratorContext;
+import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ExternalizedCheckpointRetention;
 import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.configuration.StateBackendOptions;
+import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
@@ -40,6 +52,8 @@ import org.apache.flink.connector.kafka.dynamic.source.enumerator.DynamicKafkaSo
 import org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.KafkaStreamSetSubscriber;
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
 import org.apache.flink.connector.kafka.dynamic.source.testutils.DynamicKafkaSourceEnumStateTestUtils;
+import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
+import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.NoStoppingOffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
@@ -57,7 +71,10 @@ import org.apache.flink.connector.testframe.junit.annotations.TestSemantics;
 import org.apache.flink.connector.testframe.testsuites.SourceTestSuiteBase;
 import org.apache.flink.core.execution.CheckpointingMode;
 import org.apache.flink.core.execution.JobClient;
+import org.apache.flink.core.io.InputStatus;
+import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.core.testutils.CommonTestUtils;
+import org.apache.flink.metrics.Gauge;
 import org.apache.flink.runtime.messages.FlinkJobTerminatedWithoutCancellationException;
 import org.apache.flink.runtime.testutils.InMemoryReporter;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
@@ -67,7 +84,6 @@ import org.apache.flink.streaming.api.functions.sink.legacy.RichSinkFunction;
 import org.apache.flink.streaming.connectors.kafka.DynamicKafkaSourceTestHelper;
 import org.apache.flink.streaming.connectors.kafka.KafkaTestBase;
 import org.apache.flink.test.util.MiniClusterWithClientResource;
-import org.apache.flink.test.util.TestUtils;
 import org.apache.flink.testutils.junit.SharedObjectsExtension;
 import org.apache.flink.testutils.junit.SharedReference;
 import org.apache.flink.util.CloseableIterator;
@@ -76,8 +92,15 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.NewPartitions;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.IntegerDeserializer;
+import org.apache.kafka.common.serialization.IntegerSerializer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -87,24 +110,32 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Properties;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -112,6 +143,8 @@ import java.util.stream.Stream;
 
 import static org.apache.flink.configuration.StateRecoveryOptions.SAVEPOINT_PATH;
 import static org.apache.flink.connector.kafka.dynamic.source.metrics.KafkaClusterMetricGroup.DYNAMIC_KAFKA_SOURCE_METRIC_GROUP;
+import static org.apache.flink.streaming.connectors.kafka.DynamicKafkaSourceTestHelper.committedConsumer;
+import static org.apache.flink.streaming.connectors.kafka.DynamicKafkaSourceTestHelper.drainCommittedRecords;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -770,17 +803,16 @@ class DynamicKafkaSourceITTest {
                         .containsExactlyInAnyOrderElementsOf(
                                 IntStream.range(0, stage1End).boxed().collect(Collectors.toList()));
 
-                File checkpointBeforeRemoval = waitForCompletedCheckpoint(null);
                 writeClusterMetadataToFile(
                         metadataFile, testStreamId, topic, Collections.emptyList());
                 waitForKafkaClusterMetricsToDisappear(
                         kafkaClusterTestEnvMetadata0.getKafkaClusterId());
-                waitForCompletedCheckpoint(checkpointBeforeRemoval);
+                String retainedCheckpoint = triggerAndCompleteCheckpoint(phase1JobClient);
 
-                phase1JobClient.cancel().get(30, TimeUnit.SECONDS);
+                cancelJob(phase1JobClient);
                 phase1JobClient = null;
                 // The selected checkpoint can be subsumed before cancellation completes.
-                File retainedCheckpoint = waitForCompletedCheckpoint(null);
+                retainedCheckpoint = retainedCheckpointAfterCancellation(retainedCheckpoint);
 
                 writeClusterMetadataToFile(
                         metadataFile,
@@ -798,7 +830,7 @@ class DynamicKafkaSourceITTest {
                                 stage1End);
 
                 Configuration restoreConfiguration = new Configuration(checkpointConfiguration);
-                restoreConfiguration.set(SAVEPOINT_PATH, retainedCheckpoint.toURI().toString());
+                restoreConfiguration.set(SAVEPOINT_PATH, retainedCheckpoint);
                 phase2JobClient =
                         startRetainedRemovedClusterJob(
                                 restoreConfiguration,
@@ -818,6 +850,701 @@ class DynamicKafkaSourceITTest {
             } finally {
                 cancelJob(phase2JobClient);
                 cancelJob(phase1JobClient);
+            }
+        }
+
+        @Test
+        void testHandoffReportCollectionAndLocalRecoveryPreserveCommittedRecords()
+                throws Throwable {
+            String topic = "handoff-recovery-" + UUID.randomUUID();
+            String outputTopic = topic + "-output";
+            DynamicKafkaSourceTestHelper.createTopic(topic, NUM_PARTITIONS);
+            DynamicKafkaSourceTestHelper.createTopic(0, outputTopic, 1);
+            File metadataFile = new File(testDir, "handoff-metadata.yaml");
+            writeRecoveryMetadata(metadataFile, topic, true);
+            SharedReference<ReaderAttemptObservations> observations =
+                    sharedObjects.add(new ReaderAttemptObservations());
+            Configuration configuration = createCheckpointConfiguration();
+            configuration.set(RestartStrategyOptions.RESTART_STRATEGY, "fixed-delay");
+            configuration.set(RestartStrategyOptions.RESTART_STRATEGY_FIXED_DELAY_ATTEMPTS, 5);
+            configuration.set(
+                    RestartStrategyOptions.RESTART_STRATEGY_FIXED_DELAY_DELAY,
+                    Duration.ofMillis(100));
+
+            JobClient job = null;
+            try (KafkaConsumer<Integer, Integer> consumer = committedConsumer(0, outputTopic)) {
+                List<Integer> committedRecords = new ArrayList<>();
+                int nextValue = produceRecoveryRecords(topic, 0);
+                job =
+                        startCommittedRecoveryJob(
+                                configuration,
+                                metadataFile,
+                                topic,
+                                outputTopic,
+                                observations,
+                                2,
+                                60_000L,
+                                OffsetsInitializer.earliest());
+                waitForCommittedRecords(consumer, committedRecords, job, nextValue);
+                int recoveringReader = observations.applySync(state -> state.readerByRecord.get(0));
+                int healthyReader = 1 - recoveringReader;
+
+                writeRecoveryMetadata(metadataFile, topic, false);
+                waitForKafkaClusterMetricsToDisappear(
+                        kafkaClusterTestEnvMetadata0.getKafkaClusterId());
+                triggerAndCompleteCheckpoint(job);
+
+                // The removed cluster accumulates records while its offsets remain dormant.
+                nextValue = produceRecoveryRecords(topic, nextValue);
+                waitForCommittedRecords(
+                        consumer,
+                        committedRecords,
+                        job,
+                        nextValue - NUM_PARTITIONS * NUM_RECORDS_PER_SPLIT);
+
+                observations.consumeSync(state -> state.readerToFail = recoveringReader);
+                nextValue =
+                        DynamicKafkaSourceTestHelper.produceToKafka(
+                                1, topic, NUM_PARTITIONS, NUM_RECORDS_PER_SPLIT, nextValue);
+                waitForReaderAttempt(observations, job, recoveringReader, 1, healthyReader);
+                waitForCommittedRecords(
+                        consumer,
+                        committedRecords,
+                        job,
+                        nextValue - NUM_PARTITIONS * NUM_RECORDS_PER_SPLIT);
+
+                observations.consumeSync(
+                        state -> {
+                            state.handoffClusterId =
+                                    kafkaClusterTestEnvMetadata0.getKafkaClusterId();
+                            state.failOnRequestReader = recoveringReader;
+                        });
+                writeRecoveryMetadata(metadataFile, topic, true);
+                // Lose one retained-offset response through a real local task failure.
+                waitForReaderAttempt(observations, job, recoveringReader, 2, healthyReader);
+                waitForCommittedRecords(consumer, committedRecords, job, nextValue);
+                waitForActiveSplitCounts(3, 3);
+                int requestFailures = observations.applySync(state -> state.requestFailures);
+                assertThat(requestFailures).isEqualTo(1);
+
+                nextValue = produceRecoveryRecords(topic, nextValue);
+                waitForCommittedRecords(consumer, committedRecords, job, nextValue);
+                triggerAndCompleteCheckpoint(job);
+                Integer finalHealthyAttempt =
+                        observations.applySync(state -> state.attempts.get(healthyReader));
+                assertThat(finalHealthyAttempt)
+                        .as("healthy peer stays on its original attempt through all recoveries")
+                        .isZero();
+                cancelJob(job);
+                job = null;
+                drainCommittedRecords(consumer, committedRecords);
+                assertThat(committedRecords)
+                        .containsExactlyInAnyOrderElementsOf(
+                                IntStream.range(0, nextValue).boxed().collect(Collectors.toList()));
+            } finally {
+                cancelJob(job);
+            }
+        }
+
+        @Test
+        void testManualCheckpointHandoffKeepsActiveReadersProgressing() throws Throwable {
+            String topic = "manual-checkpoint-handoff-" + UUID.randomUUID();
+            String outputTopic = topic + "-output";
+            DynamicKafkaSourceTestHelper.createTopic(topic, NUM_PARTITIONS);
+            DynamicKafkaSourceTestHelper.createTopic(0, outputTopic, 1);
+            File metadataFile = new File(testDir, "manual-checkpoint-metadata.yaml");
+            writeRecoveryMetadata(metadataFile, topic, true);
+            SharedReference<ReaderAttemptObservations> observations =
+                    sharedObjects.add(new ReaderAttemptObservations());
+            observations.consumeSync(
+                    state -> {
+                        state.observeReportBarrier = true;
+                        state.handoffClusterId = kafkaClusterTestEnvMetadata0.getKafkaClusterId();
+                    });
+
+            JobClient job = null;
+            try (KafkaConsumer<Integer, Integer> consumer = committedConsumer(0, outputTopic)) {
+                List<Integer> committedRecords = new ArrayList<>();
+                int nextValue = produceRecoveryRecords(topic, 0);
+                job =
+                        startCommittedRecoveryJob(
+                                createCheckpointConfiguration(),
+                                metadataFile,
+                                topic,
+                                outputTopic,
+                                observations,
+                                2,
+                                60_000L,
+                                OffsetsInitializer.earliest(),
+                                false);
+                waitForObservedRecords(observations, job, nextValue);
+                triggerAndCompleteCheckpoint(job);
+                waitForCommittedRecords(consumer, committedRecords, job, nextValue);
+
+                writeRecoveryMetadata(metadataFile, topic, false);
+                waitForKafkaClusterMetricsToDisappear(
+                        kafkaClusterTestEnvMetadata0.getKafkaClusterId());
+                nextValue = produceRecoveryRecords(topic, nextValue);
+                int activeRecords = nextValue - NUM_PARTITIONS * NUM_RECORDS_PER_SPLIT;
+                waitForObservedRecords(observations, job, activeRecords);
+                triggerAndCompleteCheckpoint(job);
+                waitForCommittedRecords(consumer, committedRecords, job, activeRecords);
+
+                writeRecoveryMetadata(metadataFile, topic, true);
+                // Wait for both real retained-offset reports to reach the coordinator.
+                waitForHandoffReportBarrier(observations, 2);
+                int healthyBatchStart = nextValue;
+                nextValue =
+                        DynamicKafkaSourceTestHelper.produceToKafka(
+                                1, topic, NUM_PARTITIONS, NUM_RECORDS_PER_SPLIT, nextValue);
+                waitForObservedRecords(
+                        observations, job, activeRecords + NUM_PARTITIONS * NUM_RECORDS_PER_SPLIT);
+                Set<Integer> observedWhileWaiting =
+                        observations.applySync(
+                                state -> new TreeSet<>(state.readerByRecord.keySet()));
+                assertThat(observedWhileWaiting)
+                        .as(
+                                "healthy active partitions keep emitting while handoff awaits its"
+                                        + " checkpoint")
+                        .containsAll(
+                                IntStream.range(healthyBatchStart, nextValue)
+                                        .boxed()
+                                        .collect(Collectors.toList()))
+                        .doesNotContainAnyElementsOf(
+                                IntStream.range(
+                                                NUM_PARTITIONS * NUM_RECORDS_PER_SPLIT * 2,
+                                                NUM_PARTITIONS * NUM_RECORDS_PER_SPLIT * 3)
+                                        .boxed()
+                                        .collect(Collectors.toList()));
+                Set<Integer> assignedBeforeCheckpoint =
+                        observations.applySync(state -> new TreeSet<>(state.assignmentReaders));
+                assertThat(assignedBeforeCheckpoint)
+                        .as("manual checkpoint history requires a completed handoff checkpoint")
+                        .isEmpty();
+                triggerAndCompleteCheckpoint(job);
+                waitForObservedRecords(observations, job, nextValue);
+                waitForActiveSplitCounts(3, 3);
+                triggerAndCompleteCheckpoint(job);
+                waitForCommittedRecords(consumer, committedRecords, job, nextValue);
+                cancelJob(job);
+                job = null;
+                drainCommittedRecords(consumer, committedRecords);
+                assertThat(committedRecords)
+                        .containsExactlyInAnyOrderElementsOf(
+                                IntStream.range(0, nextValue).boxed().collect(Collectors.toList()));
+            } finally {
+                cancelJob(job);
+            }
+        }
+
+        @Test
+        void testReturningSubsetFillsIdleReaderWithoutLosingCommittedRecords() throws Throwable {
+            String streamId = "returning-subset-" + UUID.randomUUID();
+            String topicA = streamId + "-a";
+            String topicB = streamId + "-b";
+            String topicC = streamId + "-c";
+            String outputTopic = streamId + "-output";
+            DynamicKafkaSourceTestHelper.createTopic(0, topicA, 1);
+            DynamicKafkaSourceTestHelper.createTopic(1, topicB, 1);
+            DynamicKafkaSourceTestHelper.createTopic(0, topicC, 1);
+            DynamicKafkaSourceTestHelper.createTopic(0, outputTopic, 1);
+            Map<String, ClusterMetadata> allClusters = new TreeMap<>();
+            allClusters.put("a", clusterMetadata(0, Collections.singleton(topicA)));
+            allClusters.put("b", clusterMetadata(1, Collections.singleton(topicB)));
+            allClusters.put("c", clusterMetadata(0, Collections.singleton(topicC)));
+            File metadataFile = new File(testDir, "returning-subset.yaml");
+            writeClusterMetadataToFile(
+                    metadataFile, Collections.singleton(new KafkaStream(streamId, allClusters)));
+            SharedReference<ReaderAttemptObservations> observations =
+                    sharedObjects.add(new ReaderAttemptObservations());
+            Configuration configuration = createCheckpointConfiguration();
+            JobClient job = null;
+            try (KafkaConsumer<Integer, Integer> consumer = committedConsumer(0, outputTopic)) {
+                List<Integer> committedRecords = new ArrayList<>();
+                int nextValue = produceTopicRecords(0, topicA, 1, 0);
+                nextValue = produceTopicRecords(1, topicB, 1, nextValue);
+                nextValue = produceTopicRecords(0, topicC, 1, nextValue);
+                job =
+                        startCommittedRecoveryJob(
+                                configuration,
+                                metadataFile,
+                                streamId,
+                                outputTopic,
+                                observations,
+                                2,
+                                60_000L,
+                                OffsetsInitializer.earliest());
+                waitForCommittedRecords(consumer, committedRecords, job, nextValue);
+                writeClusterMetadataToFile(
+                        metadataFile,
+                        Collections.singleton(
+                                new KafkaStream(
+                                        streamId,
+                                        Collections.singletonMap("a", allClusters.get("a")))));
+                waitForKafkaClusterMetricsToDisappear("b");
+                waitForKafkaClusterMetricsToDisappear("c");
+                String checkpoint = triggerAndCompleteCheckpoint(job);
+                cancelJob(job);
+                job = null;
+                checkpoint = retainedCheckpointAfterCancellation(checkpoint);
+
+                nextValue = produceTopicRecords(0, topicA, 1, nextValue);
+                nextValue = produceTopicRecords(1, topicB, 1, nextValue);
+                nextValue = produceTopicRecords(0, topicC, 1, nextValue);
+                Configuration restored = new Configuration(configuration);
+                restored.set(SAVEPOINT_PATH, checkpoint);
+                job =
+                        startCommittedRecoveryJob(
+                                restored,
+                                metadataFile,
+                                streamId,
+                                outputTopic,
+                                observations,
+                                2,
+                                60_000L,
+                                OffsetsInitializer.earliest());
+                waitForCommittedRecords(
+                        consumer, committedRecords, job, nextValue - 2 * NUM_RECORDS_PER_SPLIT);
+                waitForActiveSplitCounts(1, 0);
+
+                // Full recovery puts A first, then dormant B and C: A/C share reader0. Returning
+                // only C must rebalance to [1,1], rather than resume that dormant placement [2,0].
+                writeClusterMetadataToFile(
+                        metadataFile,
+                        Collections.singleton(
+                                new KafkaStream(
+                                        streamId,
+                                        ImmutableMap.of(
+                                                "a", allClusters.get("a"),
+                                                "c", allClusters.get("c")))));
+                waitForCommittedRecords(
+                        consumer, committedRecords, job, nextValue - NUM_RECORDS_PER_SPLIT);
+                waitForActiveSplitCounts(1, 1);
+
+                writeClusterMetadataToFile(
+                        metadataFile,
+                        Collections.singleton(new KafkaStream(streamId, allClusters)));
+                nextValue = produceTopicRecords(0, topicA, 1, nextValue);
+                nextValue = produceTopicRecords(1, topicB, 1, nextValue);
+                nextValue = produceTopicRecords(0, topicC, 1, nextValue);
+                waitForCommittedRecords(consumer, committedRecords, job, nextValue);
+                waitForBalancedActiveSplits(3, 2);
+                triggerAndCompleteCheckpoint(job);
+                cancelJob(job);
+                job = null;
+                drainCommittedRecords(consumer, committedRecords);
+                assertThat(committedRecords)
+                        .containsExactlyInAnyOrderElementsOf(
+                                IntStream.range(0, nextValue).boxed().collect(Collectors.toList()));
+            } finally {
+                cancelJob(job);
+            }
+        }
+
+        @Test
+        void testReturningSplitsFillIdleReaderWithoutMovingActiveSplits() throws Throwable {
+            runReturningSplitHandoff(-1, false);
+        }
+
+        @Test
+        void testOldOwnerLocalRecoveryAfterReturningSplitTransferPreservesCommittedRecords()
+                throws Throwable {
+            runReturningSplitHandoff(0, false);
+        }
+
+        @Test
+        void testNewOwnerLocalRecoveryAfterReturningSplitTransferPreservesCommittedRecords()
+                throws Throwable {
+            runReturningSplitHandoff(1, false);
+        }
+
+        @Test
+        void testOldOwnerRestoresRetainedShadowAfterNewOwnerEmitsRecords() throws Throwable {
+            runReturningSplitHandoff(0, true);
+        }
+
+        private void runReturningSplitHandoff(int failingReader, boolean holdCleanup)
+                throws Throwable {
+            String streamId = "returning-handoff-" + UUID.randomUUID();
+            String returningTopic = streamId + "-returning";
+            String outputTopic = streamId + "-output";
+            List<String> activeTopics =
+                    IntStream.range(0, 8)
+                            .mapToObj(index -> streamId + "-active-" + index)
+                            .collect(Collectors.toList());
+            for (String topic : activeTopics) {
+                DynamicKafkaSourceTestHelper.createTopic(0, topic, 1);
+            }
+            DynamicKafkaSourceTestHelper.createTopic(1, returningTopic, 2);
+            DynamicKafkaSourceTestHelper.createTopic(0, outputTopic, 1);
+            File metadataFile = new File(testDir, "returning-handoff.yaml");
+            writeHandoffMetadata(metadataFile, streamId, activeTopics, returningTopic);
+            SharedReference<ReaderAttemptObservations> observations =
+                    sharedObjects.add(new ReaderAttemptObservations());
+            Configuration configuration = createCheckpointConfiguration();
+            if (failingReader >= 0) {
+                configuration.set(RestartStrategyOptions.RESTART_STRATEGY, "fixed-delay");
+                configuration.set(RestartStrategyOptions.RESTART_STRATEGY_FIXED_DELAY_ATTEMPTS, 1);
+                configuration.set(
+                        RestartStrategyOptions.RESTART_STRATEGY_FIXED_DELAY_DELAY,
+                        Duration.ofMillis(100));
+            }
+            JobClient job = null;
+            try (KafkaConsumer<Integer, Integer> consumer = committedConsumer(0, outputTopic)) {
+                List<Integer> committedRecords = new ArrayList<>();
+                Map<String, Integer> initialRecordByTopic = new TreeMap<>();
+                int nextValue = 0;
+                for (String topic : activeTopics) {
+                    initialRecordByTopic.put(topic, nextValue);
+                    nextValue = produceTopicRecords(0, topic, 1, nextValue);
+                }
+                int initialReturningValue = nextValue;
+                nextValue = produceTopicRecords(1, returningTopic, 2, nextValue);
+                job =
+                        startCommittedRecoveryJob(
+                                configuration,
+                                metadataFile,
+                                streamId,
+                                outputTopic,
+                                observations,
+                                2,
+                                60_000L,
+                                OffsetsInitializer.earliest());
+                waitForCommittedRecords(consumer, committedRecords, job, nextValue);
+                waitForActiveSplitCounts(5, 5);
+                List<String> retainedActiveTopics =
+                        activeTopics.stream()
+                                .filter(
+                                        topic ->
+                                                observations.applySync(
+                                                        state ->
+                                                                state.readerByRecord.get(
+                                                                                initialRecordByTopic
+                                                                                        .get(topic))
+                                                                        == 0))
+                                .collect(Collectors.toList());
+                assertThat(retainedActiveTopics).hasSize(4);
+                int transferredPartition =
+                        observations.applySync(
+                                state ->
+                                        state.readerByRecord.get(initialReturningValue) == 0
+                                                ? 0
+                                                : 1);
+                writeHandoffMetadata(metadataFile, streamId, retainedActiveTopics, null);
+                waitForKafkaClusterMetricsToDisappear("b");
+                waitForActiveSplitCounts(4, 0);
+                triggerAndCompleteCheckpoint(job);
+                for (String topic : retainedActiveTopics) {
+                    nextValue = produceTopicRecords(0, topic, 1, nextValue);
+                }
+                int returningBatchStart = nextValue;
+                nextValue = produceTopicRecords(1, returningTopic, 2, nextValue);
+                waitForCommittedRecords(
+                        consumer, committedRecords, job, nextValue - 2 * NUM_RECORDS_PER_SPLIT);
+
+                // The returning partitions fill reader1. Existing active ownership stays [4,0].
+                observations.consumeSync(
+                        state -> {
+                            state.handoffClusterId = "b";
+                            state.transferredPartition =
+                                    new TopicPartition(returningTopic, transferredPartition);
+                            if (failingReader == 0) {
+                                state.failOnCleanupReader = 0;
+                                if (holdCleanup) {
+                                    state.cleanupBarrier =
+                                            new RetainedCleanupBarrier(
+                                                    "b", state.transferredPartition);
+                                }
+                            } else if (failingReader == 1) {
+                                state.failOnAssignmentReader = 1;
+                            }
+                        });
+                writeHandoffMetadata(metadataFile, streamId, retainedActiveTopics, returningTopic);
+                RetainedCleanupBarrier cleanupBarrier =
+                        observations.applySync(state -> state.cleanupBarrier);
+                if (cleanupBarrier != null) {
+                    cleanupBarrier.awaitNewOwnerProgress(
+                            () ->
+                                    observations.applySync(
+                                            state -> new HashMap<>(state.readerByRecord)),
+                            returningBatchStart,
+                            nextValue);
+                    cleanupBarrier.releaseCleanup();
+                }
+                if (failingReader >= 0) {
+                    waitForReaderAttempt(observations, job, failingReader, 1, 1 - failingReader);
+                    int transferFailures =
+                            observations.applySync(
+                                    state -> state.assignmentFailures + state.cleanupFailures);
+                    assertThat(transferFailures).isEqualTo(1);
+                }
+                waitForCommittedRecords(consumer, committedRecords, job, nextValue);
+                waitForActiveSplitCounts(4, 2);
+                if (cleanupBarrier != null) {
+                    cleanupBarrier.assertRestoredShadow();
+                    assertThat(
+                                    observations.<Set<Integer>>applySync(
+                                            state -> state.recordsWithMultipleOwners))
+                            .isEmpty();
+                }
+                Integer transferredOwner =
+                        observations.applySync(
+                                state ->
+                                        state.readerByRecord.get(
+                                                returningBatchStart
+                                                        + transferredPartition
+                                                                * NUM_RECORDS_PER_SPLIT));
+                assertThat(transferredOwner)
+                        .as("returning partition moved from reader0")
+                        .isEqualTo(1);
+                List<Integer> postHandoffActiveRecords = new ArrayList<>();
+                for (String topic : retainedActiveTopics) {
+                    postHandoffActiveRecords.add(nextValue);
+                    nextValue = produceTopicRecords(0, topic, 1, nextValue);
+                }
+                nextValue = produceTopicRecords(1, returningTopic, 2, nextValue);
+                waitForCommittedRecords(consumer, committedRecords, job, nextValue);
+                assertThat(postHandoffActiveRecords)
+                        .allMatch(
+                                record ->
+                                        observations.applySync(
+                                                state -> state.readerByRecord.get(record) == 0));
+                triggerAndCompleteCheckpoint(job);
+                if (failingReader >= 0) {
+                    Integer healthyAttempt =
+                            observations.applySync(state -> state.attempts.get(1 - failingReader));
+                    assertThat(healthyAttempt)
+                            .as("healthy transfer peer stays on its original execution attempt")
+                            .isZero();
+                }
+                cancelJob(job);
+                job = null;
+                drainCommittedRecords(consumer, committedRecords);
+                assertThat(committedRecords)
+                        .containsExactlyInAnyOrderElementsOf(
+                                IntStream.range(0, nextValue).boxed().collect(Collectors.toList()));
+            } finally {
+                RetainedCleanupBarrier barrier =
+                        observations.applySync(state -> state.cleanupBarrier);
+                if (barrier != null) {
+                    barrier.releaseCleanup();
+                }
+                cancelJob(job);
+            }
+        }
+
+        private void writeHandoffMetadata(
+                File file, String streamId, Collection<String> activeTopics, String returningTopic)
+                throws IOException {
+            Map<String, ClusterMetadata> clusters = new HashMap<>();
+            clusters.put("a", clusterMetadata(0, activeTopics));
+            if (returningTopic != null) {
+                clusters.put("b", clusterMetadata(1, Collections.singleton(returningTopic)));
+            }
+            writeClusterMetadataToFile(
+                    file, Collections.singleton(new KafkaStream(streamId, clusters)));
+        }
+
+        @ParameterizedTest
+        @ValueSource(longs = {0L, 123L})
+        void testGlobalClusterReAddAfterCheckpointRescalePreservesCommittedRecords(
+                long legacyReaderDeadlineSkew) throws Throwable {
+            String topic = "handoff-rescale-" + UUID.randomUUID();
+            String outputTopic = topic + "-output";
+            DynamicKafkaSourceTestHelper.createTopic(topic, NUM_PARTITIONS);
+            DynamicKafkaSourceTestHelper.createTopic(0, outputTopic, 1);
+            File metadataFile = new File(testDir, "handoff-rescale.yaml");
+            writeRecoveryMetadata(metadataFile, topic, true);
+            SharedReference<ReaderAttemptObservations> observations =
+                    sharedObjects.add(new ReaderAttemptObservations());
+            observations.consumeSync(
+                    state -> state.legacyReaderDeadlineSkew = legacyReaderDeadlineSkew);
+            Configuration configuration = createCheckpointConfiguration();
+            JobClient job = null;
+            try (KafkaConsumer<Integer, Integer> consumer = committedConsumer(0, outputTopic)) {
+                List<Integer> committedRecords = new ArrayList<>();
+                int nextValue = produceRecoveryRecords(topic, 0);
+                job =
+                        startCommittedRecoveryJob(
+                                configuration,
+                                metadataFile,
+                                topic,
+                                outputTopic,
+                                observations,
+                                1,
+                                60_000L,
+                                OffsetsInitializer.earliest());
+                waitForCommittedRecords(consumer, committedRecords, job, nextValue);
+                writeRecoveryMetadata(metadataFile, topic, false);
+                waitForKafkaClusterMetricsToDisappear(
+                        kafkaClusterTestEnvMetadata0.getKafkaClusterId());
+                triggerAndCompleteCheckpoint(job);
+                nextValue = produceRecoveryRecords(topic, nextValue);
+                waitForCommittedRecords(
+                        consumer,
+                        committedRecords,
+                        job,
+                        nextValue - NUM_PARTITIONS * NUM_RECORDS_PER_SPLIT);
+                observations.consumeSync(
+                        state -> {
+                            state.handoffClusterId =
+                                    kafkaClusterTestEnvMetadata0.getKafkaClusterId();
+                            state.holdReturningAssignment = true;
+                            state.firstReportedCheckpointByReader.clear();
+                            state.assignmentReaders.clear();
+                        });
+                writeRecoveryMetadata(metadataFile, topic, true);
+                waitForHeldReturningAssignment(observations, 1);
+                // Returning assignments are sent only after the eligible checkpoint completes.
+                // Hold before addSplits so this reader still checkpoints its dormant offset.
+                String checkpoint = latestCompletedCheckpoint(job).toURI().toString();
+                long checkpointId = checkpointId(new File(URI.create(checkpoint)));
+                Long firstReportedCheckpoint =
+                        observations.applySync(
+                                state -> state.firstReportedCheckpointByReader.get(0));
+                assertThat(firstReportedCheckpoint).isNotNull();
+                assertThat(checkpointId).isGreaterThanOrEqualTo(firstReportedCheckpoint);
+                cancelJob(job);
+                job = null;
+                checkpoint = retainedCheckpointAfterCancellation(checkpoint);
+                observations.consumeSync(
+                        state -> {
+                            state.holdReturningAssignment = false;
+                            state.assignmentReaders.clear();
+                            if (legacyReaderDeadlineSkew != 0) {
+                                assertThat(state.legacySkewedSnapshots).isGreaterThan(0);
+                            }
+                            state.legacyReaderDeadlineSkew = 0L;
+                        });
+
+                // This partition is absent from the restored enumerator inventory. Discovery must
+                // assign it only after complete reader-state reconciliation has established owners.
+                try (AdminClient admin =
+                        AdminClient.create(kafkaClusterTestEnvMetadata1.getStandardProperties())) {
+                    admin.createPartitions(
+                                    Collections.singletonMap(
+                                            topic, NewPartitions.increaseTo(NUM_PARTITIONS + 1)))
+                            .all()
+                            .get(30, TimeUnit.SECONDS);
+                }
+                List<ProducerRecord<String, Integer>> newPartitionRecords = new ArrayList<>();
+                for (int record = 0; record < NUM_RECORDS_PER_SPLIT; record++) {
+                    newPartitionRecords.add(
+                            new ProducerRecord<>(
+                                    topic, NUM_PARTITIONS, "new-partition", nextValue++));
+                }
+                DynamicKafkaSourceTestHelper.produceToKafka(1, newPartitionRecords);
+                writeRecoveryMetadata(metadataFile, topic, true);
+                Configuration restoreConfiguration = new Configuration(configuration);
+                restoreConfiguration.set(SAVEPOINT_PATH, checkpoint);
+                job =
+                        startCommittedRecoveryJob(
+                                restoreConfiguration,
+                                metadataFile,
+                                topic,
+                                outputTopic,
+                                observations,
+                                2,
+                                60_000L,
+                                OffsetsInitializer.earliest());
+                try {
+                    waitForCommittedRecords(consumer, committedRecords, job, nextValue);
+                } catch (TimeoutException timeout) {
+                    Set<Integer> missing =
+                            IntStream.range(0, nextValue)
+                                    .boxed()
+                                    .collect(Collectors.toCollection(TreeSet::new));
+                    missing.removeAll(committedRecords);
+                    throw new AssertionError(
+                            "Restore checkpoint="
+                                    + checkpoint
+                                    + "; missing committed IDs="
+                                    + missing
+                                    + "; source observations="
+                                    + observations.applySync(
+                                            state ->
+                                                    "attempts="
+                                                            + new TreeMap<>(state.attempts)
+                                                            + ", record owners="
+                                                            + new TreeMap<>(state.readerByRecord))
+                                    + "; source offset metrics="
+                                    + snapshotSourceOffsetMetrics(),
+                            timeout);
+                }
+                waitForBalancedActiveSplits(2 * NUM_PARTITIONS + 1, 2);
+                triggerAndCompleteCheckpoint(job);
+                cancelJob(job);
+                job = null;
+                drainCommittedRecords(consumer, committedRecords);
+                assertThat(committedRecords)
+                        .containsExactlyInAnyOrderElementsOf(
+                                IntStream.range(0, nextValue).boxed().collect(Collectors.toList()));
+            } finally {
+                observations.consumeSync(state -> state.holdReturningAssignment = false);
+                cancelJob(job);
+            }
+        }
+
+        @Test
+        void testExpiredClusterReAddUsesConfiguredStartingOffsets() throws Throwable {
+            String topic = "handoff-expiry-" + UUID.randomUUID();
+            String outputTopic = topic + "-output";
+            DynamicKafkaSourceTestHelper.createTopic(topic, NUM_PARTITIONS);
+            DynamicKafkaSourceTestHelper.createTopic(0, outputTopic, 1);
+            File metadataFile = new File(testDir, "handoff-expiry.yaml");
+            writeRecoveryMetadata(metadataFile, topic, true);
+            SharedReference<ReaderAttemptObservations> observations =
+                    sharedObjects.add(new ReaderAttemptObservations());
+            JobClient job = null;
+            try (KafkaConsumer<Integer, Integer> consumer = committedConsumer(0, outputTopic)) {
+                List<Integer> committedRecords = new ArrayList<>();
+                job =
+                        startCommittedRecoveryJob(
+                                createCheckpointConfiguration(),
+                                metadataFile,
+                                topic,
+                                outputTopic,
+                                observations,
+                                2,
+                                500L,
+                                OffsetsInitializer.latest());
+                waitForClusterPartitionAssignments(
+                        kafkaClusterTestEnvMetadata0.getKafkaClusterId());
+                waitForClusterPartitionAssignments(
+                        kafkaClusterTestEnvMetadata1.getKafkaClusterId());
+                int initialEnd = produceRecoveryRecords(topic, 0);
+                waitForCommittedRecords(consumer, committedRecords, job, initialEnd);
+
+                writeRecoveryMetadata(metadataFile, topic, false);
+                waitForKafkaClusterMetricsToDisappear(
+                        kafkaClusterTestEnvMetadata0.getKafkaClusterId());
+                // Let the coordinator expire paused ownership before re-add.
+                Thread.sleep(1500L);
+                int removedIntervalEnd = produceRecoveryRecords(topic, initialEnd);
+                int skippedRecords = NUM_PARTITIONS * NUM_RECORDS_PER_SPLIT;
+                waitForCommittedRecords(
+                        consumer, committedRecords, job, removedIntervalEnd - skippedRecords);
+                writeRecoveryMetadata(metadataFile, topic, true);
+                waitForClusterPartitionAssignments(
+                        kafkaClusterTestEnvMetadata0.getKafkaClusterId());
+                int nextValue = produceRecoveryRecords(topic, removedIntervalEnd);
+                waitForCommittedRecords(
+                        consumer, committedRecords, job, nextValue - skippedRecords);
+                triggerAndCompleteCheckpoint(job);
+                cancelJob(job);
+                job = null;
+                drainCommittedRecords(consumer, committedRecords);
+                // With latest(), expiry intentionally skips only the removed interval for cluster0.
+                assertThat(committedRecords)
+                        .containsExactlyInAnyOrderElementsOf(
+                                IntStream.concat(
+                                                IntStream.range(0, initialEnd),
+                                                IntStream.range(
+                                                        initialEnd + skippedRecords, nextValue))
+                                        .boxed()
+                                        .collect(Collectors.toList()));
+            } finally {
+                cancelJob(job);
             }
         }
 
@@ -1285,6 +2012,388 @@ class DynamicKafkaSourceITTest {
             return env.executeAsync("test-retained-removed-cluster-offsets");
         }
 
+        private void writeRecoveryMetadata(File metadataFile, String topic, boolean includeCluster0)
+                throws IOException {
+            writeClusterMetadataToFile(
+                    metadataFile,
+                    topic,
+                    topic,
+                    includeCluster0
+                            ? ImmutableList.of(
+                                    kafkaClusterTestEnvMetadata0, kafkaClusterTestEnvMetadata1)
+                            : ImmutableList.of(kafkaClusterTestEnvMetadata1));
+        }
+
+        private int produceRecoveryRecords(String topic, int firstValue) throws Throwable {
+            int nextValue = firstValue;
+            for (int cluster = 0;
+                    cluster < DynamicKafkaSourceTestHelper.NUM_KAFKA_CLUSTERS;
+                    cluster++) {
+                nextValue =
+                        DynamicKafkaSourceTestHelper.produceToKafka(
+                                cluster, topic, NUM_PARTITIONS, NUM_RECORDS_PER_SPLIT, nextValue);
+            }
+            return nextValue;
+        }
+
+        private ClusterMetadata clusterMetadata(int cluster, Collection<String> topics) {
+            KafkaTestBase.KafkaClusterTestEnvMetadata environment =
+                    cluster == 0 ? kafkaClusterTestEnvMetadata0 : kafkaClusterTestEnvMetadata1;
+            return new ClusterMetadata(new TreeSet<>(topics), environment.getStandardProperties());
+        }
+
+        private int produceTopicRecords(int cluster, String topic, int partitions, int firstValue)
+                throws Throwable {
+            return DynamicKafkaSourceTestHelper.produceToKafka(
+                    cluster, topic, partitions, NUM_RECORDS_PER_SPLIT, firstValue);
+        }
+
+        private JobClient startCommittedRecoveryJob(
+                Configuration configuration,
+                File metadataFile,
+                String streamId,
+                String outputTopic,
+                SharedReference<ReaderAttemptObservations> observations,
+                int parallelism,
+                long retentionMs,
+                OffsetsInitializer startingOffsets)
+                throws Exception {
+            return startCommittedRecoveryJob(
+                    configuration,
+                    metadataFile,
+                    streamId,
+                    outputTopic,
+                    observations,
+                    parallelism,
+                    retentionMs,
+                    startingOffsets,
+                    true);
+        }
+
+        private JobClient startCommittedRecoveryJob(
+                Configuration configuration,
+                File metadataFile,
+                String streamId,
+                String outputTopic,
+                SharedReference<ReaderAttemptObservations> observations,
+                int parallelism,
+                long retentionMs,
+                OffsetsInitializer startingOffsets,
+                boolean periodicCheckpointing)
+                throws Exception {
+            StreamExecutionEnvironment env =
+                    StreamExecutionEnvironment.getExecutionEnvironment(configuration);
+            env.setParallelism(parallelism);
+            if (periodicCheckpointing) {
+                env.enableCheckpointing(100L);
+            }
+            Properties properties = new Properties();
+            properties.setProperty(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "100");
+            properties.setProperty(
+                    DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "100");
+            properties.setProperty(
+                    DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
+                    Long.toString(retentionMs));
+            properties.setProperty(
+                    DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE.key(), "global");
+            properties.setProperty(ConsumerConfig.GROUP_ID_CONFIG, streamId);
+            DynamicKafkaSource<Integer> source =
+                    DynamicKafkaSource.<Integer>builder()
+                            .setStreamIds(Collections.singleton(streamId))
+                            .setKafkaMetadataService(
+                                    new YamlFileMetadataService(
+                                            metadataFile.getPath(), Duration.ofMillis(100)))
+                            .setDeserializer(
+                                    KafkaRecordDeserializationSchema.valueOnly(
+                                            IntegerDeserializer.class))
+                            .setStartingOffsets(startingOffsets)
+                            .setProperties(properties)
+                            .build();
+            Properties producerProperties = new Properties();
+            producerProperties.setProperty(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG, "60000");
+            KafkaSink<Integer> sink =
+                    KafkaSink.<Integer>builder()
+                            .setBootstrapServers(
+                                    kafkaClusterTestEnvMetadata0.getBrokerConnectionStrings())
+                            .setKafkaProducerConfig(producerProperties)
+                            .setRecordSerializer(
+                                    KafkaRecordSerializationSchema.<Integer>builder()
+                                            .setTopic(outputTopic)
+                                            .setKafkaValueSerializer(IntegerSerializer.class)
+                                            .build())
+                            .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
+                            .setTransactionalIdPrefix(outputTopic)
+                            .build();
+            // Forward/chained edges leave separate failover regions for the source subtasks.
+            env.fromSource(
+                            new ObservedHandoffSource(source, observations),
+                            WatermarkStrategy.noWatermarks(),
+                            "recovery-source")
+                    .uid("recovery-source")
+                    .map(new ReaderAttemptObserver(observations))
+                    .uid("recovery-observer")
+                    .sinkTo(sink)
+                    .uid("recovery-output");
+            return env.executeAsync(streamId);
+        }
+
+        private void waitForCommittedRecords(
+                KafkaConsumer<Integer, Integer> consumer,
+                List<Integer> records,
+                JobClient job,
+                int expectedCount)
+                throws Exception {
+            try {
+                CommonTestUtils.waitUtil(
+                        () -> {
+                            try {
+                                throwIfJobFailed(job);
+                            } catch (Exception exception) {
+                                throw new RuntimeException(exception);
+                            }
+                            consumer.poll(Duration.ofMillis(100))
+                                    .forEach(record -> records.add(record.value()));
+                            return records.size() >= expectedCount;
+                        },
+                        Duration.ofSeconds(60),
+                        "Did not observe " + expectedCount + " committed Kafka output records");
+            } catch (TimeoutException timeout) {
+                Map<TopicPartition, Long> positions = new HashMap<>();
+                consumer.assignment()
+                        .forEach(
+                                partition ->
+                                        positions.put(partition, consumer.position(partition)));
+                TimeoutException detailed =
+                        new TimeoutException(
+                                "Expected "
+                                        + expectedCount
+                                        + " committed records; received="
+                                        + records
+                                        + "; consumer positions="
+                                        + positions
+                                        + "; last stable offsets="
+                                        + consumer.endOffsets(
+                                                consumer.assignment(), Duration.ofSeconds(5)));
+                detailed.initCause(timeout);
+                throw detailed;
+            }
+        }
+
+        private void waitForObservedRecords(
+                SharedReference<ReaderAttemptObservations> observations,
+                JobClient job,
+                int expectedCount)
+                throws Exception {
+            CommonTestUtils.waitUtil(
+                    () -> {
+                        try {
+                            throwIfJobFailed(job);
+                        } catch (Exception exception) {
+                            throw new RuntimeException(exception);
+                        }
+                        return observations.applySync(
+                                state -> state.readerByRecord.size() >= expectedCount);
+                    },
+                    Duration.ofSeconds(30),
+                    "Did not observe "
+                            + expectedCount
+                            + " source records before manual checkpoint");
+        }
+
+        private void waitForHandoffReportBarrier(
+                SharedReference<ReaderAttemptObservations> observations, int readers)
+                throws Exception {
+            CommonTestUtils.waitUtil(
+                    () ->
+                            observations.applySync(
+                                    state ->
+                                            state.reportedHandoffIds.size() == readers
+                                                    && new TreeSet<>(
+                                                                            state.reportedHandoffIds
+                                                                                    .values())
+                                                                    .size()
+                                                            == 1
+                                                    && state.reportedHandoffIds.equals(
+                                                            state.reportBarrierAcks)),
+                    Duration.ofSeconds(30),
+                    "Readers did not acknowledge the barrier after all retained-offset reports");
+        }
+
+        private Map<String, Object> snapshotSourceOffsetMetrics() {
+            Map<String, Object> offsets = new TreeMap<>();
+            reporter.findGroups(DYNAMIC_KAFKA_SOURCE_METRIC_GROUP)
+                    .forEach(
+                            group ->
+                                    reporter.getMetricsByGroup(group)
+                                            .forEach(
+                                                    (name, metric) -> {
+                                                        if (metric instanceof Gauge
+                                                                && (name.endsWith("currentOffset")
+                                                                        || name.endsWith(
+                                                                                "committedOffset"))) {
+                                                            offsets.put(
+                                                                    group.getMetricIdentifier(name),
+                                                                    ((Gauge<?>) metric).getValue());
+                                                        }
+                                                    }));
+            return offsets;
+        }
+
+        private void waitForReaderAttempt(
+                SharedReference<ReaderAttemptObservations> observations,
+                JobClient job,
+                int recoveringReader,
+                int expectedAttempt,
+                int healthyReader)
+                throws Exception {
+            try {
+                CommonTestUtils.waitUtil(
+                        () -> {
+                            try {
+                                throwIfJobFailed(job);
+                            } catch (Exception exception) {
+                                throw new RuntimeException(exception);
+                            }
+                            return observations.applySync(
+                                    state ->
+                                            state.attempts.getOrDefault(recoveringReader, -1)
+                                                    == expectedAttempt);
+                        },
+                        Duration.ofSeconds(30),
+                        "The requested reader did not recover independently");
+            } catch (TimeoutException timeout) {
+                TimeoutException detailed =
+                        new TimeoutException(
+                                "Reader "
+                                        + recoveringReader
+                                        + " did not reach attempt "
+                                        + expectedAttempt
+                                        + "; observations="
+                                        + observations.applySync(
+                                                state ->
+                                                        "attempts="
+                                                                + state.attempts
+                                                                + ", requestFailures="
+                                                                + state.requestFailures
+                                                                + ", assignmentFailures="
+                                                                + state.assignmentFailures
+                                                                + ", cleanupFailures="
+                                                                + state.cleanupFailures
+                                                                + ", assignmentReaders="
+                                                                + state.assignmentReaders
+                                                                + ", reportedCheckpoints="
+                                                                + state.firstReportedCheckpointByReader)
+                                        + "; source offsets="
+                                        + snapshotSourceOffsetMetrics());
+                detailed.initCause(timeout);
+                throw detailed;
+            }
+            Integer healthyAttempt =
+                    observations.applySync(state -> state.attempts.get(healthyReader));
+            assertThat(healthyAttempt).as("healthy peer execution attempt").isZero();
+        }
+
+        private Map<Integer, Integer> snapshotActiveSplitCounts() {
+            Map<Integer, Integer> counts = new TreeMap<>();
+            reporter.findGroups(DYNAMIC_KAFKA_SOURCE_METRIC_GROUP)
+                    .forEach(
+                            group ->
+                                    reporter.getMetricsByGroup(group)
+                                            .forEach(
+                                                    (name, metric) -> {
+                                                        if (name.equals("activeSplitCount")
+                                                                && metric instanceof Gauge) {
+                                                            String subtask =
+                                                                    group.getAllVariables()
+                                                                            .get("<subtask_index>");
+                                                            counts.put(
+                                                                    Integer.parseInt(subtask),
+                                                                    ((Number)
+                                                                                    ((Gauge<?>)
+                                                                                                    metric)
+                                                                                            .getValue())
+                                                                            .intValue());
+                                                        }
+                                                    }));
+            return counts;
+        }
+
+        private void waitForActiveSplitCounts(int... counts) throws Exception {
+            Map<Integer, Integer> expected = new TreeMap<>();
+            for (int reader = 0; reader < counts.length; reader++) {
+                expected.put(reader, counts[reader]);
+            }
+            CommonTestUtils.waitUtil(
+                    () -> snapshotActiveSplitCounts().equals(expected),
+                    Duration.ofSeconds(30),
+                    "Active split counts did not reach " + expected);
+        }
+
+        private void waitForBalancedActiveSplits(int totalSplits, int readers) throws Exception {
+            CommonTestUtils.waitUtil(
+                    () -> {
+                        Map<Integer, Integer> counts = snapshotActiveSplitCounts();
+                        return counts.size() == readers
+                                && counts.values().stream().mapToInt(Integer::intValue).sum()
+                                        == totalSplits
+                                && Collections.max(counts.values())
+                                                - Collections.min(counts.values())
+                                        <= 1;
+                    },
+                    Duration.ofSeconds(30),
+                    "Active split counts did not balance " + totalSplits + " splits");
+        }
+
+        private void waitForHeldReturningAssignment(
+                SharedReference<ReaderAttemptObservations> observations, int readers)
+                throws Exception {
+            CommonTestUtils.waitUtil(
+                    () ->
+                            observations.applySync(
+                                    state -> state.assignmentReaders.size() == readers),
+                    Duration.ofSeconds(30),
+                    "Readers did not receive returning assignments after the handoff checkpoint");
+        }
+
+        private File latestCompletedCheckpoint(JobClient job) {
+            File jobDirectory =
+                    new File(
+                            new File(testDir, "retained-removed-cluster-checkpoints"),
+                            job.getJobID().toString());
+            File[] files = jobDirectory.listFiles();
+            assertThat(files).isNotNull();
+            return Stream.of(files)
+                    .filter(File::isDirectory)
+                    .filter(file -> file.getName().matches("chk-\\d+"))
+                    .filter(file -> new File(file, "_metadata").isFile())
+                    .max(Comparator.comparingLong(this::checkpointId))
+                    .orElseThrow(
+                            () ->
+                                    new AssertionError(
+                                            "No completed checkpoint for " + job.getJobID()));
+        }
+
+        private long checkpointId(File checkpoint) {
+            return Long.parseLong(checkpoint.getName().substring("chk-".length()));
+        }
+
+        private void waitForClusterPartitionAssignments(String clusterId) throws Exception {
+            CommonTestUtils.waitUtil(
+                    () ->
+                            findKafkaClusterMetrics(reporter).stream()
+                                            .filter(
+                                                    name ->
+                                                            name.contains(
+                                                                    ".kafkaCluster."
+                                                                            + clusterId
+                                                                            + "."))
+                                            .filter(name -> name.endsWith(".currentOffset"))
+                                            .count()
+                                    == NUM_PARTITIONS,
+                    Duration.ofSeconds(30),
+                    "Kafka partitions were not assigned for " + clusterId);
+        }
+
         private void waitForCollectedRecords(
                 SharedReference<List<Integer>> collectedRecords,
                 JobClient jobClient,
@@ -1337,28 +2446,53 @@ class DynamicKafkaSourceITTest {
                     .anyMatch(metricName -> metricName.contains(".kafkaCluster." + kafkaClusterId));
         }
 
-        private File waitForCompletedCheckpoint(File previousCheckpoint) throws Exception {
-            AtomicReference<File> completedCheckpoint = new AtomicReference<>();
-            CommonTestUtils.waitUtil(
-                    () -> {
-                        try {
-                            File checkpoint =
-                                    TestUtils.getMostRecentCompletedCheckpoint(
-                                            new File(
-                                                    testDir,
-                                                    "retained-removed-cluster-checkpoints"));
-                            if (checkpoint != null && !checkpoint.equals(previousCheckpoint)) {
-                                completedCheckpoint.set(checkpoint);
-                                return true;
-                            }
-                        } catch (Exception ignored) {
-                            // Checkpoint directory is not populated yet.
-                        }
-                        return false;
-                    },
-                    Duration.ofSeconds(30),
-                    "Could not obtain a completed retained-cluster checkpoint");
-            return completedCheckpoint.get();
+        private String triggerAndCompleteCheckpoint(JobClient job) throws Exception {
+            // Submit after the condition under test, and await a checkpoint of this exact job.
+            // Filesystem lookup can return a checkpoint from an earlier, canceled job.
+            return miniClusterResource
+                    .getMiniCluster()
+                    .triggerCheckpoint(job.getJobID())
+                    .get(30, TimeUnit.SECONDS);
+        }
+
+        private String retainedCheckpointAfterCancellation(String postRemovalCheckpoint)
+                throws Exception {
+            File minimumCheckpoint = new File(URI.create(postRemovalCheckpoint)).getCanonicalFile();
+            File[] jobFiles = minimumCheckpoint.getParentFile().listFiles();
+            assertThat(jobFiles).isNotNull();
+            File retainedCheckpoint =
+                    Stream.of(jobFiles)
+                            .filter(File::isDirectory)
+                            .filter(file -> file.getName().matches("chk-\\d+"))
+                            .filter(file -> new File(file, "_metadata").isFile())
+                            .max(
+                                    Comparator.comparingLong(
+                                            file ->
+                                                    Long.parseLong(
+                                                            file.getName()
+                                                                    .substring("chk-".length()))))
+                            .orElseThrow(
+                                    () ->
+                                            new AssertionError(
+                                                    "No retained completed checkpoint for "
+                                                            + minimumCheckpoint));
+            // Periodic checkpoints may subsume the explicitly triggered one before cancellation
+            // finishes. After terminal cancellation no newer checkpoint can replace this file.
+            assertThat(retainedCheckpoint).isDirectory();
+            assertThat(new File(retainedCheckpoint, "_metadata")).isFile();
+            assertThat(retainedCheckpoint.getParentFile())
+                    .as("checkpoint belongs to the canceled job")
+                    .isEqualTo(minimumCheckpoint.getParentFile());
+            assertThat(retainedCheckpoint.getName()).matches("chk-\\d+");
+            assertThat(minimumCheckpoint.getName()).matches("chk-\\d+");
+            long retainedCheckpointId =
+                    Long.parseLong(retainedCheckpoint.getName().substring("chk-".length()));
+            long minimumCheckpointId =
+                    Long.parseLong(minimumCheckpoint.getName().substring("chk-".length()));
+            assertThat(retainedCheckpointId)
+                    .as("restored checkpoint was triggered after cluster removal")
+                    .isGreaterThanOrEqualTo(minimumCheckpointId);
+            return retainedCheckpoint.toURI().toString();
         }
 
         private void cancelJob(JobClient jobClient) throws Exception {
@@ -1371,6 +2505,21 @@ class DynamicKafkaSourceITTest {
                         throw executionException;
                     }
                 }
+                // cancel() acknowledges the request before task shutdown. Reusing the transactional
+                // IDs while the old Kafka writers are still closing can fence the restored job.
+                CommonTestUtils.waitUtil(
+                        () -> {
+                            try {
+                                return jobClient
+                                        .getJobStatus()
+                                        .get(5, TimeUnit.SECONDS)
+                                        .isGloballyTerminalState();
+                            } catch (Exception exception) {
+                                throw new RuntimeException(exception);
+                            }
+                        },
+                        Duration.ofSeconds(30),
+                        "Canceled job did not finish shutting down before checkpoint restore");
             }
         }
 
@@ -1473,6 +2622,428 @@ class DynamicKafkaSourceITTest {
                     Collections.singletonMap(
                             kafkaClusterId,
                             new ClusterMetadata(Collections.singleton(topic), properties)));
+        }
+    }
+
+    private static final class ReaderAttemptObservations {
+        private final Map<Integer, Integer> attempts = new HashMap<>();
+        private final Map<Integer, Integer> readerByRecord = new HashMap<>();
+        private final Set<Integer> recordsWithMultipleOwners = new TreeSet<>();
+        private RetainedCleanupBarrier cleanupBarrier;
+        private final Map<Integer, Long> firstReportedCheckpointByReader = new HashMap<>();
+        private final Set<Integer> assignmentReaders = new TreeSet<>();
+        private final Map<Integer, Long> reportedHandoffIds = new HashMap<>();
+        private final Map<Integer, Long> reportBarrierAcks = new HashMap<>();
+        private boolean observeReportBarrier;
+        private String handoffClusterId;
+        private TopicPartition transferredPartition;
+        private int readerToFail = -1;
+        private int failOnRequestReader = -1;
+        private int failOnAssignmentReader = -1;
+        private int failOnCleanupReader = -1;
+        private int requestFailures;
+        private int assignmentFailures;
+        private int cleanupFailures;
+        private boolean holdReturningAssignment;
+        // Test-only legacy producer: old readers computed a deadline independently of the JM.
+        private long legacyReaderDeadlineSkew;
+        private int legacySkewedSnapshots;
+    }
+
+    /** Runs the real connector; only observes protocol events and injects task failures. */
+    private static final class ObservedHandoffSource
+            implements Source<Integer, DynamicKafkaSourceSplit, DynamicKafkaSourceEnumState>,
+                    SupportsSplitReassignmentOnRecovery,
+                    ResultTypeQueryable<Integer> {
+        private final DynamicKafkaSource<Integer> delegate;
+        private final SharedReference<ReaderAttemptObservations> observations;
+
+        private ObservedHandoffSource(
+                DynamicKafkaSource<Integer> delegate,
+                SharedReference<ReaderAttemptObservations> observations) {
+            this.delegate = delegate;
+            this.observations = observations;
+        }
+
+        @Override
+        public Boundedness getBoundedness() {
+            return delegate.getBoundedness();
+        }
+
+        @Override
+        public SourceReader<Integer, DynamicKafkaSourceSplit> createReader(
+                SourceReaderContext context) throws Exception {
+            return new ObservedHandoffReader(delegate.createReader(context), context, observations);
+        }
+
+        @Override
+        public SplitEnumerator<DynamicKafkaSourceSplit, DynamicKafkaSourceEnumState>
+                createEnumerator(SplitEnumeratorContext<DynamicKafkaSourceSplit> context)
+                        throws Exception {
+            return new ObservedHandoffEnumerator(
+                    delegate.createEnumerator(context), context, observations);
+        }
+
+        @Override
+        public SplitEnumerator<DynamicKafkaSourceSplit, DynamicKafkaSourceEnumState>
+                restoreEnumerator(
+                        SplitEnumeratorContext<DynamicKafkaSourceSplit> context,
+                        DynamicKafkaSourceEnumState checkpoint)
+                        throws Exception {
+            return new ObservedHandoffEnumerator(
+                    delegate.restoreEnumerator(context, checkpoint), context, observations);
+        }
+
+        @Override
+        public SimpleVersionedSerializer<DynamicKafkaSourceSplit> getSplitSerializer() {
+            return delegate.getSplitSerializer();
+        }
+
+        @Override
+        public SimpleVersionedSerializer<DynamicKafkaSourceEnumState>
+                getEnumeratorCheckpointSerializer() {
+            return delegate.getEnumeratorCheckpointSerializer();
+        }
+
+        @Override
+        public TypeInformation<Integer> getProducedType() {
+            return delegate.getProducedType();
+        }
+    }
+
+    /** Observes real reports without changing handoff or checkpoint decisions. */
+    private static final class ObservedHandoffEnumerator
+            implements SplitEnumerator<DynamicKafkaSourceSplit, DynamicKafkaSourceEnumState> {
+        private final SplitEnumerator<DynamicKafkaSourceSplit, DynamicKafkaSourceEnumState>
+                delegate;
+        private final SplitEnumeratorContext<DynamicKafkaSourceSplit> context;
+        private final SharedReference<ReaderAttemptObservations> observations;
+        private long lastBarrierRound = -1;
+
+        private ObservedHandoffEnumerator(
+                SplitEnumerator<DynamicKafkaSourceSplit, DynamicKafkaSourceEnumState> delegate,
+                SplitEnumeratorContext<DynamicKafkaSourceSplit> context,
+                SharedReference<ReaderAttemptObservations> observations) {
+            this.delegate = delegate;
+            this.context = context;
+            this.observations = observations;
+        }
+
+        @Override
+        public void start() {
+            delegate.start();
+        }
+
+        @Override
+        public void handleSplitRequest(int subtaskId, String requesterHostname) {
+            delegate.handleSplitRequest(subtaskId, requesterHostname);
+        }
+
+        @Override
+        public void addSplitsBack(List<DynamicKafkaSourceSplit> splits, int subtaskId) {
+            delegate.addSplitsBack(splits, subtaskId);
+        }
+
+        @Override
+        public void addReader(int subtaskId) {
+            RetainedCleanupBarrier barrier = observations.applySync(state -> state.cleanupBarrier);
+            if (barrier != null) {
+                barrier.recordRestoredState(context, subtaskId);
+            }
+            delegate.addReader(subtaskId);
+        }
+
+        @Override
+        public DynamicKafkaSourceEnumState snapshotState(long checkpointId) throws Exception {
+            return delegate.snapshotState(checkpointId);
+        }
+
+        @Override
+        public void notifyCheckpointComplete(long checkpointId) throws Exception {
+            delegate.notifyCheckpointComplete(checkpointId);
+        }
+
+        @Override
+        public void notifyCheckpointAborted(long checkpointId) throws Exception {
+            delegate.notifyCheckpointAborted(checkpointId);
+        }
+
+        @Override
+        public void handleSourceEvent(int subtaskId, SourceEvent event) {
+            if (event instanceof HandoffObservationBarrier) {
+                long handoffId = ((HandoffObservationBarrier) event).handoffId;
+                observations.consumeSync(
+                        state -> state.reportBarrierAcks.put(subtaskId, handoffId));
+                return;
+            }
+            delegate.handleSourceEvent(subtaskId, event);
+            if (event instanceof RetainedSplitOffsetsEvent) {
+                long handoffId = ((RetainedSplitOffsetsEvent) event).getHandoffId();
+                boolean allReports =
+                        observations.applySync(
+                                state -> {
+                                    state.reportedHandoffIds.put(subtaskId, handoffId);
+                                    return state.observeReportBarrier
+                                            && state.reportedHandoffIds.size()
+                                                    == context.currentParallelism()
+                                            && state.reportedHandoffIds.values().stream()
+                                                    .allMatch(id -> id == handoffId);
+                                });
+                if (allReports && handoffId > lastBarrierRound) {
+                    lastBarrierRound = handoffId;
+                    for (int reader : context.registeredReaders().keySet()) {
+                        context.sendEventToSourceReader(
+                                reader, new HandoffObservationBarrier(handoffId));
+                    }
+                }
+            }
+        }
+
+        @Override
+        public void close() throws IOException {
+            delegate.close();
+        }
+    }
+
+    private static final class HandoffObservationBarrier implements SourceEvent {
+        private static final long serialVersionUID = 1L;
+        private final long handoffId;
+
+        private HandoffObservationBarrier(long handoffId) {
+            this.handoffId = handoffId;
+        }
+    }
+
+    private static final class ObservedHandoffReader
+            implements SourceReader<Integer, DynamicKafkaSourceSplit> {
+        private final SourceReader<Integer, DynamicKafkaSourceSplit> delegate;
+        private final SourceReaderContext context;
+        private final int subtask;
+        private final SharedReference<ReaderAttemptObservations> observations;
+        private boolean reportedHandoff;
+
+        private ObservedHandoffReader(
+                SourceReader<Integer, DynamicKafkaSourceSplit> delegate,
+                SourceReaderContext context,
+                SharedReference<ReaderAttemptObservations> observations) {
+            this.delegate = delegate;
+            this.context = context;
+            this.subtask = context.getIndexOfSubtask();
+            this.observations = observations;
+        }
+
+        @Override
+        public void start() {
+            delegate.start();
+        }
+
+        @Override
+        public InputStatus pollNext(ReaderOutput<Integer> output) throws Exception {
+            return delegate.pollNext(output);
+        }
+
+        @Override
+        public List<DynamicKafkaSourceSplit> snapshotState(long checkpointId) {
+            List<DynamicKafkaSourceSplit> splits = delegate.snapshotState(checkpointId);
+            long skew = observations.applySync(state -> state.legacyReaderDeadlineSkew);
+            if (checkpointId >= 0
+                    && skew != 0
+                    && splits.stream().anyMatch(DynamicKafkaSourceSplit::isRetained)) {
+                observations.consumeSync(state -> state.legacySkewedSnapshots++);
+                splits =
+                        splits.stream()
+                                .map(
+                                        split ->
+                                                split.isRetained()
+                                                        ? split.retainUntil(
+                                                                split.getRetainedUntilMs() + skew)
+                                                        : split)
+                                .collect(Collectors.toList());
+            }
+            if (reportedHandoff && checkpointId >= 0) {
+                observations.consumeSync(
+                        state ->
+                                state.firstReportedCheckpointByReader.putIfAbsent(
+                                        subtask, checkpointId));
+            }
+            return splits;
+        }
+
+        @Override
+        public CompletableFuture<Void> isAvailable() {
+            return delegate.isAvailable();
+        }
+
+        @Override
+        public void addSplits(List<DynamicKafkaSourceSplit> splits) {
+            boolean returning =
+                    reportedHandoff
+                            && observations.applySync(
+                                    state ->
+                                            splits.stream()
+                                                    .anyMatch(
+                                                            split ->
+                                                                    split.getKafkaClusterId()
+                                                                                    .equals(
+                                                                                            state.handoffClusterId)
+                                                                            && !split
+                                                                                    .isRetained()));
+            if (returning) {
+                observations.consumeSync(state -> state.assignmentReaders.add(subtask));
+                while (observations.applySync(state -> state.holdReturningAssignment)) {
+                    try {
+                        Thread.sleep(10L);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException(
+                                "Interrupted while holding returning assignment", interrupted);
+                    }
+                }
+            }
+            delegate.addSplits(splits);
+            boolean fail =
+                    returning
+                            && observations.applySync(
+                                    state -> {
+                                        if (state.failOnAssignmentReader == subtask
+                                                && splits.stream()
+                                                        .anyMatch(
+                                                                split ->
+                                                                        split.getKafkaClusterId()
+                                                                                        .equals(
+                                                                                                state.handoffClusterId)
+                                                                                && split.getTopicPartition()
+                                                                                        .equals(
+                                                                                                state.transferredPartition))) {
+                                            state.failOnAssignmentReader = -1;
+                                            state.assignmentFailures++;
+                                            return true;
+                                        }
+                                        return false;
+                                    });
+            if (fail) {
+                throw new IllegalStateException(
+                        "Requested new-owner failure after returning assignment");
+            }
+        }
+
+        @Override
+        public void notifyNoMoreSplits() {
+            delegate.notifyNoMoreSplits();
+        }
+
+        @Override
+        public void notifyCheckpointComplete(long checkpointId) throws Exception {
+            delegate.notifyCheckpointComplete(checkpointId);
+        }
+
+        @Override
+        public void notifyCheckpointAborted(long checkpointId) throws Exception {
+            delegate.notifyCheckpointAborted(checkpointId);
+        }
+
+        @Override
+        public void pauseOrResumeSplits(
+                Collection<String> splitsToPause, Collection<String> splitsToResume) {
+            delegate.pauseOrResumeSplits(splitsToPause, splitsToResume);
+        }
+
+        @Override
+        public void handleSourceEvents(SourceEvent event) {
+            if (event instanceof HandoffObservationBarrier) {
+                context.sendSourceEventToCoordinator(event);
+                return;
+            }
+            if (event instanceof RequestRetainedSplitOffsetsEvent) {
+                boolean fail =
+                        observations.applySync(
+                                state -> {
+                                    if (state.failOnRequestReader == subtask) {
+                                        state.failOnRequestReader = -1;
+                                        state.requestFailures++;
+                                        return true;
+                                    }
+                                    return false;
+                                });
+                if (fail) {
+                    throw new IllegalStateException(
+                            "Requested failure before retained-offset report");
+                }
+                reportedHandoff = true;
+            }
+            boolean cleanup =
+                    reportedHandoff
+                            && observations.applySync(
+                                    state ->
+                                            RetainedCleanupBarrier.isCleanupEvent(
+                                                    event, state.handoffClusterId));
+            RetainedCleanupBarrier barrier =
+                    observations.applySync(
+                            state ->
+                                    state.failOnCleanupReader == subtask
+                                            ? state.cleanupBarrier
+                                            : null);
+            if (cleanup && barrier != null) {
+                barrier.beforeCleanup(delegate.snapshotState(-1));
+            }
+            delegate.handleSourceEvents(event);
+            if (cleanup
+                    && observations.applySync(
+                            state -> {
+                                if (state.failOnCleanupReader != subtask) {
+                                    return false;
+                                }
+                                state.failOnCleanupReader = -1;
+                                state.cleanupFailures++;
+                                return true;
+                            })) {
+                throw new IllegalStateException(
+                        "Requested old-owner failure after retained-shadow cleanup");
+            }
+        }
+
+        @Override
+        public void close() throws Exception {
+            delegate.close();
+        }
+    }
+
+    /** Observes actual task attempts; output correctness is checked in transactional Kafka. */
+    private static final class ReaderAttemptObserver extends RichMapFunction<Integer, Integer> {
+        private final SharedReference<ReaderAttemptObservations> observations;
+        private transient int subtask;
+
+        private ReaderAttemptObserver(SharedReference<ReaderAttemptObservations> observations) {
+            this.observations = observations;
+        }
+
+        @Override
+        public void open(OpenContext openContext) {
+            subtask = getRuntimeContext().getTaskInfo().getIndexOfThisSubtask();
+            int attempt = getRuntimeContext().getTaskInfo().getAttemptNumber();
+            observations.consumeSync(state -> state.attempts.put(subtask, attempt));
+        }
+
+        @Override
+        public Integer map(Integer value) {
+            boolean fail =
+                    observations.applySync(
+                            state -> {
+                                Integer previousOwner = state.readerByRecord.put(value, subtask);
+                                if (previousOwner != null && previousOwner != subtask) {
+                                    state.recordsWithMultipleOwners.add(value);
+                                }
+                                if (state.readerToFail == subtask) {
+                                    state.readerToFail = -1;
+                                    return true;
+                                }
+                                return false;
+                            });
+            if (fail) {
+                throw new IllegalStateException(
+                        "Requested source reader region failure " + subtask);
+            }
+            return value;
         }
     }
 

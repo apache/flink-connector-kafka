@@ -212,7 +212,7 @@ Dynamic Kafka Source 支持两种 split 分配模式：
 * `global`：在所有集群共享一个全局 owner 游标：
   `owner = knownActiveSplitIds.size() % numReaders`，
   然后将该 split id 加入 `knownActiveSplitIds`。
-  （当 split 通过 `addSplitsBack` 返回时，若原 owner 仍然有效，则优先复用该 owner。）
+  单个 reader 恢复时保留其当前分配；来自之前 owner 的过期报告会被忽略。
 
 在 `global` 模式下，均衡策略是**前向增量（forward-only）**的：新发现 split 会尽量保证后续分配均衡，
 但不会仅为重平衡主动迁移已分配且仍在消费的 active split。
@@ -253,6 +253,16 @@ Cluster metadata 可以包含每个集群的起始/停止 offsets initializer，
 如果希望在之后重新加入集群或恢复作业时继续使用这些 offset，请将
 `stream-metadata-removed-cluster-retention-ms` 设置为正数。例如，`604800000`
 会将已移除集群的状态保留七天，之后 source 将不再把它写入 checkpoint。
+如果集群在作业运行期间、保留期限内重新加入，source 会收集 reader 保留的 offset，并等待一个 checkpoint
+完成后再重新分配这些 split。因此需要启用周期性 checkpoint 或手动触发 checkpoint；等待期间，
+其他活跃集群可以继续消费。已经开始的交接会保留这些 offset，即使 checkpoint 完成前保留期限已过。
+在 `global` 模式下，返回的 split 优先分配给当前 split 数量最少的 reader，已有的活跃 split
+不会迁移。例如，reader 的 split 数量为 `[4, 0]` 时，两个返回的 split 会使其变为 `[4, 2]`。
+在 `per_cluster` 模式下，返回的 split 使用通常的 topic-partition 分配规则。
+从 checkpoint 完整恢复时，所有活跃 split（包括重新加入的保留 split）直接使用 checkpoint 中的 offset
+重新分配，无需等待另一个 checkpoint；单个 reader 恢复时则保持当前所有权。
+已分配的无界 split 如果缺少 offset，恢复会失败，而不会静默选择新的起始 offset。
+已经完成的有界 split 仍保持完成状态。保留期限过后再次加入的集群使用当前生效的起始 offset initializer。
 
 ### Additional Properties
 There are configuration options in DynamicKafkaSourceOptions that can be configured in the properties through the builder:
