@@ -75,9 +75,16 @@ public class DynamicKafkaSourceEnumState {
 
     /**
      * Splits reported by readers on registration that were not yet reassigned when the checkpoint
-     * was taken. Readers hold no splits at that point, and the sub enumerator states mark the
-     * partitions as assigned without tracking the reader-reported offsets. Until reassignment this
-     * map is the only record of those offsets.
+     * was taken. Readers hold no splits at that point and the sub enumerator states already mark
+     * the partitions as assigned, so until reassignment this map is the only record of the
+     * reader-reported offsets.
+     *
+     * <p>Only reports the enumerator has already received need to be checkpointed. Per the FLIP-537
+     * contract, the coordinator receives a restarting reader's report before any subsequent
+     * checkpoint request: the report is sent before the reader's task turns {@code RUNNING}, and no
+     * checkpoint can be triggered until it is. A checkpoint that overlaps a reader failure can only
+     * complete if the source task acknowledged it before failing, making it a consistent
+     * pre-failure snapshot.
      */
     public Map<Integer, List<DynamicKafkaSourceSplit>> getPendingReportedSplitsByReader() {
         return pendingReportedSplitsByReader;
