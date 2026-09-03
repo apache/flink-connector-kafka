@@ -164,7 +164,7 @@ class ReducingUpsertWriter<WriterState, Comm>
     /**
      * Wrapper of {@link SinkWriter.Context}.
      *
-     * <p>When records arrives, the {@link ReducingUpsertWriter} updates the current {@link
+     * <p>When records arrive, the {@link ReducingUpsertWriter} updates the current {@link
      * SinkWriter.Context} and memorize the timestamp with the records. When flushing, the {@link
      * ReducingUpsertWriter} will emit the records in the buffer with memorized timestamp.
      */

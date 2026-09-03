@@ -60,10 +60,10 @@ public interface OffsetsInitializer extends Serializable {
             PartitionOffsetsRetriever partitionOffsetsRetriever);
 
     /**
-     * Get the auto offset reset strategy in case the initialized offsets falls out of the range.
+     * Get the auto offset reset strategy in case the initialized offsets fall out of the range.
      *
      * <p>The OffsetStrategy is only used when the offset initializer is used to initialize the
-     * starting offsets and the starting offsets is out of range.
+     * starting offsets and the starting offsets are out of range.
      *
      * @return An {@link OffsetResetStrategy} to use if the initialized offsets are out of the
      *     range.
@@ -100,9 +100,9 @@ public interface OffsetsInitializer extends Serializable {
 
     /**
      * Get an {@link OffsetsInitializer} which initializes the offsets to the committed offsets. An
-     * exception will be thrown at runtime if there is no committed offsets.
+     * exception will be thrown at runtime if there are no committed offsets.
      *
-     * @return an offset initializer which initialize the offsets to the committed offsets.
+     * @return an offset initializer which initializes the offsets to the committed offsets.
      */
     static OffsetsInitializer committedOffsets() {
         return committedOffsets(OffsetResetStrategy.NONE);
@@ -110,7 +110,7 @@ public interface OffsetsInitializer extends Serializable {
 
     /**
      * Get an {@link OffsetsInitializer} which initializes the offsets to the committed offsets. Use
-     * the given {@link OffsetResetStrategy} to initialize the offsets if the committed offsets does
+     * the given {@link OffsetResetStrategy} to initialize the offsets if the committed offsets do
      * not exist.
      *
      * @param offsetResetStrategy the offset reset strategy to use when the committed offsets do not
@@ -125,7 +125,7 @@ public interface OffsetsInitializer extends Serializable {
     /**
      * Get an {@link OffsetsInitializer} which initializes the offsets in each partition so that the
      * initialized offset is the offset of the first record whose record timestamp is greater than
-     * or equals the given timestamp (milliseconds).
+     * or equal to the given timestamp (milliseconds).
      *
      * @param timestamp the timestamp (milliseconds) to start the consumption.
      * @return an {@link OffsetsInitializer} which initializes the offsets based on the given
