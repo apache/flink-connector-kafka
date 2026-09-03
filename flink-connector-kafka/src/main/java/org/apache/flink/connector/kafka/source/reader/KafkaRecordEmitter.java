@@ -53,7 +53,13 @@ public class KafkaRecordEmitter<T>
             deserializationSchema.deserialize(consumerRecord, sourceOutputWrapper);
             splitState.setCurrentOffset(consumerRecord.offset() + 1);
         } catch (Exception e) {
-            throw new IOException("Failed to deserialize consumer record due to", e);
+            throw new IOException(
+                    String.format(
+                            "Failed to deserialize consumer record from topic=%s, partition=%d, offset=%d due to",
+                            consumerRecord.topic(),
+                            consumerRecord.partition(),
+                            consumerRecord.offset()),
+                    e);
         }
     }
 
