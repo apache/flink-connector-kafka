@@ -399,9 +399,10 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
 
             addSplits(validPendingSplits);
             pendingSplits.clear();
-            if (isNoMoreSplits) {
-                notifyNoMoreSplits();
-            }
+        }
+
+        if (isNoMoreSplits) {
+            notifyNoMoreSplits();
         }
 
         // Releasing the last split output can expose the runtime output as idle immediately. Keep
