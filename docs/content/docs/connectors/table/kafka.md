@@ -315,6 +315,26 @@ Connector Options
       </td>
     </tr>
     <tr>
+      <td><h5>key.format.projection-pushdown.enabled</h5></td>
+      <td>optional</td>
+      <td>no</td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>When enabled, query projections are pushed down into the key format. How much is pushed down
+        depends on the format's level of projection-pushdown support (none, top-level, or nested).
+      </td>
+    </tr>
+    <tr>
+      <td><h5>value.format.projection-pushdown.enabled</h5></td>
+      <td>optional</td>
+      <td>no</td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>When enabled, query projections are pushed down into the value format. How much is pushed down
+        depends on the format's level of projection-pushdown support (none, top-level, or nested).
+      </td>
+    </tr>
+    <tr>
       <td><h5>scan.startup.mode</h5></td>
       <td>optional</td>
       <td>yes</td>
