@@ -270,6 +270,10 @@ public class SourceTopicIntegrityTest {
 
         // Expect the job has run and produced the extra records to the sink
         KafkaSourceTestEnv.waitForRecordsInTopic(SINK_TOPIC_NAME, expectedTotalRecords);
+
+        // cancel the job and wait fot its termination
+        miniCluster.cancelJob(secondJobId).get();
+        miniCluster.requestJobResult(secondJobId).get();
     }
 
     private enum SourceSubscriptionMode {
