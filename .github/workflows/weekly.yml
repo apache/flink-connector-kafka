@@ -28,22 +28,28 @@ jobs:
   compile_and_test:
     if: github.repository_owner == 'apache'
     strategy:
+      fail-fast: false
       matrix:
+        # Release lines run a single JDK to stay under the ASF limit of 20 concurrent jobs.
         flink_branches: &flink_branches_matrix [{
           flink: 2.2-SNAPSHOT,
           branch: main
         }, {
           flink: 2.2.1,
-          branch: v5.0
+          branch: v5.0,
+          jdk: '17'
         }, {
           flink: 2.1.2,
-          branch: v5.0
+          branch: v5.0,
+          jdk: '17'
         }, {
           flink: 2.0.2,
-          branch: v4.0
+          branch: v4.0,
+          jdk: '17'
         }, {
           flink: 1.20.4,
-          branch: v3.4
+          branch: v3.4,
+          jdk: '11'
         }]
     uses: apache/flink-connector-shared-utils/.github/workflows/ci.yml@ci_utils
     with:
@@ -54,10 +60,11 @@ jobs:
   python_test:
     if: github.repository_owner == 'apache'
     strategy:
+      fail-fast: false
       matrix:
         flink_branches: *flink_branches_matrix
     uses: apache/flink-connector-shared-utils/.github/workflows/python_ci.yml@ci_utils
     with:
       flink_version: ${{ matrix.flink_branches.flink }}
       connector_branch: ${{ matrix.flink_branches.branch }}
-      jdk_version: ${{ matrix.flink_branches.jdk || '11, 17, 21' }}
+      jdk_version: '17'
