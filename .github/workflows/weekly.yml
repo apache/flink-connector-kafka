@@ -57,6 +57,7 @@ jobs:
       connector_branch: ${{ matrix.flink_branches.branch }}
       jdk_version: ${{ matrix.flink_branches.jdk || '11, 17, 21' }}
       run_dependency_convergence: false
+      timeout_test: 45
   python_test:
     if: github.repository_owner == 'apache'
     strategy:
