@@ -20,6 +20,8 @@ package org.apache.flink.connector.kafka.source.enumerator.subscriber;
 
 import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetIdentifier;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifierProvider;
+import org.apache.flink.connector.kafka.source.enumerator.metadata.TopicMetadataProvider;
+import org.apache.flink.connector.kafka.source.enumerator.metadata.TopicMetadataSettable;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.TopicDescription;
@@ -34,27 +36,38 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-import static org.apache.flink.connector.kafka.util.AdminUtils.getTopicMetadata;
-
 /**
  * A subscriber to a fixed list of topics. The subscribed topics must have existed in the Kafka
  * cluster, otherwise an exception will be thrown.
  */
-class TopicListSubscriber implements KafkaSubscriber, KafkaDatasetIdentifierProvider {
+class TopicListSubscriber
+        implements KafkaSubscriber, KafkaDatasetIdentifierProvider, TopicMetadataSettable {
     private static final long serialVersionUID = -6917603843104947866L;
     private static final Logger LOG = LoggerFactory.getLogger(TopicListSubscriber.class);
     private final List<String> topics;
+    private transient TopicMetadataProvider topicMetadataProvider;
 
     TopicListSubscriber(List<String> topics) {
         this.topics = topics;
     }
 
     @Override
+    public void setTopicMetadataProvider(TopicMetadataProvider topicMetadataProvider) {
+        this.topicMetadataProvider = topicMetadataProvider;
+    }
+
+    private TopicMetadataProvider getTopicMetadataProvider() {
+        if (topicMetadataProvider == null) {
+            topicMetadataProvider = TopicMetadataProvider.createDefault();
+        }
+        return topicMetadataProvider;
+    }
+
+    @Override
     public Set<TopicPartition> getSubscribedTopicPartitions(AdminClient adminClient) {
         LOG.debug("Fetching descriptions for topics: {}", topics);
         final Map<String, TopicDescription> topicMetadata =
-                getTopicMetadata(adminClient, new HashSet<>(topics));
-
+                getTopicMetadataProvider().getTopicMetadata(adminClient, topics);
         Set<TopicPartition> subscribedPartitions = new HashSet<>();
         for (TopicDescription topic : topicMetadata.values()) {
             for (TopicPartitionInfo partition : topic.partitions()) {

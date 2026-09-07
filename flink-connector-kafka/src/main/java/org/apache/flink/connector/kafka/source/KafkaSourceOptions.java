@@ -70,6 +70,13 @@ public class KafkaSourceOptions {
                                     + "of polling more often. 0 polls without blocking. Must not be "
                                     + "negative.");
 
+    public static final ConfigOption<Boolean> TOPIC_INTEGRITY_CHECK_ENABLED =
+            ConfigOptions.key("scan.topic-integrity-check.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to verify topic id during runtime and fail if the topic is missing or recreated");
+
     @SuppressWarnings("unchecked")
     public static <T> T getOption(
             Properties props, ConfigOption<?> configOption, Function<String, T> parser) {

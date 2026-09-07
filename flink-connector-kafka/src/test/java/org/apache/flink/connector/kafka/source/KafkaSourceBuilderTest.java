@@ -273,6 +273,57 @@ public class KafkaSourceBuilderTest {
                 .isEqualTo(-1L);
     }
 
+    @Test
+    public void testDefaultCheckSourceIntegrity() {
+        final KafkaSource<String> kafkaSource = getBasicBuilder().build();
+        assertThat(
+                        kafkaSource
+                                .getConfiguration()
+                                .get(KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED))
+                .isEqualTo(KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.defaultValue());
+    }
+
+    @Test
+    public void testCheckSourceIntegrityEnabled() {
+        boolean checkSourceIntegrity = true;
+        final KafkaSource<String> kafkaSource =
+                getBasicBuilder()
+                        .setProperty(
+                                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key(),
+                                Boolean.toString(checkSourceIntegrity))
+                        .build();
+        assertThat(
+                        kafkaSource
+                                .getConfiguration()
+                                .get(KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED))
+                .isEqualTo(checkSourceIntegrity);
+    }
+
+    @Test
+    public void testTopicIntegrityCheckEnabledWithoutTopicIntegrityAwareSubscriber() {
+        assertThatThrownBy(
+                        () ->
+                                new KafkaSourceBuilder<String>()
+                                        .setBootstrapServers("testServer")
+                                        .setDeserializer(
+                                                KafkaRecordDeserializationSchema.valueOnly(
+                                                        StringDeserializer.class))
+                                        .enableTopicIntegrityCheck()
+                                        .setKafkaSubscriber(
+                                                new KafkaSubscriber() {
+                                                    @Override
+                                                    public Set<TopicPartition>
+                                                            getSubscribedTopicPartitions(
+                                                                    AdminClient adminClient) {
+                                                        return null;
+                                                    }
+                                                })
+                                        .build())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(
+                        "Topic integrity check is not supported for non TopicMetadataSettable subscriber");
+    }
+
     private KafkaSourceBuilder<String> getBasicBuilder() {
         return new KafkaSourceBuilder<String>()
                 .setBootstrapServers("testServer")
