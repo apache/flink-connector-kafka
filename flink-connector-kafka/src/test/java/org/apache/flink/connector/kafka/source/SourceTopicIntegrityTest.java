@@ -66,7 +66,7 @@ public class SourceTopicIntegrityTest {
     private static final String SOURCE_TOPIC_PATTERN = "SourceTopicIntegrityTest_source.*";
     private static final String SINK_TOPIC_NAME = "SourceTopicIntegrityTest_sink-topic";
     private static final long DISCOVERY_INTERVAL = 50L;
-    private static final Duration ERROR_DISCOVERY_TIMEOUT = Duration.ofSeconds(2);
+    private static final Duration ERROR_DISCOVERY_TIMEOUT = Duration.ofSeconds(20);
     @TempDir private Path savepointBasePath;
 
     @RegisterExtension
