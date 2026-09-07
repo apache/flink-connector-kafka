@@ -127,6 +127,158 @@ public class DynamicKafkaSourceEnumeratorTest {
     }
 
     @Test
+    public void testBoundedSourceSignalsNoMoreSplitsOncePerReader() throws Throwable {
+        try (RecordingSplitEnumeratorContext context = new RecordingSplitEnumeratorContext();
+                DynamicKafkaSourceEnumerator enumerator = createBoundedEnumerator(context)) {
+            enumerator.start();
+            for (int reader = 0; reader < NUM_SUBTASKS; reader++) {
+                mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, reader);
+            }
+
+            assertThat(context.splitsAtCompletion).isEmpty();
+            runAllOneTimeCallables(context);
+
+            for (int reader = 0; reader < NUM_SUBTASKS; reader++) {
+                context.assertReaderCompleted(reader, 1);
+            }
+            verifyAllSplitsHaveBeenAssigned(
+                    context.getSplitsAssignmentSequence(),
+                    DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC));
+        }
+    }
+
+    @Test
+    public void testBoundedSourceAssignsAllClustersBeforeCompletingLateReaders() throws Throwable {
+        try (RecordingSplitEnumeratorContext context = new RecordingSplitEnumeratorContext();
+                DynamicKafkaSourceEnumerator enumerator = createBoundedEnumerator(context)) {
+            enumerator.start();
+            mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, 0);
+            runAllOneTimeCallables(context);
+
+            context.assertReaderCompleted(0, 1);
+            assertThat(context.splitsAtCompletion).containsOnlyKeys(0);
+
+            for (int reader = 1; reader < NUM_SUBTASKS; reader++) {
+                mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, reader);
+                for (int registeredReader = 0; registeredReader <= reader; registeredReader++) {
+                    context.assertReaderCompleted(registeredReader, 1);
+                }
+            }
+            verifyAllSplitsHaveBeenAssigned(
+                    context.getSplitsAssignmentSequence(),
+                    DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC));
+        }
+    }
+
+    @Test
+    public void testBoundedSourceCompletesRestartedReaderAfterReturnedSplits() throws Throwable {
+        try (RecordingSplitEnumeratorContext context = new RecordingSplitEnumeratorContext();
+                DynamicKafkaSourceEnumerator enumerator = createBoundedEnumerator(context)) {
+            enumerator.start();
+            for (int reader = 0; reader < NUM_SUBTASKS; reader++) {
+                mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, reader);
+            }
+            runAllOneTimeCallables(context);
+
+            List<DynamicKafkaSourceSplit> returnedSplits = context.getAssignedSplits(0);
+            context.getSplitsAssignmentSequence().clear();
+            context.unregisterReader(0);
+            enumerator.addSplitsBack(returnedSplits, 0);
+
+            assertThat(context.getSplitsAssignmentSequence()).isEmpty();
+            context.splitsAtCompletion
+                    .values()
+                    .forEach(completions -> assertThat(completions).hasSize(1));
+
+            mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, 0);
+
+            assertThat(context.getAssignedSplits(0))
+                    .containsExactlyInAnyOrderElementsOf(returnedSplits);
+            context.assertReaderCompleted(0, 2);
+            for (int reader = 1; reader < NUM_SUBTASKS; reader++) {
+                assertThat(context.splitsAtCompletion.get(reader)).hasSize(1);
+            }
+        }
+    }
+
+    @Test
+    public void testBoundedSourceReassignsReportedSplitsBeforeCompletingReader() throws Throwable {
+        try (RecordingSplitEnumeratorContext context = new RecordingSplitEnumeratorContext();
+                DynamicKafkaSourceEnumerator enumerator = createBoundedEnumerator(context)) {
+            enumerator.start();
+            for (int reader = 0; reader < NUM_SUBTASKS; reader++) {
+                mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, reader);
+            }
+            runAllOneTimeCallables(context);
+
+            List<DynamicKafkaSourceSplit> reportedSplits = context.getAssignedSplits(0);
+            context.getSplitsAssignmentSequence().clear();
+            context.unregisterReader(0);
+            context.registerReader(ReaderInfo.createReaderInfo(0, "restarted", reportedSplits));
+            enumerator.addReader(0);
+
+            assertThat(context.getAssignedSplits(0))
+                    .containsExactlyInAnyOrderElementsOf(reportedSplits);
+            context.assertReaderCompleted(0, 2);
+            for (int reader = 1; reader < NUM_SUBTASKS; reader++) {
+                assertThat(context.splitsAtCompletion.get(reader)).hasSize(1);
+            }
+        }
+    }
+
+    @Test
+    public void testBoundedSourceCompletesReadersAfterActiveAndRetainedReassignment()
+            throws Throwable {
+        try (RecordingSplitEnumeratorContext context = new RecordingSplitEnumeratorContext();
+                DynamicKafkaSourceEnumerator enumerator = createBoundedEnumerator(context)) {
+            enumerator.start();
+            for (int reader = 0; reader < NUM_SUBTASKS; reader++) {
+                mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, reader);
+            }
+            runAllOneTimeCallables(context);
+
+            Map<Integer, List<DynamicKafkaSourceSplit>> reportedSplitsByReader = new HashMap<>();
+            for (int reader = 0; reader < 2; reader++) {
+                reportedSplitsByReader.put(reader, context.getAssignedSplits(reader));
+                context.unregisterReader(reader);
+            }
+            reportedSplitsByReader
+                    .get(0)
+                    .add(
+                            new DynamicKafkaSourceSplit(
+                                    "removed-cluster",
+                                    new KafkaPartitionSplit(
+                                            new TopicPartition("removed-topic", 0), 5),
+                                    Long.MAX_VALUE));
+            context.getSplitsAssignmentSequence().clear();
+            context.splitsAtCompletion.clear();
+
+            context.registerReader(
+                    ReaderInfo.createReaderInfo(0, "restarted", reportedSplitsByReader.get(0)));
+            enumerator.addReader(0);
+            assertThat(context.getSplitsAssignmentSequence()).isEmpty();
+            assertThat(context.splitsAtCompletion).isEmpty();
+
+            context.registerReader(
+                    ReaderInfo.createReaderInfo(1, "restarted", reportedSplitsByReader.get(1)));
+            enumerator.addReader(1);
+
+            assertThat(context.splitsAtCompletion).containsOnlyKeys(0, 1);
+            for (int reader = 0; reader < 2; reader++) {
+                List<DynamicKafkaSourceSplit> reportedSplits = reportedSplitsByReader.get(reader);
+                assertThat(context.getAssignedSplits(reader))
+                        .containsExactlyInAnyOrderElementsOf(reportedSplits);
+                assertThat(context.splitsAtCompletion.get(reader))
+                        .singleElement()
+                        .isEqualTo(
+                                reportedSplits.stream()
+                                        .map(DynamicKafkaSourceSplit::splitId)
+                                        .collect(Collectors.toSet()));
+            }
+        }
+    }
+
+    @Test
     public void testStartupWithContinuousDiscovery() throws Throwable {
         try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
@@ -1998,6 +2150,25 @@ public class DynamicKafkaSourceEnumeratorTest {
         }
     }
 
+    private DynamicKafkaSourceEnumerator createBoundedEnumerator(
+            SplitEnumeratorContext<DynamicKafkaSourceSplit> context) {
+        Properties properties = new Properties();
+        properties.setProperty(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "0");
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "0");
+        return new DynamicKafkaSourceEnumerator(
+                new KafkaStreamSetSubscriber(Collections.singleton(TOPIC)),
+                new MockKafkaMetadataService(
+                        Collections.singleton(DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC))),
+                context,
+                OffsetsInitializer.earliest(),
+                OffsetsInitializer.latest(),
+                properties,
+                Boundedness.BOUNDED,
+                new DynamicKafkaSourceEnumState(),
+                new TestKafkaEnumContextProxyFactory());
+    }
+
     private DynamicKafkaSourceEnumerator createEnumerator(
             SplitEnumeratorContext<DynamicKafkaSourceSplit> context) {
         return createEnumerator(
@@ -2467,7 +2638,8 @@ public class DynamicKafkaSourceEnumeratorTest {
             return new TestKafkaEnumContextProxy(
                     kafkaClusterId,
                     kafkaMetadataService,
-                    (MockSplitEnumeratorContext<DynamicKafkaSourceSplit>) enumContext);
+                    (MockSplitEnumeratorContext<DynamicKafkaSourceSplit>) enumContext,
+                    signalNoMoreSplitsCallback);
         }
     }
 
@@ -2479,7 +2651,15 @@ public class DynamicKafkaSourceEnumeratorTest {
                 String kafkaClusterId,
                 KafkaMetadataService kafkaMetadataService,
                 MockSplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext) {
-            super(kafkaClusterId, kafkaMetadataService, enumContext, null);
+            this(kafkaClusterId, kafkaMetadataService, enumContext, null);
+        }
+
+        private TestKafkaEnumContextProxy(
+                String kafkaClusterId,
+                KafkaMetadataService kafkaMetadataService,
+                MockSplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext,
+                Runnable signalNoMoreSplitsCallback) {
+            super(kafkaClusterId, kafkaMetadataService, enumContext, signalNoMoreSplitsCallback);
             this.enumContext = enumContext;
         }
 
@@ -2593,6 +2773,52 @@ public class DynamicKafkaSourceEnumeratorTest {
         @Override
         public void close() throws Exception {
             throw new Exception("test close failure");
+        }
+    }
+
+    private static class RecordingSplitEnumeratorContext
+            extends MockSplitEnumeratorContext<DynamicKafkaSourceSplit> {
+        private final Map<Integer, List<Set<String>>> splitsAtCompletion = new HashMap<>();
+
+        private RecordingSplitEnumeratorContext() {
+            super(NUM_SUBTASKS);
+        }
+
+        @Override
+        public void signalNoMoreSplits(int subtask) {
+            super.signalNoMoreSplits(subtask);
+            splitsAtCompletion
+                    .computeIfAbsent(subtask, ignored -> new ArrayList<>())
+                    .add(
+                            getAssignedSplits(subtask).stream()
+                                    .map(DynamicKafkaSourceSplit::splitId)
+                                    .collect(Collectors.toSet()));
+        }
+
+        private List<DynamicKafkaSourceSplit> getAssignedSplits(int reader) {
+            return getSplitsAssignmentSequence().stream()
+                    .flatMap(
+                            assignment ->
+                                    assignment
+                                            .assignment()
+                                            .getOrDefault(reader, Collections.emptyList())
+                                            .stream())
+                    .collect(Collectors.toList());
+        }
+
+        private void assertReaderCompleted(int reader, int times) {
+            List<DynamicKafkaSourceSplit> assignedSplits = getAssignedSplits(reader);
+            assertThat(assignedSplits).hasSize(DynamicKafkaSourceTestHelper.NUM_KAFKA_CLUSTERS);
+            Set<String> assignedSplitIds =
+                    assignedSplits.stream()
+                            .map(DynamicKafkaSourceSplit::splitId)
+                            .collect(Collectors.toSet());
+            assertThat(splitsAtCompletion.get(reader))
+                    .hasSize(times)
+                    .allSatisfy(
+                            splitIds ->
+                                    assertThat(splitIds)
+                                            .containsExactlyInAnyOrderElementsOf(assignedSplitIds));
         }
     }
 
