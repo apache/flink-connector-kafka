@@ -115,6 +115,8 @@ public class DynamicKafkaSourceEnumerator
             retainedClusterEnumeratorStates;
     private boolean firstDiscoveryComplete;
     private final ReaderRecoveryGate readerRecoveryGate;
+    private final Set<Integer> readersWithNoMoreSplits = new HashSet<>();
+    private boolean splitAssignmentInProgress;
 
     public DynamicKafkaSourceEnumerator(
             KafkaStreamSubscriber kafkaStreamSubscriber,
@@ -410,6 +412,10 @@ public class DynamicKafkaSourceEnumerator
     }
 
     private void handleNoMoreSplits() {
+        // A cluster callback may run before other clusters have assigned their splits.
+        if (splitAssignmentInProgress || readerRecoveryGate.hasPendingRecovery()) {
+            return;
+        }
         if (Boundedness.BOUNDED.equals(boundedness)) {
             boolean allEnumeratorsHaveSignalledNoMoreSplits = true;
             for (StoppableKafkaEnumContextProxy context : clusterEnumContextMap.values()) {
@@ -418,10 +424,12 @@ public class DynamicKafkaSourceEnumerator
             }
 
             if (firstDiscoveryComplete && allEnumeratorsHaveSignalledNoMoreSplits) {
-                logger.info(
-                        "Signal no more splits to all readers: {}",
-                        enumContext.registeredReaders().keySet());
-                enumContext.registeredReaders().keySet().forEach(enumContext::signalNoMoreSplits);
+                for (int readerId : enumContext.registeredReaders().keySet()) {
+                    if (readersWithNoMoreSplits.add(readerId)) {
+                        logger.info("Signal no more splits to reader {}", readerId);
+                        enumContext.signalNoMoreSplits(readerId);
+                    }
+                }
             } else {
                 logger.info("Not ready to notify no more splits to readers.");
             }
@@ -751,8 +759,11 @@ public class DynamicKafkaSourceEnumerator
     @Override
     public void addSplitsBack(List<DynamicKafkaSourceSplit> splits, int subtaskId) {
         logger.debug("Adding splits back for {}", subtaskId);
-        splitAssignmentStrategy.onSplitsBack(splits, subtaskId);
-        addSplitsBackToClusterEnumerators(splits, subtaskId, false);
+        runWithSplitAssignmentInProgress(
+                () -> {
+                    splitAssignmentStrategy.onSplitsBack(splits, subtaskId);
+                    addSplitsBackToClusterEnumerators(splits, subtaskId, false);
+                });
         handleNoMoreSplits();
     }
 
@@ -791,6 +802,7 @@ public class DynamicKafkaSourceEnumerator
     @Override
     public void addReader(int subtaskId) {
         logger.debug("Adding reader {}", subtaskId);
+        readersWithNoMoreSplits.remove(subtaskId);
         ReaderInfo readerInfo = enumContext.registeredReaders().get(subtaskId);
         if (readerInfo != null) {
             readerRecoveryGate.recordReportedSplits(
@@ -801,7 +813,7 @@ public class DynamicKafkaSourceEnumerator
             return;
         }
 
-        addReaderToClusterEnumerators(subtaskId);
+        runWithSplitAssignmentInProgress(() -> addReaderToClusterEnumerators(subtaskId));
         handleNoMoreSplits();
     }
 
@@ -813,15 +825,28 @@ public class DynamicKafkaSourceEnumerator
             return true;
         }
 
-        readerRecoveryGate.markInitialRegistrationComplete();
-        if (readerRecoveryGate.hasReportedSplits()) {
-            reassignReportedSplits();
-        } else {
-            flushPendingSplitAssignmentsForRegisteredReaders();
-        }
+        // Draining the gate clears its pending state before reassignment finishes.
+        runWithSplitAssignmentInProgress(
+                () -> {
+                    readerRecoveryGate.markInitialRegistrationComplete();
+                    if (readerRecoveryGate.hasReportedSplits()) {
+                        reassignReportedSplits();
+                    } else {
+                        flushPendingSplitAssignmentsForRegisteredReaders();
+                    }
+                });
         handleNoMoreSplits();
         flushPendingMetadataUpdateEvents();
         return true;
+    }
+
+    private void runWithSplitAssignmentInProgress(Runnable assignment) {
+        splitAssignmentInProgress = true;
+        try {
+            assignment.run();
+        } finally {
+            splitAssignmentInProgress = false;
+        }
     }
 
     private boolean allReadersRegistered() {
