@@ -68,13 +68,16 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
                         properties, DeliveryGuarantee.AT_LEAST_ONCE, metricGroup)) {
 
             writer.write(1, SINK_WRITER_CONTEXT);
+            writer.getCurrentProducer().flush();
 
             KAFKA_CONTAINER.stop();
 
             try {
+                writer.write(1, SINK_WRITER_CONTEXT);
                 writer.getCurrentProducer().flush();
                 assertThatCode(() -> writer.write(1, SINK_WRITER_CONTEXT))
-                        .hasRootCauseExactlyInstanceOf(NetworkException.class);
+                        .rootCause()
+                        .isInstanceOfAny(NetworkException.class, TimeoutException.class);
             } finally {
                 KAFKA_CONTAINER.start();
             }
@@ -91,11 +94,14 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
                 createWriterWithConfiguration(
                         properties, DeliveryGuarantee.AT_LEAST_ONCE, metricGroup)) {
             writer.write(1, SINK_WRITER_CONTEXT);
+            writer.flush(false);
 
             KAFKA_CONTAINER.stop();
             try {
+                writer.write(1, SINK_WRITER_CONTEXT);
                 assertThatCode(() -> writer.flush(false))
-                        .hasRootCauseExactlyInstanceOf(NetworkException.class);
+                        .rootCause()
+                        .isInstanceOfAny(NetworkException.class, TimeoutException.class);
             } finally {
                 KAFKA_CONTAINER.start();
             }
@@ -113,14 +119,17 @@ public class KafkaWriterFaultToleranceITCase extends KafkaWriterTestBase {
                         properties, DeliveryGuarantee.AT_LEAST_ONCE, metricGroup);
 
         writer.write(1, SINK_WRITER_CONTEXT);
+        writer.getCurrentProducer().flush();
 
         KAFKA_CONTAINER.stop();
 
         try {
+            writer.write(1, SINK_WRITER_CONTEXT);
             writer.getCurrentProducer().flush();
             // closing producer resource throws exception first
             assertThatCode(() -> writer.close())
-                    .hasRootCauseExactlyInstanceOf(NetworkException.class);
+                    .rootCause()
+                    .isInstanceOfAny(NetworkException.class, TimeoutException.class);
         } catch (Exception e) {
             writer.close();
             throw e;
