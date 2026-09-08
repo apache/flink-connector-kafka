@@ -17,9 +17,10 @@
 
 package org.apache.flink.connector.kafka.share;
 
-import org.apache.flink.annotation.Internal;
+import org.apache.flink.annotation.PublicEvolving;
 
-@Internal
+/** Final acknowledgement decision for a Kafka share-group record. */
+@PublicEvolving
 public enum ShareAckDecision {
     ACCEPT((byte) 1),
     REJECT((byte) 3);

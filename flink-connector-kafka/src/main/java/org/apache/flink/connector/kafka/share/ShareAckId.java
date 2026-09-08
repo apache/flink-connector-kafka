@@ -17,12 +17,13 @@
 
 package org.apache.flink.connector.kafka.share;
 
-import org.apache.flink.annotation.Internal;
+import org.apache.flink.annotation.PublicEvolving;
 
 import java.io.Serializable;
 import java.util.Objects;
 
-@Internal
+/** Stable identity of one Kafka share-group record acknowledgement. */
+@PublicEvolving
 public final class ShareAckId implements Serializable {
 
     private static final long serialVersionUID = 1L;

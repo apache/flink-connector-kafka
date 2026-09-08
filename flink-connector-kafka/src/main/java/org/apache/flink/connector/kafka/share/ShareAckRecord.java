@@ -17,13 +17,14 @@
 
 package org.apache.flink.connector.kafka.share;
 
-import org.apache.flink.annotation.Internal;
+import org.apache.flink.annotation.PublicEvolving;
 
 import java.io.Serializable;
 import java.util.List;
 import java.util.Objects;
 
-@Internal
+/** Control record carrying the final acknowledgement decision for one share-group record. */
+@PublicEvolving
 public final class ShareAckRecord implements Serializable {
 
     private static final long serialVersionUID = 1L;
