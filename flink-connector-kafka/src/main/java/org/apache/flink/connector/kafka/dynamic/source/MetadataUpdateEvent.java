@@ -23,37 +23,53 @@ import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
 import org.apache.flink.connector.kafka.dynamic.source.reader.DynamicKafkaSourceReader;
 
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
 /**
- * Signals {@link DynamicKafkaSourceReader} to stop their underlying readers. The restart process is
- * as follows:
+ * Supplies the current subscription and authoritative retention deadlines to {@link
+ * DynamicKafkaSourceReader}. Readers reconcile their active sub-readers with the subscription and
+ * retain removed-cluster offsets only while the coordinator grants retention.
  *
- * <p>1. Detect metadata change in enumerator 2. Stop sub enumerators and don't snapshot state 3.
- * Send this event to all readers 4. Stop sub readers and snapshot state (offsets) 5. Start new sub
- * enumerators with clean state and do total split reassignment to readers 6. Readers obtain splits,
- * starting sub readers dynamically, and do reconciliation of starting offsets with the cached
- * offsets
- *
- * <p>We don't snapshot enumerator state because we want to reassign previously assigned splits.
- * After restart, readers need to reinitialize the sub readers by using the received splits.
+ * <p>Returning splits are assigned separately after the retained-offset checkpoint handoff. A
+ * subsequent metadata update removes the former owners' retained copies.
  */
 @Internal
 public class MetadataUpdateEvent implements SourceEvent {
     private final Set<KafkaStream> kafkaStreams;
+    private final Map<String, Long> retainedClusterDeadlines;
 
     public MetadataUpdateEvent(Set<KafkaStream> kafkaStreams) {
+        this(kafkaStreams, Collections.emptyMap());
+    }
+
+    public MetadataUpdateEvent(
+            Set<KafkaStream> kafkaStreams, Map<String, Long> retainedClusterDeadlines) {
         this.kafkaStreams = kafkaStreams;
+        this.retainedClusterDeadlines =
+                Collections.unmodifiableMap(new HashMap<>(retainedClusterDeadlines));
     }
 
     public Set<KafkaStream> getKafkaStreams() {
         return kafkaStreams;
     }
 
+    /** Retention epochs still owned by the coordinator, including pending handoffs. */
+    public Map<String, Long> getRetainedClusterDeadlines() {
+        return retainedClusterDeadlines;
+    }
+
     @Override
     public String toString() {
-        return "MetadataUpdateEvent{" + "kafkaStreams=" + kafkaStreams + '}';
+        return "MetadataUpdateEvent{"
+                + "kafkaStreams="
+                + kafkaStreams
+                + ", retainedClusterDeadlines="
+                + retainedClusterDeadlines
+                + '}';
     }
 
     @Override
@@ -65,11 +81,12 @@ public class MetadataUpdateEvent implements SourceEvent {
             return false;
         }
         MetadataUpdateEvent that = (MetadataUpdateEvent) o;
-        return Objects.equals(kafkaStreams, that.kafkaStreams);
+        return Objects.equals(kafkaStreams, that.kafkaStreams)
+                && Objects.equals(retainedClusterDeadlines, that.retainedClusterDeadlines);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(kafkaStreams);
+        return Objects.hash(kafkaStreams, retainedClusterDeadlines);
     }
 }

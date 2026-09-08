@@ -97,7 +97,7 @@ public class KafkaSourceReader<T>
     @Override
     public List<KafkaPartitionSplit> snapshotState(long checkpointId) {
         List<KafkaPartitionSplit> splits = super.snapshotState(checkpointId);
-        if (!commitOffsetsOnCheckpoint) {
+        if (!commitOffsetsOnCheckpoint || checkpointId < 0) {
             return splits;
         }
 

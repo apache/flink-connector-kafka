@@ -46,6 +46,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
@@ -74,6 +75,7 @@ public class StoppableKafkaEnumContextProxy
     private final Runnable signalNoMoreSplitsCallback;
     private boolean noMoreSplits = false;
     private volatile boolean isClosing;
+    private Consumer<SplitsAssignment<DynamicKafkaSourceSplit>> assignmentListener = ignored -> {};
 
     /**
      * Constructor for the enumerator context.
@@ -120,6 +122,10 @@ public class StoppableKafkaEnumContextProxy
     }
 
     /** Wrap splits with cluster metadata. */
+    void setAssignmentListener(Consumer<SplitsAssignment<DynamicKafkaSourceSplit>> listener) {
+        this.assignmentListener = listener;
+    }
+
     @Override
     public void assignSplits(SplitsAssignment<KafkaPartitionSplit> newSplitAssignments) {
         if (logger.isInfoEnabled()) {
@@ -147,7 +153,10 @@ public class StoppableKafkaEnumContextProxy
                                                 .collect(Collectors.toList())));
 
         if (!readerToSplitsMap.isEmpty()) {
-            enumContext.assignSplits(new SplitsAssignment<>(readerToSplitsMap));
+            SplitsAssignment<DynamicKafkaSourceSplit> assignment =
+                    new SplitsAssignment<>(readerToSplitsMap);
+            assignmentListener.accept(assignment);
+            enumContext.assignSplits(assignment);
         }
     }
 

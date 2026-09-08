@@ -43,7 +43,9 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -159,9 +161,21 @@ public class YamlFileMetadataService implements KafkaMetadataService {
             throws IOException {
         logger.debug("Writing stream infos to file: {}", streamMetadata);
         Yaml yaml = initYamlParser();
-        FileWriter fileWriter = new FileWriter(metadataFile, false);
-        yaml.dump(streamMetadata, fileWriter);
-        fileWriter.close();
+        Path target = metadataFile.toPath().toAbsolutePath();
+        Path temporary = Files.createTempFile(target.getParent(), ".stream-metadata-", ".yaml");
+        try {
+            try (FileWriter fileWriter = new FileWriter(temporary.toFile(), false)) {
+                yaml.dump(streamMetadata, fileWriter);
+            }
+            // Metadata discovery must see a complete old or new document while it polls this file.
+            Files.move(
+                    temporary,
+                    target,
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
     }
 
     /**

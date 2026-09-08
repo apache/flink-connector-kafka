@@ -21,6 +21,8 @@ package org.apache.flink.connector.kafka.dynamic.source.enumerator;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
+import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
+import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplitSerializer;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumStateSerializer;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
@@ -37,8 +39,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
@@ -51,16 +55,19 @@ public class DynamicKafkaSourceEnumStateSerializer
     private static final int VERSION_1 = 1;
     private static final int VERSION_2 = 2;
     private static final int VERSION_3 = 3;
+    private static final int VERSION_4 = 4;
 
     private final KafkaSourceEnumStateSerializer kafkaSourceEnumStateSerializer;
+    private final DynamicKafkaSourceSplitSerializer splitSerializer;
 
     public DynamicKafkaSourceEnumStateSerializer() {
         this.kafkaSourceEnumStateSerializer = new KafkaSourceEnumStateSerializer();
+        this.splitSerializer = new DynamicKafkaSourceSplitSerializer();
     }
 
     @Override
     public int getVersion() {
-        return VERSION_3;
+        return VERSION_4;
     }
 
     @Override
@@ -88,6 +95,8 @@ public class DynamicKafkaSourceEnumStateSerializer
                         retainedClusterEnumeratorState.getValue().getKafkaSourceEnumState(), out);
             }
 
+            writePendingReportedSplits(state.getPendingReportedSplitsByReader(), out);
+
             return baos.toByteArray();
         }
     }
@@ -95,7 +104,7 @@ public class DynamicKafkaSourceEnumStateSerializer
     @Override
     public DynamicKafkaSourceEnumState deserialize(int version, byte[] serialized)
             throws IOException {
-        if (version != VERSION_1 && version != VERSION_2 && version != VERSION_3) {
+        if (version < VERSION_1 || version > getVersion()) {
             throw new IOException(
                     String.format(
                             "The bytes are serialized with version %d, "
@@ -116,7 +125,7 @@ public class DynamicKafkaSourceEnumStateSerializer
 
             Map<String, DynamicKafkaSourceEnumState.RetainedClusterState>
                     retainedClusterEnumeratorStates = new HashMap<>();
-            if (version == VERSION_3) {
+            if (version >= VERSION_3) {
                 int retainedClusterEnumeratorStateMapSize = in.readInt();
                 for (int i = 0; i < retainedClusterEnumeratorStateMapSize; i++) {
                     String kafkaClusterId = in.readUTF();
@@ -130,9 +139,55 @@ public class DynamicKafkaSourceEnumStateSerializer
                 }
             }
 
+            Map<Integer, List<DynamicKafkaSourceSplit>> pendingReportedSplitsByReader =
+                    version >= VERSION_4 ? readPendingReportedSplits(in) : new HashMap<>();
+
             return new DynamicKafkaSourceEnumState(
-                    kafkaStreams, clusterEnumeratorStates, retainedClusterEnumeratorStates);
+                    kafkaStreams,
+                    clusterEnumeratorStates,
+                    retainedClusterEnumeratorStates,
+                    pendingReportedSplitsByReader);
         }
+    }
+
+    private void writePendingReportedSplits(
+            Map<Integer, List<DynamicKafkaSourceSplit>> pendingReportedSplitsByReader,
+            DataOutputStream out)
+            throws IOException {
+        out.writeInt(splitSerializer.getVersion());
+        out.writeInt(pendingReportedSplitsByReader.size());
+        for (Map.Entry<Integer, List<DynamicKafkaSourceSplit>> readerSplits :
+                pendingReportedSplitsByReader.entrySet()) {
+            out.writeInt(readerSplits.getKey());
+            out.writeInt(readerSplits.getValue().size());
+            for (DynamicKafkaSourceSplit split : readerSplits.getValue()) {
+                byte[] splitBytes = splitSerializer.serialize(split);
+                // DynamicKafkaSourceSplitSerializer consumes all remaining bytes on
+                // deserialization, so each split must be length-prefixed.
+                out.writeInt(splitBytes.length);
+                out.write(splitBytes);
+            }
+        }
+    }
+
+    private Map<Integer, List<DynamicKafkaSourceSplit>> readPendingReportedSplits(
+            DataInputStream in) throws IOException {
+        Map<Integer, List<DynamicKafkaSourceSplit>> pendingReportedSplitsByReader = new HashMap<>();
+        int splitSerializerVersion = in.readInt();
+        int readerCount = in.readInt();
+        for (int i = 0; i < readerCount; i++) {
+            int readerId = in.readInt();
+            int splitCount = in.readInt();
+            List<DynamicKafkaSourceSplit> splits = new ArrayList<>(splitCount);
+            for (int j = 0; j < splitCount; j++) {
+                int splitByteSize = in.readInt();
+                splits.add(
+                        splitSerializer.deserialize(
+                                splitSerializerVersion, readNBytes(in, splitByteSize)));
+            }
+            pendingReportedSplitsByReader.put(readerId, splits);
+        }
+        return pendingReportedSplitsByReader;
     }
 
     private void writeClusterEnumeratorStates(
