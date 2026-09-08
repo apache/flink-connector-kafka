@@ -60,6 +60,11 @@ public final class FlinkKafkaShareAckTransactionalProducer implements ShareAckTr
     }
 
     @Override
+    public void abortTransaction() {
+        producer.abortTransaction();
+    }
+
+    @Override
     public String getTransactionalId() {
         String transactionalId = producer.getTransactionalId();
         if (transactionalId == null) {

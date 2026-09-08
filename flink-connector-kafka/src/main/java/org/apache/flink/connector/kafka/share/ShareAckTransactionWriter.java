@@ -96,6 +96,25 @@ public final class ShareAckTransactionWriter implements AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        producer.close();
+        Exception failure = null;
+        if (transactionStarted) {
+            try {
+                producer.abortTransaction();
+            } catch (Exception e) {
+                failure = e;
+            }
+        }
+        try {
+            producer.close();
+        } catch (Exception e) {
+            if (failure == null) {
+                failure = e;
+            } else {
+                failure.addSuppressed(e);
+            }
+        }
+        if (failure != null) {
+            throw failure;
+        }
     }
 }

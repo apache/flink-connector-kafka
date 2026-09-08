@@ -95,6 +95,18 @@ class FlinkKafkaShareAckTransactionalProducerTest {
         producer.close();
     }
 
+    @Test
+    void testAbortsShareAckTransaction() {
+        RecordingProducer internalProducer = new RecordingProducer("share-ack-txn");
+        FlinkKafkaShareAckTransactionalProducer producer =
+                new FlinkKafkaShareAckTransactionalProducer(internalProducer, (p, payload) -> {});
+
+        producer.abortTransaction();
+        producer.close();
+
+        assertThat(internalProducer.events).containsExactly("abort", "close");
+    }
+
     private static ShareAckPayload payload(long offset) {
         return new ShareAckRecord(
                         new ShareAckId("group", "topic-id", "orders", 0, offset),
@@ -139,6 +151,11 @@ class FlinkKafkaShareAckTransactionalProducerTest {
         }
 
         @Override
+        public void abortTransaction() {
+            events.add("abort");
+        }
+
+        @Override
         public String getTransactionalId() {
             return transactionalId;
         }
@@ -156,6 +173,7 @@ class FlinkKafkaShareAckTransactionalProducerTest {
         @Override
         public void close() {
             events.add("close");
+            super.close();
         }
     }
 }

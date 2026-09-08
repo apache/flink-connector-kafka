@@ -122,6 +122,34 @@ class ShareAckTransactionWriterTest {
                         "prepare");
     }
 
+    @Test
+    void testCloseAbortsStartedTransactionBeforePrepare() throws Exception {
+        RecordingProducer producer = new RecordingProducer();
+        ShareAckTransactionWriter writer =
+                new ShareAckTransactionWriter("orders-pipeline-v1", producer);
+
+        writer.write(record(1L, ShareAckDecision.ACCEPT));
+        writer.close();
+
+        assertThat(producer.events)
+                .containsExactly(
+                        "begin", "stage:group|topic-id|orders|0|1", "abort", "close");
+    }
+
+    @Test
+    void testCloseDoesNotAbortPreparedTransaction() throws Exception {
+        RecordingProducer producer = new RecordingProducer();
+        ShareAckTransactionWriter writer =
+                new ShareAckTransactionWriter("orders-pipeline-v1", producer);
+
+        writer.write(record(1L, ShareAckDecision.ACCEPT));
+        writer.prepareCommit(42L);
+        writer.close();
+
+        assertThat(producer.events)
+                .containsExactly("begin", "stage:group|topic-id|orders|0|1", "prepare", "close");
+    }
+
     private static ShareAckRecord record(long offset, ShareAckDecision decision) {
         return new ShareAckRecord(id(offset), "member", 7, decision);
     }
@@ -154,6 +182,11 @@ class ShareAckTransactionWriterTest {
         }
 
         @Override
+        public void abortTransaction() {
+            events.add("abort");
+        }
+
+        @Override
         public String getTransactionalId() {
             return "share-ack-txn";
         }
@@ -169,6 +202,8 @@ class ShareAckTransactionWriterTest {
         }
 
         @Override
-        public void close() {}
+        public void close() {
+            events.add("close");
+        }
     }
 }

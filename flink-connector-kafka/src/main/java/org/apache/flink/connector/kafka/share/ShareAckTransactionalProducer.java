@@ -31,6 +31,8 @@ public interface ShareAckTransactionalProducer extends AutoCloseable {
 
     Optional<String> prepareTransaction() throws IOException;
 
+    void abortTransaction() throws IOException;
+
     String getTransactionalId();
 
     long getProducerId();
