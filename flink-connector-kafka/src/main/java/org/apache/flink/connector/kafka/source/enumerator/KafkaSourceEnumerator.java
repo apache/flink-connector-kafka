@@ -133,6 +133,12 @@ public class KafkaSourceEnumerator
     private final Map<Integer, Set<KafkaPartitionSplit>> pendingPartitionSplitAssignment =
             new HashMap<>();
 
+    /**
+     * Partitions with split initialization in flight on the worker thread. Discovery skips these
+     * partitions to avoid duplicate assignments. Accessed only from the coordinator thread.
+     */
+    private final Set<TopicPartition> partitionsBeingInitialized = new HashSet<>();
+
     private final SplitOwnerSelector splitOwnerSelector;
 
     /** The consumer group id used for this KafkaSource. */
@@ -368,9 +374,19 @@ public class KafkaSourceEnumerator
         if (partitionChange.isEmpty()) {
             return;
         }
+        // Track in-flight partitions to avoid duplicate discovery.
+        final Set<TopicPartition> partitionsInThisBatch = new HashSet<>();
+        partitionsInThisBatch.addAll(partitionChange.getInitialPartitions());
+        partitionsInThisBatch.addAll(partitionChange.getNewPartitions());
+        partitionsBeingInitialized.addAll(partitionsInThisBatch);
+
         context.callAsync(
                 () -> initializePartitionSplits(partitionChange),
-                this::handlePartitionSplitChanges);
+                (result, error) -> {
+                    // Clear in-flight state on the success and failure paths.
+                    partitionsBeingInitialized.removeAll(partitionsInThisBatch);
+                    handlePartitionSplitChanges(result, error);
+                });
     }
 
     /**
@@ -565,6 +581,8 @@ public class KafkaSourceEnumerator
                 (reader, splits) ->
                         splits.forEach(
                                 split -> dedupOrMarkAsRemoved.accept(split.getTopicPartition())));
+        // Skip partitions with initialization in flight to avoid duplicate assignments.
+        newPartitions.removeAll(partitionsBeingInitialized);
 
         if (!newPartitions.isEmpty()) {
             LOG.info("Discovered new partitions: {}", newPartitions);
@@ -580,7 +598,8 @@ public class KafkaSourceEnumerator
         }
         // migration path, ensure that partitions without offset are properly initialized
         for (KafkaPartitionSplit split : unassignedSplits.values()) {
-            if (split.isMigrated()) {
+            if (split.isMigrated()
+                    && !partitionsBeingInitialized.contains(split.getTopicPartition())) {
                 initialPartitions.add(split.getTopicPartition());
             }
         }
