@@ -30,8 +30,8 @@ import org.apache.flink.connector.kafka.source.enumerator.initializer.NoStopping
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.util.Preconditions;
+import org.apache.flink.util.StringUtils;
 
-import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
@@ -41,6 +41,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Locale;
 import java.util.Properties;
+import java.util.Random;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -279,7 +280,8 @@ public class DynamicKafkaSourceBuilder<T> {
                 KafkaSourceOptions.CLIENT_ID_PREFIX.key(),
                 props.containsKey(ConsumerConfig.GROUP_ID_CONFIG)
                         ? props.getProperty(ConsumerConfig.GROUP_ID_CONFIG)
-                        : "DynamicKafkaSource-" + RandomStringUtils.randomAlphabetic(8),
+                        : "DynamicKafkaSource-"
+                                + StringUtils.generateRandomAlphanumericString(new Random(), 8),
                 false);
     }
 
