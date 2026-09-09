@@ -22,8 +22,10 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.StateRecoveryOptions;
+import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
+import org.apache.flink.connector.kafka.sink.KafkaSinkBuilder;
 import org.apache.flink.connector.kafka.source.enumerator.metadata.TopicIntegrityException;
 import org.apache.flink.connector.kafka.testutils.KafkaSourceTestEnv;
 import org.apache.flink.core.execution.SavepointFormatType;
@@ -45,7 +47,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,6 +68,8 @@ public class SourceTopicIntegrityTest {
     private static final String SINK_TOPIC_NAME = "SourceTopicIntegrityTest_sink-topic";
     private static final long DISCOVERY_INTERVAL = 50L;
     private static final Duration ERROR_DISCOVERY_TIMEOUT = Duration.ofSeconds(20);
+    private static final Duration CHECKPOINT_INTERVAL = Duration.ofSeconds(1);
+    private static final String TRANSACTIONAL_ID_PREFIX = "source-topic-integrity-test";
     @TempDir private Path savepointBasePath;
 
     @RegisterExtension
@@ -108,6 +111,14 @@ public class SourceTopicIntegrityTest {
     private final JobGraph getJobGraph(
             Configuration extraConf, SourceSubscriptionMode sourceSubscriptionMode)
             throws Throwable {
+        return getJobGraph(extraConf, sourceSubscriptionMode, DeliveryGuarantee.NONE);
+    }
+
+    private final JobGraph getJobGraph(
+            Configuration extraConf,
+            SourceSubscriptionMode sourceSubscriptionMode,
+            DeliveryGuarantee deliveryGuarantee)
+            throws Throwable {
         KafkaSourceBuilder<String> sourceBuilder =
                 KafkaSource.<String>builder()
                         .setBootstrapServers(KafkaSourceTestEnv.brokerConnectionStrings)
@@ -133,20 +144,28 @@ public class SourceTopicIntegrityTest {
         }
 
         KafkaSource<String> source = sourceBuilder.build();
-        KafkaSink<String> sink =
+        KafkaSinkBuilder<String> sinkBuilder =
                 KafkaSink.<String>builder()
                         .setBootstrapServers(KafkaSourceTestEnv.brokerConnectionStrings)
+                        .setDeliveryGuarantee(deliveryGuarantee)
                         .setRecordSerializer(
                                 KafkaRecordSerializationSchema.builder()
                                         .setTopic(SINK_TOPIC_NAME)
                                         .setValueSerializationSchema(new SimpleStringSchema())
                                         .setPartitioner(new FlinkFixedPartitioner())
-                                        .build())
-                        .build();
+                                        .build());
+        if (deliveryGuarantee == DeliveryGuarantee.EXACTLY_ONCE) {
+            sinkBuilder.setTransactionalIdPrefix(
+                    TRANSACTIONAL_ID_PREFIX + "-" + sourceSubscriptionMode);
+        }
+        KafkaSink<String> sink = sinkBuilder.build();
         Configuration configuration = new Configuration();
         configuration.addAll(extraConf);
         final StreamExecutionEnvironment env =
                 StreamExecutionEnvironment.getExecutionEnvironment(configuration);
+        if (deliveryGuarantee == DeliveryGuarantee.EXACTLY_ONCE) {
+            env.enableCheckpointing(CHECKPOINT_INTERVAL.toMillis());
+        }
         DataStream<String> stream =
                 env.fromSource(source, WatermarkStrategy.noWatermarks(), "kafka-source");
         stream.sinkTo(sink);
@@ -231,21 +250,32 @@ public class SourceTopicIntegrityTest {
      *
      * @throws Throwable
      */
+    private static Stream<Arguments> testTopicIntegritySuccessArgsProvider() {
+        return Stream.of(
+                        SourceSubscriptionMode.PARTITIONS,
+                        SourceSubscriptionMode.TOPICS,
+                        SourceSubscriptionMode.PATTERN)
+                .flatMap(
+                        mode ->
+                                Stream.of(DeliveryGuarantee.NONE, DeliveryGuarantee.EXACTLY_ONCE)
+                                        .map(guarantee -> Arguments.of(mode, guarantee)));
+    }
+
     @ParameterizedTest
-    @EnumSource(
-            value = SourceSubscriptionMode.class,
-            names = {"PARTITIONS", "TOPICS", "PATTERN"})
+    @MethodSource("testTopicIntegritySuccessArgsProvider")
     public void testTopicIntegritySuccess(
             SourceSubscriptionMode sourceSubscriptionMode,
+            DeliveryGuarantee deliveryGuarantee,
             @InjectMiniCluster MiniCluster miniCluster)
             throws Throwable {
-        JobGraph firstJobGraph = getJobGraph(new Configuration(), sourceSubscriptionMode);
+        JobGraph firstJobGraph =
+                getJobGraph(new Configuration(), sourceSubscriptionMode, deliveryGuarantee);
         miniCluster.submitJob(firstJobGraph).get();
         org.apache.flink.runtime.testutils.CommonTestUtils.waitForAllTaskRunning(
                 miniCluster, firstJobGraph.getJobID(), true);
         final int initialExpectedRecords =
                 KafkaSourceTestEnv.NUM_RECORDS_PER_PARTITION * KafkaSourceTestEnv.NUM_PARTITIONS;
-        KafkaSourceTestEnv.waitForRecordsInTopic(SINK_TOPIC_NAME, initialExpectedRecords);
+        waitForRecords(deliveryGuarantee, initialExpectedRecords);
         String savepointPath =
                 miniCluster
                         .stopWithSavepoint(
@@ -262,18 +292,28 @@ public class SourceTopicIntegrityTest {
         // resume from savepoint
         Configuration configuration = new Configuration();
         configuration.set(StateRecoveryOptions.SAVEPOINT_PATH, savepointPath);
-        JobGraph secondJobGraph = getJobGraph(configuration, sourceSubscriptionMode);
+        JobGraph secondJobGraph =
+                getJobGraph(configuration, sourceSubscriptionMode, deliveryGuarantee);
         miniCluster.submitJob(secondJobGraph).get();
         final JobID secondJobId = secondJobGraph.getJobID();
         org.apache.flink.runtime.testutils.CommonTestUtils.waitForAllTaskRunning(
                 miniCluster, secondJobId, true);
 
         // Expect the job has run and produced the extra records to the sink
-        KafkaSourceTestEnv.waitForRecordsInTopic(SINK_TOPIC_NAME, expectedTotalRecords);
+        waitForRecords(deliveryGuarantee, expectedTotalRecords);
 
         // cancel the job and wait fot its termination
         miniCluster.cancelJob(secondJobId).get();
         miniCluster.requestJobResult(secondJobId).get();
+    }
+
+    private static void waitForRecords(DeliveryGuarantee deliveryGuarantee, int expectedRecords)
+            throws Exception {
+        if (deliveryGuarantee == DeliveryGuarantee.EXACTLY_ONCE) {
+            KafkaSourceTestEnv.waitForRecordsInTopic(SINK_TOPIC_NAME, expectedRecords);
+        } else {
+            KafkaSourceTestEnv.waitForAtLeastRecordsInTopic(SINK_TOPIC_NAME, expectedRecords);
+        }
     }
 
     private enum SourceSubscriptionMode {

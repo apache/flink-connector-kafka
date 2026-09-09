@@ -46,6 +46,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
+import java.util.function.LongPredicate;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -285,7 +286,13 @@ public class KafkaSourceTestEnv extends KafkaTestBase {
     }
 
     private static long getRecordCountInTopic(String topicName) {
-        try (Consumer<String, Integer> consumer = getConsumer()) {
+        // read_committed so that records written by an in-flight or aborted transaction are not
+        // counted when the job under test uses DeliveryGuarantee.EXACTLY_ONCE. Records written
+        // non-transactionally are visible to a read-committed consumer, so this is also correct
+        // for DeliveryGuarantee.NONE.
+        Properties props = getConsumerProperties(IntegerDeserializer.class);
+        props.setProperty(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
+        try (Consumer<String, Integer> consumer = new KafkaConsumer<>(props)) {
             List<TopicPartition> partitions =
                     consumer.partitionsFor(topicName).stream()
                             .map(info -> new TopicPartition(topicName, info.partition()))
@@ -305,24 +312,42 @@ public class KafkaSourceTestEnv extends KafkaTestBase {
         }
     }
 
+    /**
+     * Waits until the topic holds exactly {@code expectedCount} records. Valid where the writer
+     * guarantees no duplicates.
+     */
     public static void waitForRecordsInTopic(String topicName, int expectedCount) throws Exception {
+        waitForRecordsInTopic(topicName, expectedCount, count -> count == expectedCount, "exactly");
+    }
+
+    /**
+     * Waits until the topic holds at least {@code expectedCount} records. Valid where the writer
+     * guarantees at-least-once.
+     */
+    public static void waitForAtLeastRecordsInTopic(String topicName, int expectedCount)
+            throws Exception {
+        waitForRecordsInTopic(
+                topicName, expectedCount, count -> count >= expectedCount, "at least");
+    }
+
+    private static void waitForRecordsInTopic(
+            String topicName, int expectedCount, LongPredicate satisfied, String description)
+            throws Exception {
         CommonTestUtils.waitUtil(
                 () -> {
                     long count = KafkaSourceTestEnv.getRecordCountInTopic(topicName);
                     LOG.info(
-                            "Found {} records in topic {} (expected: {})",
+                            "Found {} records in topic {} (expected: {} {})",
                             count,
                             topicName,
+                            description,
                             expectedCount);
-                    if (count == expectedCount) {
-                        return true;
-                    }
-                    return false;
+                    return satisfied.test(count);
                 },
                 WAIT_DATA_TIMEOUT,
                 WAIT_DATA_INTERVAL,
                 String.format(
-                        "Timeout waiting for %d records in topic %s after %s",
-                        expectedCount, topicName, WAIT_DATA_TIMEOUT));
+                        "Timeout waiting for %s %d records in topic %s after %s",
+                        description, expectedCount, topicName, WAIT_DATA_TIMEOUT));
     }
 }
