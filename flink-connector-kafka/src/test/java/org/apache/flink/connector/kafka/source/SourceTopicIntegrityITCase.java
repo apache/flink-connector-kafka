@@ -60,11 +60,11 @@ import java.util.stream.Stream;
 
 /** Integration tests for topic integrity checking in KafkaSource. */
 @ResourceLock("KafkaTestBase")
-public class SourceTopicIntegrityTest {
-    private static final Logger LOG = LoggerFactory.getLogger(SourceTopicIntegrityTest.class);
-    private static final String SOURCE_TOPIC_NAME = "SourceTopicIntegrityTest_source-topic";
-    private static final String SOURCE_TOPIC_PATTERN = "SourceTopicIntegrityTest_source.*";
-    private static final String SINK_TOPIC_NAME = "SourceTopicIntegrityTest_sink-topic";
+public class SourceTopicIntegrityITCase {
+    private static final Logger LOG = LoggerFactory.getLogger(SourceTopicIntegrityITCase.class);
+    private static final String SOURCE_TOPIC_NAME = "SourceTopicIntegrityITCase_source-topic";
+    private static final String SOURCE_TOPIC_PATTERN = "SourceTopicIntegrityITCase_source.*";
+    private static final String SINK_TOPIC_NAME = "SourceTopicIntegrityITCase_sink-topic";
     private static final long DISCOVERY_INTERVAL = 50L;
     private static final Duration ERROR_DISCOVERY_TIMEOUT = Duration.ofSeconds(20);
     @TempDir private Path savepointBasePath;
