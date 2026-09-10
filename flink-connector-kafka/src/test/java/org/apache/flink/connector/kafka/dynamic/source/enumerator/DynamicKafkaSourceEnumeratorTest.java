@@ -2467,7 +2467,8 @@ public class DynamicKafkaSourceEnumeratorTest {
             return new TestKafkaEnumContextProxy(
                     kafkaClusterId,
                     kafkaMetadataService,
-                    (MockSplitEnumeratorContext<DynamicKafkaSourceSplit>) enumContext);
+                    (MockSplitEnumeratorContext<DynamicKafkaSourceSplit>) enumContext,
+                    signalNoMoreSplitsCallback);
         }
     }
 
@@ -2479,7 +2480,15 @@ public class DynamicKafkaSourceEnumeratorTest {
                 String kafkaClusterId,
                 KafkaMetadataService kafkaMetadataService,
                 MockSplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext) {
-            super(kafkaClusterId, kafkaMetadataService, enumContext, null);
+            this(kafkaClusterId, kafkaMetadataService, enumContext, null);
+        }
+
+        public TestKafkaEnumContextProxy(
+                String kafkaClusterId,
+                KafkaMetadataService kafkaMetadataService,
+                MockSplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext,
+                Runnable signalNoMoreSplitsCallback) {
+            super(kafkaClusterId, kafkaMetadataService, enumContext, signalNoMoreSplitsCallback);
             this.enumContext = enumContext;
         }
 
