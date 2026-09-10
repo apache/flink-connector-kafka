@@ -40,8 +40,23 @@ public interface ProducerPool extends AutoCloseable {
     FlinkKafkaInternalProducer<byte[], byte[]> getTransactionalProducer(
             String transactionalId, long checkpointId);
 
-    /** Returns a snapshot of all ongoing transactions. */
+    /**
+     * Returns a snapshot of all ongoing transactions. Transactions opened by this pool carry the
+     * producer id and epoch of their producer; transactions restored from state keep whatever the
+     * state recorded.
+     */
     Collection<CheckpointTransaction> getOngoingTransactions();
+
+    /**
+     * Aborts the transaction the broker holds under a restored transactional id whose recorded
+     * producer epoch has been superseded, without releasing the id. The id stays tracked as an
+     * ongoing transaction so that it is not reused until the committer reports the outcome of the
+     * restored transaction through {@link #recycleByTransactionId} or a later checkpoint's
+     * transaction is reported finished.
+     *
+     * @throws IllegalStateException if the id is not a restored transaction or has a live producer
+     */
+    void abortRestoredTransaction(String transactionalId);
 
     /**
      * Explicitly recycle a producer. This is useful when the producer has not been passed to the
