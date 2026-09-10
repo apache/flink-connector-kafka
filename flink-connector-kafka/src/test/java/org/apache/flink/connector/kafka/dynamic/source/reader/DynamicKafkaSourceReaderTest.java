@@ -166,6 +166,67 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
     }
 
     @Test
+    void testIdleReaderFinishesWhenNoMoreSplitsArrivesBeforeMetadata() throws Exception {
+        TestingReaderContext context = new TestingReaderContext();
+        try (DynamicKafkaSourceReader<Integer> reader = createReaderWithoutStart(context)) {
+            TestingReaderOutput<Integer> readerOutput = new TestingReaderOutput<>();
+            reader.start();
+
+            // The enumerator signals no more splits before the reader receives the metadata
+            // update event, e.g. when an idle reader registers after all bounded
+            // sub-enumerators have already finished split discovery.
+            reader.notifyNoMoreSplits();
+
+            MetadataUpdateEvent metadata =
+                    DynamicKafkaSourceTestHelper.getMetadataUpdateEvent(TOPIC);
+            CompletableFuture<Void> availableBeforeMetadata = reader.isAvailable();
+            reader.handleSourceEvents(metadata);
+
+            assertThat(availableBeforeMetadata)
+                    .as("the metadata update must wake up a task parked on the earlier future")
+                    .isDone();
+            assertThat(reader.pollNext(readerOutput))
+                    .as(
+                            "idle reader must reach END_OF_INPUT even when no-more-splits precedes the metadata update event")
+                    .isEqualTo(InputStatus.END_OF_INPUT);
+        }
+    }
+
+    @Test
+    void testActiveReaderWaitsForNewSplitsAfterMetadataChange() throws Exception {
+        TestingReaderContext context = new TestingReaderContext();
+        try (DynamicKafkaSourceReader<Integer> reader = createReaderWithoutStart(context)) {
+            TestingReaderOutput<Integer> readerOutput = new TestingReaderOutput<>();
+            reader.start();
+
+            // First metadata update: only cluster 0 is known, so the reader goes active with a
+            // single sub-reader.
+            KafkaStream clusterZeroOnly = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+            clusterZeroOnly.getClusterMetadataMap().remove(kafkaClusterId1);
+            reader.handleSourceEvents(
+                    new MetadataUpdateEvent(Collections.singleton(clusterZeroOnly)));
+
+            // The enumerator finished discovery for that metadata epoch.
+            reader.notifyNoMoreSplits();
+
+            // Cluster 1 appears. The reader holds no splits, so the metadata change recreates every
+            // sub-reader and only the reader-level flag still remembers the earlier signal. Splits
+            // and a fresh no-more-splits signal for the new metadata arrive after this event.
+            reader.handleSourceEvents(DynamicKafkaSourceTestHelper.getMetadataUpdateEvent(TOPIC));
+
+            assertThat(reader.pollNext(readerOutput))
+                    .as(
+                            "reader must not finish on the stale no-more-splits signal while a newly added cluster still awaits its splits")
+                    .isEqualTo(InputStatus.NOTHING_AVAILABLE);
+
+            reader.notifyNoMoreSplits();
+            assertThat(reader.pollNext(readerOutput))
+                    .as("reader finishes once the enumerator signals again for the new metadata")
+                    .isEqualTo(InputStatus.END_OF_INPUT);
+        }
+    }
+
+    @Test
     void testAvailabilityFutureUpdates() throws Exception {
         TestingReaderContext context = new TestingReaderContext();
         try (DynamicKafkaSourceReader<Integer> reader = createReaderWithoutStart(context)) {
