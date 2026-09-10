@@ -1,12 +1,13 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -31,11 +32,17 @@ import java.util.Collection;
 
 import static org.apache.flink.connector.kafka.sink.KafkaWriterState.UNKNOWN;
 
-/** A serializer used to serialize {@link KafkaWriterState}. */
+/**
+ * A serializer used to serialize {@link KafkaWriterState}.
+ *
+ * <p>Version 3 adds the producer id and epoch of every precommitted transaction, so that a recovery
+ * can tell a transaction the committer still has to commit from a later transaction that reused the
+ * same transactional id. State written by version 2 is read with unknown producer id and epoch.
+ */
 class KafkaWriterStateSerializer implements SimpleVersionedSerializer<KafkaWriterState> {
     @Override
     public int getVersion() {
-        return 2;
+        return 3;
     }
 
     @Override
@@ -50,6 +57,8 @@ class KafkaWriterStateSerializer implements SimpleVersionedSerializer<KafkaWrite
             for (CheckpointTransaction transaction : state.getPrecommittedTransactionalIds()) {
                 out.writeUTF(transaction.getTransactionalId());
                 out.writeLong(transaction.getCheckpointId());
+                out.writeLong(transaction.getProducerId());
+                out.writeShort(transaction.getEpoch());
             }
             out.flush();
             return baos.toByteArray();
@@ -58,7 +67,7 @@ class KafkaWriterStateSerializer implements SimpleVersionedSerializer<KafkaWrite
 
     @Override
     public KafkaWriterState deserialize(int version, byte[] serialized) throws IOException {
-        if (version > 2) {
+        if (version > 3) {
             throw new IOException("Unknown version: " + version);
         }
 
@@ -69,14 +78,25 @@ class KafkaWriterStateSerializer implements SimpleVersionedSerializer<KafkaWrite
             int totalNumberOfOwnedSubtasks = UNKNOWN;
             TransactionOwnership transactionOwnership = TransactionOwnership.IMPLICIT_BY_SUBTASK_ID;
             final Collection<CheckpointTransaction> precommitted = new ArrayList<>();
-            if (version == 2) {
+            if (version >= 2) {
                 ownedSubtaskId = in.readInt();
                 totalNumberOfOwnedSubtasks = in.readInt();
                 transactionOwnership = TransactionOwnership.values()[in.readInt()];
 
                 final int usedTransactionIdsSize = in.readInt();
                 for (int i = 0; i < usedTransactionIdsSize; i++) {
-                    precommitted.add(new CheckpointTransaction(in.readUTF(), in.readLong()));
+                    final String transactionalId = in.readUTF();
+                    final long checkpointId = in.readLong();
+                    if (version >= 3) {
+                        precommitted.add(
+                                new CheckpointTransaction(
+                                        transactionalId,
+                                        checkpointId,
+                                        in.readLong(),
+                                        in.readShort()));
+                    } else {
+                        precommitted.add(new CheckpointTransaction(transactionalId, checkpointId));
+                    }
                 }
             }
             return new KafkaWriterState(

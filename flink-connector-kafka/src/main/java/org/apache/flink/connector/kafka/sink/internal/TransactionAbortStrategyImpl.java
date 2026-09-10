@@ -143,6 +143,18 @@ public enum TransactionAbortStrategyImpl {
             TransactionAborter transactionAborter = context.getTransactionAborter();
             for (String name : openTransactionsForSubtask) {
                 if (context.getPrecommittedTransactionalIds().contains(name)) {
+                    if (context.isPrecommittedTransactionSuperseded(name)) {
+                        // The broker holds a later transaction under this id than the one the
+                        // committer is about to commit. That commit will be fenced, and nobody
+                        // owns the open transaction; abort it so that it does not pin the last
+                        // stable offset until the transaction timeout.
+                        LOG.warn(
+                                "Aborting open transaction {}: the recovered transaction under this id was superseded by a newer epoch",
+                                name);
+                        context.abandonPrecommittedTransaction(name);
+                        transactionAborter.abortTransaction(name);
+                        continue;
+                    }
                     LOG.debug(
                             "Skipping transaction {} because it's in the list of transactions to be committed",
                             name);
@@ -204,6 +216,21 @@ public enum TransactionAbortStrategyImpl {
          * the committer state.
          */
         Set<String> getPrecommittedTransactionalIds();
+
+        /**
+         * Returns whether the broker no longer holds the precommitted transaction with the given
+         * transactional id but a later one, opened under a newer producer epoch after the id was
+         * reused. The precommitted transaction is then already committed or aborted, and the open
+         * transaction on the broker has no owner. Returns {@code false} when the state did not
+         * record the epoch, so that older state keeps the previous behavior.
+         */
+        boolean isPrecommittedTransactionSuperseded(String transactionalId);
+
+        /**
+         * Removes a superseded transaction from the precommitted set so that its transactional id
+         * can be aborted and reused.
+         */
+        void abandonPrecommittedTransaction(String transactionalId);
 
         long getStartCheckpointId();
 
