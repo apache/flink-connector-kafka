@@ -159,6 +159,12 @@ class FlinkKafkaInternalProducerITCase {
             fenced.initTransactions();
             fenced.beginTransaction();
             fenced.send(new ProducerRecord<>(topic, "test-value"));
+            // Await the produce before fencing. An in-flight ProduceRequest that reaches the
+            // broker after the epoch bump below is rejected with INVALID_PRODUCER_EPOCH, and the
+            // finalizer then throws InvalidProducerEpochException, a sibling of
+            // ProducerFencedException rather than a subtype. Flushing keeps the fencing on the
+            // EndTxn path, which is the case this test pins.
+            fenced.flush();
             // Start a second producer that fences the first one
             try (FlinkKafkaInternalProducer<String, String> producer =
                     new FlinkKafkaInternalProducer<>(getProperties(), "dummy")) {
