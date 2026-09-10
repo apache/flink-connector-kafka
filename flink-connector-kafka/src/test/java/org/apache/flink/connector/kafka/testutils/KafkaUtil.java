@@ -55,6 +55,8 @@ public class KafkaUtil {
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaUtil.class);
     private static final Duration CONSUMER_POLL_DURATION = Duration.ofSeconds(1);
+    private static final Duration OPEN_TRANSACTION_SETTLE_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration OPEN_TRANSACTION_POLL_INTERVAL = Duration.ofMillis(100);
     private static final int REQUEST_TIMEOUT_SECONDS = 30;
 
     private KafkaUtil() {}
@@ -157,7 +159,8 @@ public class KafkaUtil {
         consumerConfig.put("value.deserializer", ByteArrayDeserializer.class.getName());
         try (KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer<>(consumerConfig)) {
             Set<TopicPartition> topicPartitions = getAllPartitions(consumer, topic);
-            Map<TopicPartition, Long> endOffsets = consumer.endOffsets(topicPartitions);
+            Map<TopicPartition, Long> endOffsets =
+                    getSettledEndOffsets(topic, consumer, consumerConfig, topicPartitions);
             consumer.assign(topicPartitions);
             consumer.seekToBeginning(topicPartitions);
 
@@ -190,6 +193,55 @@ public class KafkaUtil {
             }
             return consumerRecords;
         }
+    }
+
+    /**
+     * Returns the end offsets up to which {@code consumer} drains. Under {@code read_committed},
+     * {@link KafkaConsumer#endOffsets} is the last stable offset, which trails the high watermark
+     * until the broker has written the markers of a transaction it has already acknowledged as
+     * committed. Waits a bounded time for the two to meet so that a commit that completed a moment
+     * ago is not cut off. If a transaction stays open, returns the last stable offset as is and
+     * logs which offsets are pinned, so a truncated drain names its cause.
+     */
+    private static Map<TopicPartition, Long> getSettledEndOffsets(
+            String topic,
+            KafkaConsumer<byte[], byte[]> consumer,
+            Properties consumerConfig,
+            Set<TopicPartition> topicPartitions) {
+        Map<TopicPartition, Long> endOffsets = consumer.endOffsets(topicPartitions);
+        if (!"read_committed"
+                .equals(consumerConfig.getProperty(ConsumerConfig.ISOLATION_LEVEL_CONFIG))) {
+            return endOffsets;
+        }
+        final Properties uncommittedConfig = new Properties();
+        uncommittedConfig.putAll(consumerConfig);
+        uncommittedConfig.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_uncommitted");
+        try (KafkaConsumer<byte[], byte[]> uncommittedConsumer =
+                new KafkaConsumer<>(uncommittedConfig)) {
+            final Map<TopicPartition, Long> highWatermarks =
+                    uncommittedConsumer.endOffsets(topicPartitions);
+            final long deadline = System.nanoTime() + OPEN_TRANSACTION_SETTLE_TIMEOUT.toNanos();
+            while (!endOffsets.equals(highWatermarks) && System.nanoTime() < deadline) {
+                try {
+                    Thread.sleep(OPEN_TRANSACTION_POLL_INTERVAL.toMillis());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                endOffsets = consumer.endOffsets(topicPartitions);
+            }
+            if (!endOffsets.equals(highWatermarks)) {
+                LOG.warn(
+                        "Open transactions pin the last stable offset of topic {} after {}: "
+                                + "last stable offsets {}, high watermarks {}. "
+                                + "Only records before the last stable offset are drained.",
+                        topic,
+                        OPEN_TRANSACTION_SETTLE_TIMEOUT,
+                        endOffsets,
+                        highWatermarks);
+            }
+        }
+        return endOffsets;
     }
 
     private static Set<TopicPartition> getAllPartitions(
