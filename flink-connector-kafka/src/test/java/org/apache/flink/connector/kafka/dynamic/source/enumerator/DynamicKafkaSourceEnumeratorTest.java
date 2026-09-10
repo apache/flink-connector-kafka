@@ -2024,9 +2024,31 @@ public class DynamicKafkaSourceEnumeratorTest {
     }
 
     private DynamicKafkaSourceEnumerator createEnumerator(
+            SplitEnumeratorContext<DynamicKafkaSourceSplit> context, Boundedness boundedness) {
+        return createEnumerator(
+                context,
+                new MockKafkaMetadataService(
+                        Collections.singleton(DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC))),
+                (properties) -> {},
+                boundedness);
+    }
+
+    private DynamicKafkaSourceEnumerator createEnumerator(
             SplitEnumeratorContext<DynamicKafkaSourceSplit> context,
             KafkaMetadataService kafkaMetadataService,
             Consumer<Properties> applyPropertiesConsumer) {
+        return createEnumerator(
+                context,
+                kafkaMetadataService,
+                applyPropertiesConsumer,
+                Boundedness.CONTINUOUS_UNBOUNDED);
+    }
+
+    private DynamicKafkaSourceEnumerator createEnumerator(
+            SplitEnumeratorContext<DynamicKafkaSourceSplit> context,
+            KafkaMetadataService kafkaMetadataService,
+            Consumer<Properties> applyPropertiesConsumer,
+            Boundedness boundedness) {
         Properties properties = new Properties();
         applyPropertiesConsumer.accept(properties);
         properties.putIfAbsent(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "0");
@@ -2037,9 +2059,11 @@ public class DynamicKafkaSourceEnumeratorTest {
                 kafkaMetadataService,
                 context,
                 OffsetsInitializer.earliest(),
-                new NoStoppingOffsetsInitializer(),
+                Boundedness.BOUNDED.equals(boundedness)
+                        ? OffsetsInitializer.latest()
+                        : new NoStoppingOffsetsInitializer(),
                 properties,
-                Boundedness.CONTINUOUS_UNBOUNDED,
+                boundedness,
                 new DynamicKafkaSourceEnumState(),
                 new TestKafkaEnumContextProxyFactory());
     }
@@ -2453,6 +2477,97 @@ public class DynamicKafkaSourceEnumeratorTest {
                 copiedProperties,
                 baseClusterMetadata.getStartingOffsetsInitializer(),
                 baseClusterMetadata.getStoppingOffsetsInitializer());
+    }
+
+    @Test
+    public void testNoMoreSplitsIsSignalledOncePerReaderRegistration() throws Throwable {
+        try (CountingSignalNoMoreSplitsContext context =
+                        new CountingSignalNoMoreSplitsContext(NUM_SUBTASKS);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(context, Boundedness.BOUNDED)) {
+            enumerator.start();
+            runAllOneTimeCallables(context);
+
+            for (int reader = 0; reader < NUM_SUBTASKS; reader++) {
+                mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, reader);
+                runAllOneTimeCallables(context);
+            }
+
+            for (int reader = 0; reader < NUM_SUBTASKS; reader++) {
+                assertThat(context.getSignalCount(reader))
+                        .as("reader %s should be signalled no more splits once", reader)
+                        .isEqualTo(1);
+            }
+
+            // one reader fails and returns its splits. That drives handleNoMoreSplits() again, but
+            // the other readers may already have finished on the first signal, and
+            // NoMoreSplitsEvent is not loss tolerant: re-sending it to a FINISHED task fails the
+            // job with "An OperatorEvent from an OperatorCoordinator to a task was lost".
+            int failingReader = NUM_SUBTASKS - 1;
+            List<DynamicKafkaSourceSplit> splitsOfFailingReader = new ArrayList<>();
+            for (SplitsAssignment<DynamicKafkaSourceSplit> assignment :
+                    context.getSplitsAssignmentSequence()) {
+                List<DynamicKafkaSourceSplit> splits = assignment.assignment().get(failingReader);
+                if (splits != null) {
+                    splitsOfFailingReader.addAll(splits);
+                }
+            }
+            assertThat(splitsOfFailingReader).as("precondition: reader had splits").isNotEmpty();
+
+            // the coordinator unregisters a reader in executionAttemptFailed before calling
+            // subtaskReset, which is what drives addSplitsBack -- with an empty list for a reader
+            // that owned nothing.
+            context.unregisterReader(failingReader);
+            enumerator.addSplitsBack(splitsOfFailingReader, failingReader);
+
+            for (int reader = 0; reader < NUM_SUBTASKS; reader++) {
+                assertThat(context.getSignalCount(reader))
+                        .as(
+                                "reader %s must not be signalled again while it is not registered",
+                                reader)
+                        .isEqualTo(1);
+            }
+
+            // the new attempt registers, which makes the reader addressable again, so it has to be
+            // signalled a second time or it would never finish.
+            mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, failingReader);
+            runAllOneTimeCallables(context);
+
+            assertThat(context.getSignalCount(failingReader))
+                    .as("re-registered reader %s must be signalled again", failingReader)
+                    .isEqualTo(2);
+            for (int reader = 0; reader < failingReader; reader++) {
+                assertThat(context.getSignalCount(reader))
+                        .as(
+                                "reader %s must not be signalled again after it was already told",
+                                reader)
+                        .isEqualTo(1);
+            }
+        }
+    }
+
+    /**
+     * {@link MockSplitEnumeratorContext} only latches a boolean per subtask, so a repeated no more
+     * splits signal is invisible to it. This counts the calls instead.
+     */
+    private static class CountingSignalNoMoreSplitsContext
+            extends MockSplitEnumeratorContext<DynamicKafkaSourceSplit> {
+
+        private final Map<Integer, Integer> signalCounts = new HashMap<>();
+
+        private CountingSignalNoMoreSplitsContext(int parallelism) {
+            super(parallelism);
+        }
+
+        @Override
+        public void signalNoMoreSplits(int subtask) {
+            signalCounts.merge(subtask, 1, Integer::sum);
+            super.signalNoMoreSplits(subtask);
+        }
+
+        private int getSignalCount(int subtask) {
+            return signalCounts.getOrDefault(subtask, 0);
+        }
     }
 
     private static class TestKafkaEnumContextProxyFactory

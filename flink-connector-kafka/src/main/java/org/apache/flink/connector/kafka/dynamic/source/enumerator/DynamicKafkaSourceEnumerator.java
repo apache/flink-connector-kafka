@@ -115,6 +115,7 @@ public class DynamicKafkaSourceEnumerator
             retainedClusterEnumeratorStates;
     private boolean firstDiscoveryComplete;
     private final ReaderRecoveryGate readerRecoveryGate;
+    private final Set<Integer> readersSignalledNoMoreSplits;
 
     public DynamicKafkaSourceEnumerator(
             KafkaStreamSubscriber kafkaStreamSubscriber,
@@ -218,6 +219,7 @@ public class DynamicKafkaSourceEnumerator
         this.splitAssignmentStrategy = createSplitAssignmentStrategy(properties);
         this.readerRecoveryGate =
                 new ReaderRecoveryGate(hasRestoredEnumeratorState(dynamicKafkaSourceEnumState));
+        this.readersSignalledNoMoreSplits = new HashSet<>();
 
         if (!dynamicKafkaSourceEnumState.getClusterEnumeratorStates().isEmpty()) {
             logger.info("Dynamic Kafka source restored from checkpointed enumerator state");
@@ -390,10 +392,17 @@ public class DynamicKafkaSourceEnumerator
             }
 
             if (firstDiscoveryComplete && allEnumeratorsHaveSignalledNoMoreSplits) {
-                logger.info(
-                        "Signal no more splits to all readers: {}",
-                        enumContext.registeredReaders().keySet());
-                enumContext.registeredReaders().keySet().forEach(enumContext::signalNoMoreSplits);
+                // a reader that has already been signalled may have finished, and
+                // NoMoreSplitsEvent is not loss tolerant: re-sending it to a FINISHED task fails
+                // the job. Signal each reader once per generation of this set, which is cleared
+                // when the reader registers again -- the point at which a new attempt becomes
+                // addressable -- and when a metadata change recreates the sub enumerators.
+                for (Integer readerId : enumContext.registeredReaders().keySet()) {
+                    if (readersSignalledNoMoreSplits.add(readerId)) {
+                        logger.info("Signal no more splits to reader: {}", readerId);
+                        enumContext.signalNoMoreSplits(readerId);
+                    }
+                }
             } else {
                 logger.info("Not ready to notify no more splits to readers.");
             }
@@ -478,6 +487,11 @@ public class DynamicKafkaSourceEnumerator
         logger.info("Closing enumerators due to metadata change");
 
         closeAllEnumeratorsAndContexts();
+        // every sub enumerator is about to be recreated and will signal no more splits again for
+        // its new assignments, and the reader has closed and recreated its sub readers, so the
+        // signals sent for the previous generation no longer hold. Without clearing this, a bounded
+        // job would hang after a metadata change once FLINK-31006 restores that re-signal.
+        readersSignalledNoMoreSplits.clear();
         retainRemovedClusterEnumeratorStates(
                 dynamicKafkaSourceEnumState.getClusterEnumeratorStates(),
                 latestClusterTopicsMap.keySet());
@@ -763,6 +777,10 @@ public class DynamicKafkaSourceEnumerator
     @Override
     public void addReader(int subtaskId) {
         logger.debug("Adding reader {}", subtaskId);
+        // registration is the point at which a new attempt of this reader becomes addressable, so
+        // a signal sent to a previous attempt does not count: it must be signalled again or a
+        // restarted reader would never finish.
+        readersSignalledNoMoreSplits.remove(subtaskId);
         ReaderInfo readerInfo = enumContext.registeredReaders().get(subtaskId);
         if (readerInfo != null) {
             readerRecoveryGate.recordReportedSplits(
