@@ -515,6 +515,15 @@ public class KafkaSourceBuilder<OUT> {
             maybeOverride(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "-1", true);
         }
 
+        // A source that checks topic integrity must not recreate the topic it is checking. Both
+        // the broker and the consumer allow topic auto-creation by default, so a reader polling a
+        // deleted topic recreates it, and the check then reports it as recreated rather than
+        // missing. Users who want the Kafka default back can still set the property themselves.
+        if (Boolean.parseBoolean(
+                props.getProperty(KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))) {
+            maybeOverride(ConsumerConfig.ALLOW_AUTO_CREATE_TOPICS_CONFIG, "false", false);
+        }
+
         // If the client id prefix is not set, reuse the consumer group id as the client id prefix,
         // or generate a random string if consumer group id is not specified.
         maybeOverride(

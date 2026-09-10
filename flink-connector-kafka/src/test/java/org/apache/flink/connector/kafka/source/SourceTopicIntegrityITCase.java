@@ -37,9 +37,13 @@ import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkFixedPartiti
 import org.apache.flink.test.junit5.InjectMiniCluster;
 import org.apache.flink.test.junit5.MiniClusterExtension;
 
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.parallel.ResourceLock;
@@ -52,11 +56,14 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.Properties;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Integration tests for topic integrity checking in KafkaSource. */
 @ResourceLock("KafkaTestBase")
@@ -192,6 +199,15 @@ public class SourceTopicIntegrityITCase {
         tearDown();
         setupKafka(recreateTopic);
 
+        // Guard the precondition the deleted-topic cases depend on. If anything recreates the
+        // topic before the job resumes, the integrity check reports it as recreated and the wait
+        // below can only time out, which says nothing about why. Fail here instead.
+        if (!recreateTopic) {
+            assertThat(KafkaSourceTestEnv.getAdminClient().listTopics().names().get())
+                    .as("source topic must stay deleted for the \"is missing\" case")
+                    .doesNotContain(SOURCE_TOPIC_NAME);
+        }
+
         // resume from savepoint
         Configuration configuration = new Configuration();
         configuration.set(StateRecoveryOptions.SAVEPOINT_PATH, savepointPath);
@@ -274,6 +290,47 @@ public class SourceTopicIntegrityITCase {
         // cancel the job and wait fot its termination
         miniCluster.cancelJob(secondJobId).get();
         miniCluster.requestJobResult(secondJobId).get();
+    }
+
+    /**
+     * Pins the mechanism behind FLINK-40622 without depending on the savepoint race: a consumer
+     * configured the way the source configures its readers must not create a topic that does not
+     * exist. Both the broker and the Kafka consumer allow topic auto-creation by default, so before
+     * the builder disabled it a reader polling a deleted topic brought it back with a fresh id, and
+     * the integrity check then reported "was recreated" rather than "is missing".
+     *
+     * <p>Uses a name nothing else creates, so it needs neither a broker restart nor the cluster.
+     */
+    @Test
+    public void testSourceReaderDoesNotCreateMissingTopic() throws Exception {
+        final String missingTopic = "SourceTopicIntegrityITCase_never-created";
+        final KafkaSource<String> source =
+                KafkaSource.<String>builder()
+                        .setBootstrapServers(KafkaSourceTestEnv.brokerConnectionStrings)
+                        .setValueOnlyDeserializer(new SimpleStringSchema())
+                        .enableTopicIntegrityCheck()
+                        .setTopics(missingTopic)
+                        .setProperties(getSourceProperties())
+                        .build();
+
+        final Properties consumerProps = new Properties();
+        consumerProps.putAll(source.getConfiguration().toMap());
+        consumerProps.setProperty(
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
+                KafkaSourceTestEnv.brokerConnectionStrings);
+        consumerProps.setProperty(ConsumerConfig.GROUP_ID_CONFIG, "integrity-autocreate-probe");
+
+        // Mirror KafkaPartitionSplitReader: assign explicit partitions, then poll.
+        try (KafkaConsumer<String, String> consumer =
+                new KafkaConsumer<>(
+                        consumerProps, new StringDeserializer(), new StringDeserializer())) {
+            consumer.assign(Collections.singletonList(new TopicPartition(missingTopic, 0)));
+            consumer.poll(Duration.ofSeconds(3));
+        }
+
+        assertThat(KafkaSourceTestEnv.getAdminClient().listTopics().names().get())
+                .as("a source reader must not create the topic whose integrity it checks")
+                .doesNotContain(missingTopic);
     }
 
     private enum SourceSubscriptionMode {

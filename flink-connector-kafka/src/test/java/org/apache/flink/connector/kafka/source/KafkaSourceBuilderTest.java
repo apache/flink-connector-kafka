@@ -324,6 +324,38 @@ public class KafkaSourceBuilderTest {
                         "Topic integrity check is not supported for non TopicMetadataSettable subscriber");
     }
 
+    @Test
+    public void testTopicIntegrityCheckDisablesTopicAutoCreation() {
+        final KafkaSource<String> kafkaSource =
+                getBasicBuilder().enableTopicIntegrityCheck().build();
+        assertThat(getAllowAutoCreateTopics(kafkaSource)).isFalse();
+    }
+
+    @Test
+    public void testTopicAutoCreationUntouchedWithoutIntegrityCheck() {
+        final KafkaSource<String> kafkaSource = getBasicBuilder().build();
+        assertThat(getAllowAutoCreateTopics(kafkaSource)).isNull();
+    }
+
+    @Test
+    public void testExplicitTopicAutoCreationSurvivesIntegrityCheck() {
+        final KafkaSource<String> kafkaSource =
+                getBasicBuilder()
+                        .enableTopicIntegrityCheck()
+                        .setProperty(ConsumerConfig.ALLOW_AUTO_CREATE_TOPICS_CONFIG, "true")
+                        .build();
+        assertThat(getAllowAutoCreateTopics(kafkaSource)).isTrue();
+    }
+
+    private Boolean getAllowAutoCreateTopics(KafkaSource<?> kafkaSource) {
+        return kafkaSource
+                .getConfiguration()
+                .get(
+                        ConfigOptions.key(ConsumerConfig.ALLOW_AUTO_CREATE_TOPICS_CONFIG)
+                                .booleanType()
+                                .noDefaultValue());
+    }
+
     private KafkaSourceBuilder<String> getBasicBuilder() {
         return new KafkaSourceBuilder<String>()
                 .setBootstrapServers("testServer")
