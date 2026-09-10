@@ -143,6 +143,15 @@ public enum TransactionAbortStrategyImpl {
             TransactionAborter transactionAborter = context.getTransactionAborter();
             for (String name : openTransactionsForSubtask) {
                 if (context.getPrecommittedTransactionalIds().contains(name)) {
+                    if (context.isPrecommittedTransactionSuperseded(name)) {
+                        // The broker reported a later transaction under this id than the one the
+                        // committer is about to commit. That commit will be fenced; abort the
+                        // reported transaction so that it does not pin the last stable offset
+                        // until the transaction timeout, but keep the id reserved until the
+                        // committer reports the fenced commit's outcome.
+                        context.abortSupersededPrecommittedTransaction(name);
+                        continue;
+                    }
                     LOG.debug(
                             "Skipping transaction {} because it's in the list of transactions to be committed",
                             name);
@@ -204,6 +213,22 @@ public enum TransactionAbortStrategyImpl {
          * the committer state.
          */
         Set<String> getPrecommittedTransactionalIds();
+
+        /**
+         * Returns whether the broker reported a later transaction under the given transactional id
+         * than the precommitted one, opened under a newer producer epoch after the id was reused.
+         * The precommitted transaction is then already committed or aborted, and the committer's
+         * commit of it will be fenced. Returns {@code false} when the state did not record the
+         * epoch, so that older state keeps the previous behavior.
+         */
+        boolean isPrecommittedTransactionSuperseded(String transactionalId);
+
+        /**
+         * Aborts the broker-side transaction reported under a superseded precommitted transactional
+         * id, without releasing the id; it stays reserved until the committer reports the fenced
+         * commit's outcome.
+         */
+        void abortSupersededPrecommittedTransaction(String transactionalId);
 
         long getStartCheckpointId();
 

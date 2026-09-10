@@ -105,8 +105,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>This exercises the recovery fencing scenario described in {@link
  * KafkaCommitter#logFencedRequest}. The restored job must replay the uncheckpointed records and
  * successfully commit new transactions without losing or duplicating records. The first checkpoint
- * after restoration must make the replayed record visible to {@code read_committed} consumers; an
- * abandoned transaction under the reused transactional id must not block that output.
+ * after restoration must make the replayed record visible to {@code read_committed} consumers; the
+ * superseded transaction reported under the reused transactional id must not block that output.
  */
 @Testcontainers
 class KafkaSinkRecoveryITCase {

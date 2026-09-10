@@ -54,6 +54,54 @@ class TransactionAbortStrategyImplTest {
             assertThat(testContext.getAbortedTransactions()).containsExactlyInAnyOrder(t02, t12);
         }
 
+        /**
+         * A precommitted id whose transaction on the broker was reported under a newer epoch (the
+         * id was reused before the failure) is aborted directly through {@link
+         * TransactionAbortStrategyImpl.Context#abortSupersededPrecommittedTransaction}, never
+         * through the generic {@link TransactionAbortStrategyImpl.TransactionAborter}, and it stays
+         * in the precommitted set: releasing the id is the producer pool's responsibility once the
+         * committer reports the fenced commit's outcome.
+         */
+        @Test
+        void testAbortsSupersededPrecommittedTransaction() {
+            TestContext testContext = new TestContext();
+            testContext.setSubtaskIdAndParallelism(0, 1);
+            testContext.setOwnedSubtaskIdsAndMaxParallelism(0, 1);
+
+            String kept = testContext.addPrecommittedTransactionalIds(0, 1L);
+            String superseded = testContext.addPrecommittedTransactionalIds(0, 2L);
+            testContext.markSuperseded(superseded);
+            String open = testContext.addOpenTransaction(0, 3L);
+
+            LISTING.abortTransactions(testContext);
+            assertThat(testContext.getAbortedTransactions()).containsExactly(open);
+            assertThat(testContext.getAbortedSupersededTransactions()).containsExactly(superseded);
+            assertThat(testContext.getPrecommittedTransactionalIds())
+                    .containsExactlyInAnyOrder(kept, superseded);
+        }
+
+        /**
+         * After a downscale, new transactions only use the first owned subtask id, so an orphan
+         * under a secondary owned subtask id is never recycled. The recovery is the only place that
+         * aborts it.
+         */
+        @Test
+        void testAbortsSupersededPrecommittedTransactionOfSecondaryOwnedSubtask() {
+            TestContext testContext = new TestContext();
+            testContext.setSubtaskIdAndParallelism(0, 1);
+            testContext.setOwnedSubtaskIdsAndMaxParallelism(0, 1, 2);
+
+            String primary = testContext.addPrecommittedTransactionalIds(0, 1L);
+            String secondary = testContext.addPrecommittedTransactionalIds(1, 1L);
+            testContext.markSuperseded(secondary);
+
+            LISTING.abortTransactions(testContext);
+            assertThat(testContext.getAbortedTransactions()).isEmpty();
+            assertThat(testContext.getAbortedSupersededTransactions()).containsExactly(secondary);
+            assertThat(testContext.getPrecommittedTransactionalIds())
+                    .containsExactlyInAnyOrder(primary, secondary);
+        }
+
         @Test
         void testDownscaleWithUnsafeTransactionalIds() {
             TestContext testContext = new TestContext();
@@ -138,6 +186,8 @@ class TransactionAbortStrategyImplTest {
         private final Set<String> precommittedTransactionalIds = new HashSet<>();
         private final Collection<String> abortedTransactions = new ArrayList<>();
         private final Collection<String> openTransactionalIds = new ArrayList<>();
+        private final Set<String> supersededTransactionalIds = new HashSet<>();
+        private final Collection<String> abortedSupersededTransactions = new ArrayList<>();
         private int currentSubtaskId;
         private int currentParallelism;
         private int maxParallelism;
@@ -189,6 +239,24 @@ class TransactionAbortStrategyImplTest {
         @Override
         public Set<String> getPrecommittedTransactionalIds() {
             return this.precommittedTransactionalIds;
+        }
+
+        public void markSuperseded(String transactionalId) {
+            supersededTransactionalIds.add(transactionalId);
+        }
+
+        public Collection<String> getAbortedSupersededTransactions() {
+            return abortedSupersededTransactions;
+        }
+
+        @Override
+        public boolean isPrecommittedTransactionSuperseded(String transactionalId) {
+            return supersededTransactionalIds.contains(transactionalId);
+        }
+
+        @Override
+        public void abortSupersededPrecommittedTransaction(String transactionalId) {
+            abortedSupersededTransactions.add(transactionalId);
         }
 
         @Override
