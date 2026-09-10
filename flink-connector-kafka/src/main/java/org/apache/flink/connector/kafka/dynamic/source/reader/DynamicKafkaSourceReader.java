@@ -337,6 +337,10 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
             clustersProperties.putAll(newClustersProperties);
         }
 
+        // Captured before the flag flips below, so the no-more-splits replay can tell the
+        // reader's first metadata update from a later metadata change.
+        final boolean firstMetadataUpdate = !isActivelyConsumingSplits;
+
         // finally mark the reader as active, if not already and add pending splits
         if (!isActivelyConsumingSplits) {
             isActivelyConsumingSplits = true;
@@ -366,9 +370,15 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
 
             addSplits(validPendingSplits);
             pendingSplits.clear();
-            if (isNoMoreSplits) {
-                notifyNoMoreSplits();
-            }
+        }
+
+        // Replay only on the first metadata update. On a later metadata change the reader must
+        // wait for the enumerator to signal again after the new assignments (that re-signal is
+        // currently missing for a sub-enumerator recreated with partitions already assigned; see
+        // FLINK-31006), so replaying here would finish an active reader before the new topic's
+        // splits arrive.
+        if (isNoMoreSplits && firstMetadataUpdate) {
+            notifyNoMoreSplits();
         }
     }
 
