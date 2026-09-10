@@ -748,7 +748,8 @@ public class KafkaSourceEnumeratorTest {
                 assignedSplits,
                 unassignedInitialSplits,
                 overrideProperties,
-                startingOffsetsInitializer);
+                startingOffsetsInitializer,
+                initialDiscoveryFinished);
     }
 
     /**
@@ -762,7 +763,8 @@ public class KafkaSourceEnumeratorTest {
             Collection<KafkaPartitionSplit> assignedSplits,
             Collection<KafkaPartitionSplit> unassignedInitialSplits,
             Properties overrideProperties,
-            OffsetsInitializer startingOffsetsInitializer) {
+            OffsetsInitializer startingOffsetsInitializer,
+            boolean initialDiscoveryFinished) {
         // Use a TopicPatternSubscriber so that no exception if a subscribed topic hasn't been
         // created yet.
         StringJoiner topicNameJoiner = new StringJoiner("|");
@@ -786,7 +788,8 @@ public class KafkaSourceEnumeratorTest {
                 props,
                 enumContext,
                 Boundedness.CONTINUOUS_UNBOUNDED,
-                new KafkaSourceEnumState(assignedSplits, unassignedInitialSplits, false));
+                new KafkaSourceEnumState(
+                        assignedSplits, unassignedInitialSplits, initialDiscoveryFinished));
     }
 
     // ---------------------
