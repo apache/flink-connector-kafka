@@ -110,6 +110,23 @@ public class KafkaConnectorOptions {
     public static final ConfigOption<Integer> SCAN_PARALLELISM = FactoryUtil.SOURCE_PARALLELISM;
     public static final ConfigOption<Integer> SINK_PARALLELISM = FactoryUtil.SINK_PARALLELISM;
 
+    private static final String PROJECTION_PUSHDOWN_DESCRIPTION =
+            "When enabled, query projections are pushed down into the format. How much is pushed "
+                    + "down depends on the format's level of projection-pushdown support (none, "
+                    + "top-level, or nested).";
+
+    public static final ConfigOption<Boolean> KEY_FORMAT_PROJECTION_PUSHDOWN_ENABLED =
+            ConfigOptions.key("key" + FORMAT_SUFFIX + ".projection-pushdown.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(PROJECTION_PUSHDOWN_DESCRIPTION);
+
+    public static final ConfigOption<Boolean> VALUE_FORMAT_PROJECTION_PUSHDOWN_ENABLED =
+            ConfigOptions.key("value" + FORMAT_SUFFIX + ".projection-pushdown.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(PROJECTION_PUSHDOWN_DESCRIPTION);
+
     // --------------------------------------------------------------------------------------------
     // Kafka specific options
     // --------------------------------------------------------------------------------------------
