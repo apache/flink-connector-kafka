@@ -76,6 +76,12 @@ public class KafkaPartitionSplitReader
     // Tracking empty splits that has not been added to finished splits in fetch()
     private final Set<String> emptySplits = new HashSet<>();
 
+    // Offset of the last record that fetch() handed to the source reader, per partition
+    private final Map<TopicPartition, Long> lastFetchedOffsets = new HashMap<>();
+
+    // Consumer position observed at the end of the most recent fetch(), per partition.
+    private final Map<TopicPartition, Long> lastKnownPositions = new HashMap<>();
+
     public KafkaPartitionSplitReader(
             Properties props,
             SourceReaderContext context,
@@ -127,6 +133,7 @@ public class KafkaPartitionSplitReader
         for (TopicPartition tp : consumer.assignment()) {
             long stoppingOffset = getStoppingOffset(tp);
             long consumerPosition = getConsumerPosition(tp, "retrieving consumer position");
+            lastKnownPositions.put(tp, consumerPosition);
             // Stop fetching when the consumer's position reaches the stoppingOffset.
             // Control messages may follow the last record; therefore, using the last record's
             // offset as a stopping condition could result in indefinite blocking.
@@ -149,6 +156,8 @@ public class KafkaPartitionSplitReader
                         trackTp -> {
                             kafkaSourceReaderMetrics.maybeAddRecordsLagMetric(consumer, trackTp);
                         });
+
+        trackLastFetchedRecordOffsets(consumerRecords);
 
         markEmptySplitsAsFinished(recordsBySplits);
 
@@ -272,7 +281,7 @@ public class KafkaPartitionSplitReader
     public void notifyCheckpointComplete(
             Map<TopicPartition, OffsetAndMetadata> offsetsToCommit,
             OffsetCommitCallback offsetCommitCallback) {
-        consumer.commitAsync(offsetsToCommit, offsetCommitCallback);
+        consumer.commitAsync(reconcileOffsetsToCommit(offsetsToCommit), offsetCommitCallback);
     }
 
     @VisibleForTesting
@@ -283,6 +292,16 @@ public class KafkaPartitionSplitReader
     @VisibleForTesting
     Duration getPollTimeout() {
         return pollTimeout;
+    }
+
+    @VisibleForTesting
+    Map<TopicPartition, Long> lastFetchedOffsets() {
+        return lastFetchedOffsets;
+    }
+
+    @VisibleForTesting
+    Map<TopicPartition, Long> lastKnownPositions() {
+        return lastKnownPositions;
     }
 
     // --------------- private helper method ----------------------
@@ -318,6 +337,58 @@ public class KafkaPartitionSplitReader
 
     long getConsumerPosition(TopicPartition tp, String msg) {
         return retryOnWakeup(() -> consumer.position(tp), msg);
+    }
+
+    private void trackLastFetchedRecordOffsets(ConsumerRecords<byte[], byte[]> consumerRecords) {
+        for (TopicPartition tp : consumerRecords.partitions()) {
+            List<ConsumerRecord<byte[], byte[]>> partitionRecords = consumerRecords.records(tp);
+            if (!partitionRecords.isEmpty()) {
+                lastFetchedOffsets.put(
+                        tp, partitionRecords.get(partitionRecords.size() - 1).offset());
+            }
+        }
+    }
+
+    /**
+     * Advances the offsets to commit over the entries that the Kafka consumer read but never
+     * delivered, such as transaction control markers and records of aborted transactions.
+     *
+     * <p>{@link KafkaRecordEmitter} derives the offset to commit from the records it receives, so
+     * the offset stops at the first entry that Kafka does not deliver, for as long as the partition
+     * is idle. The consumer's own position accounts for those entries, so it is the offset that
+     * external tooling expects to see.
+     *
+     * <p>This relies on {@link #lastKnownPositions}, populated as a side effect of the regular
+     * {@link #fetch()} poll loop, rather than querying the consumer for the position again here.
+     * {@link #notifyCheckpointComplete} runs on this same split fetcher thread, but at a point
+     * outside that poll loop, so this allows us to avoid a separate blocking call to the consumer.
+     */
+    private Map<TopicPartition, OffsetAndMetadata> reconcileOffsetsToCommit(
+            Map<TopicPartition, OffsetAndMetadata> offsetsToCommit) {
+        Map<TopicPartition, OffsetAndMetadata> reconciled = new HashMap<>(offsetsToCommit);
+        Set<TopicPartition> assignment = consumer.assignment();
+        offsetsToCommit.forEach(
+                (tp, offsetAndMetadata) -> {
+                    if (!assignment.contains(tp) || stoppingOffsets.containsKey(tp)) {
+                        return;
+                    }
+                    Long lastFetchedOffset = lastFetchedOffsets.get(tp);
+                    if (lastFetchedOffset != null
+                            && offsetAndMetadata.offset() != lastFetchedOffset + 1) {
+                        return;
+                    }
+                    Long position = lastKnownPositions.get(tp);
+                    if (position != null && position > offsetAndMetadata.offset()) {
+                        LOG.debug(
+                                "Advancing offset to commit for {} from {} to the consumer position {}.",
+                                tp,
+                                offsetAndMetadata.offset(),
+                                position);
+                        reconciled.put(
+                                tp, new OffsetAndMetadata(position, offsetAndMetadata.metadata()));
+                    }
+                });
+        return reconciled;
     }
 
     private void parseStartingOffsets(
@@ -459,6 +530,11 @@ public class KafkaPartitionSplitReader
         Collection<TopicPartition> newAssignment = new HashSet<>(consumer.assignment());
         newAssignment.removeAll(partitionsToUnassign);
         consumer.assign(newAssignment);
+        partitionsToUnassign.forEach(
+                tp -> {
+                    lastFetchedOffsets.remove(tp);
+                    lastKnownPositions.remove(tp);
+                });
     }
 
     private String createConsumerClientId(Properties props) {

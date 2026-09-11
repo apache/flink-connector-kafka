@@ -425,6 +425,45 @@ public class KafkaPartitionSplitReaderTest {
                                 KafkaSourceOptions.POLL_TIMEOUT_MS.key()));
     }
 
+    @Test
+    void testTrackedOffsetsAreRemovedWhenPartitionsAreUnassigned() throws Exception {
+        KafkaPartitionSplitReader reader = createReader();
+        final TopicPartition finishingPartition = new TopicPartition(TOPIC1, 0);
+        // a second partition is kept assigned throughout, which prevents consumer.poll()
+        // blocking, and proves that only offsets of the unassigned partition are removed
+        final TopicPartition remainingPartition = new TopicPartition(TOPIC1, 1);
+        reader.handleSplitsChanges(
+                new SplitsAddition<>(
+                        Arrays.asList(
+                                new KafkaPartitionSplit(
+                                        finishingPartition,
+                                        earliestOffsets.get(finishingPartition),
+                                        NUM_RECORDS_PER_PARTITION),
+                                new KafkaPartitionSplit(
+                                        remainingPartition,
+                                        earliestOffsets.get(remainingPartition),
+                                        KafkaPartitionSplit.NO_STOPPING_OFFSET))));
+
+        // fetch until the bounded split has been finished and unassigned
+        final String finishingSplitId = KafkaPartitionSplit.toSplitId(finishingPartition);
+        final Set<String> finishedSplits = new HashSet<>();
+        while (!finishedSplits.contains(finishingSplitId)) {
+            finishedSplits.addAll(reader.fetch().finishedSplits());
+        }
+        assertThat(reader.consumer().assignment())
+                .doesNotContain(finishingPartition)
+                .contains(remainingPartition);
+
+        assertThat(reader.lastFetchedOffsets())
+                .as("Offsets tracked for committing")
+                .doesNotContainKey(finishingPartition)
+                .containsKey(remainingPartition);
+        assertThat(reader.lastKnownPositions())
+                .as("Consumer positions tracked for committing")
+                .doesNotContainKey(finishingPartition)
+                .containsKey(remainingPartition);
+    }
+
     // ------------------
 
     private void assignSplitsAndFetchUntilFinish(KafkaPartitionSplitReader reader, int readerId)
