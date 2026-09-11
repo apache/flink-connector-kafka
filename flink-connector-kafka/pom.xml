@@ -418,6 +418,24 @@ under the License.
 					</execution>
 				</executions>
 			</plugin>
+
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<properties>
+						<!-- Fail a hung test method after 15 minutes, with its stack trace, instead of
+							letting it consume the CI job's timeout. A test can override this with @Timeout.
+							The test body runs in a separate thread so that a method which swallows the
+							interrupt still fails on time and the rest of the suite runs. -->
+						<configurationParameters>
+							junit.jupiter.execution.timeout.testable.method.default = 15 m
+							junit.jupiter.execution.timeout.thread.mode.default = SEPARATE_THREAD
+							junit.jupiter.execution.timeout.mode = disabled_on_debug
+						</configurationParameters>
+					</properties>
+				</configuration>
+			</plugin>
 		</plugins>
 	</build>
 
