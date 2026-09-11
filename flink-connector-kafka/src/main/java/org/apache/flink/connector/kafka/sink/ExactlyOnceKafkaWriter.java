@@ -221,9 +221,15 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     public Collection<KafkaCommittable> prepareCommit() {
         // only return a KafkaCommittable if the current transaction has been written some data
         if (currentProducer.hasRecordsInTransaction()) {
-            KafkaCommittable committable = KafkaCommittable.of(currentProducer);
+            Optional<String> preparedTransactionState = currentProducer.precommitTransaction();
+            KafkaCommittable committable =
+                    new KafkaCommittable(
+                            currentProducer.getProducerId(),
+                            currentProducer.getEpoch(),
+                            currentProducer.getTransactionalId(),
+                            preparedTransactionState.orElse(null),
+                            currentProducer);
             LOG.debug("Prepare {}.", committable);
-            currentProducer.precommitTransaction();
             return Collections.singletonList(committable);
         }
 

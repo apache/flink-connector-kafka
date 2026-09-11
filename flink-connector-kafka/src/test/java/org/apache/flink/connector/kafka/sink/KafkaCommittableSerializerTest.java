@@ -19,6 +19,8 @@ package org.apache.flink.connector.kafka.sink;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,6 +39,37 @@ class KafkaCommittableSerializerTest {
         final short epoch = 5;
         final KafkaCommittable committable = new KafkaCommittable(1L, epoch, transactionalId, null);
         final byte[] serialized = SERIALIZER.serialize(committable);
-        assertThat(SERIALIZER.deserialize(1, serialized)).isEqualTo(committable);
+        assertThat(SERIALIZER.deserialize(SERIALIZER.getVersion(), serialized))
+                .isEqualTo(committable);
+    }
+
+    @Test
+    void testPreparedTransactionStateSerDe() throws IOException {
+        final KafkaCommittable committable =
+                new KafkaCommittable(1L, (short) 5, "test-id", "1:5", null);
+
+        final KafkaCommittable restored =
+                SERIALIZER.deserialize(SERIALIZER.getVersion(), SERIALIZER.serialize(committable));
+
+        assertThat(restored).isEqualTo(committable);
+        assertThat(restored.getPreparedTransactionState()).contains("1:5");
+    }
+
+    @Test
+    void testDeserializeVersionOneCommittable() throws IOException {
+        final byte[] versionOneBytes;
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                DataOutputStream out = new DataOutputStream(baos)) {
+            out.writeShort(5);
+            out.writeLong(1L);
+            out.writeUTF("test-id");
+            out.flush();
+            versionOneBytes = baos.toByteArray();
+        }
+
+        final KafkaCommittable restored = SERIALIZER.deserialize(1, versionOneBytes);
+
+        assertThat(restored).isEqualTo(new KafkaCommittable(1L, (short) 5, "test-id", null));
+        assertThat(restored.getPreparedTransactionState()).isEmpty();
     }
 }

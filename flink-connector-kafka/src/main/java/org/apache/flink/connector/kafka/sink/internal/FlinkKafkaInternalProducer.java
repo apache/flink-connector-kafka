@@ -38,8 +38,10 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.apache.flink.util.Preconditions.checkState;
 
@@ -57,15 +59,18 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
     @Nullable private String transactionalId;
     private volatile TransactionState transactionState = TransactionState.NOT_IN_TRANSACTION;
     private volatile boolean closed;
+    private final boolean twoPhaseCommitEnabled;
 
     public FlinkKafkaInternalProducer(Properties properties) {
         super(properties);
+        this.twoPhaseCommitEnabled = isTwoPhaseCommitEnabled(properties);
         LOG.info("Created non-transactional {}", this);
     }
 
     public FlinkKafkaInternalProducer(Properties properties, String transactionalId) {
         super(withTransactionalId(properties, transactionalId));
         this.transactionalId = transactionalId;
+        this.twoPhaseCommitEnabled = isTwoPhaseCommitEnabled(properties);
         LOG.info("Created transactional {}", this);
     }
 
@@ -74,6 +79,14 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         props.putAll(properties);
         props.setProperty(ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
         return props;
+    }
+
+    private static boolean isTwoPhaseCommitEnabled(Properties properties) {
+        Object value = properties.get(ProducerConfig.TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG);
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        return value != null && Boolean.parseBoolean(value.toString());
     }
 
     @Override
@@ -127,9 +140,23 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         return transactionState == TransactionState.PRECOMMITTED;
     }
 
-    public void precommitTransaction() {
+    public Optional<String> precommitTransaction() {
         checkState(hasRecordsInTransaction(), "Transaction was not started");
+        if (twoPhaseCommitEnabled) {
+            String preparedTransactionState = PreparedTransactionRecovery.prepare(this);
+            transactionState = TransactionState.PRECOMMITTED;
+            return Optional.of(preparedTransactionState);
+        }
         transactionState = TransactionState.PRECOMMITTED;
+        return Optional.empty();
+    }
+
+    public void completePreparedTransaction(String preparedTransactionState) {
+        if (!isPrecommitted()) {
+            PreparedTransactionRecovery.initialize(this);
+        }
+        transactionState = TransactionState.PRECOMMITTED;
+        PreparedTransactionRecovery.complete(this, preparedTransactionState);
     }
 
     @Override
@@ -203,7 +230,36 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         TransactionalRequestResult result = enqueueNewPartitions();
         Object sender = getField("sender");
         invoke(sender, "wakeup");
-        result.await();
+        awaitTransactionalRequestResult(result);
+    }
+
+    private static void awaitTransactionalRequestResult(TransactionalRequestResult result) {
+        try {
+            Method method = result.getClass().getDeclaredMethod("await");
+            method.setAccessible(true);
+            method.invoke(result);
+        } catch (NoSuchMethodException e) {
+            invoke(
+                    result,
+                    "await",
+                    new Class<?>[] {Long.TYPE, TimeUnit.class, String.class},
+                    new Object[] {
+                        1L,
+                        TimeUnit.DAYS,
+                        "Timed out while flushing new Kafka transaction partitions."
+                    });
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException) {
+                throw (RuntimeException) cause;
+            }
+            if (cause instanceof Error) {
+                throw (Error) cause;
+            }
+            throw new RuntimeException("Incompatible KafkaProducer version", cause);
+        } catch (IllegalAccessException e) {
+            throw new RuntimeException("Incompatible KafkaProducer version", e);
+        }
     }
 
     /**
