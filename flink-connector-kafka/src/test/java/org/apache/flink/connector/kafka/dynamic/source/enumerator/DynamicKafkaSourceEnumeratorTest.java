@@ -2023,6 +2023,56 @@ public class DynamicKafkaSourceEnumeratorTest {
                 applyPropertiesConsumer);
     }
 
+    /**
+     * A bounded DynamicKafkaSource restored with every partition already assigned must still tell
+     * its readers that no more splits are coming. Each sub-enumerator runs its one-time discovery,
+     * finds nothing new, and before FLINK-31006 returned early without ever marking the discovery
+     * as finished, so the readers waited forever and the job never finished.
+     */
+    @Test
+    public void testBoundedRestoreSignalsNoMoreSplitsWithoutPartitionChanges() throws Throwable {
+        final DynamicKafkaSourceEnumState restoredState = getCheckpointState();
+
+        Properties properties = new Properties();
+        // A bounded source never runs periodic discovery; DynamicKafkaSourceBuilder forces this.
+        properties.setProperty(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "-1");
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "-1");
+
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                DynamicKafkaSourceEnumerator enumerator =
+                        new DynamicKafkaSourceEnumerator(
+                                new KafkaStreamSetSubscriber(Collections.singleton(TOPIC)),
+                                new MockKafkaMetadataService(
+                                        Collections.singleton(
+                                                DynamicKafkaSourceTestHelper.getKafkaStream(
+                                                        TOPIC))),
+                                context,
+                                OffsetsInitializer.earliest(),
+                                new NoStoppingOffsetsInitializer(),
+                                properties,
+                                Boundedness.BOUNDED,
+                                restoredState,
+                                new TestKafkaEnumContextProxyFactory())) {
+            enumerator.start();
+
+            for (int reader = 0; reader < NUM_SUBTASKS; reader++) {
+                mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, reader);
+            }
+            runAllOneTimeCallables(context);
+
+            assertThat(context.getSplitsAssignmentSequence())
+                    .as("Every partition is already assigned, so nothing may be assigned again")
+                    .isEmpty();
+            for (int reader = 0; reader < NUM_SUBTASKS; reader++) {
+                assertThat(context.hasNoMoreSplits(reader))
+                        .as("Reader %s must be told that no more splits are coming", reader)
+                        .isTrue();
+            }
+        }
+    }
+
     private DynamicKafkaSourceEnumerator createEnumerator(
             SplitEnumeratorContext<DynamicKafkaSourceSplit> context,
             KafkaMetadataService kafkaMetadataService,
@@ -2467,7 +2517,8 @@ public class DynamicKafkaSourceEnumeratorTest {
             return new TestKafkaEnumContextProxy(
                     kafkaClusterId,
                     kafkaMetadataService,
-                    (MockSplitEnumeratorContext<DynamicKafkaSourceSplit>) enumContext);
+                    (MockSplitEnumeratorContext<DynamicKafkaSourceSplit>) enumContext,
+                    signalNoMoreSplitsCallback);
         }
     }
 
@@ -2479,7 +2530,15 @@ public class DynamicKafkaSourceEnumeratorTest {
                 String kafkaClusterId,
                 KafkaMetadataService kafkaMetadataService,
                 MockSplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext) {
-            super(kafkaClusterId, kafkaMetadataService, enumContext, null);
+            this(kafkaClusterId, kafkaMetadataService, enumContext, null);
+        }
+
+        public TestKafkaEnumContextProxy(
+                String kafkaClusterId,
+                KafkaMetadataService kafkaMetadataService,
+                MockSplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext,
+                Runnable signalNoMoreSplitsCallback) {
+            super(kafkaClusterId, kafkaMetadataService, enumContext, signalNoMoreSplitsCallback);
             this.enumContext = enumContext;
         }
 
