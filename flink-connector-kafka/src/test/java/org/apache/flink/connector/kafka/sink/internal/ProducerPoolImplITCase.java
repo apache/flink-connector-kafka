@@ -42,6 +42,7 @@ import java.util.function.Consumer;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Testcontainers
 class ProducerPoolImplITCase {
@@ -119,6 +120,59 @@ class ProducerPoolImplITCase {
             FlinkKafkaInternalProducer<byte[], byte[]> newProducer =
                     producerPool.getTransactionalProducer(TRANSACTIONAL_ID, 1L);
             assertThat(newProducer).isSameAs(producer);
+        }
+    }
+
+    /**
+     * Ongoing transactions opened by the pool carry the producer id and epoch of their producer.
+     */
+    @Test
+    void testOngoingTransactionsCarryProducerEpoch() throws Exception {
+        try (ProducerPoolImpl producerPool =
+                new ProducerPoolImpl(getProducerConfig(), INIT, Collections.emptyList())) {
+            FlinkKafkaInternalProducer<byte[], byte[]> producer =
+                    producerPool.getTransactionalProducer(TRANSACTIONAL_ID, 1L);
+
+            CheckpointTransaction ongoing = producerPool.getOngoingTransactions().iterator().next();
+            assertThat(ongoing.getTransactionalId()).isEqualTo(TRANSACTIONAL_ID);
+            assertThat(ongoing.getCheckpointId()).isEqualTo(1L);
+            assertThat(ongoing.hasKnownEpoch()).isTrue();
+            assertThat(ongoing.getProducerId()).isEqualTo(producer.getProducerId());
+            assertThat(ongoing.getEpoch()).isEqualTo(producer.getEpoch());
+        }
+    }
+
+    /**
+     * A transaction restored from state can be abandoned on recovery when the broker no longer
+     * holds it; the id is then free for a new producer, and the remaining restored transactions are
+     * untouched.
+     */
+    @Test
+    void testAbandonRestoredTransaction() throws Exception {
+        CheckpointTransaction superseded =
+                new CheckpointTransaction(TRANSACTIONAL_ID + "-0", 1L, 42L, (short) 3);
+        CheckpointTransaction kept =
+                new CheckpointTransaction(TRANSACTIONAL_ID + "-1", 1L, 43L, (short) 4);
+        try (ProducerPoolImpl producerPool =
+                new ProducerPoolImpl(getProducerConfig(), INIT, List.of(superseded, kept))) {
+            producerPool.abandonTransaction(superseded.getTransactionalId());
+            assertThat(producerPool.getOngoingTransactions()).containsExactly(kept);
+
+            // the id can be used again, which is how the recovery aborts the open transaction
+            FlinkKafkaInternalProducer<byte[], byte[]> producer =
+                    producerPool.getTransactionalProducer(superseded.getTransactionalId(), 2L);
+            assertThat(producer.getTransactionalId()).isEqualTo(superseded.getTransactionalId());
+            assertThat(producerPool.getOngoingTransactions())
+                    .extracting(CheckpointTransaction::getTransactionalId)
+                    .containsExactlyInAnyOrder(
+                            kept.getTransactionalId(), superseded.getTransactionalId());
+
+            assertThatThrownBy(() -> producerPool.abandonTransaction("unknown"))
+                    .isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(
+                            () -> producerPool.abandonTransaction(superseded.getTransactionalId()))
+                    .as("a transaction with a live producer cannot be abandoned")
+                    .isInstanceOf(IllegalStateException.class);
         }
     }
 

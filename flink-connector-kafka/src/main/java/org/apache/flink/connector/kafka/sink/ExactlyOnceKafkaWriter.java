@@ -55,7 +55,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.util.IOUtils.closeAll;
@@ -345,13 +344,10 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
                     producerPool.recycle(producer);
                     return epoch;
                 };
-        Set<String> precommittedTransactionalIds =
+        List<CheckpointTransaction> precommittedTransactions =
                 recoveredStates.stream()
-                        .flatMap(
-                                s ->
-                                        s.getPrecommittedTransactionalIds().stream()
-                                                .map(CheckpointTransaction::getTransactionalId))
-                        .collect(Collectors.toSet());
+                        .flatMap(s -> s.getPrecommittedTransactionalIds().stream())
+                        .collect(Collectors.toList());
         return new TransactionAbortStrategyContextImpl(
                 this::getTopicNames,
                 kafkaSinkContext.getParallelInstanceId(),
@@ -362,7 +358,8 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
                 startCheckpointId,
                 aborter,
                 this::getAdminClient,
-                precommittedTransactionalIds);
+                precommittedTransactions,
+                producerPool::abandonTransaction);
     }
 
     private Collection<String> getTopicNames() {

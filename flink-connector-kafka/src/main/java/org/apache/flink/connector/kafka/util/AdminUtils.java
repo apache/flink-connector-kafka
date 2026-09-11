@@ -22,17 +22,22 @@ import org.apache.flink.annotation.Internal;
 
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.DescribeProducersResult;
+import org.apache.kafka.clients.admin.DescribeTransactionsResult;
 import org.apache.kafka.clients.admin.ListTransactionsOptions;
 import org.apache.kafka.clients.admin.ProducerState;
 import org.apache.kafka.clients.admin.TopicDescription;
+import org.apache.kafka.clients.admin.TransactionDescription;
 import org.apache.kafka.clients.admin.TransactionListing;
 import org.apache.kafka.clients.admin.TransactionState;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.TransactionalIdNotFoundException;
 
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -117,6 +122,43 @@ public class AdminUtils {
                             topicNames),
                     e);
         }
+    }
+
+    /**
+     * Describes the broker-side state of the given transactional ids. Ids the broker does not know,
+     * because they were never used or have expired, are left out of the result.
+     *
+     * <p>Requires a Kafka broker of at least version 3.0 (KIP-664) and {@code Describe} on the
+     * {@code TransactionalId} resource, which {@code Write} on it implies.
+     */
+    public static Map<String, TransactionDescription> describeTransactions(
+            Admin admin, Collection<String> transactionalIds) {
+        Map<String, TransactionDescription> descriptions = new HashMap<>();
+        if (transactionalIds.isEmpty()) {
+            return descriptions;
+        }
+        DescribeTransactionsResult result = admin.describeTransactions(transactionalIds);
+        for (String transactionalId : transactionalIds) {
+            try {
+                descriptions.put(transactionalId, result.description(transactionalId).get());
+            } catch (ExecutionException e) {
+                if (e.getCause() instanceof TransactionalIdNotFoundException) {
+                    continue;
+                }
+                throw new RuntimeException(
+                        String.format(
+                                "Failed to describe transaction %s. Make sure that the Kafka broker has at least version 3.0 and the application has describe permissions on the transactional id.",
+                                transactionalId),
+                        e);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(
+                        String.format(
+                                "Interrupted while describing transaction %s.", transactionalId),
+                        e);
+            }
+        }
+        return descriptions;
     }
 
     private static void checkIfInterrupted(Exception e) {

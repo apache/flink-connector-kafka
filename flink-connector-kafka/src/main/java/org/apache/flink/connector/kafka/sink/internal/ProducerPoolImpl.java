@@ -34,6 +34,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Objects;
@@ -254,7 +255,39 @@ public class ProducerPoolImpl implements ProducerPool {
 
     @Override
     public Collection<CheckpointTransaction> getOngoingTransactions() {
-        return new ArrayList<>(transactionalIdsByCheckpoint.keySet());
+        List<CheckpointTransaction> ongoing = new ArrayList<>(transactionalIdsByCheckpoint.size());
+        for (Map.Entry<CheckpointTransaction, String> entry :
+                transactionalIdsByCheckpoint.entrySet()) {
+            CheckpointTransaction transaction = entry.getKey();
+            ProducerEntry producerEntry = producerByTransactionalId.get(entry.getValue());
+            FlinkKafkaInternalProducer<byte[], byte[]> producer =
+                    producerEntry == null ? null : producerEntry.getProducer();
+            if (producer == null) {
+                // restored from state; keep what the state knows
+                ongoing.add(transaction);
+            } else {
+                ongoing.add(
+                        new CheckpointTransaction(
+                                transaction.getTransactionalId(),
+                                transaction.getCheckpointId(),
+                                producer.getProducerId(),
+                                producer.getEpoch()));
+            }
+        }
+        return ongoing;
+    }
+
+    @Override
+    public void abandonTransaction(String transactionalId) {
+        ProducerEntry producerEntry = producerByTransactionalId.get(transactionalId);
+        checkState(
+                producerEntry != null && producerEntry.getProducer() == null,
+                "Transaction %s is not a restored transaction without a producer: %s",
+                transactionalId,
+                producerEntry);
+        producerByTransactionalId.remove(transactionalId);
+        transactionalIdsByCheckpoint.remove(producerEntry.getCheckpointedTransaction());
+        LOG.debug("Abandoned restored transaction {}", transactionalId);
     }
 
     @VisibleForTesting
