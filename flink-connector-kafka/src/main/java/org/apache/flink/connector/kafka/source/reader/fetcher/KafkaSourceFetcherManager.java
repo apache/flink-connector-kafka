@@ -54,7 +54,7 @@ public class KafkaSourceFetcherManager
     private static final Logger LOG = LoggerFactory.getLogger(KafkaSourceFetcherManager.class);
 
     /**
-     * Creates a new SplitFetcherManager with a single I/O threads.
+     * Creates a new SplitFetcherManager with a single I/O thread.
      *
      * @param elementsQueue The queue that is used to hand over data from the I/O thread (the
      *     fetchers) to the reader (which emits the records and book-keeps the state. This must be
