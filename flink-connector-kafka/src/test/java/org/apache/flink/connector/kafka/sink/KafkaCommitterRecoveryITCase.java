@@ -19,36 +19,38 @@ package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
+import org.apache.flink.connector.kafka.sink.internal.TransactionFinished;
 import org.apache.flink.connector.kafka.testutils.DockerImageVersions;
 import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.streaming.api.connector.sink2.CommittableMessage;
 import org.apache.flink.streaming.api.connector.sink2.CommittableSummary;
 import org.apache.flink.streaming.api.connector.sink2.CommittableWithLineage;
-import org.apache.flink.streaming.runtime.operators.sink.CommitterOperatorFactory;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 
-import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.FinalizedVersionRange;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import static org.apache.flink.connector.kafka.sink.KafkaRecoveryTestUtils.advanceEpoch;
+import static org.apache.flink.connector.kafka.sink.KafkaRecoveryTestUtils.createHarness;
+import static org.apache.flink.connector.kafka.sink.KafkaRecoveryTestUtils.getProperties;
+import static org.apache.flink.connector.kafka.sink.KafkaRecoveryTestUtils.recoverCheckpoint;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.drainAllRecordsFromTopic;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -58,7 +60,6 @@ import static org.assertj.core.api.SoftAssertions.assertSoftly;
 @Testcontainers
 class KafkaCommitterRecoveryITCase {
 
-    private static final Logger LOG = LoggerFactory.getLogger(KafkaCommitterRecoveryITCase.class);
     private static final long CHECKPOINT_ID = 1;
 
     @Container
@@ -76,22 +77,24 @@ class KafkaCommitterRecoveryITCase {
         checkProducerLeak();
     }
 
-    @ParameterizedTest(name = "broker={0}, naming={1}, epoch={2}")
+    @ParameterizedTest(name = "protocol={0}, epoch={1}")
     @MethodSource("recoveryScenarios")
     @Timeout(value = 10, unit = TimeUnit.MINUTES)
     void testRecoverCheckpointAfterTransactionCommit(
-            String dockerImage, TransactionNamingStrategy namingStrategy, int epochBeforeCommit)
-            throws Exception {
-        boolean transactionV2 = dockerImage.equals(DockerImageVersions.APACHE_KAFKA);
-        TestKafkaContainer kafkaContainer = transactionV2 ? KAFKA_V2_CONTAINER : KAFKA_V1_CONTAINER;
-        String transactionalId = "commit-recovery-" + namingStrategy + "-" + epochBeforeCommit;
+            TransactionProtocol expectedProtocol, int epochBeforeCommit) throws Exception {
+        TestKafkaContainer kafkaContainer =
+                expectedProtocol == TransactionProtocol.V2
+                        ? KAFKA_V2_CONTAINER
+                        : KAFKA_V1_CONTAINER;
+        String transactionalId = "commit-recovery-" + epochBeforeCommit;
         String topic = transactionalId;
         Properties properties = getProperties(kafkaContainer.getBootstrapServers());
+        assertBrokerProtocol(kafkaContainer.getBootstrapServers(), expectedProtocol);
         KafkaSink<byte[]> sink =
                 KafkaSink.<byte[]>builder()
                         .setBootstrapServers(kafkaContainer.getBootstrapServers())
                         .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
-                        .setTransactionNamingStrategy(namingStrategy)
+                        .setTransactionNamingStrategy(TransactionNamingStrategy.INCREMENTING)
                         .setTransactionalIdPrefix(transactionalId)
                         .setRecordSerializer(
                                 KafkaRecordSerializationSchema.<byte[]>builder()
@@ -105,10 +108,12 @@ class KafkaCommitterRecoveryITCase {
         try (FlinkKafkaInternalProducer<byte[], byte[]> producer =
                 new FlinkKafkaInternalProducer<>(properties, transactionalId)) {
             producer.initTransactions();
+            boolean transactionV2 = producer.isTransactionV2Enabled();
+            assertThat(transactionV2)
+                    .as("Producer negotiated the expected %s protocol", expectedProtocol)
+                    .isEqualTo(expectedProtocol == TransactionProtocol.V2);
             long producerId = producer.getProducerId();
-            advanceEpoch(producer, transactionalId, epochBeforeCommit);
-            assertThat(producer.getProducerId()).isEqualTo(producerId);
-            assertThat(producer.getEpoch()).isEqualTo((short) epochBeforeCommit);
+            advanceEpoch(producer, epochBeforeCommit);
 
             producer.beginTransaction();
             producer.send(new ProducerRecord<>(topic, value)).get();
@@ -136,8 +141,7 @@ class KafkaCommitterRecoveryITCase {
                 assertThat(producer.getProducerId()).isNotEqualTo(producerId);
                 assertThat(producer.getEpoch()).isZero();
             } else {
-                // Verify the negotiated protocol behavior. Even at epoch 32766, a V1 commit
-                // leaves the producer ID and epoch unchanged, so it does not exercise rollover.
+                // V1 leaves the epoch unchanged; V2 advances it after a committed transaction.
                 assertThat(producer.getProducerId()).isEqualTo(producerId);
                 assertThat(producer.getEpoch())
                         .isEqualTo((short) (epochBeforeCommit + (transactionV2 ? 1 : 0)));
@@ -154,71 +158,65 @@ class KafkaCommitterRecoveryITCase {
         assertSoftly(
                 softly -> {
                     for (int attempt = 1; attempt <= 3; attempt++) {
-                        softly.assertThatCode(() -> recoverCheckpoint(sink, checkpoint))
+                        softly.assertThatCode(
+                                        () ->
+                                                recoverCheckpoint(
+                                                        sink,
+                                                        checkpoint,
+                                                        CHECKPOINT_ID,
+                                                        transactionalId,
+                                                        TransactionFinished.successful(
+                                                                transactionalId)))
                                 .as(
-                                        "Recovery attempt %s: broker=%s, naming=%s, epoch=%s",
-                                        attempt, dockerImage, namingStrategy, epochBeforeCommit)
+                                        "Recovery attempt %s: protocol=%s, epoch=%s",
+                                        attempt, expectedProtocol, epochBeforeCommit)
                                 .doesNotThrowAnyException();
                     }
                 });
     }
 
     private static Stream<Arguments> recoveryScenarios() {
-        // Naming selects PROBING or LISTING for writer cleanup. This test exercises the shared
-        // committer recovery path; it does not run either writer cleanup algorithm.
-        return Stream.of(DockerImageVersions.CP_KAFKA, DockerImageVersions.APACHE_KAFKA)
-                .flatMap(
-                        dockerImage ->
-                                Arrays.stream(TransactionNamingStrategy.values())
-                                        .flatMap(
-                                                namingStrategy ->
-                                                        IntStream.of(0, Short.MAX_VALUE - 1)
-                                                                .mapToObj(
-                                                                        epoch ->
-                                                                                Arguments.of(
-                                                                                        dockerImage,
-                                                                                        namingStrategy,
-                                                                                        epoch))));
+        // This matrix exercises the shared committer path. Naming and producer reuse need an
+        // actual writer lifecycle, which is covered by KafkaPooledTransactionRecoveryITCase.
+        // Keep both protocols as required coverage even when the shared image versions change.
+        // V1 does not advance the epoch on commit, so an ordinary epoch is sufficient as control.
+        return Stream.of(
+                Arguments.of(TransactionProtocol.V1, 0),
+                Arguments.of(TransactionProtocol.V2, 0),
+                Arguments.of(TransactionProtocol.V2, Short.MAX_VALUE - 1));
     }
 
-    private static void advanceEpoch(
-            FlinkKafkaInternalProducer<?, ?> producer, String transactionalId, int targetEpoch) {
-        // Advance the real coordinator state with one producer and no data transactions. Setting
-        // only the client's epoch via reflection would not reproduce broker-side PID rotation.
-        for (int epoch = 1; epoch <= targetEpoch; epoch++) {
-            producer.setTransactionId(transactionalId);
-            producer.initTransactions();
-            if (epoch % 4096 == 0) {
-                LOG.info("Advanced producer epoch to {} of {}", epoch, targetEpoch);
+    private static void assertBrokerProtocol(
+            String bootstrapServers, TransactionProtocol expectedProtocol) throws Exception {
+        try (Admin admin =
+                Admin.create(
+                        Collections.singletonMap(
+                                AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers))) {
+            FinalizedVersionRange transactionVersion =
+                    admin.describeFeatures()
+                            .featureMetadata()
+                            .get(30, TimeUnit.SECONDS)
+                            .finalizedFeatures()
+                            .get("transaction.version");
+            // Use the configured feature level, not the image name or the broker's maximum
+            // supported level. A future V3 fixture must not silently replace V2 coverage.
+            if (expectedProtocol == TransactionProtocol.V2) {
+                assertThat(transactionVersion)
+                        .as(
+                                "V2 broker fixture must have transaction.version=2; check image/config changes")
+                        .isEqualTo(new FinalizedVersionRange((short) 2, (short) 2));
+            } else {
+                // Older brokers do not advertise this feature, and levels below 2 use V1.
+                assertThat(transactionVersion == null ? 0 : transactionVersion.maxVersionLevel())
+                        .as(
+                                "V1 broker fixture must not enable V2 or later; check image/config changes")
+                        .isLessThan((short) 2);
             }
         }
     }
 
-    private static OneInputStreamOperatorTestHarness<
-                    CommittableMessage<KafkaCommittable>, CommittableMessage<KafkaCommittable>>
-            createHarness(KafkaSink<byte[]> sink) throws Exception {
-        return new OneInputStreamOperatorTestHarness<>(
-                new CommitterOperatorFactory<>(sink, false, true));
-    }
-
-    private static void recoverCheckpoint(KafkaSink<byte[]> sink, OperatorSubtaskState checkpoint)
-            throws Exception {
-        try (OneInputStreamOperatorTestHarness<
-                        CommittableMessage<KafkaCommittable>, CommittableMessage<KafkaCommittable>>
-                recovered = createHarness(sink)) {
-            recovered.setup();
-            recovered.setRestoredCheckpointId(CHECKPOINT_ID);
-            recovered.initializeState(checkpoint);
-            recovered.open();
-        }
-    }
-
-    private static Properties getProperties(String bootstrapServers) {
-        Properties properties = new Properties();
-        properties.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
-        properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
-        properties.setProperty(ProducerConfig.MAX_BLOCK_MS_CONFIG, "30000");
-        return properties;
+    private enum TransactionProtocol {
+        V1,
+        V2
     }
 }
