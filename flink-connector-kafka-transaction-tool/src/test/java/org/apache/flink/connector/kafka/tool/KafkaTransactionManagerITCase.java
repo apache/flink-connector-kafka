@@ -185,7 +185,59 @@ class KafkaTransactionManagerITCase {
         }
 
         @Test
-        void testCommitSpecificTransactionOnly() {
+        void testAbortUnknownTransactionalIdFailsWithoutCreatingTransaction() {
+            final String transactionalId = "unknown-" + UUID.randomUUID();
+
+            try (KafkaAdminAssert adminAssert = KafkaAdminAssert.assertThat(kafkaContainer)) {
+                adminAssert.transactions().extractingIds().doesNotContain(transactionalId);
+
+                final KafkaTransactionManager manager = new KafkaTransactionManager();
+                assertThatThrownBy(
+                                () ->
+                                        manager.abortTransaction(
+                                                kafkaContainer.getBootstrapServers(),
+                                                transactionalId))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("Unknown transactional ID")
+                        .hasMessageContaining(transactionalId);
+
+                assertThat(
+                                KafkaTransactionTool.run(
+                                        new String[] {
+                                            "--action",
+                                            "abort",
+                                            "--bootstrap-servers",
+                                            kafkaContainer.getBootstrapServers(),
+                                            "--transactional-id",
+                                            transactionalId
+                                        }))
+                        .isEqualTo(2);
+
+                adminAssert.transactions().extractingIds().doesNotContain(transactionalId);
+            }
+        }
+
+        @Test
+        void testAbortCompletedTransactionKeepsCommittedRecords() throws Exception {
+            final String topic = "test-abort-completed";
+            final String transactionalId = "testAbortCompleted-target";
+            final String data = "committed-data";
+            final long[] metadata = createLingeringTransaction(topic, transactionalId, data);
+            final KafkaTransactionManager manager = new KafkaTransactionManager();
+            manager.commitTransaction(
+                    kafkaContainer.getBootstrapServers(),
+                    transactionalId,
+                    metadata[0],
+                    (short) metadata[1]);
+            waitForCommitCompletion(kafkaContainer, transactionalId);
+
+            manager.abortTransaction(kafkaContainer.getBootstrapServers(), transactionalId);
+
+            assertThat(consumeRecords(topic, "read_committed")).containsExactly(data);
+        }
+
+        @Test
+        void testCommitSpecificTransactionOnly() throws Exception {
             // given
             final String topic = "test-commit-isolation";
             final String transactionIdPrefix = "testCommitTarget-";
@@ -228,6 +280,7 @@ class KafkaTransactionManagerITCase {
                     targetTxId,
                     targetProducerId,
                     targetEpoch);
+            waitForCommitCompletion(kafkaContainer, targetTxId);
 
             // then
             try (KafkaAdminAssert adminAssert = KafkaAdminAssert.assertThat(kafkaContainer)) {
@@ -235,7 +288,7 @@ class KafkaTransactionManagerITCase {
                         .transactions()
                         .extractingStates()
                         .extractingByKey(targetTxId)
-                        .isIn(TransactionState.PREPARE_COMMIT, TransactionState.COMPLETE_COMMIT);
+                        .isEqualTo(TransactionState.COMPLETE_COMMIT);
 
                 adminAssert
                         .transactions()
@@ -422,6 +475,7 @@ class KafkaTransactionManagerITCase {
                     transactionalId,
                     description.producerId(),
                     (short) description.producerEpoch());
+            waitForCommitCompletion(kafkaContainer, transactionalId);
 
             // then
             // after committing transactions via the cleanup process, we should finally see the
@@ -516,6 +570,22 @@ class KafkaTransactionManagerITCase {
                                 return buffer.getLong();
                             })
                     .collect(Collectors.toList());
+        }
+    }
+
+    private static void waitForCommitCompletion(
+            TestKafkaContainer kafkaContainer, String transactionalId) throws Exception {
+        final Properties properties = new Properties();
+        properties.put(
+                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaContainer.getBootstrapServers());
+        try (Admin admin = Admin.create(properties)) {
+            CommonTestUtils.waitUntilCondition(
+                    () ->
+                            admin.describeTransactions(Collections.singletonList(transactionalId))
+                                            .description(transactionalId)
+                                            .get()
+                                            .state()
+                                    == TransactionState.COMPLETE_COMMIT);
         }
     }
 

@@ -19,9 +19,9 @@
 package org.apache.flink.connector.kafka.tool;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.annotation.VisibleForTesting;
 
 import org.apache.commons.cli.CommandLine;
-import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Option;
@@ -30,7 +30,15 @@ import org.apache.commons.cli.ParseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Properties;
+import java.util.Set;
+import java.util.function.Function;
 
 /**
  * Command-line tool for manually managing lingering Kafka transactions.
@@ -57,7 +65,7 @@ import java.util.Arrays;
  * {@code kafka-clients} and {@code commons-cli}.
  *
  * <pre>
- * mvn clean package -pl flink-connector-kafka-transaction-tool -DskipTests
+ * ./mvnw clean package -pl flink-connector-kafka-transaction-tool -am -DskipTests
  * </pre>
  *
  * <p>The resulting JAR will be located in the {@code target/} directory, usually named: {@code
@@ -105,6 +113,7 @@ public final class KafkaTransactionTool {
     static final String OPTION_TRANSACTIONAL_ID = "transactional-id";
     static final String OPTION_PRODUCER_ID = "producer-id";
     static final String OPTION_EPOCH = "epoch";
+    static final String OPTION_COMMAND_CONFIG = "command-config";
     static final String OPTION_HELP = "help";
 
     private KafkaTransactionTool() {}
@@ -114,25 +123,34 @@ public final class KafkaTransactionTool {
     }
 
     static int run(String[] args) {
-        final Options options = getOptions();
-        CommandLineParser parser = new DefaultParser();
-        HelpFormatter formatter = new HelpFormatter();
+        return run(args, KafkaTransactionManager::new);
+    }
+
+    @VisibleForTesting
+    static int run(String[] args, Function<Properties, KafkaTransactionManager> managerFactory) {
+        final Options options = getOptions(true);
+        final HelpFormatter formatter = new HelpFormatter();
         formatter.setWidth(120);
 
-        // Pre-check for --help
-        if (Arrays.asList(args).contains("--" + OPTION_HELP) || args.length == 0) {
+        if (args.length == 0) {
             printHelp(formatter, options);
             return 0;
         }
 
         try {
-            CommandLine cmd = parser.parse(options, args);
+            final CommandLine cmd = parseArguments(args);
+            if (cmd.hasOption(OPTION_HELP)) {
+                printHelp(formatter, options);
+                return 0;
+            }
 
-            String action = cmd.getOptionValue(OPTION_ACTION);
-            String bootstrapServers = cmd.getOptionValue(OPTION_BOOTSTRAP_SERVERS);
-            String transactionalId = cmd.getOptionValue(OPTION_TRANSACTIONAL_ID);
+            final String action = cmd.getOptionValue(OPTION_ACTION);
+            final String bootstrapServers = cmd.getOptionValue(OPTION_BOOTSTRAP_SERVERS);
+            final String transactionalId = cmd.getOptionValue(OPTION_TRANSACTIONAL_ID);
 
-            KafkaTransactionManager manager = new KafkaTransactionManager();
+            final KafkaTransactionManager manager =
+                    managerFactory.apply(
+                            loadCommandConfig(cmd.getOptionValue(OPTION_COMMAND_CONFIG)));
 
             if ("abort".equalsIgnoreCase(action)) {
                 manager.abortTransaction(bootstrapServers, transactionalId);
@@ -166,20 +184,52 @@ public final class KafkaTransactionTool {
                             + ". --producer-id must be a valid long,"
                             + " --epoch must be a valid short (0-32767).");
             return 2;
+        } catch (CommitOutcomeUnknownException e) {
+            LOG.error("{}", e.getMessage(), e);
+            return 3;
         } catch (Exception e) {
-            LOG.error("Execution failed", e);
+            LOG.error("{}", e.getMessage(), e);
             return 2;
         }
     }
 
-    private static Options getOptions() {
+    static CommandLine parseArguments(String[] args) throws ParseException {
+        final boolean helpRequested = Arrays.asList(args).contains("--" + OPTION_HELP);
+        final CommandLine commandLine = new DefaultParser().parse(getOptions(!helpRequested), args);
+        final Set<String> seenOptions = new HashSet<>();
+        for (Option option : commandLine.getOptions()) {
+            if (!seenOptions.add(option.getLongOpt())) {
+                throw new ParseException(
+                        "Option --" + option.getLongOpt() + " must be specified only once.");
+            }
+        }
+        if (!commandLine.getArgList().isEmpty()) {
+            throw new ParseException(
+                    "Unexpected positional arguments; only named options are supported.");
+        }
+        return commandLine;
+    }
+
+    static Properties loadCommandConfig(String file) throws IOException {
+        final Properties properties = new Properties();
+        if (file != null) {
+            try (InputStream input = Files.newInputStream(Path.of(file))) {
+                properties.load(input);
+            } catch (IOException | IllegalArgumentException e) {
+                throw new IOException("Cannot load --command-config file '" + file + "'.", e);
+            }
+        }
+        return properties;
+    }
+
+    private static Options getOptions(boolean required) {
         final Options options = new Options();
 
         options.addOption(
                 Option.builder()
                         .longOpt(OPTION_ACTION)
                         .hasArg()
-                        .required()
+                        .required(required)
                         .desc("Operation to perform: 'abort' or 'commit'.")
                         .build());
 
@@ -187,7 +237,7 @@ public final class KafkaTransactionTool {
                 Option.builder()
                         .longOpt(OPTION_BOOTSTRAP_SERVERS)
                         .hasArg()
-                        .required()
+                        .required(required)
                         .desc("Kafka brokers list (e.g. localhost:9092).")
                         .build());
 
@@ -195,7 +245,7 @@ public final class KafkaTransactionTool {
                 Option.builder()
                         .longOpt(OPTION_TRANSACTIONAL_ID)
                         .hasArg()
-                        .required()
+                        .required(required)
                         .desc("The Kafka Transactional ID.")
                         .build());
 
@@ -214,6 +264,14 @@ public final class KafkaTransactionTool {
                         .build());
 
         options.addOption(
+                Option.builder()
+                        .longOpt(OPTION_COMMAND_CONFIG)
+                        .hasArg()
+                        .desc(
+                                "Kafka client properties file (e.g. SSL/SASL settings and max.block.ms). CLI target and tool serializers take precedence.")
+                        .build());
+
+        options.addOption(
                 Option.builder().longOpt(OPTION_HELP).desc("Show this help message.").build());
 
         return options;
@@ -224,9 +282,19 @@ public final class KafkaTransactionTool {
                 "KafkaTransactionTool",
                 "Tool to manually manage lingering Flink Kafka transactions.",
                 options,
-                "Examples:\n"
+                "Safety: Ensure the Flink job is stopped and cannot restart before using either action.\n"
+                        + "Aborting can cause data loss for read_committed consumers. Committing can conflict with Flink recovery.\n"
+                        + "Use the exact producer ID and epoch from the failed transaction's Flink logs or checkpoint state.\n"
+                        + "Broker metadata may describe a new active transaction after a job restart; never use it without verifying the target.\n"
+                        + "If a commit times out or is interrupted, its outcome is unknown. Retry only the same commit; do not abort.\n"
+                        + "Abort rejects an unknown transactional ID when the broker supports the existence check; older brokers trigger a warning.\n"
+                        + "Exit codes: 0 = success/help; 1 = command-line parsing error; 2 = operation or validation error; 3 = unknown commit outcome.\n"
+                        + "A nonzero exit code is not proof that the transaction was not committed.\n"
+                        + "See the Kafka transaction tool runbook in the connector documentation.\n\n"
+                        + "Examples:\n"
                         + "  abort:  --action abort --bootstrap-servers localhost:9092 --transactional-id flink-tx-1\n"
-                        + "  commit: --action commit --bootstrap-servers localhost:9092 --transactional-id flink-tx-1 --producer-id 100 --epoch 5",
+                        + "  commit: --action commit --bootstrap-servers localhost:9092 --transactional-id flink-tx-1 --producer-id 100 --epoch 5\n"
+                        + "  secured cluster: add --command-config client.properties to either command",
                 true);
     }
 }
