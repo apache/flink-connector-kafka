@@ -459,12 +459,23 @@ public class KafkaSourceEnumerator
             LOG.debug("Partition discovery is disabled.");
             noMoreNewPartitionSplits = true;
         }
+        List<KafkaPartitionSplit> newPartitionSplits = new ArrayList<>();
         for (KafkaPartitionSplit split : partitionSplitChange.newPartitionSplits) {
-            unassignedSplits.put(split.getTopicPartition(), split);
+            TopicPartition partition = split.getTopicPartition();
+            KafkaPartitionSplit pendingSplit = unassignedSplits.get(partition);
+            // A checkpoint split can arrive while initialization runs on a worker. Its
+            // position takes precedence over a late discovery result; only MIGRATED needs init.
+            if (assignedSplits.containsKey(partition)
+                    || (pendingSplit != null && !pendingSplit.isMigrated())) {
+                LOG.debug("Ignoring stale initialization for known partition {}", partition);
+                continue;
+            }
+            unassignedSplits.put(partition, split);
+            newPartitionSplits.add(split);
         }
         LOG.info("Partition split changes: {}", partitionSplitChange);
         // TODO: Handle removed partitions.
-        addPartitionSplitChangeToPendingAssignments(partitionSplitChange.newPartitionSplits);
+        addPartitionSplitChangeToPendingAssignments(newPartitionSplits);
         assignPendingPartitionSplits(context.registeredReaders().keySet());
     }
 
@@ -472,7 +483,21 @@ public class KafkaSourceEnumerator
     private void addPartitionSplitChangeToPendingAssignments(
             Collection<KafkaPartitionSplit> newPartitionSplits) {
         int numReaders = context.currentParallelism();
-        List<KafkaPartitionSplit> sortedSplits = new ArrayList<>(newPartitionSplits);
+        Map<TopicPartition, KafkaPartitionSplit> splitsByPartition = new HashMap<>();
+        newPartitionSplits.forEach(
+                split -> splitsByPartition.put(split.getTopicPartition(), split));
+        // Split equality includes offsets. Replace pending physical copies across all owners
+        // once per batch; if a batch repeats a partition, its last supplied position wins.
+        pendingPartitionSplitAssignment
+                .values()
+                .forEach(
+                        pending ->
+                                pending.removeIf(
+                                        previous ->
+                                                splitsByPartition.containsKey(
+                                                        previous.getTopicPartition())));
+        pendingPartitionSplitAssignment.values().removeIf(Set::isEmpty);
+        List<KafkaPartitionSplit> sortedSplits = new ArrayList<>(splitsByPartition.values());
         sortedSplits.sort(
                 Comparator.comparing(
                                 (KafkaPartitionSplit split) -> split.getTopicPartition().topic())
