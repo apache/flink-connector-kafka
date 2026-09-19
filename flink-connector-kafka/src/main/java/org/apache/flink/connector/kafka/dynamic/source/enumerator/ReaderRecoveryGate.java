@@ -94,8 +94,9 @@ class ReaderRecoveryGate {
     }
 
     /**
-     * Pending entries can come from earlier registrations or remapped checkpoint state. Merging by
-     * split id, preferring the current report, avoids both losing and duplicating splits.
+     * Sub-enumerators can assign newly discovered splits while reported splits await reassignment.
+     * A checkpoint may therefore contain both pending reports and reader-held splits, which must be
+     * merged on restore. Preferring the current report for overlapping split ids is defensive.
      */
     private static List<DynamicKafkaSourceSplit> mergeReportedSplits(
             @Nullable List<DynamicKafkaSourceSplit> previousReportedSplits,
