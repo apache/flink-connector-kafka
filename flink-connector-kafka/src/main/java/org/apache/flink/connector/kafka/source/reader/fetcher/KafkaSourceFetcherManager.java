@@ -108,5 +108,10 @@ public class KafkaSourceFetcherManager
                     @Override
                     public void wakeUp() {}
                 });
+
+        // Wake the fetcher so an idle consumer blocked in poll() returns promptly and runs the
+        // commit task now, instead of leaving the offset uncommitted until the poll times out.
+        // (On a busy split the next poll will returns straight away, so this isn't needed)
+        kafkaReader.wakeUp();
     }
 }
