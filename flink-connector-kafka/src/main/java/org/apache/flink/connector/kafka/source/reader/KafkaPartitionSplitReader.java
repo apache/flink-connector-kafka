@@ -65,13 +65,23 @@ public class KafkaPartitionSplitReader
         implements SplitReader<ConsumerRecord<byte[], byte[]>, KafkaPartitionSplit> {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaPartitionSplitReader.class);
 
-    private final KafkaConsumer<byte[], byte[]> consumer;
+    private final Properties consumerProps;
     private final Map<TopicPartition, Long> stoppingOffsets;
     private final String groupId;
     private final int subtaskId;
     private final Duration pollTimeout;
 
     private final KafkaSourceReaderMetrics kafkaSourceReaderMetrics;
+
+    /**
+     * The Kafka consumer. Created lazily on the first thread that actually uses it — the split
+     * fetcher thread — rather than on the thread constructing this reader (the source-reader or
+     * checkpoint thread). {@link KafkaConsumer} is not thread-safe, so it must live on the thread
+     * that uses it (FLINK-36434). Only ever written by {@link #ensureConsumer()} on the fetcher
+     * thread; {@code volatile} solely for the cross-thread reads in {@link #wakeUp()} and {@link
+     * #close()}.
+     */
+    @Nullable private volatile KafkaConsumer<byte[], byte[]> consumer;
 
     // Tracking empty splits that has not been added to finished splits in fetch()
     private final Set<String> emptySplits = new HashSet<>();
@@ -90,23 +100,58 @@ public class KafkaPartitionSplitReader
             String rackIdSupplier) {
         this.subtaskId = context.getIndexOfSubtask();
         this.kafkaSourceReaderMetrics = kafkaSourceReaderMetrics;
-        // Parsed before creating the consumer so that an invalid value does not leak a consumer.
+        // Parsed eagerly so that an invalid value fails at construction rather than on the
+        // fetcher thread when the consumer is first used.
         this.pollTimeout = parsePollTimeout(props);
         Properties consumerProps = new Properties();
         consumerProps.putAll(props);
         consumerProps.setProperty(ConsumerConfig.CLIENT_ID_CONFIG, createConsumerClientId(props));
         setConsumerClientRack(consumerProps, rackIdSupplier);
-        this.consumer = new KafkaConsumer<>(consumerProps);
+        this.consumerProps = consumerProps;
         this.stoppingOffsets = new HashMap<>();
         this.groupId = consumerProps.getProperty(ConsumerConfig.GROUP_ID_CONFIG);
+    }
 
-        // Metric registration
-        maybeRegisterKafkaConsumerMetrics(props, kafkaSourceReaderMetrics, consumer);
-        this.kafkaSourceReaderMetrics.registerNumBytesIn(consumer);
+    /**
+     * Returns the consumer, creating it on the calling thread on first use.
+     *
+     * <p>The reader is constructed on the source-reader (or, when a fetcher is re-created for an
+     * offset commit, the checkpoint) thread, while the consumer is used almost exclusively on the
+     * split fetcher thread. Creating the consumer eagerly in the constructor therefore puts it on
+     * the wrong thread. All consumer-touching {@link SplitReader} methods run on the fetcher
+     * thread, so deferring creation to the first such call keeps construction and use on the same
+     * thread. The only cross-thread entry point remains {@link #wakeUp()}, which is the one call
+     * {@link KafkaConsumer} documents as thread-safe.
+     */
+    private KafkaConsumer<byte[], byte[]> ensureConsumer() {
+        // Single-writer: only the fetcher thread calls this, so the creation branch needs no
+        // guard; the field is volatile solely for the cross-thread reads in wakeUp() and close().
+        KafkaConsumer<byte[], byte[]> currentConsumer = this.consumer;
+        if (currentConsumer == null) {
+            currentConsumer = createConsumer(consumerProps);
+            // Published before metric registration: if registration throws, close() still sees
+            // the consumer and releases it instead of leaking it.
+            this.consumer = currentConsumer;
+            maybeRegisterKafkaConsumerMetrics(
+                    consumerProps, kafkaSourceReaderMetrics, currentConsumer);
+            kafkaSourceReaderMetrics.registerNumBytesIn(currentConsumer);
+        }
+        return currentConsumer;
+    }
+
+    /**
+     * Creates the {@link KafkaConsumer}. Overridable by same-package tests to observe creation.
+     *
+     * <p>Deliberately not annotated with {@code @VisibleForTesting}: the freezing ArchUnit rule
+     * flags new uses of the internal annotation in connector production code.
+     */
+    KafkaConsumer<byte[], byte[]> createConsumer(Properties consumerProps) {
+        return new KafkaConsumer<>(consumerProps);
     }
 
     @Override
     public RecordsWithSplitIds<ConsumerRecord<byte[], byte[]>> fetch() throws IOException {
+        final KafkaConsumer<byte[], byte[]> consumer = ensureConsumer();
         ConsumerRecords<byte[], byte[]> consumerRecords;
         try {
             consumerRecords = consumer.poll(pollTimeout);
@@ -126,7 +171,8 @@ public class KafkaPartitionSplitReader
         List<TopicPartition> finishedPartitions = new ArrayList<>();
         for (TopicPartition tp : consumer.assignment()) {
             long stoppingOffset = getStoppingOffset(tp);
-            long consumerPosition = getConsumerPosition(tp, "retrieving consumer position");
+            long consumerPosition =
+                    getConsumerPosition(consumer, tp, "retrieving consumer position");
             // Stop fetching when the consumer's position reaches the stoppingOffset.
             // Control messages may follow the last record; therefore, using the last record's
             // offset as a stopping condition could result in indefinite blocking.
@@ -155,7 +201,7 @@ public class KafkaPartitionSplitReader
         // Unassign the partitions that has finished.
         if (!finishedPartitions.isEmpty()) {
             finishedPartitions.forEach(kafkaSourceReaderMetrics::removeRecordsLagMetric);
-            unassignPartitions(finishedPartitions);
+            unassignPartitions(consumer, finishedPartitions);
         }
 
         // Update numBytesIn
@@ -182,6 +228,7 @@ public class KafkaPartitionSplitReader
                             "The SplitChange type of %s is not supported.",
                             splitsChange.getClass()));
         }
+        final KafkaConsumer<byte[], byte[]> consumer = ensureConsumer();
 
         // Assignment.
         List<TopicPartition> newPartitionAssignments = new ArrayList<>();
@@ -216,32 +263,51 @@ public class KafkaPartitionSplitReader
 
         // Seek on the newly assigned partitions to their stating offsets.
         seekToStartingOffsets(
+                consumer,
                 partitionsStartingFromEarliest,
                 partitionsStartingFromLatest,
                 partitionsStartingFromSpecifiedOffsets);
         // Setup the stopping offsets.
-        acquireAndSetStoppingOffsets(partitionsStoppingAtLatest, partitionsStoppingAtCommitted);
+        acquireAndSetStoppingOffsets(
+                consumer, partitionsStoppingAtLatest, partitionsStoppingAtCommitted);
 
         // After acquiring the starting and stopping offsets, remove the empty splits if necessary.
-        removeEmptySplits();
+        removeEmptySplits(consumer);
 
-        maybeLogSplitChangesHandlingResult(splitsChange);
+        maybeLogSplitChangesHandlingResult(consumer, splitsChange);
     }
 
     @Override
     public void wakeUp() {
-        consumer.wakeup();
+        // The only method called from a thread other than the fetcher thread, relying on
+        // KafkaConsumer.wakeup() being the one documented thread-safe consumer call.
+        //
+        // wakeUp() only ever targets a running fetch task (see SplitReader#wakeUp javadoc), which
+        // the base SplitFetcher can only schedule after handleSplitsChanges() — and therefore
+        // ensureConsumer() — has run at least once on the fetcher thread. So the consumer is
+        // always non-null here in practice; a pre-creation wakeup has nothing to interrupt and is
+        // safely dropped. Note this leans on an implementation invariant of
+        // SplitFetcher/AddSplitsTask rather than a documented contract beyond wakeUp()'s own
+        // javadoc scoping.
+        KafkaConsumer<byte[], byte[]> currentConsumer = this.consumer;
+        if (currentConsumer != null) {
+            currentConsumer.wakeup();
+        }
     }
 
     @Override
     public void close() throws Exception {
-        consumer.close();
+        KafkaConsumer<byte[], byte[]> currentConsumer = this.consumer;
+        if (currentConsumer != null) {
+            currentConsumer.close();
+        }
     }
 
     @Override
     public void pauseOrResumeSplits(
             Collection<KafkaPartitionSplit> splitsToPause,
             Collection<KafkaPartitionSplit> splitsToResume) {
+        final KafkaConsumer<byte[], byte[]> consumer = ensureConsumer();
         // Filter against current assignment to avoid IllegalStateException when a partition
         // was concurrently unassigned by fetch() or removeEmptySplits().
         Set<TopicPartition> assigned = consumer.assignment();
@@ -272,12 +338,12 @@ public class KafkaPartitionSplitReader
     public void notifyCheckpointComplete(
             Map<TopicPartition, OffsetAndMetadata> offsetsToCommit,
             OffsetCommitCallback offsetCommitCallback) {
-        consumer.commitAsync(offsetsToCommit, offsetCommitCallback);
+        ensureConsumer().commitAsync(offsetsToCommit, offsetCommitCallback);
     }
 
     @VisibleForTesting
     KafkaConsumer<byte[], byte[]> consumer() {
-        return consumer;
+        return ensureConsumer();
     }
 
     @VisibleForTesting
@@ -316,7 +382,10 @@ public class KafkaPartitionSplitReader
         }
     }
 
-    long getConsumerPosition(TopicPartition tp, String msg) {
+    // The helpers below take the consumer their entry point (fetch() / handleSplitsChanges())
+    // already ensured, so consumer creation stays confined to the SplitReader entry points.
+    private long getConsumerPosition(
+            KafkaConsumer<byte[], byte[]> consumer, TopicPartition tp, String msg) {
         return retryOnWakeup(() -> consumer.position(tp), msg);
     }
 
@@ -364,6 +433,7 @@ public class KafkaPartitionSplitReader
     }
 
     private void seekToStartingOffsets(
+            KafkaConsumer<byte[], byte[]> consumer,
             List<TopicPartition> partitionsStartingFromEarliest,
             List<TopicPartition> partitionsStartingFromLatest,
             Map<TopicPartition, Long> partitionsStartingFromSpecifiedOffsets) {
@@ -387,6 +457,7 @@ public class KafkaPartitionSplitReader
     }
 
     private void acquireAndSetStoppingOffsets(
+            KafkaConsumer<byte[], byte[]> consumer,
             List<TopicPartition> partitionsStoppingAtLatest,
             Set<TopicPartition> partitionsStoppingAtCommitted) {
         Map<TopicPartition, Long> endOffset = consumer.endOffsets(partitionsStoppingAtLatest);
@@ -408,12 +479,13 @@ public class KafkaPartitionSplitReader
         }
     }
 
-    private void removeEmptySplits() {
+    private void removeEmptySplits(KafkaConsumer<byte[], byte[]> consumer) {
         List<TopicPartition> emptyPartitions = new ArrayList<>();
         // If none of the partitions have any records,
         for (TopicPartition tp : consumer.assignment()) {
             long startingOffset =
-                    getConsumerPosition(tp, "getting starting offset to check if split is empty");
+                    getConsumerPosition(
+                            consumer, tp, "getting starting offset to check if split is empty");
             if (startingOffset >= getStoppingOffset(tp)) {
                 emptyPartitions.add(tp);
             }
@@ -428,11 +500,12 @@ public class KafkaPartitionSplitReader
                             .map(KafkaPartitionSplit::toSplitId)
                             .collect(Collectors.toSet()));
             // Un-assign partitions from Kafka consumer
-            unassignPartitions(emptyPartitions);
+            unassignPartitions(consumer, emptyPartitions);
         }
     }
 
     private void maybeLogSplitChangesHandlingResult(
+            KafkaConsumer<byte[], byte[]> consumer,
             SplitsChange<KafkaPartitionSplit> splitsChange) {
         if (LOG.isDebugEnabled()) {
             StringJoiner splitsInfo = new StringJoiner(",");
@@ -443,7 +516,8 @@ public class KafkaPartitionSplitReader
                 }
 
                 long startingOffset =
-                        getConsumerPosition(split.getTopicPartition(), "logging starting position");
+                        getConsumerPosition(
+                                consumer, split.getTopicPartition(), "logging starting position");
 
                 long stoppingOffset = getStoppingOffset(split.getTopicPartition());
                 splitsInfo.add(
@@ -455,7 +529,9 @@ public class KafkaPartitionSplitReader
         }
     }
 
-    private void unassignPartitions(Collection<TopicPartition> partitionsToUnassign) {
+    private void unassignPartitions(
+            KafkaConsumer<byte[], byte[]> consumer,
+            Collection<TopicPartition> partitionsToUnassign) {
         Collection<TopicPartition> newAssignment = new HashSet<>(consumer.assignment());
         newAssignment.removeAll(partitionsToUnassign);
         consumer.assign(newAssignment);
