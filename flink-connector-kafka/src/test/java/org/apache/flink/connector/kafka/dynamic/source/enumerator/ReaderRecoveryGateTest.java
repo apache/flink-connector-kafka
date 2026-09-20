@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.NavigableMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -97,19 +98,44 @@ class ReaderRecoveryGateTest {
     }
 
     @Test
-    void testRepeatedReportForSameReaderReplacesPreviousReport() {
+    void testRepeatedReportMergesSplitsAndPrefersLatestOffsets() {
+        ReaderRecoveryGate gate = new ReaderRecoveryGate(false);
+        DynamicKafkaSourceSplit firstReport = split("topic", 0);
+        DynamicKafkaSourceSplit secondReport = split("topic", 1);
+        DynamicKafkaSourceSplit updatedSplit =
+                new DynamicKafkaSourceSplit(
+                        "cluster0", new KafkaPartitionSplit(new TopicPartition("topic", 0), 42L));
+        DynamicKafkaSourceSplit previousOnlySplit = split("topic", 2);
+        gate.recordReportedSplits(1, Arrays.asList(firstReport, previousOnlySplit));
+        gate.recordReportedSplits(1, Arrays.asList(updatedSplit, secondReport));
+
+        NavigableMap<Integer, List<DynamicKafkaSourceSplit>> drained = gate.drainReportedSplits();
+
+        assertThat(drained.keySet()).containsExactly(1);
+        assertThat(drained.get(1))
+                .containsExactlyInAnyOrder(updatedSplit, previousOnlySplit, secondReport);
+    }
+
+    @Test
+    void testSnapshotReportedSplitsIsIndependentAndDoesNotDrain() {
         ReaderRecoveryGate gate = new ReaderRecoveryGate(false);
         DynamicKafkaSourceSplit firstReport = split("topic", 0);
         DynamicKafkaSourceSplit secondReport = split("topic", 1);
         gate.recordReportedSplits(1, Collections.singletonList(firstReport));
+
+        Map<Integer, List<DynamicKafkaSourceSplit>> snapshot = gate.snapshotReportedSplits();
+        assertThat(gate.hasReportedSplits()).isTrue();
+        snapshot.get(1).clear();
+        snapshot.clear();
+        assertThat(gate.snapshotReportedSplits().get(1)).containsExactly(firstReport);
+
+        snapshot = gate.snapshotReportedSplits();
         gate.recordReportedSplits(1, Collections.singletonList(secondReport));
-
-        // A reader that registers again keeps one entry holding its latest report, so the
-        // duplicate-owner check in reassignReportedSplits is not tripped by its own re-report.
-        NavigableMap<Integer, List<DynamicKafkaSourceSplit>> drained = gate.drainReportedSplits();
-
-        assertThat(drained.keySet()).containsExactly(1);
-        assertThat(drained.get(1)).containsExactly(secondReport);
+        assertThat(gate.drainReportedSplits().get(1))
+                .containsExactlyInAnyOrder(firstReport, secondReport);
+        assertThat(gate.snapshotReportedSplits()).isEmpty();
+        assertThat(snapshot).containsOnlyKeys(1);
+        assertThat(snapshot.get(1)).containsExactly(firstReport);
     }
 
     @Test

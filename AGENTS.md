@@ -122,7 +122,7 @@ This file provides guidance for AI coding agents working with the Apache Flink K
 
 ### Changing checkpointed state
 
-Splits, enumerator state, writer state and committables are written by `SimpleVersionedSerializer` implementations. Current versions: `KafkaPartitionSplitSerializer` 0, `KafkaSourceEnumStateSerializer` 4, `KafkaWriterStateSerializer` 2, `KafkaCommittableSerializer` 1, `DynamicKafkaSourceSplitSerializer` 2, `DynamicKafkaSourceEnumStateSerializer` 3.
+Splits, enumerator state, writer state and committables are written by `SimpleVersionedSerializer` implementations. Current versions: `KafkaPartitionSplitSerializer` 0, `KafkaSourceEnumStateSerializer` 4, `KafkaWriterStateSerializer` 2, `KafkaCommittableSerializer` 1, `DynamicKafkaSourceSplitSerializer` 2, `DynamicKafkaSourceEnumStateSerializer` 4.
 
 1. Bump the version and keep a read path for every older version
 2. Enum ordinals written to state (for example `TransactionOwnership`) must not be reordered

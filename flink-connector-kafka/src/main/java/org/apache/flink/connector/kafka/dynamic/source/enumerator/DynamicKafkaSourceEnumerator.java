@@ -218,6 +218,8 @@ public class DynamicKafkaSourceEnumerator
         this.splitAssignmentStrategy = createSplitAssignmentStrategy(properties);
         this.readerRecoveryGate =
                 new ReaderRecoveryGate(hasRestoredEnumeratorState(dynamicKafkaSourceEnumState));
+        restorePendingReportedSplits(dynamicKafkaSourceEnumState.getPendingReportedSplitsByReader())
+                .forEach(readerRecoveryGate::recordReportedSplits);
 
         if (!dynamicKafkaSourceEnumState.getClusterEnumeratorStates().isEmpty()) {
             logger.info("Dynamic Kafka source restored from checkpointed enumerator state");
@@ -289,6 +291,32 @@ public class DynamicKafkaSourceEnumerator
                     clusterStoppingOffsets.get(clusterId));
         }
         splitAssignmentStrategy.onMetadataRefresh(activeSplitIds);
+    }
+
+    /**
+     * Restores reported splits that a checkpoint captured before recovery reassignment ran. Reader
+     * ids from a checkpoint taken at a different parallelism are remapped onto the current one, and
+     * entries that collapse onto the same reader are merged.
+     */
+    private Map<Integer, List<DynamicKafkaSourceSplit>> restorePendingReportedSplits(
+            Map<Integer, List<DynamicKafkaSourceSplit>> restoredPendingReportedSplits) {
+        Map<Integer, List<DynamicKafkaSourceSplit>> remappedSplitsByReader = new HashMap<>();
+        if (restoredPendingReportedSplits.isEmpty()) {
+            return remappedSplitsByReader;
+        }
+        int parallelism = enumContext.currentParallelism();
+        for (Entry<Integer, List<DynamicKafkaSourceSplit>> readerSplits :
+                restoredPendingReportedSplits.entrySet()) {
+            int readerId = Math.floorMod(readerSplits.getKey(), parallelism);
+            remappedSplitsByReader
+                    .computeIfAbsent(readerId, ignored -> new ArrayList<>())
+                    .addAll(readerSplits.getValue());
+        }
+        logger.info(
+                "Restored {} reported splits that were pending reassignment when the checkpoint"
+                        + " was taken",
+                restoredPendingReportedSplits.values().stream().mapToInt(List::size).sum());
+        return remappedSplitsByReader;
     }
 
     private Set<KafkaStream> refreshRestoredClusterPropertiesFromMetadataService(
@@ -923,7 +951,8 @@ public class DynamicKafkaSourceEnumerator
     private static boolean hasRestoredEnumeratorState(
             DynamicKafkaSourceEnumState dynamicKafkaSourceEnumState) {
         return !dynamicKafkaSourceEnumState.getClusterEnumeratorStates().isEmpty()
-                || !dynamicKafkaSourceEnumState.getRetainedClusterEnumeratorStates().isEmpty();
+                || !dynamicKafkaSourceEnumState.getRetainedClusterEnumeratorStates().isEmpty()
+                || !dynamicKafkaSourceEnumState.getPendingReportedSplitsByReader().isEmpty();
     }
 
     private static class ReportedSplit {
@@ -967,10 +996,22 @@ public class DynamicKafkaSourceEnumerator
             }
         }
 
+        Map<Integer, List<DynamicKafkaSourceSplit>> pendingReportedSplitsByReader =
+                readerRecoveryGate.snapshotReportedSplits();
+        if (isCheckpointSnapshot && !pendingReportedSplitsByReader.isEmpty()) {
+            logger.debug(
+                    "Checkpoint {} includes pending reported splits of readers {}",
+                    checkpointId,
+                    pendingReportedSplitsByReader.keySet());
+        }
+
+        // See DynamicKafkaSourceEnumState#getPendingReportedSplitsByReader() for why the
+        // pending splits are checkpointed.
         return new DynamicKafkaSourceEnumState(
                 latestKafkaStreams,
                 subEnumeratorStateByCluster,
-                new HashMap<>(retainedClusterEnumeratorStates));
+                new HashMap<>(retainedClusterEnumeratorStates),
+                pendingReportedSplitsByReader);
     }
 
     private void retainRemovedClusterEnumeratorStates(
