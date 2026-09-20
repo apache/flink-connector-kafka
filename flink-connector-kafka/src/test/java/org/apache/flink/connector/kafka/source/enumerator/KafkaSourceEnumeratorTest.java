@@ -748,7 +748,8 @@ public class KafkaSourceEnumeratorTest {
                 assignedSplits,
                 unassignedInitialSplits,
                 overrideProperties,
-                startingOffsetsInitializer);
+                startingOffsetsInitializer,
+                initialDiscoveryFinished);
     }
 
     /**
@@ -762,7 +763,31 @@ public class KafkaSourceEnumeratorTest {
             Collection<KafkaPartitionSplit> assignedSplits,
             Collection<KafkaPartitionSplit> unassignedInitialSplits,
             Properties overrideProperties,
-            OffsetsInitializer startingOffsetsInitializer) {
+            OffsetsInitializer startingOffsetsInitializer,
+            boolean initialDiscoveryFinished) {
+        return createEnumerator(
+                enumContext,
+                partitionDiscoveryIntervalMs,
+                topicsToSubscribe,
+                assignedSplits,
+                unassignedInitialSplits,
+                overrideProperties,
+                startingOffsetsInitializer,
+                Boundedness.CONTINUOUS_UNBOUNDED,
+                initialDiscoveryFinished);
+    }
+
+    /** Create the enumerator, controlling the boundedness of the source. */
+    private KafkaSourceEnumerator createEnumerator(
+            MockSplitEnumeratorContext<KafkaPartitionSplit> enumContext,
+            long partitionDiscoveryIntervalMs,
+            Collection<String> topicsToSubscribe,
+            Collection<KafkaPartitionSplit> assignedSplits,
+            Collection<KafkaPartitionSplit> unassignedInitialSplits,
+            Properties overrideProperties,
+            OffsetsInitializer startingOffsetsInitializer,
+            Boundedness boundedness,
+            boolean initialDiscoveryFinished) {
         // Use a TopicPatternSubscriber so that no exception if a subscribed topic hasn't been
         // created yet.
         StringJoiner topicNameJoiner = new StringJoiner("|");
@@ -785,8 +810,9 @@ public class KafkaSourceEnumeratorTest {
                 stoppingOffsetsInitializer,
                 props,
                 enumContext,
-                Boundedness.CONTINUOUS_UNBOUNDED,
-                new KafkaSourceEnumState(assignedSplits, unassignedInitialSplits, false));
+                boundedness,
+                new KafkaSourceEnumState(
+                        assignedSplits, unassignedInitialSplits, initialDiscoveryFinished));
     }
 
     // ---------------------
@@ -973,6 +999,241 @@ public class KafkaSourceEnumeratorTest {
             // Verify that the properties value is used
             assertThat(propertiesCheckSourceIntegrity)
                     .isEqualTo(enumerator.topicIntegrityCheckEnabled());
+        }
+    }
+
+    /**
+     * A bounded enumerator that is restored with every subscribed partition already assigned must
+     * still tell its readers that no more splits are coming. The restored enumerator runs its
+     * one-time discovery, finds nothing new, and on an unfixed enumerator returns early before
+     * reaching the only place that sets {@code noMoreNewPartitionSplits}, so the readers wait for a
+     * {@code NoMoreSplitsEvent} that never arrives and the job never finishes (FLINK-31006).
+     *
+     * <p>Do not weaken this test by enabling partition discovery or by leaving a partition out of
+     * the restored state: either makes the partition change non-empty and the early return is no
+     * longer taken.
+     */
+    @Test
+    public void testRestoredBoundedEnumeratorSignalsNoMoreSplitsWithoutPartitionChanges()
+            throws Throwable {
+        Set<KafkaPartitionSplit> restoredAssignedSplits =
+                KafkaSourceTestEnv.getPartitionsForTopics(PRE_EXISTING_TOPICS).stream()
+                        .map(tp -> new KafkaPartitionSplit(tp, 0L))
+                        .collect(Collectors.toSet());
+        assertThat(restoredAssignedSplits).isNotEmpty();
+
+        try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                KafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                context,
+                                -1,
+                                PRE_EXISTING_TOPICS,
+                                restoredAssignedSplits,
+                                Collections.emptySet(),
+                                new Properties(),
+                                OffsetsInitializer.earliest(),
+                                Boundedness.BOUNDED,
+                                true)) {
+            enumerator.start();
+
+            // A reader that re-registers before the discovery callback returns.
+            registerReader(context, enumerator, READER0);
+            runOneTimePartitionDiscovery(context);
+            // A reader that re-registers after it.
+            registerReader(context, enumerator, READER1);
+
+            assertThat(context.getSplitsAssignmentSequence())
+                    .as("Every partition is already assigned, so nothing may be assigned again")
+                    .isEmpty();
+            SoftAssertions.assertSoftly(
+                    softly -> {
+                        softly.assertThat(context.hasNoMoreSplits(READER0))
+                                .as("Reader registered before the discovery callback")
+                                .isTrue();
+                        softly.assertThat(context.hasNoMoreSplits(READER1))
+                                .as("Reader registered after the discovery callback")
+                                .isTrue();
+                    });
+        }
+    }
+
+    /**
+     * The mirror of the two tests above. An unbounded source with one-time discovery cannot act on
+     * an empty partition change: it has no readers to tell that the input ended, and treating the
+     * discovery as finished would make a later restore initialise the partitions that appeared
+     * meanwhile from the earliest offset instead of the configured one. It must keep returning
+     * early, and this test fails if the condition in checkPartitionChanges is ever widened past
+     * bounded sources.
+     */
+    @Test
+    public void testUnboundedSourceKeepsSkippingAnEmptyPartitionChange() throws Throwable {
+        Collection<String> noSuchTopic = Collections.singleton("topic-that-does-not-exist");
+
+        try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                KafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                context,
+                                -1,
+                                noSuchTopic,
+                                Collections.emptySet(),
+                                Collections.emptySet(),
+                                new Properties(),
+                                OffsetsInitializer.earliest(),
+                                Boundedness.CONTINUOUS_UNBOUNDED,
+                                false)) {
+            enumerator.start();
+            registerReader(context, enumerator, READER0);
+            runOneTimePartitionDiscovery(context);
+
+            SoftAssertions.assertSoftly(
+                    softly -> {
+                        try {
+                            softly.assertThat(
+                                            enumerator.snapshotState(1L).initialDiscoveryFinished())
+                                    .as("An empty change must not mark the discovery as finished")
+                                    .isFalse();
+                        } catch (Exception e) {
+                            throw new IllegalStateException(e);
+                        }
+                        softly.assertThat(context.hasNoMoreSplits(READER0))
+                                .as("An unbounded source never runs out of splits")
+                                .isFalse();
+                        softly.assertThat(context.getSplitsAssignmentSequence())
+                                .as("There is no partition to assign")
+                                .isEmpty();
+                    });
+        }
+    }
+
+    /**
+     * The same early return leaves a bounded source that subscribes to no existing partition
+     * hanging on a fresh start: the partition change is empty from the first discovery on, so the
+     * readers are never told that no more splits are coming (FLINK-31006).
+     */
+    @Test
+    public void testBoundedSourceWithoutPartitionsSignalsNoMoreSplits() throws Throwable {
+        // A single explicit name, because the helper joins the names into a pattern and an empty
+        // collection would compile to a pattern that matches every topic.
+        Collection<String> noSuchTopic = Collections.singleton("topic-that-does-not-exist");
+
+        try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                KafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                context,
+                                -1,
+                                noSuchTopic,
+                                Collections.emptySet(),
+                                Collections.emptySet(),
+                                new Properties(),
+                                OffsetsInitializer.earliest(),
+                                Boundedness.BOUNDED,
+                                false)) {
+            enumerator.start();
+
+            registerReader(context, enumerator, READER0);
+            runOneTimePartitionDiscovery(context);
+            registerReader(context, enumerator, READER1);
+
+            assertThat(context.getSplitsAssignmentSequence())
+                    .as("There is no partition to assign")
+                    .isEmpty();
+            SoftAssertions.assertSoftly(
+                    softly -> {
+                        softly.assertThat(context.hasNoMoreSplits(READER0))
+                                .as("Reader registered before the discovery callback")
+                                .isTrue();
+                        softly.assertThat(context.hasNoMoreSplits(READER1))
+                                .as("Reader registered after the discovery callback")
+                                .isTrue();
+                    });
+        }
+    }
+
+    /**
+     * A restored bounded enumerator must not tell a reader that the input ended before the
+     * discovery that follows the restore has assigned that reader its splits. A partition created
+     * while the job was down is only found by that discovery, so signalling from addReader on the
+     * strength of the restored initialDiscoveryFinished flag would finish the reader first and
+     * assign to it afterwards. That is the failure that apache/flink#21909 was rejected for, and
+     * this test pins the ordering that avoids it.
+     */
+    @Test
+    public void testRestoredBoundedEnumeratorAssignsBeforeItSignals() throws Throwable {
+        // Only TOPIC1 was assigned before the savepoint; TOPIC2 stands in for the partitions that
+        // appeared while the job was down and that only the post-restore discovery can find.
+        Set<KafkaPartitionSplit> restoredAssignedSplits =
+                KafkaSourceTestEnv.getPartitionsForTopics(Collections.singleton(TOPIC1)).stream()
+                        .map(tp -> new KafkaPartitionSplit(tp, 0L))
+                        .collect(Collectors.toSet());
+        assertThat(restoredAssignedSplits).isNotEmpty();
+
+        try (RecordingSplitEnumeratorContext context =
+                        new RecordingSplitEnumeratorContext(NUM_SUBTASKS);
+                KafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                context,
+                                -1,
+                                PRE_EXISTING_TOPICS,
+                                restoredAssignedSplits,
+                                Collections.emptySet(),
+                                new Properties(),
+                                OffsetsInitializer.earliest(),
+                                Boundedness.BOUNDED,
+                                true)) {
+            enumerator.start();
+            // Registers before the discovery callback, which is the ordering a restore produces.
+            registerReader(context, enumerator, READER0);
+            runOneTimePartitionDiscovery(context);
+
+            assertThat(context.events)
+                    .as("The reader must be assigned its splits before it is told the input ended")
+                    .isNotEmpty();
+            final int firstSignal = context.events.indexOf("signalNoMoreSplits:" + READER0);
+            final int lastAssign = context.events.lastIndexOf("assignSplits:" + READER0);
+            assertThat(firstSignal)
+                    .as(
+                            "Reader %s was never told that no more splits are coming: %s",
+                            READER0, context.events)
+                    .isNotNegative();
+            assertThat(lastAssign)
+                    .as(
+                            "Reader %s was never assigned the partitions discovered after the "
+                                    + "restore: %s",
+                            READER0, context.events)
+                    .isNotNegative();
+            assertThat(lastAssign)
+                    .as(
+                            "Reader %s was told the input ended before its splits arrived: %s",
+                            READER0, context.events)
+                    .isLessThan(firstSignal);
+        }
+    }
+
+    /** Records the order in which splits are assigned and no-more-splits is signalled. */
+    private static class RecordingSplitEnumeratorContext
+            extends MockSplitEnumeratorContext<KafkaPartitionSplit> {
+        private final List<String> events = new ArrayList<>();
+
+        private RecordingSplitEnumeratorContext(int parallelism) {
+            super(parallelism);
+        }
+
+        @Override
+        public void assignSplits(SplitsAssignment<KafkaPartitionSplit> newSplitAssignments) {
+            newSplitAssignments
+                    .assignment()
+                    .keySet()
+                    .forEach(subtask -> events.add("assignSplits:" + subtask));
+            super.assignSplits(newSplitAssignments);
+        }
+
+        @Override
+        public void signalNoMoreSplits(int subtask) {
+            events.add("signalNoMoreSplits:" + subtask);
+            super.signalNoMoreSplits(subtask);
         }
     }
 
