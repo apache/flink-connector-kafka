@@ -35,19 +35,9 @@ import java.util.TreeMap;
 /**
  * Tracks the recovery-time reader registration state of the {@link DynamicKafkaSourceEnumerator}.
  *
- * <p>The gate is armed by two recovery triggers:
- *
- * <ul>
- *   <li><b>Enumerator restore from checkpoint</b>: armed at construction ({@code
- *       restoredFromCheckpoint = true}). Split assignment and metadata update events must be
- *       deferred until the first metadata discovery has completed and every reader has
- *       (re-)registered, so that restored reader splits can be redistributed consistently.
- *   <li><b>Reader re-registration after partial failover</b>: armed on a running enumerator when a
- *       re-registering reader reports checkpointed splits ({@link #recordReportedSplits} with
- *       non-empty splits while initial reader registration is already complete). Metadata update
- *       events are deferred until all readers have registered again and reported splits are
- *       redistributed.
- * </ul>
+ * <p>After enumerator restore, assignments and metadata updates wait for the complete reader cohort
+ * and the first metadata discovery. A local reader restart only waits for that reader's checkpoint
+ * report to be reconciled with the surviving enumerator's current ownership.
  *
  * <p>This class owns that gating state; the enumerator remains responsible for acting on it.
  *
@@ -65,6 +55,9 @@ class ReaderRecoveryGate {
     private final Map<Integer, List<DynamicKafkaSourceSplit>> pendingReportedSplitsByReader =
             new HashMap<>();
 
+    /** Readers whose checkpoint reports are being reconciled before pending assignments flush. */
+    private final Set<Integer> readersAwaitingSplitReconciliation = new HashSet<>();
+
     /** Readers whose metadata update events were deferred during recovery. */
     private final Set<Integer> pendingMetadataUpdateReaders = new HashSet<>();
 
@@ -72,25 +65,21 @@ class ReaderRecoveryGate {
         this.initialReaderRegistrationPending = restoredFromCheckpoint;
     }
 
-    /** Records splits a reader reported on registration; an empty report is ignored. */
+    /** Records the current report during initial recovery, including an empty replacement. */
     void recordReportedSplits(int subtaskId, List<DynamicKafkaSourceSplit> reportedSplits) {
-        if (!reportedSplits.isEmpty()) {
+        if (initialReaderRegistrationPending) {
             pendingReportedSplitsByReader.put(subtaskId, new ArrayList<>(reportedSplits));
         }
     }
 
     /** Whether recovery gating is active and registrations must be deferred. */
     boolean hasPendingRecovery() {
-        return initialReaderRegistrationPending || !pendingReportedSplitsByReader.isEmpty();
+        return initialReaderRegistrationPending;
     }
 
-    /**
-     * Whether metadata update events must be deferred instead of sent, given the current reader
-     * registration completeness.
-     */
-    boolean shouldDeferMetadataUpdateEvents(boolean allReadersRegistered) {
-        return initialReaderRegistrationPending
-                || (!pendingReportedSplitsByReader.isEmpty() && !allReadersRegistered);
+    /** Whether metadata updates must wait for checkpoint report reconciliation. */
+    boolean shouldDeferMetadataUpdateEvents() {
+        return initialReaderRegistrationPending || !readersAwaitingSplitReconciliation.isEmpty();
     }
 
     void deferMetadataUpdate(int readerId) {
@@ -109,8 +98,26 @@ class ReaderRecoveryGate {
         return readers;
     }
 
+    void startReaderRegistration(int readerId) {
+        readersAwaitingSplitReconciliation.add(readerId);
+    }
+
+    void completeReaderRegistration(int readerId) {
+        readersAwaitingSplitReconciliation.remove(readerId);
+    }
+
+    boolean isReaderReadyForAssignment(int readerId) {
+        return !initialReaderRegistrationPending
+                && !readersAwaitingSplitReconciliation.contains(readerId);
+    }
+
+    boolean isReconciliationPending() {
+        return initialReaderRegistrationPending || !readersAwaitingSplitReconciliation.isEmpty();
+    }
+
     void markInitialRegistrationComplete() {
         initialReaderRegistrationPending = false;
+        readersAwaitingSplitReconciliation.clear();
     }
 
     boolean hasReportedSplits() {
@@ -120,8 +127,7 @@ class ReaderRecoveryGate {
     /**
      * Returns the reported splits ordered by reader id and clears the pending state.
      *
-     * <p>Note: the pending state is cleared eagerly, so the gate must not be consulted for pending
-     * reported splits while reassigning (e.g. from {@code handleNoMoreSplits}).
+     * <p>The initial registration gate remains closed while these reports are reassigned.
      */
     NavigableMap<Integer, List<DynamicKafkaSourceSplit>> drainReportedSplits() {
         NavigableMap<Integer, List<DynamicKafkaSourceSplit>> reportedSplitsByReader =
