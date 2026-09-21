@@ -39,6 +39,7 @@ import java.util.Collections;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
@@ -243,6 +244,36 @@ class KafkaCommitterTest {
         }
     }
 
+    @Test
+    public void testPreparedCommittableUsesPreparedRecovery()
+            throws IOException, InterruptedException {
+        Properties properties = getProperties();
+        AtomicReference<PreparedMockProducer> createdProducer = new AtomicReference<>();
+        BiFunction<Properties, String, FlinkKafkaInternalProducer<?, ?>> preparedFactory =
+                (props, transactionalId) -> {
+                    PreparedMockProducer producer = new PreparedMockProducer(props);
+                    createdProducer.set(producer);
+                    return producer;
+                };
+        try (final KafkaCommitter committer =
+                        new KafkaCommitter(
+                                properties, TRANS_ID, SUB_ID, ATTEMPT, false, preparedFactory);
+                ReadableBackchannel<TransactionFinished> backchannel =
+                        BackchannelFactory.getInstance()
+                                .getReadableBackchannel(SUB_ID, ATTEMPT, TRANS_ID)) {
+            final MockCommitRequest<KafkaCommittable> request =
+                    new MockCommitRequest<>(
+                            new KafkaCommittable(
+                                    PRODUCER_ID, EPOCH, TRANS_ID, "100:0", null));
+
+            committer.commit(Collections.singletonList(request));
+
+            assertThat(createdProducer.get().completedPreparedTransactionState).isEqualTo("100:0");
+            assertThat(createdProducer.get().resumed).isFalse();
+            assertThat(backchannel).has(transactionFinished(true));
+        }
+    }
+
     private Condition<? super ReadableBackchannel<TransactionFinished>> transactionFinished(
             boolean success) {
         return new Condition<>(
@@ -280,5 +311,25 @@ class KafkaCommitterTest {
 
         @Override
         public void flush() {}
+    }
+
+    private static class PreparedMockProducer extends MockProducer {
+
+        private String completedPreparedTransactionState;
+        private boolean resumed;
+
+        public PreparedMockProducer(Properties properties) {
+            super(properties, null);
+        }
+
+        @Override
+        public void completePreparedTransaction(String preparedTransactionState) {
+            completedPreparedTransactionState = preparedTransactionState;
+        }
+
+        @Override
+        public void resumeTransaction(long producerId, short epoch) {
+            resumed = true;
+        }
     }
 }

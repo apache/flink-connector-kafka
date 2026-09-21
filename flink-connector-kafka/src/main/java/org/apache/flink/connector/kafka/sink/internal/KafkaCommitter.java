@@ -99,8 +99,20 @@ public class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
             Optional<FlinkKafkaInternalProducer<?, ?>> writerProducer = committable.getProducer();
             FlinkKafkaInternalProducer<?, ?> producer = null;
             try {
-                producer = writerProducer.orElseGet(() -> getProducer(committable));
-                producer.commitTransaction();
+                Optional<String> preparedTransactionState =
+                        committable.getPreparedTransactionState();
+                if (writerProducer.isPresent()) {
+                    producer = writerProducer.get();
+                } else if (preparedTransactionState.isPresent()) {
+                    producer = getProducer(committable.getTransactionalId());
+                } else {
+                    producer = getProducer(committable);
+                }
+                if (preparedTransactionState.isPresent()) {
+                    producer.completePreparedTransaction(preparedTransactionState.get());
+                } else {
+                    producer.commitTransaction();
+                }
                 backchannel.send(TransactionFinished.successful(committable.getTransactionalId()));
             } catch (RetriableException e) {
                 LOG.warn(
@@ -213,13 +225,17 @@ public class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
      * was serialized into {@link KafkaCommittable}.
      */
     private FlinkKafkaInternalProducer<?, ?> getProducer(KafkaCommittable committable) {
+        FlinkKafkaInternalProducer<?, ?> producer = getProducer(committable.getTransactionalId());
+        producer.resumeTransaction(committable.getProducerId(), committable.getEpoch());
+        return producer;
+    }
+
+    private FlinkKafkaInternalProducer<?, ?> getProducer(String transactionalId) {
         if (committingProducer == null) {
-            committingProducer =
-                    producerFactory.apply(kafkaProducerConfig, committable.getTransactionalId());
+            committingProducer = producerFactory.apply(kafkaProducerConfig, transactionalId);
         } else {
-            committingProducer.setTransactionId(committable.getTransactionalId());
+            committingProducer.setTransactionId(transactionalId);
         }
-        committingProducer.resumeTransaction(committable.getProducerId(), committable.getEpoch());
         return committingProducer;
     }
 }

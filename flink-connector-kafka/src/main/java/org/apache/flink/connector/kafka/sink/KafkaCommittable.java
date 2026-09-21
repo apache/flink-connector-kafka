@@ -36,6 +36,7 @@ public class KafkaCommittable {
     private final long producerId;
     private final short epoch;
     private final String transactionalId;
+    @Nullable private final String preparedTransactionState;
     @Nullable private FlinkKafkaInternalProducer<?, ?> producer;
 
     public KafkaCommittable(
@@ -43,9 +44,19 @@ public class KafkaCommittable {
             short epoch,
             String transactionalId,
             @Nullable FlinkKafkaInternalProducer<?, ?> producer) {
+        this(producerId, epoch, transactionalId, null, producer);
+    }
+
+    public KafkaCommittable(
+            long producerId,
+            short epoch,
+            String transactionalId,
+            @Nullable String preparedTransactionState,
+            @Nullable FlinkKafkaInternalProducer<?, ?> producer) {
         this.producerId = producerId;
         this.epoch = epoch;
         this.transactionalId = transactionalId;
+        this.preparedTransactionState = preparedTransactionState;
         this.producer = producer;
     }
 
@@ -54,6 +65,16 @@ public class KafkaCommittable {
                 producer.getProducerId(),
                 producer.getEpoch(),
                 producer.getTransactionalId(),
+                producer);
+    }
+
+    public static <K, V> KafkaCommittable prepared(
+            FlinkKafkaInternalProducer<K, V> producer, String preparedTransactionState) {
+        return new KafkaCommittable(
+                producer.getProducerId(),
+                producer.getEpoch(),
+                producer.getTransactionalId(),
+                preparedTransactionState,
                 producer);
     }
 
@@ -67,6 +88,10 @@ public class KafkaCommittable {
 
     public String getTransactionalId() {
         return transactionalId;
+    }
+
+    public Optional<String> getPreparedTransactionState() {
+        return Optional.ofNullable(preparedTransactionState);
     }
 
     public Optional<FlinkKafkaInternalProducer<?, ?>> getProducer() {
@@ -83,6 +108,8 @@ public class KafkaCommittable {
                 + ", transactionalId='"
                 + transactionalId
                 + '\''
+                + ", preparedTransactionState="
+                + preparedTransactionState
                 + ", producer="
                 + producer
                 + '}';
@@ -99,11 +126,12 @@ public class KafkaCommittable {
         KafkaCommittable that = (KafkaCommittable) o;
         return producerId == that.producerId
                 && epoch == that.epoch
-                && transactionalId.equals(that.transactionalId);
+                && transactionalId.equals(that.transactionalId)
+                && Objects.equals(preparedTransactionState, that.preparedTransactionState);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(producerId, epoch, transactionalId);
+        return Objects.hash(producerId, epoch, transactionalId, preparedTransactionState);
     }
 }
