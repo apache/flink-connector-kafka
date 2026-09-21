@@ -642,4 +642,39 @@ under the License.
 			</plugin>
 		</plugins>
 	</build>
+
+	<profiles>
+		<profile>
+			<!-- Mirrors the activation of the release profile in flink-connector-parent,
+			which is activated by the property rather than by -P. -->
+			<id>release</id>
+			<activation>
+				<property>
+					<name>release</name>
+				</property>
+			</activation>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-enforcer-plugin</artifactId>
+						<executions>
+							<execution>
+								<id>enforce-maven</id>
+								<configuration>
+									<rules>
+										<requireMavenVersion>
+											<!-- Releases must use the Maven version from
+											.mvn/wrapper/maven-wrapper.properties -->
+											<version>[3.9.16]</version>
+										</requireMavenVersion>
+									</rules>
+								</configuration>
+							</execution>
+						</executions>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
 </project>
