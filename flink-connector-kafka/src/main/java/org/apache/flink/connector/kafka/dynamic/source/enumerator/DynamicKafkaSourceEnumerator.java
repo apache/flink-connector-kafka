@@ -97,6 +97,8 @@ public class DynamicKafkaSourceEnumerator
     private Map<String, Set<String>> latestClusterTopicsMap;
     private Set<KafkaStream> latestKafkaStreams;
     private boolean firstDiscoveryComplete;
+    private final Set<Integer> readersWithNoMoreSplits = new HashSet<>();
+    private boolean splitAssignmentInProgress;
 
     public DynamicKafkaSourceEnumerator(
             KafkaStreamSubscriber kafkaStreamSubscriber,
@@ -238,6 +240,10 @@ public class DynamicKafkaSourceEnumerator
     }
 
     private void handleNoMoreSplits() {
+        // A cluster callback may run before other clusters have assigned their splits.
+        if (splitAssignmentInProgress) {
+            return;
+        }
         if (Boundedness.BOUNDED.equals(boundedness)) {
             boolean allEnumeratorsHaveSignalledNoMoreSplits = true;
             for (StoppableKafkaEnumContextProxy context : clusterEnumContextMap.values()) {
@@ -246,10 +252,12 @@ public class DynamicKafkaSourceEnumerator
             }
 
             if (firstDiscoveryComplete && allEnumeratorsHaveSignalledNoMoreSplits) {
-                logger.info(
-                        "Signal no more splits to all readers: {}",
-                        enumContext.registeredReaders().keySet());
-                enumContext.registeredReaders().keySet().forEach(enumContext::signalNoMoreSplits);
+                for (int readerId : enumContext.registeredReaders().keySet()) {
+                    if (readersWithNoMoreSplits.add(readerId)) {
+                        logger.info("Signal no more splits to reader {}", readerId);
+                        enumContext.signalNoMoreSplits(readerId);
+                    }
+                }
             } else {
                 logger.info("Not ready to notify no more splits to readers.");
             }
@@ -515,30 +523,35 @@ public class DynamicKafkaSourceEnumerator
     @Override
     public void addSplitsBack(List<DynamicKafkaSourceSplit> splits, int subtaskId) {
         logger.debug("Adding splits back for {}", subtaskId);
-        splitAssignmentStrategy.onSplitsBack(splits, subtaskId);
+        runWithSplitAssignmentInProgress(
+                () -> {
+                    splitAssignmentStrategy.onSplitsBack(splits, subtaskId);
 
-        // separate splits by cluster
-        Map<String, List<KafkaPartitionSplit>> kafkaPartitionSplits = new HashMap<>();
-        for (DynamicKafkaSourceSplit split : splits) {
-            kafkaPartitionSplits
-                    .computeIfAbsent(split.getKafkaClusterId(), unused -> new ArrayList<>())
-                    .add(split.getKafkaPartitionSplit());
-        }
+                    // separate splits by cluster
+                    Map<String, List<KafkaPartitionSplit>> kafkaPartitionSplits = new HashMap<>();
+                    for (DynamicKafkaSourceSplit split : splits) {
+                        kafkaPartitionSplits
+                                .computeIfAbsent(
+                                        split.getKafkaClusterId(), unused -> new ArrayList<>())
+                                .add(split.getKafkaPartitionSplit());
+                    }
 
-        // add splits back and assign pending splits for all enumerators
-        for (String kafkaClusterId : kafkaPartitionSplits.keySet()) {
-            if (clusterEnumeratorMap.containsKey(kafkaClusterId)) {
-                clusterEnumeratorMap
-                        .get(kafkaClusterId)
-                        .addSplitsBack(kafkaPartitionSplits.get(kafkaClusterId), subtaskId);
-            } else {
-                logger.warn(
-                        "Split refers to inactive cluster {} with current clusters being {}",
-                        kafkaClusterId,
-                        clusterEnumeratorMap.keySet());
-            }
-        }
-
+                    // add splits back and assign pending splits for all enumerators
+                    for (String kafkaClusterId : kafkaPartitionSplits.keySet()) {
+                        if (clusterEnumeratorMap.containsKey(kafkaClusterId)) {
+                            clusterEnumeratorMap
+                                    .get(kafkaClusterId)
+                                    .addSplitsBack(
+                                            kafkaPartitionSplits.get(kafkaClusterId), subtaskId);
+                        } else {
+                            logger.warn(
+                                    "Split refers to inactive cluster {} with current clusters"
+                                            + " being {}",
+                                    kafkaClusterId,
+                                    clusterEnumeratorMap.keySet());
+                        }
+                    }
+                });
         handleNoMoreSplits();
     }
 
@@ -546,12 +559,25 @@ public class DynamicKafkaSourceEnumerator
     @Override
     public void addReader(int subtaskId) {
         logger.debug("Adding reader {}", subtaskId);
-        splitAssignmentStrategy.onReaderAdded(subtaskId);
+        readersWithNoMoreSplits.remove(subtaskId);
+        runWithSplitAssignmentInProgress(
+                () -> {
+                    splitAssignmentStrategy.onReaderAdded(subtaskId);
 
-        // assign pending splits from the sub enumerator
-        clusterEnumeratorMap.forEach(
-                (cluster, subEnumerator) -> subEnumerator.addReader(subtaskId));
+                    // assign pending splits from the sub enumerator
+                    clusterEnumeratorMap.forEach(
+                            (cluster, subEnumerator) -> subEnumerator.addReader(subtaskId));
+                });
         handleNoMoreSplits();
+    }
+
+    private void runWithSplitAssignmentInProgress(Runnable assignment) {
+        splitAssignmentInProgress = true;
+        try {
+            assignment.run();
+        } finally {
+            splitAssignmentInProgress = false;
+        }
     }
 
     /**
