@@ -366,7 +366,10 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
             String transactionalId = committable.getTransactionalId();
             try (FlinkKafkaInternalProducer<byte[], byte[]> producer =
                     new FlinkKafkaInternalProducer<>(properties, transactionalId)) {
-                producer.resumeTransaction(committable.getProducerId(), committable.getEpoch());
+                producer.resumeTransaction(
+                        committable.getProducerId(),
+                        committable.getEpoch(),
+                        committable.getTransactionV2Enabled());
                 producer.commitTransaction();
             }
 
