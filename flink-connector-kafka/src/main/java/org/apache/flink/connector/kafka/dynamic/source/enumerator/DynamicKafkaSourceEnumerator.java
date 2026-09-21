@@ -96,6 +96,8 @@ public class DynamicKafkaSourceEnumerator
     private Map<String, Set<String>> latestClusterTopicsMap;
     private Set<KafkaStream> latestKafkaStreams;
     private boolean firstDiscoveryComplete;
+    private final Set<Integer> readersWithNoMoreSplits = new HashSet<>();
+    private boolean splitAssignmentInProgress;
 
     public DynamicKafkaSourceEnumerator(
             KafkaStreamSubscriber kafkaStreamSubscriber,
@@ -212,6 +214,10 @@ public class DynamicKafkaSourceEnumerator
     }
 
     private void handleNoMoreSplits() {
+        // A cluster callback may run before other clusters have assigned their splits.
+        if (splitAssignmentInProgress) {
+            return;
+        }
         if (Boundedness.BOUNDED.equals(boundedness)) {
             boolean allEnumeratorsHaveSignalledNoMoreSplits = true;
             for (StoppableKafkaEnumContextProxy context : clusterEnumContextMap.values()) {
@@ -220,10 +226,12 @@ public class DynamicKafkaSourceEnumerator
             }
 
             if (firstDiscoveryComplete && allEnumeratorsHaveSignalledNoMoreSplits) {
-                logger.info(
-                        "Signal no more splits to all readers: {}",
-                        enumContext.registeredReaders().keySet());
-                enumContext.registeredReaders().keySet().forEach(enumContext::signalNoMoreSplits);
+                for (int readerId : enumContext.registeredReaders().keySet()) {
+                    if (readersWithNoMoreSplits.add(readerId)) {
+                        logger.info("Signal no more splits to reader {}", readerId);
+                        enumContext.signalNoMoreSplits(readerId);
+                    }
+                }
             } else {
                 logger.info("Not ready to notify no more splits to readers.");
             }
@@ -456,18 +464,22 @@ public class DynamicKafkaSourceEnumerator
         }
 
         // add splits back and assign pending splits for all enumerators
-        for (String kafkaClusterId : kafkaPartitionSplits.keySet()) {
-            if (clusterEnumeratorMap.containsKey(kafkaClusterId)) {
-                clusterEnumeratorMap
-                        .get(kafkaClusterId)
-                        .addSplitsBack(kafkaPartitionSplits.get(kafkaClusterId), subtaskId);
-            } else {
-                logger.warn(
-                        "Split refers to inactive cluster {} with current clusters being {}",
-                        kafkaClusterId,
-                        clusterEnumeratorMap.keySet());
-            }
-        }
+        runWithSplitAssignmentInProgress(
+                () -> {
+                    for (String kafkaClusterId : kafkaPartitionSplits.keySet()) {
+                        if (clusterEnumeratorMap.containsKey(kafkaClusterId)) {
+                            clusterEnumeratorMap
+                                    .get(kafkaClusterId)
+                                    .addSplitsBack(
+                                            kafkaPartitionSplits.get(kafkaClusterId), subtaskId);
+                        } else {
+                            logger.warn(
+                                    "Split refers to inactive cluster {} with current clusters being {}",
+                                    kafkaClusterId,
+                                    clusterEnumeratorMap.keySet());
+                        }
+                    }
+                });
 
         handleNoMoreSplits();
     }
@@ -476,10 +488,22 @@ public class DynamicKafkaSourceEnumerator
     @Override
     public void addReader(int subtaskId) {
         logger.debug("Adding reader {}", subtaskId);
+        readersWithNoMoreSplits.remove(subtaskId);
         // assign pending splits from the sub enumerator
-        clusterEnumeratorMap.forEach(
-                (cluster, subEnumerator) -> subEnumerator.addReader(subtaskId));
+        runWithSplitAssignmentInProgress(
+                () ->
+                        clusterEnumeratorMap.forEach(
+                                (cluster, subEnumerator) -> subEnumerator.addReader(subtaskId)));
         handleNoMoreSplits();
+    }
+
+    private void runWithSplitAssignmentInProgress(Runnable assignment) {
+        splitAssignmentInProgress = true;
+        try {
+            assignment.run();
+        } finally {
+            splitAssignmentInProgress = false;
+        }
     }
 
     /**
