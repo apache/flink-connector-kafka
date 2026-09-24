@@ -139,6 +139,26 @@ DynamicKafkaSource<String> source =
         .build();
 ```
 {{< /tab >}}
+{{< tab "Python" >}}
+```python
+starting_offsets = KafkaOffsetsInitializer.offsets({
+    KafkaTopicPartition("input-stream", 0): 100,
+    KafkaTopicPartition("input-stream", 1): 200,
+})
+
+metadata_service = SingleClusterTopicMetadataService(
+    "cluster-a",
+    {"bootstrap.servers": "localhost:9092"},
+    starting_offsets_initializer=starting_offsets)
+
+source = DynamicKafkaSource.builder() \
+    .set_kafka_metadata_service(metadata_service) \
+    .set_stream_ids({"input-stream"}) \
+    .set_starting_offsets(KafkaOffsetsInitializer.latest()) \
+    .set_value_only_deserializer(SimpleStringSchema()) \
+    .build()
+```
+{{< /tab >}}
 {{< /tabs >}}
 
 ### Watermark 对齐
@@ -197,9 +217,9 @@ Dynamic Kafka Source 支持两种 split 分配模式：
 在 `global` 模式下，均衡策略是**前向增量（forward-only）**的：新发现 split 会尽量保证后续分配均衡，
 但不会仅为重平衡主动迁移已分配且仍在消费的 active split。
 
-如果因为缩容/移除导致 global 分配出现倾斜，enumerator 不会自行重排已在运行的 split。
-如需对已有 ownership 做重平衡，可通过并行度变化后的恢复流程（例如 savepoint/checkpoint + rescale restore），
-让 Flink Runtime 对 source reader 的 operator state 进行重分区。
+如果因为缩容/移除导致 global 分配出现倾斜，恢复流程会将恢复出的 active split
+重新分配到可用 reader，无需改变并行度。仅为保留 offset 而保存的已移除 split
+不会参与 active 重平衡，在重新激活或过期前仍保留在原 reader 上。
 
 {{< tabs "DynamicKafkaSourceEnumeratorMode" >}}
 {{< tab "Java" >}}
@@ -229,6 +249,11 @@ swap from one cluster to the new cluster when the service makes that change in t
 
 Cluster metadata 可以包含每个集群的起始/停止 offsets initializer，用于覆盖全局 builder 配置。
 
+默认情况下，从 metadata 中移除集群后，后续 checkpoint 也会移除该集群的 split offset。
+如果希望在之后重新加入集群或恢复作业时继续使用这些 offset，请将
+`stream-metadata-removed-cluster-retention-ms` 设置为正数。例如，`604800000`
+会将已移除集群的状态保留七天，之后 source 将不再把它写入 checkpoint。
+
 ### Additional Properties
 There are configuration options in DynamicKafkaSourceOptions that can be configured in the properties through the builder:
 <table class="table table-bordered">
@@ -255,6 +280,13 @@ There are configuration options in DynamicKafkaSourceOptions that can be configu
       <td style="word-wrap: break-word;">1</td>
       <td>Integer</td>
       <td>The number of consecutive failures before letting the exception from Kafka metadata service discovery trigger jobmanager failure and global failover. The default is one to at least catch startup failures.</td>
+    </tr>
+    <tr>
+      <td><h5>stream-metadata-removed-cluster-retention-ms</h5></td>
+      <td>required</td>
+      <td style="word-wrap: break-word;">0</td>
+      <td>Long</td>
+      <td>已移除 Kafka 集群的 split offset 和 enumerator 状态继续写入 checkpoint 的时长，单位为毫秒。零值会禁用保留。</td>
     </tr>
     <tr>
       <td><h5>stream-enumerator-mode</h5></td>
@@ -284,7 +316,7 @@ a list of applicable properties.
   </thead>
   <tbody>
     <tr>
-        <th rowspan="8">Operator</th>
+        <th rowspan="6">Operator</th>
         <td>currentEmitEventTimeLag</td>
         <td>n/a</td>
         <td>The time span from the record event timestamp to the time the record is emitted by the source connector¹: <code>currentEmitEventTimeLag = EmitTime - EventTime.</code></td>
@@ -312,6 +344,12 @@ a list of applicable properties.
       <td>kafkaClustersCount</td>
       <td>n/a</td>
       <td>The total number of Kafka clusters read by this reader.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>activeSplitCount</td>
+      <td>n/a</td>
+      <td>当前分配给此 source reader 的活跃 split 数。该 gauge 在 reader 的整个生命周期内保持注册；当元数据移除所有本地 split 后会报告 <code>0</code>。为已移除集群保留的 checkpoint offset 不计入其中。</td>
       <td>Gauge</td>
     </tr>
   </tbody>

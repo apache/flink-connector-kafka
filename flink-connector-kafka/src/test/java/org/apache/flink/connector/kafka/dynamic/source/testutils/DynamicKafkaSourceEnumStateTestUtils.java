@@ -18,6 +18,7 @@
 
 package org.apache.flink.connector.kafka.dynamic.source.testutils;
 
+import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumStateSerializer;
 
 import java.io.ByteArrayOutputStream;
@@ -49,5 +50,68 @@ public final class DynamicKafkaSourceEnumStateTestUtils {
             out.writeInt(0);
             return baos.toByteArray();
         }
+    }
+
+    public static byte[] serializeV2State(
+            String streamId,
+            String clusterId,
+            Set<String> topics,
+            String bootstrapServers,
+            KafkaSourceEnumState clusterState)
+            throws IOException {
+        KafkaSourceEnumStateSerializer kafkaSourceEnumStateSerializer =
+                new KafkaSourceEnumStateSerializer();
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                DataOutputStream out = new DataOutputStream(baos)) {
+            // kafka streams in the V2 layout
+            out.writeInt(1);
+            out.writeUTF(streamId);
+            out.writeInt(1);
+            out.writeUTF(clusterId);
+            out.writeInt(topics.size());
+            for (String topic : topics) {
+                out.writeUTF(topic);
+            }
+            out.writeUTF(bootstrapServers);
+            out.writeBoolean(false); // no starting offsets initializer
+            out.writeBoolean(false); // no stopping offsets initializer
+            out.writeInt(kafkaSourceEnumStateSerializer.getVersion());
+            // cluster enumerator states
+            out.writeInt(1);
+            out.writeUTF(clusterId);
+            writeLengthPrefixed(kafkaSourceEnumStateSerializer.serialize(clusterState), out);
+            return baos.toByteArray();
+        }
+    }
+
+    public static byte[] serializeV3State(
+            String streamId,
+            String clusterId,
+            Set<String> topics,
+            String bootstrapServers,
+            KafkaSourceEnumState clusterState,
+            String retainedClusterId,
+            long retainedUntilMs,
+            KafkaSourceEnumState retainedClusterState)
+            throws IOException {
+        KafkaSourceEnumStateSerializer kafkaSourceEnumStateSerializer =
+                new KafkaSourceEnumStateSerializer();
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                DataOutputStream out = new DataOutputStream(baos)) {
+            out.write(
+                    serializeV2State(streamId, clusterId, topics, bootstrapServers, clusterState));
+            // retained cluster enumerator states (new in V3)
+            out.writeInt(1);
+            out.writeUTF(retainedClusterId);
+            out.writeLong(retainedUntilMs);
+            writeLengthPrefixed(
+                    kafkaSourceEnumStateSerializer.serialize(retainedClusterState), out);
+            return baos.toByteArray();
+        }
+    }
+
+    private static void writeLengthPrefixed(byte[] bytes, DataOutputStream out) throws IOException {
+        out.writeInt(bytes.length);
+        out.write(bytes);
     }
 }

@@ -122,6 +122,7 @@ public class DynamicKafkaTableFactory implements DynamicTableSourceFactory {
         options.add(SCAN_PARALLELISM);
         options.add(DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS);
         options.add(DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_FAILURE_THRESHOLD);
+        options.add(DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS);
         options.add(DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE);
         return options;
     }
@@ -217,6 +218,15 @@ public class DynamicKafkaTableFactory implements DynamicTableSourceFactory {
                                                 .STREAM_METADATA_DISCOVERY_FAILURE_THRESHOLD
                                                 .key(),
                                         Integer.toString(value)));
+        tableOptions
+                .getOptional(DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS)
+                .ifPresent(
+                        value ->
+                                properties.setProperty(
+                                        DynamicKafkaSourceOptions
+                                                .STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS
+                                                .key(),
+                                        Long.toString(value)));
         tableOptions
                 .getOptional(DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE)
                 .ifPresent(

@@ -22,7 +22,9 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -38,16 +40,34 @@ public class KafkaSourceEnumState {
      */
     private final boolean initialDiscoveryFinished;
 
+    private final Map<String, String> trackedTopicIdsByName;
+
     public KafkaSourceEnumState(
             Set<SplitAndAssignmentStatus> splits, boolean initialDiscoveryFinished) {
+        this(splits, initialDiscoveryFinished, Collections.emptyMap());
+    }
+
+    public KafkaSourceEnumState(
+            Set<SplitAndAssignmentStatus> splits,
+            boolean initialDiscoveryFinished,
+            Map<String, String> trackedTopicIdsByName) {
         this.splits = splits;
         this.initialDiscoveryFinished = initialDiscoveryFinished;
+        this.trackedTopicIdsByName = trackedTopicIdsByName;
     }
 
     public KafkaSourceEnumState(
             Collection<KafkaPartitionSplit> assignedSplits,
             Collection<KafkaPartitionSplit> unassignedSplits,
             boolean initialDiscoveryFinished) {
+        this(assignedSplits, unassignedSplits, initialDiscoveryFinished, Collections.emptyMap());
+    }
+
+    public KafkaSourceEnumState(
+            Collection<KafkaPartitionSplit> assignedSplits,
+            Collection<KafkaPartitionSplit> unassignedSplits,
+            boolean initialDiscoveryFinished,
+            Map<String, String> trackedTopicIdsByName) {
         this.splits = new HashSet<>();
         splits.addAll(
                 assignedSplits.stream()
@@ -64,6 +84,7 @@ public class KafkaSourceEnumState {
                                                 topicPartition, AssignmentStatus.UNASSIGNED))
                         .collect(Collectors.toSet()));
         this.initialDiscoveryFinished = initialDiscoveryFinished;
+        this.trackedTopicIdsByName = trackedTopicIdsByName;
     }
 
     public Set<SplitAndAssignmentStatus> splits() {
@@ -80,6 +101,10 @@ public class KafkaSourceEnumState {
 
     public boolean initialDiscoveryFinished() {
         return initialDiscoveryFinished;
+    }
+
+    public Map<String, String> trackedTopicIdsByName() {
+        return trackedTopicIdsByName;
     }
 
     private Collection<KafkaPartitionSplit> filterByAssignmentStatus(

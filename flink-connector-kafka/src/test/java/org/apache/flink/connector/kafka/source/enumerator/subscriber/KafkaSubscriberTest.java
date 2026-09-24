@@ -20,9 +20,14 @@ package org.apache.flink.connector.kafka.source.enumerator.subscriber;
 
 import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetIdentifier;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifierProvider;
+import org.apache.flink.connector.kafka.source.enumerator.metadata.TopicIntegrityException;
+import org.apache.flink.connector.kafka.source.enumerator.metadata.TopicIntegrityProvider;
+import org.apache.flink.connector.kafka.source.enumerator.metadata.TopicMetadataSettable;
 import org.apache.flink.connector.kafka.testutils.KafkaSourceTestEnv;
 
 import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.TopicDescription;
+import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.junit.jupiter.api.AfterAll;
@@ -32,9 +37,11 @@ import org.junit.jupiter.api.parallel.ResourceLock;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.regex.Pattern;
 
 import static org.apache.flink.core.testutils.FlinkAssertions.anyCauseMatches;
@@ -46,6 +53,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class KafkaSubscriberTest {
     private static final String TOPIC1 = "topic1";
     private static final String TOPIC2 = "pattern-topic";
+    private static final String TOPIC3 = "topic3";
+    private static final List<String> TOPICS = Arrays.asList(TOPIC1, TOPIC3);
     private static final TopicPartition NON_EXISTING_TOPIC = new TopicPartition("removed", 0);
     private static AdminClient adminClient;
 
@@ -54,6 +63,7 @@ class KafkaSubscriberTest {
         KafkaSourceTestEnv.setup();
         KafkaSourceTestEnv.createTestTopic(TOPIC1);
         KafkaSourceTestEnv.createTestTopic(TOPIC2);
+        KafkaSourceTestEnv.createTestTopic(TOPIC3);
         adminClient = KafkaSourceTestEnv.getAdminClient();
     }
 
@@ -91,6 +101,69 @@ class KafkaSubscriberTest {
     }
 
     @Test
+    void testNonExistingTopicWithTopicIntegrity() {
+        final KafkaSubscriber subscriber =
+                KafkaSubscriber.getTopicListSubscriber(
+                        Collections.singletonList(NON_EXISTING_TOPIC.topic()));
+        enableTopicIntegrityCheck(subscriber);
+        assertThatThrownBy(() -> subscriber.getSubscribedTopicPartitions(adminClient))
+                .isInstanceOf(TopicIntegrityException.class)
+                .hasMessage("Topic " + NON_EXISTING_TOPIC.topic() + " is missing");
+    }
+
+    private static void enableTopicIntegrityCheck(KafkaSubscriber subscriber) {
+        ((TopicMetadataSettable) subscriber)
+                .setTopicMetadataProvider(new TopicIntegrityProvider(new HashMap<>()));
+    }
+
+    static String getTopicId(String topicName, AdminClient adminClient)
+            throws ExecutionException, InterruptedException {
+        KafkaFuture<TopicDescription> topicDescriptionFuture =
+                adminClient
+                        .describeTopics(Arrays.asList(topicName))
+                        .topicNameValues()
+                        .get(topicName);
+        return topicDescriptionFuture.get().topicId().toString();
+    }
+
+    public void testSubscriberWithCheckTopicIntegrityEnabled(KafkaSubscriber subscriber)
+            throws Throwable {
+        enableTopicIntegrityCheck(subscriber);
+        final Set<TopicPartition> subscribedPartitions =
+                subscriber.getSubscribedTopicPartitions(adminClient);
+        final Set<TopicPartition> expectedSubscribedPartitions =
+                new HashSet<>(KafkaSourceTestEnv.getPartitionsForTopics(TOPICS));
+        assertThat(subscribedPartitions).isEqualTo(expectedSubscribedPartitions);
+
+        // Recreate the environment to simulate topic recreation
+        // (simple recreation won't do because topics are only marked for deletion)
+        tearDown();
+        setup();
+        assertThatThrownBy(() -> subscriber.getSubscribedTopicPartitions(adminClient))
+                .isInstanceOf(TopicIntegrityException.class)
+                .hasMessageMatching("Topic (" + String.join("|", TOPICS) + ") was recreated");
+    }
+
+    @Test
+    public void testTopicSubscriberWithCheckTopicIntegrityEnabled() throws Throwable {
+        testSubscriberWithCheckTopicIntegrityEnabled(
+                KafkaSubscriber.getTopicListSubscriber(TOPICS));
+    }
+
+    @Test
+    public void testPatternSubscriberWithCheckTopicIntegrityEnabled() throws Throwable {
+        testSubscriberWithCheckTopicIntegrityEnabled(
+                KafkaSubscriber.getTopicPatternSubscriber(Pattern.compile("topic.*")));
+    }
+
+    @Test
+    public void testPartitionSubscriberWithCheckTopicIntegrityEnabled() throws Throwable {
+        testSubscriberWithCheckTopicIntegrityEnabled(
+                KafkaSubscriber.getPartitionSetSubscriber(
+                        new HashSet<>(KafkaSourceTestEnv.getPartitionsForTopics(TOPICS))));
+    }
+
+    @Test
     void testTopicPatternSubscriber() {
         Pattern pattern = Pattern.compile("pattern.*");
         KafkaSubscriber subscriber = KafkaSubscriber.getTopicPatternSubscriber(pattern);
@@ -114,10 +187,10 @@ class KafkaSubscriberTest {
         partitions.remove(new TopicPartition(TOPIC1, 1));
 
         KafkaSubscriber subscriber = KafkaSubscriber.getPartitionSetSubscriber(partitions);
+        enableTopicIntegrityCheck(subscriber);
 
         final Set<TopicPartition> subscribedPartitions =
                 subscriber.getSubscribedTopicPartitions(adminClient);
-
         assertThat(subscribedPartitions).isEqualTo(partitions);
         assertThat(((KafkaDatasetIdentifierProvider) subscriber).getDatasetIdentifier().get())
                 .isEqualTo(DefaultKafkaDatasetIdentifier.ofTopics(topics));
@@ -129,6 +202,7 @@ class KafkaSubscriberTest {
         final KafkaSubscriber subscriber =
                 KafkaSubscriber.getPartitionSetSubscriber(
                         Collections.singleton(nonExistingPartition));
+        enableTopicIntegrityCheck(subscriber);
 
         assertThatThrownBy(() -> subscriber.getSubscribedTopicPartitions(adminClient))
                 .isInstanceOf(RuntimeException.class)

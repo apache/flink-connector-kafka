@@ -29,7 +29,6 @@ import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsResult;
-import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.admin.RecordsToDelete;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.clients.admin.TopicListing;
@@ -63,7 +62,6 @@ abstract class KafkaTableTestBase extends AbstractTestBase {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaTableTestBase.class);
 
     private static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
-    private static final int zkTimeoutMills = 30000;
 
     @Container
     public static final TestKafkaContainer KAFKA_CONTAINER =
@@ -115,8 +113,6 @@ abstract class KafkaTableTestBase extends AbstractTestBase {
         standardProps.put("enable.auto.commit", false);
         standardProps.put("auto.offset.reset", "earliest");
         standardProps.put("max.partition.fetch.bytes", 256);
-        standardProps.put("zookeeper.session.timeout.ms", zkTimeoutMills);
-        standardProps.put("zookeeper.connection.timeout.ms", zkTimeoutMills);
         return standardProps;
     }
 
@@ -125,21 +121,10 @@ abstract class KafkaTableTestBase extends AbstractTestBase {
     }
 
     public void createTestTopic(String topic, int numPartitions, int replicationFactor) {
-        Map<String, Object> properties = new HashMap<>();
+        Properties properties = new Properties();
         properties.put(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, getBootstrapServers());
-        try (AdminClient admin = AdminClient.create(properties)) {
-            admin.createTopics(
-                            Collections.singletonList(
-                                    new NewTopic(topic, numPartitions, (short) replicationFactor)))
-                    .all()
-                    .get();
-        } catch (Exception e) {
-            throw new IllegalStateException(
-                    String.format(
-                            "Fail to create topic [%s partitions: %d replication factor: %d].",
-                            topic, numPartitions, replicationFactor),
-                    e);
-        }
+        KafkaUtil.createNewTopicAndWaitForPartitionAssignment(
+                topic, numPartitions, replicationFactor, properties);
     }
 
     public Map<TopicPartition, OffsetAndMetadata> getConsumerOffset(String groupId) {

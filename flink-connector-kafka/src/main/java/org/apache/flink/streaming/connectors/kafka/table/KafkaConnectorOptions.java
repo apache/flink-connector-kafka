@@ -314,7 +314,7 @@ public class KafkaConnectorOptions {
         GROUP_OFFSETS(
                 "group-offsets",
                 text(
-                        "Start from committed offsets in ZooKeeper / Kafka brokers of a specific consumer group.")),
+                        "Start from committed offsets in Kafka brokers of a specific consumer group.")),
         TIMESTAMP("timestamp", text("Start from user-supplied timestamp for each partition.")),
         SPECIFIC_OFFSETS(
                 "specific-offsets",
@@ -350,7 +350,7 @@ public class KafkaConnectorOptions {
         GROUP_OFFSETS(
                 "group-offsets",
                 text(
-                        "Bounded by committed offsets in ZooKeeper / Kafka brokers of a specific"
+                        "Bounded by committed offsets in Kafka brokers of a specific"
                                 + " consumer group. This is evaluated at the start of consumption"
                                 + " from a given partition.")),
         TIMESTAMP("timestamp", text("Bounded by a user-supplied timestamp.")),

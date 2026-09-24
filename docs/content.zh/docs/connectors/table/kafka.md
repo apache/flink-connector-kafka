@@ -223,7 +223,7 @@ CREATE TABLE KafkaTable (
       <td style="word-wrap: break-word;">（无）</td>
       <td>String</td>
       <td>
-         可以设置和传递任意 Kafka 的配置项。后缀名必须匹配在 <a href="https://kafka.apache.org/documentation/#configuration">Kafka 配置文档</a> 中定义的配置键。Flink 将移除 "properties." 配置键前缀并将变换后的配置键和值传入底层的 Kafka 客户端。例如，你可以通过 <code>'properties.allow.auto.create.topics' = 'false'</code> 来禁用 topic 的自动创建。但是某些配置项不支持进行配置，因为 Flink 会覆盖这些配置，例如 <code>'key.deserializer'</code> 和 <code>'value.deserializer'</code>。
+         可以设置和传递任意 Kafka 的配置项。后缀名必须匹配在 <a href="https://kafka.apache.org/documentation/#configuration">Kafka 配置文档</a> 中定义的配置键。Flink 将移除 "properties." 配置键前缀并将变换后的配置键和值传入底层的 Kafka 客户端。例如，你可以通过 <code>'properties.allow.auto.create.topics' = 'false'</code> 来禁用 topic 的自动创建。<code>'auto.offset.reset'</code> 属性用于配置 source 如何处理 Kafka 中不存在的初始化起始 offset。它独立于 <code>'scan.startup.mode'</code>。由于这两个选项控制不同阶段，因此可以有意地将它们配置为不同的值。但是某些配置项不支持进行配置，因为 Flink 会覆盖这些配置，例如 <code>'key.deserializer'</code> 和 <code>'value.deserializer'</code>。
       </td>
     </tr>
     <tr>
@@ -506,13 +506,13 @@ ROW<`version` INT, `behavior` STRING>
 
 `scan.startup.mode` 配置项决定了 Kafka consumer 的启动模式。有效值为：
 
-* `group-offsets`：从 Zookeeper/Kafka 中某个指定的消费组已提交的偏移量开始。
+* `group-offsets`：从 Kafka 中某个指定的消费组已提交的偏移量开始。
 * `earliest-offset`：从可能的最早偏移量开始。
 * `latest-offset`：从最末尾偏移量开始。
 * `timestamp`：从用户为每个 partition 指定的时间戳开始。
 * `specific-offsets`：从用户为每个 partition 指定的偏移量开始。
 
-默认值 `group-offsets` 表示从 Zookeeper/Kafka 中最近一次已提交的偏移量开始消费。
+默认值 `group-offsets` 表示从 Kafka 中最近一次已提交的偏移量开始消费。
 
 如果使用了 `timestamp`，必须使用另外一个配置项 `scan.startup.timestamp-millis` 来指定一个从格林尼治标准时间 1970 年 1 月 1 日 00:00:00.000 开始计算的毫秒单位时间戳作为起始时间。
 
@@ -523,7 +523,7 @@ ROW<`version` INT, `behavior` STRING>
 
 The config option `scan.bounded.mode` specifies the bounded mode for Kafka consumer. The valid enumerations are:
 <ul>
-<li><span markdown="span">`group-offsets`</span>: bounded by committed offsets in ZooKeeper / Kafka brokers of a specific consumer group. This is evaluated at the start of consumption from a given partition.</li>
+<li><span markdown="span">`group-offsets`</span>: bounded by committed offsets in Kafka brokers of a specific consumer group. This is evaluated at the start of consumption from a given partition.</li>
 <li><span markdown="span">`latest-offset`</span>: bounded by latest offsets. This is evaluated at the start of consumption from a given partition.</li>
 <li><span markdown="span">`timestamp`</span>: bounded by a user-supplied timestamp.</li>
 <li><span markdown="span">`specific-offsets`</span>: bounded by user-supplied specific offsets for each partition.</li>

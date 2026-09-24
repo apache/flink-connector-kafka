@@ -21,6 +21,8 @@ package org.apache.flink.connector.kafka.dynamic.source.split;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 
+import javax.annotation.Nullable;
+
 import java.util.Objects;
 
 /** Split that wraps {@link KafkaPartitionSplit} with Kafka cluster information. */
@@ -29,14 +31,23 @@ public class DynamicKafkaSourceSplit extends KafkaPartitionSplit {
 
     private final String kafkaClusterId;
     private final KafkaPartitionSplit kafkaPartitionSplit;
+    @Nullable private final Long retainedUntilMs;
 
     public DynamicKafkaSourceSplit(String kafkaClusterId, KafkaPartitionSplit kafkaPartitionSplit) {
+        this(kafkaClusterId, kafkaPartitionSplit, null);
+    }
+
+    public DynamicKafkaSourceSplit(
+            String kafkaClusterId,
+            KafkaPartitionSplit kafkaPartitionSplit,
+            @Nullable Long retainedUntilMs) {
         super(
                 kafkaPartitionSplit.getTopicPartition(),
                 kafkaPartitionSplit.getStartingOffset(),
                 kafkaPartitionSplit.getStoppingOffset().orElse(NO_STOPPING_OFFSET));
         this.kafkaClusterId = kafkaClusterId;
         this.kafkaPartitionSplit = kafkaPartitionSplit;
+        this.retainedUntilMs = retainedUntilMs;
     }
 
     @Override
@@ -52,6 +63,27 @@ public class DynamicKafkaSourceSplit extends KafkaPartitionSplit {
         return kafkaPartitionSplit;
     }
 
+    @Nullable
+    public Long getRetainedUntilMs() {
+        return retainedUntilMs;
+    }
+
+    public boolean isRetained() {
+        return retainedUntilMs != null;
+    }
+
+    public boolean isRetained(long currentTimeMillis) {
+        return retainedUntilMs != null && retainedUntilMs > currentTimeMillis;
+    }
+
+    public DynamicKafkaSourceSplit retainUntil(long newRetainedUntilMs) {
+        return new DynamicKafkaSourceSplit(kafkaClusterId, kafkaPartitionSplit, newRetainedUntilMs);
+    }
+
+    public DynamicKafkaSourceSplit clearRetention() {
+        return new DynamicKafkaSourceSplit(kafkaClusterId, kafkaPartitionSplit);
+    }
+
     @Override
     public String toString() {
         return "DynamicKafkaSourceSplit{"
@@ -60,6 +92,8 @@ public class DynamicKafkaSourceSplit extends KafkaPartitionSplit {
                 + '\''
                 + ", kafkaPartitionSplit="
                 + kafkaPartitionSplit
+                + ", retainedUntilMs="
+                + retainedUntilMs
                 + '}';
     }
 
@@ -76,11 +110,12 @@ public class DynamicKafkaSourceSplit extends KafkaPartitionSplit {
         }
         DynamicKafkaSourceSplit that = (DynamicKafkaSourceSplit) o;
         return Objects.equals(kafkaClusterId, that.kafkaClusterId)
-                && Objects.equals(kafkaPartitionSplit, that.kafkaPartitionSplit);
+                && Objects.equals(kafkaPartitionSplit, that.kafkaPartitionSplit)
+                && Objects.equals(retainedUntilMs, that.retainedUntilMs);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(super.hashCode(), kafkaClusterId, kafkaPartitionSplit);
+        return Objects.hash(super.hashCode(), kafkaClusterId, kafkaPartitionSplit, retainedUntilMs);
     }
 }

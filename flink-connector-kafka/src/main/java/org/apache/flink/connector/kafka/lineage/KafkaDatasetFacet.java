@@ -20,13 +20,13 @@
 package org.apache.flink.connector.kafka.lineage;
 
 import org.apache.flink.annotation.PublicEvolving;
-import org.apache.flink.streaming.api.lineage.LineageDatasetFacet;
+import org.apache.flink.streaming.api.lineage.DatasetConfigFacet;
 
 import java.util.Properties;
 
 /** Facet definition to contain all Kafka specific information on Kafka sources and sinks. */
 @PublicEvolving
-public interface KafkaDatasetFacet extends LineageDatasetFacet {
+public interface KafkaDatasetFacet extends DatasetConfigFacet {
     Properties getProperties();
 
     KafkaDatasetIdentifier getTopicIdentifier();

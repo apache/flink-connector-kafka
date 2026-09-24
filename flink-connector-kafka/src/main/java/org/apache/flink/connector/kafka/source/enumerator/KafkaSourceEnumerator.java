@@ -26,6 +26,8 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.connector.source.SplitsAssignment;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
+import org.apache.flink.connector.kafka.source.enumerator.metadata.TopicIntegrityProvider;
+import org.apache.flink.connector.kafka.source.enumerator.metadata.TopicMetadataSettable;
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.util.FlinkRuntimeException;
@@ -145,6 +147,10 @@ public class KafkaSourceEnumerator
     // this flag will be marked as true if initial partitions are discovered after enumerator starts
     private boolean initialDiscoveryFinished;
 
+    private final boolean topicIntegrityCheckEnabled;
+
+    private final TopicIntegrityProvider topicIntegrityProvider;
+
     public KafkaSourceEnumerator(
             KafkaSubscriber subscriber,
             OffsetsInitializer startingOffsetInitializer,
@@ -213,6 +219,24 @@ public class KafkaSourceEnumerator
         this.initialDiscoveryFinished = kafkaSourceEnumState.initialDiscoveryFinished();
         this.assignedSplits = indexByPartition(kafkaSourceEnumState.assignedSplits());
         this.unassignedSplits = indexByPartition(kafkaSourceEnumState.unassignedSplits());
+        this.topicIntegrityCheckEnabled =
+                KafkaSourceOptions.getOption(
+                        properties,
+                        KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED,
+                        Boolean::parseBoolean);
+        this.topicIntegrityProvider =
+                new TopicIntegrityProvider(
+                        topicIntegrityCheckEnabled
+                                ? kafkaSourceEnumState.trackedTopicIdsByName()
+                                : Collections.emptyMap());
+        LOG.debug(
+                "KafkaSourceEnumerator initialized with assignedSplits: {}, unassignedSplits: {}, "
+                        + "initialDiscoveryFinished: {}, topicIntegrityCheckEnabled: {}, trackedTopicIdsByName: {}",
+                assignedSplits.keySet(),
+                unassignedSplits.keySet(),
+                initialDiscoveryFinished,
+                topicIntegrityCheckEnabled,
+                topicIntegrityProvider.getTrackedTopicIdsByName());
     }
 
     private static Map<TopicPartition, KafkaPartitionSplit> indexByPartition(
@@ -239,6 +263,10 @@ public class KafkaSourceEnumerator
                         .collect(Collectors.toList());
         if (!preinitializedSplits.isEmpty()) {
             addPartitionSplitChangeToPendingAssignments(preinitializedSplits);
+        }
+
+        if (topicIntegrityCheckEnabled && subscriber instanceof TopicMetadataSettable) {
+            ((TopicMetadataSettable) subscriber).setTopicMetadataProvider(topicIntegrityProvider);
         }
 
         if (partitionDiscoveryIntervalMs > 0) {
@@ -292,7 +320,10 @@ public class KafkaSourceEnumerator
     @Override
     public KafkaSourceEnumState snapshotState(long checkpointId) throws Exception {
         return new KafkaSourceEnumState(
-                assignedSplits.values(), unassignedSplits.values(), initialDiscoveryFinished);
+                assignedSplits.values(),
+                unassignedSplits.values(),
+                initialDiscoveryFinished,
+                topicIntegrityProvider.getTrackedTopicIdsByName());
     }
 
     @Override
@@ -809,5 +840,10 @@ public class KafkaSourceEnumerator
                                                     entry.getValue().timestamp(),
                                                     entry.getValue().leaderEpoch())));
         }
+    }
+
+    @VisibleForTesting
+    boolean topicIntegrityCheckEnabled() {
+        return topicIntegrityCheckEnabled;
     }
 }

@@ -24,11 +24,13 @@ import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.NoStoppingOffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializerValidator;
+import org.apache.flink.connector.kafka.source.enumerator.metadata.TopicMetadataSettable;
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.util.function.SerializableSupplier;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.Deserializer;
@@ -375,6 +377,19 @@ public class KafkaSourceBuilder<OUT> {
     }
 
     /**
+     * Whether perform a check for the integrity of source topics, and fail the job if the topic was
+     * deleted or recreated. For the check to be performed periodically during source runtime,
+     * partition discovery must be enabled (KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS set
+     * to a positive number)
+     *
+     * @return {@link KafkaSourceBuilder}
+     */
+    public KafkaSourceBuilder<OUT> enableTopicIntegrityCheck() {
+        this.setProperty(KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key(), "true");
+        return this;
+    }
+
+    /**
      * Set an arbitrary property for the KafkaSource and KafkaConsumer. The valid keys can be found
      * in {@link ConsumerConfig} and {@link KafkaSourceOptions}.
      *
@@ -382,9 +397,9 @@ public class KafkaSourceBuilder<OUT> {
      * created.
      *
      * <ul>
-     *   <li><code>auto.offset.reset.strategy</code> is overridden by {@link
-     *       OffsetsInitializer#getAutoOffsetResetStrategy()} for the starting offsets, which is by
-     *       default {@link OffsetsInitializer#earliest()}.
+     *   <li><code>auto.offset.reset</code> is set from {@link
+     *       OffsetsInitializer#getAutoOffsetResetStrategy()} for the starting offsets unless
+     *       explicitly configured by the user.
      *   <li><code>partition.discovery.interval.ms</code> is overridden to -1 when {@link
      *       #setBounded(OffsetsInitializer)} has been invoked.
      * </ul>
@@ -406,9 +421,9 @@ public class KafkaSourceBuilder<OUT> {
      * created.
      *
      * <ul>
-     *   <li><code>auto.offset.reset.strategy</code> is overridden by {@link
-     *       OffsetsInitializer#getAutoOffsetResetStrategy()} for the starting offsets, which is by
-     *       default {@link OffsetsInitializer#earliest()}.
+     *   <li><code>auto.offset.reset</code> is set from {@link
+     *       OffsetsInitializer#getAutoOffsetResetStrategy()} for the starting offsets unless
+     *       explicitly configured by the user.
      *   <li><code>partition.discovery.interval.ms</code> is overridden to -1 when {@link
      *       #setBounded(OffsetsInitializer)} has been invoked.
      *   <li><code>client.id</code> is overridden to the "client.id.prefix-RANDOM_LONG", or
@@ -468,10 +483,32 @@ public class KafkaSourceBuilder<OUT> {
             maybeOverride(KafkaSourceOptions.COMMIT_OFFSETS_ON_CHECKPOINT.key(), "false", false);
         }
         maybeOverride(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false", false);
+        String configuredOffsetReset = props.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
+        if (configuredOffsetReset != null) {
+            OffsetResetStrategy configuredOffsetResetStrategy =
+                    KafkaPropertiesUtil.getResetStrategy(configuredOffsetReset);
+            String normalizedOffsetReset = configuredOffsetResetStrategy.name().toLowerCase();
+            props.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, normalizedOffsetReset);
+            if (KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
+                    configuredOffsetResetStrategy, startingOffsetsInitializer)) {
+                LOG.warn(
+                        "Configured {}={} differs from the {} strategy derived from the starting "
+                                + "offsets initializer. The source will use the initializer for "
+                                + "startup, but Kafka may reset to {} if an initialized offset "
+                                + "becomes unavailable.",
+                        ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                        normalizedOffsetReset,
+                        startingOffsetsInitializer
+                                .getAutoOffsetResetStrategy()
+                                .name()
+                                .toLowerCase(),
+                        normalizedOffsetReset);
+            }
+        }
         maybeOverride(
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
                 startingOffsetsInitializer.getAutoOffsetResetStrategy().name().toLowerCase(),
-                true);
+                false);
 
         // If the source is bounded, do not run periodic partition discovery.
         if (boundedness == Boundedness.BOUNDED) {
@@ -538,6 +575,12 @@ public class KafkaSourceBuilder<OUT> {
         if (props.containsKey(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG)) {
             checkDeserializer(props.getProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG));
         }
+        if (topicIntegrityCheckEnabled()) {
+            checkState(
+                    subscriber instanceof TopicMetadataSettable,
+                    "Topic integrity check is not supported for non TopicMetadataSettable subscriber %s",
+                    subscriber.getClass().getName());
+        }
     }
 
     private void checkDeserializer(String deserializer) {
@@ -586,5 +629,11 @@ public class KafkaSourceBuilder<OUT> {
                                 props.getProperty(
                                         KafkaSourceOptions.COMMIT_OFFSETS_ON_CHECKPOINT.key()));
         return autoCommit || commitOnCheckpoint;
+    }
+
+    private boolean topicIntegrityCheckEnabled() {
+        return props.containsKey(KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key())
+                && Boolean.parseBoolean(
+                        props.getProperty(KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()));
     }
 }

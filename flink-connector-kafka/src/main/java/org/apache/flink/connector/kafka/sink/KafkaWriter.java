@@ -199,7 +199,7 @@ class KafkaWriter<IN>
 
     @Override
     public void close() throws Exception {
-        closed = true;
+        markClosed();
         LOG.debug("Closing writer with {}", currentProducer);
         closeAll(currentProducer);
         checkState(
@@ -208,6 +208,10 @@ class KafkaWriter<IN>
 
         // Rethrow exception for the case in which close is called before writer() and flush().
         checkAsyncException();
+    }
+
+    protected void markClosed() {
+        closed = true;
     }
 
     @VisibleForTesting
@@ -224,6 +228,7 @@ class KafkaWriter<IN>
         byteOutMetric =
                 MetricUtil.getKafkaMetric(
                         producer.metrics(), KAFKA_PRODUCER_METRICS, "outgoing-byte-total");
+        latestOutgoingByteTotal = ((Number) byteOutMetric.metricValue()).longValue();
         if (disabledMetrics) {
             return;
         }

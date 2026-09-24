@@ -37,6 +37,7 @@ import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.header.Header;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -171,7 +172,9 @@ class DynamicKafkaRecordSerializationSchema
                 readMetadata(consumedRow, KafkaDynamicSink.WritableMetadata.TIMESTAMP),
                 keySerialized,
                 valueSerialized,
-                readMetadata(consumedRow, KafkaDynamicSink.WritableMetadata.HEADERS));
+                resolveHeaders(
+                        readMetadata(consumedRow, KafkaDynamicSink.WritableMetadata.HEADERS),
+                        readMetadata(consumedRow, KafkaDynamicSink.WritableMetadata.HEADER_LIST)));
     }
 
     @Override
@@ -284,5 +287,15 @@ class DynamicKafkaRecordSerializationSchema
             return null;
         }
         return (T) metadata.converter.read(consumedRow, pos);
+    }
+
+    private static @Nullable List<Header> resolveHeaders(
+            @Nullable List<Header> mapHeaders, @Nullable List<Header> arrayHeaders) {
+        if (mapHeaders != null && arrayHeaders != null) {
+            throw new IllegalStateException(
+                    "Both 'headers' and 'header-list' metadata keys are active simultaneously. "
+                            + "This should have been caught during planning.");
+        }
+        return mapHeaders != null ? mapHeaders : arrayHeaders;
     }
 }

@@ -274,6 +274,7 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
 
     @Override
     public void close() throws Exception {
+        markClosed();
         closeAll(
                 this::abortCurrentProducer,
                 () -> closeAll(producerPool),

@@ -22,6 +22,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
+import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.connector.kafka.source.metrics.KafkaSourceReaderMetrics;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.connector.kafka.testutils.KafkaSourceTestEnv;
@@ -53,6 +54,7 @@ import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -352,6 +354,75 @@ public class KafkaPartitionSplitReaderTest {
         // doesn't allow us to examine the final ConsumerConfig object
         reader.setConsumerClientRack(properties, rackId);
         assertThat(properties.containsKey(ConsumerConfig.CLIENT_RACK_CONFIG)).isFalse();
+    }
+
+    @Test
+    void testPauseOrResumeSplitsWithUnassignedPartition() {
+        KafkaPartitionSplitReader reader = createReader();
+        // Create a split for a partition that is NOT assigned to the consumer.
+        // Without the fix, this would throw IllegalStateException:
+        // "No current assignment for partition".
+        TopicPartition unassignedPartition = new TopicPartition(TOPIC1, 0);
+        KafkaPartitionSplit unassignedSplit =
+                new KafkaPartitionSplit(unassignedPartition, KafkaPartitionSplit.EARLIEST_OFFSET);
+
+        // Verify the partition is indeed not assigned
+        assertThat(reader.consumer().assignment()).doesNotContain(unassignedPartition);
+
+        // This should be a no-op, not throw an exception
+        reader.pauseOrResumeSplits(
+                Collections.singletonList(unassignedSplit), Collections.emptyList());
+        reader.pauseOrResumeSplits(
+                Collections.emptyList(), Collections.singletonList(unassignedSplit));
+        reader.pauseOrResumeSplits(
+                Collections.singletonList(unassignedSplit),
+                Collections.singletonList(unassignedSplit));
+    }
+
+    @Test
+    public void testDefaultPollTimeout() {
+        // When the property is not set, the reader falls back to the option's default instead of
+        // hardcoding a timeout of its own.
+        assertThat(createReader().getPollTimeout())
+                .isEqualTo(Duration.ofMillis(KafkaSourceOptions.POLL_TIMEOUT_MS.defaultValue()));
+    }
+
+    @Test
+    public void testConfiguredPollTimeout() {
+        final Properties props = new Properties();
+        props.setProperty(KafkaSourceOptions.POLL_TIMEOUT_MS.key(), "500");
+        KafkaPartitionSplitReader reader =
+                createReader(props, UnregisteredMetricsGroup.createSourceReaderMetricGroup());
+
+        assertThat(reader.getPollTimeout()).isEqualTo(Duration.ofMillis(500));
+    }
+
+    @Test
+    public void testZeroPollTimeout() {
+        // KafkaConsumer#poll accepts a zero timeout, which returns immediately with whatever is
+        // already buffered, so the reader must not reject it either.
+        final Properties props = new Properties();
+        props.setProperty(KafkaSourceOptions.POLL_TIMEOUT_MS.key(), "0");
+        KafkaPartitionSplitReader reader =
+                createReader(props, UnregisteredMetricsGroup.createSourceReaderMetricGroup());
+
+        assertThat(reader.getPollTimeout()).isEqualTo(Duration.ZERO);
+    }
+
+    @Test
+    public void testNegativePollTimeoutIsRejected() {
+        final Properties props = new Properties();
+        props.setProperty(KafkaSourceOptions.POLL_TIMEOUT_MS.key(), "-1");
+        assertThatThrownBy(
+                        () ->
+                                createReader(
+                                        props,
+                                        UnregisteredMetricsGroup.createSourceReaderMetricGroup()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        String.format(
+                                "Property %s should not be negative, but is -1",
+                                KafkaSourceOptions.POLL_TIMEOUT_MS.key()));
     }
 
     // ------------------

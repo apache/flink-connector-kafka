@@ -35,6 +35,7 @@ public class DynamicKafkaSourceSplitSerializer
         implements SimpleVersionedSerializer<DynamicKafkaSourceSplit> {
 
     private static final int VERSION_1 = 1;
+    private static final int VERSION_2 = 2;
 
     private final KafkaPartitionSplitSerializer kafkaPartitionSplitSerializer;
 
@@ -44,7 +45,7 @@ public class DynamicKafkaSourceSplitSerializer
 
     @Override
     public int getVersion() {
-        return VERSION_1;
+        return VERSION_2;
     }
 
     @Override
@@ -52,6 +53,11 @@ public class DynamicKafkaSourceSplitSerializer
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 DataOutputStream out = new DataOutputStream(baos)) {
             out.writeUTF(split.getKafkaClusterId());
+            Long retainedUntilMs = split.getRetainedUntilMs();
+            out.writeBoolean(retainedUntilMs != null);
+            if (retainedUntilMs != null) {
+                out.writeLong(retainedUntilMs);
+            }
             out.writeInt(kafkaPartitionSplitSerializer.getVersion());
             out.write(kafkaPartitionSplitSerializer.serialize(split.getKafkaPartitionSplit()));
             out.flush();
@@ -61,14 +67,27 @@ public class DynamicKafkaSourceSplitSerializer
 
     @Override
     public DynamicKafkaSourceSplit deserialize(int version, byte[] serialized) throws IOException {
+        if (version != VERSION_1 && version != VERSION_2) {
+            throw new IOException(
+                    String.format(
+                            "The bytes are serialized with version %d, "
+                                    + "while this deserializer only supports version up to %d",
+                            version, getVersion()));
+        }
+
         try (ByteArrayInputStream bais = new ByteArrayInputStream(serialized);
                 DataInputStream in = new DataInputStream(bais)) {
             String kafkaClusterId = in.readUTF();
+            Long retainedUntilMs = null;
+            if (version == VERSION_2 && in.readBoolean()) {
+                retainedUntilMs = in.readLong();
+            }
             int kafkaPartitionSplitSerializerVersion = in.readInt();
             KafkaPartitionSplit kafkaPartitionSplit =
                     kafkaPartitionSplitSerializer.deserialize(
                             kafkaPartitionSplitSerializerVersion, in.readAllBytes());
-            return new DynamicKafkaSourceSplit(kafkaClusterId, kafkaPartitionSplit);
+            return new DynamicKafkaSourceSplit(
+                    kafkaClusterId, kafkaPartitionSplit, retainedUntilMs);
         }
     }
 }

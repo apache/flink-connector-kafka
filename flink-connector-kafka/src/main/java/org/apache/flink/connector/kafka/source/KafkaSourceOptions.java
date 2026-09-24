@@ -58,6 +58,25 @@ public class KafkaSourceOptions {
                     .defaultValue(true)
                     .withDescription("Whether to commit consuming offset on checkpoint.");
 
+    public static final ConfigOption<Long> POLL_TIMEOUT_MS =
+            ConfigOptions.key("poll.timeout.ms")
+                    .longType()
+                    .defaultValue(Duration.ofSeconds(10).toMillis())
+                    .withDescription(
+                            "The maximum time in milliseconds the Kafka consumer blocks in a single "
+                                    + "poll() call while waiting for records. Since the poll returns "
+                                    + "as soon as records are available, a smaller value mainly makes "
+                                    + "an idle split reader react faster to split changes, at the cost "
+                                    + "of polling more often. 0 polls without blocking. Must not be "
+                                    + "negative.");
+
+    public static final ConfigOption<Boolean> TOPIC_INTEGRITY_CHECK_ENABLED =
+            ConfigOptions.key("scan.topic-integrity-check.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to verify topic id during runtime and fail if the topic is missing or recreated");
+
     @SuppressWarnings("unchecked")
     public static <T> T getOption(
             Properties props, ConfigOption<?> configOption, Function<String, T> parser) {

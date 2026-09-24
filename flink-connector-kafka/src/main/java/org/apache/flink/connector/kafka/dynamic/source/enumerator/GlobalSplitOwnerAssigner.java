@@ -34,6 +34,7 @@ final class GlobalSplitOwnerAssigner {
 
     private final Set<String> knownActiveSplitIds = new HashSet<>();
     private final Map<String, Integer> preferredOwnerBySplitId = new HashMap<>();
+    private final Map<String, Integer> recoveryOwnerBySplitId = new HashMap<>();
 
     void onMetadataRefresh(Set<String> activeSplitIds) {
         knownActiveSplitIds.clear();
@@ -48,8 +49,29 @@ final class GlobalSplitOwnerAssigner {
         }
     }
 
+    void onRecoveredSplits(List<DynamicKafkaSourceSplit> splits, int numReaders) {
+        Preconditions.checkArgument(numReaders > 0, "numReaders must be > 0");
+
+        recoveryOwnerBySplitId.clear();
+        for (DynamicKafkaSourceSplit split : splits) {
+            knownActiveSplitIds.remove(split.splitId());
+            preferredOwnerBySplitId.remove(split.splitId());
+        }
+
+        for (DynamicKafkaSourceSplit split : splits) {
+            int targetReader = Math.floorMod(knownActiveSplitIds.size(), numReaders);
+            knownActiveSplitIds.add(split.splitId());
+            recoveryOwnerBySplitId.put(split.splitId(), targetReader);
+        }
+    }
+
     int assignSplitOwner(String splitId, int numReaders) {
         Preconditions.checkArgument(numReaders > 0, "numReaders must be > 0");
+
+        Integer recoveryOwner = recoveryOwnerBySplitId.remove(splitId);
+        if (recoveryOwner != null) {
+            return recoveryOwner;
+        }
 
         Integer preferredOwner = preferredOwnerBySplitId.remove(splitId);
         if (preferredOwner != null && preferredOwner >= 0 && preferredOwner < numReaders) {

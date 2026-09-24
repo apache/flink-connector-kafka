@@ -43,7 +43,6 @@ import org.apache.flink.runtime.metrics.groups.InternalSourceReaderMetricGroup;
 import org.apache.flink.util.function.SerializableSupplier;
 
 import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -92,12 +91,8 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
     @BeforeAll
     public static void setup() throws Throwable {
         KafkaSourceTestEnv.setup();
+        KafkaSourceTestEnv.createTestTopic(TOPIC, NUM_PARTITIONS, 1);
         try (AdminClient adminClient = KafkaSourceTestEnv.getAdminClient()) {
-            adminClient
-                    .createTopics(
-                            Collections.singleton(new NewTopic(TOPIC, NUM_PARTITIONS, (short) 1)))
-                    .all()
-                    .get();
             // Use the admin client to trigger the creation of internal __consumer_offsets topic.
             // This makes sure that we won't see unavailable coordinator in the tests.
             waitUtil(

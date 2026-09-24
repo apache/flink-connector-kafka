@@ -34,7 +34,6 @@ import org.apache.flink.runtime.checkpoint.CheckpointFailureReason;
 
 import com.google.common.collect.Iterables;
 import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
@@ -283,8 +282,7 @@ public class KafkaSourceEnumeratorTest {
                                 context,
                                 ENABLE_PERIODIC_PARTITION_DISCOVERY,
                                 INCLUDE_DYNAMIC_TOPIC,
-                                OffsetsInitializer.latest());
-                AdminClient adminClient = KafkaSourceTestEnv.getAdminClient()) {
+                                OffsetsInitializer.latest())) {
 
             startEnumeratorAndRegisterReaders(context, enumerator, OffsetsInitializer.latest());
 
@@ -295,15 +293,7 @@ public class KafkaSourceEnumeratorTest {
                     .hasSize(2);
 
             // create the dynamic topic.
-            adminClient
-                    .createTopics(
-                            Collections.singleton(
-                                    new NewTopic(
-                                            DYNAMIC_TOPIC_NAME,
-                                            NUM_PARTITIONS_DYNAMIC_TOPIC,
-                                            (short) 1)))
-                    .all()
-                    .get();
+            KafkaSourceTestEnv.createTestTopic(DYNAMIC_TOPIC_NAME, NUM_PARTITIONS_DYNAMIC_TOPIC, 1);
 
             // invoke partition discovery callable again.
             while (true) {
@@ -955,6 +945,47 @@ public class KafkaSourceEnumeratorTest {
         // Initialize offsets for discovered partitions
         if (!context.getOneTimeCallables().isEmpty()) {
             context.runNextOneTimeCallable();
+        }
+    }
+
+    @Test
+    public void testCheckSourceIntegrityFromProperties() throws Exception {
+        // Test that properties are used when job configuration doesn't have the setting
+        final boolean propertiesCheckSourceIntegrity = true;
+
+        Properties properties = new Properties();
+        properties.setProperty(
+                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key(),
+                String.valueOf(propertiesCheckSourceIntegrity));
+        try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                KafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                context,
+                                ENABLE_PERIODIC_PARTITION_DISCOVERY ? 1 : -1,
+                                OffsetsInitializer.earliest(),
+                                Collections.emptySet(),
+                                Collections.emptySet(),
+                                Collections.emptySet(),
+                                true,
+                                properties)) {
+
+            // Verify that the properties value is used
+            assertThat(propertiesCheckSourceIntegrity)
+                    .isEqualTo(enumerator.topicIntegrityCheckEnabled());
+        }
+    }
+
+    @Test
+    public void testCheckSourceIntegrityDefaultValue() throws Exception {
+        final boolean defaultCheckSourceIntegrity = false;
+        try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                KafkaSourceEnumerator enumerator =
+                        createEnumerator(context, DISABLE_PERIODIC_PARTITION_DISCOVERY)) {
+
+            assertThat(defaultCheckSourceIntegrity)
+                    .isEqualTo(enumerator.topicIntegrityCheckEnabled());
         }
     }
 }

@@ -93,8 +93,14 @@ Read-only columns must be declared `VIRTUAL` to exclude them during an `INSERT I
     </tr>
     <tr>
       <td><code>headers</code></td>
-      <td><code>MAP<STRING, BYTES> NOT NULL</code></td>
-      <td>Headers of the Kafka record as a map of raw bytes.</td>
+      <td><code>MAP&lt;STRING, BYTES&gt; NOT NULL</code></td>
+      <td>Headers of the Kafka record as a map. Duplicate keys are collapsed (last value wins) and insertion order is lost.</td>
+      <td><code>R/W</code></td>
+    </tr>
+    <tr>
+      <td><code>header-list</code></td>
+      <td><code>ARRAY&lt;ROW&lt;key STRING, value BYTES&gt;&gt; NOT NULL</code></td>
+      <td>Headers of the Kafka record as an ordered list of key-value pairs. Preserves duplicate keys and insertion order. Mutually exclusive with <code>headers</code> on the write path.</td>
       <td><code>R/W</code></td>
     </tr>
     <tr>
@@ -233,7 +239,7 @@ Connector Options
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>
       <td>
-         This can set and pass arbitrary Kafka configurations. Suffix names must match the configuration key defined in <a href="https://kafka.apache.org/documentation/#configuration">Kafka Configuration documentation</a>. Flink will remove the "properties." key prefix and pass the transformed key and values to the underlying KafkaClient. For example, you can disable automatic topic creation via <code>'properties.allow.auto.create.topics' = 'false'</code>. But there are some configurations that do not support to set, because Flink will override them, e.g. <code>'auto.offset.reset'</code>.
+         This can set and pass arbitrary Kafka configurations. Suffix names must match the configuration key defined in <a href="https://kafka.apache.org/documentation/#configuration">Kafka Configuration documentation</a>. Flink will remove the "properties." key prefix and pass the transformed key and values to the underlying KafkaClient. For example, you can disable automatic topic creation via <code>'properties.allow.auto.create.topics' = 'false'</code>. The <code>'auto.offset.reset'</code> property configures how the source handles initialized starting offsets that are not available in Kafka. It is independent of <code>'scan.startup.mode'</code>. Because these options control different phases, they may intentionally use different values. Other configurations may not be supported because Flink overrides them.
       </td>
     </tr>
     <tr>
@@ -557,13 +563,13 @@ Note that topic list and topic pattern only work in sources. In sinks, Flink cur
 
 The config option `scan.startup.mode` specifies the startup mode for Kafka consumer. The valid enumerations are:
 
-* `group-offsets`: start from committed offsets in ZK / Kafka brokers of a specific consumer group.
+* `group-offsets`: start from committed offsets in Kafka brokers of a specific consumer group.
 * `earliest-offset`: start from the earliest offset possible.
 * `latest-offset`: start from the latest offset.
 * `timestamp`: start from user-supplied timestamp for each partition.
 * `specific-offsets`: start from user-supplied specific offsets for each partition.
 
-The default option value is `group-offsets` which indicates to consume from last committed offsets in ZK / Kafka brokers.
+The default option value is `group-offsets` which indicates to consume from last committed offsets in Kafka brokers.
 
 If `timestamp` is specified, another config option `scan.startup.timestamp-millis` is required to specify a specific startup timestamp in milliseconds since January 1, 1970 00:00:00.000 GMT.
 
@@ -574,7 +580,7 @@ e.g. an option value `partition:0,offset:42;partition:1,offset:300` indicates of
 
 The config option `scan.bounded.mode` specifies the bounded mode for Kafka consumer. The valid enumerations are:
 <ul>
-<li><span markdown="span">`group-offsets`</span>: bounded by committed offsets in ZooKeeper / Kafka brokers of a specific consumer group. This is evaluated at the start of consumption from a given partition.</li>
+<li><span markdown="span">`group-offsets`</span>: bounded by committed offsets in Kafka brokers of a specific consumer group. This is evaluated at the start of consumption from a given partition.</li>
 <li><span markdown="span">`latest-offset`</span>: bounded by latest offsets. This is evaluated at the start of consumption from a given partition.</li>
 <li><span markdown="span">`timestamp`</span>: bounded by a user-supplied timestamp.</li>
 <li><span markdown="span">`specific-offsets`</span>: bounded by user-supplied specific offsets for each partition.</li>

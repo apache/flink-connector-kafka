@@ -30,6 +30,7 @@ import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.synchronization.FutureCompletingBlockingQueue;
 import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
+import org.apache.flink.connector.kafka.dynamic.source.DynamicKafkaSourceOptions;
 import org.apache.flink.connector.kafka.dynamic.source.GetMetadataUpdateEvent;
 import org.apache.flink.connector.kafka.dynamic.source.MetadataUpdateEvent;
 import org.apache.flink.connector.kafka.dynamic.source.metrics.KafkaClusterMetricGroup;
@@ -68,6 +69,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -82,10 +84,14 @@ import java.util.stream.Collectors;
 @Internal
 public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafkaSourceSplit> {
     private static final Logger logger = LoggerFactory.getLogger(DynamicKafkaSourceReader.class);
+    static final String ACTIVE_SPLIT_COUNT_METRIC = "activeSplitCount";
+
     private final KafkaRecordDeserializationSchema<T> deserializationSchema;
     private final Properties properties;
+    private final OffsetsInitializer startingOffsetsInitializer;
     private final MetricGroup dynamicKafkaSourceMetricGroup;
     private final Gauge<Integer> kafkaClusterCount;
+    private final AtomicInteger activeSplitCount;
     private final SourceReaderContext readerContext;
     private final KafkaClusterMetricGroupManager kafkaClusterMetricGroupManager;
 
@@ -93,34 +99,54 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     private final NavigableMap<String, KafkaSourceReader<T>> clusterReaderMap;
     private final Map<String, Properties> clustersProperties;
     private final List<DynamicKafkaSourceSplit> pendingSplits;
+    private final Set<String> pendingSplitOutputReleases;
+    private final List<DynamicKafkaSourceSplit> retainedSplits;
+    private final long removedClusterStateRetentionMs;
 
     private MultipleFuturesAvailabilityHelper availabilityHelper;
     private int availabilityHelperSize;
     private boolean isActivelyConsumingSplits;
     private boolean isNoMoreSplits;
+    private boolean dynamicOutputIdle;
     private AtomicBoolean restartingReaders;
+    private ReaderOutput<T> latestReaderOutput;
 
     public DynamicKafkaSourceReader(
             SourceReaderContext readerContext,
             KafkaRecordDeserializationSchema<T> deserializationSchema,
             Properties properties) {
+        this(readerContext, deserializationSchema, properties, OffsetsInitializer.earliest());
+    }
+
+    public DynamicKafkaSourceReader(
+            SourceReaderContext readerContext,
+            KafkaRecordDeserializationSchema<T> deserializationSchema,
+            Properties properties,
+            OffsetsInitializer startingOffsetsInitializer) {
         this.readerContext = readerContext;
         this.clusterReaderMap = new TreeMap<>();
         this.deserializationSchema = deserializationSchema;
         this.properties = properties;
+        this.startingOffsetsInitializer = startingOffsetsInitializer;
         this.kafkaClusterCount = clusterReaderMap::size;
+        this.activeSplitCount = new AtomicInteger();
         this.dynamicKafkaSourceMetricGroup =
                 readerContext
                         .metricGroup()
                         .addGroup(KafkaClusterMetricGroup.DYNAMIC_KAFKA_SOURCE_METRIC_GROUP);
         this.kafkaClusterMetricGroupManager = new KafkaClusterMetricGroupManager();
         this.pendingSplits = new ArrayList<>();
+        this.retainedSplits = new ArrayList<>();
+        this.removedClusterStateRetentionMs =
+                DynamicKafkaSourceOptions.getRemovedClusterStateRetentionMs(properties);
         this.availabilityHelper =
                 new MultipleFuturesAvailabilityHelper(this.availabilityHelperSize = 0);
         this.isNoMoreSplits = false;
         this.isActivelyConsumingSplits = false;
+        this.dynamicOutputIdle = false;
         this.restartingReaders = new AtomicBoolean();
         this.clustersProperties = new HashMap<>();
+        this.pendingSplitOutputReleases = new HashSet<>();
     }
 
     /**
@@ -132,11 +158,19 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         logger.trace("Starting reader for subtask index={}", readerContext.getIndexOfSubtask());
         // metrics cannot be registered in the enumerator
         readerContext.metricGroup().gauge("kafkaClusterCount", kafkaClusterCount);
+        // Keep this gauge registered for the full source-reader lifetime. In particular, it must
+        // continue reporting zero after metadata removes all locally assigned splits, rather than
+        // relying on split-specific metric groups that disappear with removed clusters.
+        dynamicKafkaSourceMetricGroup.gauge(ACTIVE_SPLIT_COUNT_METRIC, activeSplitCount::get);
         readerContext.sendSourceEventToCoordinator(new GetMetadataUpdateEvent());
     }
 
     @Override
     public InputStatus pollNext(ReaderOutput<T> readerOutput) throws Exception {
+        latestReaderOutput = readerOutput;
+        releasePendingSplitOutputs(readerOutput);
+        maybeUpdateNoActiveSplitOutputIdleness(readerOutput);
+
         // at startup, do not return end of input if metadata event has not been received
         if (clusterReaderMap.isEmpty()) {
             return logAndReturnInputStatus(InputStatus.NOTHING_AVAILABLE);
@@ -162,6 +196,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
             }
         }
 
+        refreshActiveSplitCount();
         return logAndReturnInputStatus(consolidateInputStatus(isMoreAvailable, isNothingAvailable));
     }
 
@@ -183,6 +218,9 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     @Override
     public void addSplits(List<DynamicKafkaSourceSplit> splits) {
         logger.info("Adding splits to reader {}: {}", readerContext.getIndexOfSubtask(), splits);
+        for (DynamicKafkaSourceSplit split : splits) {
+            pendingSplitOutputReleases.remove(split.splitId());
+        }
 
         // at startup, don't add splits until we get confirmation from enumerator of the current
         // metadata
@@ -224,6 +262,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         if (newCluster) {
             completeAndResetAvailabilityHelper();
         }
+        refreshActiveSplitCount();
     }
 
     /**
@@ -240,6 +279,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                 "Received source event {}: subtask={}",
                 sourceEvent,
                 readerContext.getIndexOfSubtask());
+        pruneExpiredRetainedSplits();
         Set<KafkaStream> newKafkaStreams = ((MetadataUpdateEvent) sourceEvent).getKafkaStreams();
         Map<String, Set<String>> newClustersAndTopics = new HashMap<>();
         Map<String, Properties> newClustersProperties = new HashMap<>();
@@ -254,16 +294,20 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                 Properties clusterProperties = new Properties();
                 KafkaPropertiesUtil.copyProperties(
                         clusterMetadataMapEntry.getValue().getProperties(), clusterProperties);
-                OffsetsInitializer startingOffsetsInitializer =
+                OffsetsInitializer clusterStartingOffsetsInitializer =
                         clusterMetadataMapEntry.getValue().getStartingOffsetsInitializer();
-                if (startingOffsetsInitializer != null) {
-                    clusterProperties.setProperty(
-                            ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                            startingOffsetsInitializer
-                                    .getAutoOffsetResetStrategy()
-                                    .name()
-                                    .toLowerCase());
-                }
+                OffsetsInitializer effectiveStartingOffsetsInitializer =
+                        clusterStartingOffsetsInitializer != null
+                                ? clusterStartingOffsetsInitializer
+                                : startingOffsetsInitializer;
+                clusterProperties.setProperty(
+                        ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                        KafkaPropertiesUtil.resolveAutoOffsetResetStrategy(
+                                        properties,
+                                        clusterProperties,
+                                        effectiveStartingOffsetsInitializer)
+                                .name()
+                                .toLowerCase());
                 newClustersProperties.put(clusterMetadataMapEntry.getKey(), clusterProperties);
             }
         }
@@ -276,6 +320,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                 currentSplitState);
         Map<String, Set<String>> currentMetadataFromState = new HashMap<>();
         Map<String, List<KafkaPartitionSplit>> filteredNewClusterSplitStateMap = new HashMap<>();
+        long retainedUntilMs = System.currentTimeMillis() + removedClusterStateRetentionMs;
 
         // the data structures above
         for (DynamicKafkaSourceSplit split : currentSplitState) {
@@ -291,9 +336,14 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                         .computeIfAbsent(split.getKafkaClusterId(), (ignore) -> new ArrayList<>())
                         .add(split);
             } else {
+                releaseOrDeferSplitOutput(split.splitId());
+                if (shouldRetainSplit(split, newClustersAndTopics)) {
+                    retainedSplits.add(split.retainUntil(retainedUntilMs));
+                }
                 logger.info("Skipping outdated split due to metadata changes: {}", split);
             }
         }
+        reactivateRetainedSplits(newClustersAndTopics, filteredNewClusterSplitStateMap);
 
         // only restart if there was metadata change to handle duplicate MetadataUpdateEvent from
         // enumerator. We can possibly only restart the readers whose metadata has changed but that
@@ -321,11 +371,16 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
 
             // reset the availability future to also depend on the new sub readers
             completeAndResetAvailabilityHelper();
+            refreshActiveSplitCount();
         } else {
             // update properties even on no metadata change
             clustersProperties.clear();
             clustersProperties.putAll(newClustersProperties);
         }
+
+        // Captured before the flag flips below, so the no-more-splits replay can tell the
+        // reader's first metadata update from a later metadata change.
+        final boolean firstMetadataUpdate = !isActivelyConsumingSplits;
 
         // finally mark the reader as active, if not already and add pending splits
         if (!isActivelyConsumingSplits) {
@@ -339,26 +394,57 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                             // update event arrives. Splits in state could be old and it's possible
                             // to not have another metadata update event, so need to filter the
                             // splits at this point.
-                            .filter(
-                                    pendingSplit -> {
-                                        boolean splitValid =
-                                                isSplitForActiveClusters(
-                                                        pendingSplit, newClustersAndTopics);
-                                        if (!splitValid) {
-                                            logger.info(
-                                                    "Removing invalid split for reader: {}",
-                                                    pendingSplit);
-                                        }
-                                        return splitValid;
-                                    })
+                            .map(
+                                    pendingSplit ->
+                                            validatePendingSplit(
+                                                    pendingSplit, newClustersAndTopics))
+                            .filter(split -> split != null)
                             .collect(Collectors.toList());
 
             addSplits(validPendingSplits);
             pendingSplits.clear();
-            if (isNoMoreSplits) {
-                notifyNoMoreSplits();
-            }
         }
+
+        // Replay only on the first metadata update. On a later metadata change the reader must
+        // wait for the enumerator to signal again after the new assignments (that re-signal is
+        // currently missing for a sub-enumerator recreated with partitions already assigned; see
+        // FLINK-31006), so replaying here would finish an active reader before the new topic's
+        // splits arrive.
+        if (isNoMoreSplits && firstMetadataUpdate) {
+            notifyNoMoreSplits();
+        }
+
+        // Releasing the last split output can expose the runtime output as idle immediately. Keep
+        // the reader-level state in sync so a replacement split is reactivated before polling it.
+        if (latestReaderOutput != null) {
+            maybeUpdateNoActiveSplitOutputIdleness(latestReaderOutput);
+        }
+    }
+
+    private void releaseOrDeferSplitOutput(String splitId) {
+        if (latestReaderOutput == null) {
+            pendingSplitOutputReleases.add(splitId);
+        } else {
+            markSplitIdleAndReleaseOutput(latestReaderOutput, splitId);
+        }
+    }
+
+    private void releasePendingSplitOutputs(ReaderOutput<T> readerOutput) {
+        if (pendingSplitOutputReleases.isEmpty()) {
+            return;
+        }
+
+        for (String splitId : pendingSplitOutputReleases) {
+            markSplitIdleAndReleaseOutput(readerOutput, splitId);
+        }
+        pendingSplitOutputReleases.clear();
+    }
+
+    private void markSplitIdleAndReleaseOutput(ReaderOutput<T> readerOutput, String splitId) {
+        // Unregistering a split output does not recompute Flink's split-local watermark or
+        // idleness. Mark it idle first so a removed split cannot keep the source output active.
+        readerOutput.createOutputForSplit(splitId).markIdle();
+        readerOutput.releaseOutputForSplit(splitId);
     }
 
     private static boolean isSplitForActiveClusters(
@@ -370,10 +456,12 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
 
     @Override
     public List<DynamicKafkaSourceSplit> snapshotState(long checkpointId) {
+        pruneExpiredRetainedSplits();
         List<DynamicKafkaSourceSplit> splits = snapshotStateFromAllReaders(checkpointId);
 
         // pending splits should be typically empty, since we do not add splits to pending splits if
         // reader has started
+        splits.addAll(retainedSplits);
         splits.addAll(pendingSplits);
         return splits;
     }
@@ -443,6 +531,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         for (KafkaSourceReader<T> subReader : clusterReaderMap.values()) {
             subReader.close();
         }
+        activeSplitCount.set(0);
         kafkaClusterMetricGroupManager.close();
     }
 
@@ -458,6 +547,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                         kafkaClusterId,
                         clustersProperties.keySet()),
                 readerSpecificProperties);
+        DynamicKafkaSourceOptions.removeRemovedClusterRetentionOption(readerSpecificProperties);
         KafkaPropertiesUtil.setClientIdPrefix(readerSpecificProperties, kafkaClusterId);
 
         // layer a kafka cluster group to distinguish metrics by cluster
@@ -555,6 +645,12 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                         this.availabilityHelperSize = clusterReaderMap.size());
         syncAvailabilityHelperWithReaders();
 
+        if (getNumberOfActiveSplits() == 0) {
+            restartingReaders.set(false);
+            cachedPreviousFuture.complete(null);
+            return;
+        }
+
         // We cannot immediately complete the previous future here. We must complete it only when
         // the new readers have finished handling the split assignment. Completing the future too
         // early can cause WakeupException (implicitly woken up by invocation to pollNext()) if the
@@ -593,6 +689,87 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         }
         clusterReaderMap.clear();
         clustersProperties.clear();
+        // Keep the last published count during a rebuild because metric reporters may sample the
+        // gauge concurrently. The caller publishes the final count after replacement readers have
+        // received their splits.
+    }
+
+    /**
+     * Refresh the local active split count from the underlying readers on the source reader's main
+     * thread. Pending restored splits and retained removed-cluster offsets are intentionally not
+     * counted until metadata has validated and assigned them to an active reader.
+     */
+    private void refreshActiveSplitCount() {
+        int currentActiveSplitCount =
+                clusterReaderMap.values().stream()
+                        .mapToInt(KafkaSourceReader::getNumberOfCurrentlyAssignedSplits)
+                        .sum();
+        activeSplitCount.set(currentActiveSplitCount);
+    }
+
+    private void reactivateRetainedSplits(
+            Map<String, Set<String>> newClustersAndTopics,
+            Map<String, List<KafkaPartitionSplit>> filteredNewClusterSplitStateMap) {
+        List<DynamicKafkaSourceSplit> stillRetainedSplits = new ArrayList<>();
+        for (DynamicKafkaSourceSplit retainedSplit : retainedSplits) {
+            if (isSplitForActiveClusters(retainedSplit, newClustersAndTopics)) {
+                filteredNewClusterSplitStateMap
+                        .computeIfAbsent(
+                                retainedSplit.getKafkaClusterId(), (ignore) -> new ArrayList<>())
+                        .add(retainedSplit.clearRetention());
+            } else {
+                stillRetainedSplits.add(retainedSplit);
+            }
+        }
+
+        retainedSplits.clear();
+        retainedSplits.addAll(stillRetainedSplits);
+    }
+
+    private DynamicKafkaSourceSplit validatePendingSplit(
+            DynamicKafkaSourceSplit pendingSplit, Map<String, Set<String>> newClustersAndTopics) {
+        if (isSplitForActiveClusters(pendingSplit, newClustersAndTopics)) {
+            return pendingSplit.clearRetention();
+        }
+
+        releaseOrDeferSplitOutput(pendingSplit.splitId());
+        if (pendingSplit.isRetained(System.currentTimeMillis())) {
+            retainedSplits.add(pendingSplit);
+        } else {
+            logger.info("Removing invalid split for reader: {}", pendingSplit);
+        }
+
+        return null;
+    }
+
+    private boolean shouldRetainSplit(
+            DynamicKafkaSourceSplit split, Map<String, Set<String>> newClustersAndTopics) {
+        return removedClusterStateRetentionMs > 0
+                && !newClustersAndTopics.containsKey(split.getKafkaClusterId());
+    }
+
+    private void pruneExpiredRetainedSplits() {
+        long currentTimeMillis = System.currentTimeMillis();
+        retainedSplits.removeIf(
+                split -> split.isRetained() && !split.isRetained(currentTimeMillis));
+        pendingSplits.removeIf(split -> split.isRetained() && !split.isRetained(currentTimeMillis));
+    }
+
+    private int getNumberOfActiveSplits() {
+        return clusterReaderMap.values().stream()
+                .mapToInt(KafkaSourceReader::getNumberOfCurrentlyAssignedSplits)
+                .sum();
+    }
+
+    private void maybeUpdateNoActiveSplitOutputIdleness(ReaderOutput<T> readerOutput) {
+        boolean hasActiveSplits = getNumberOfActiveSplits() > 0;
+        if (!hasActiveSplits && isActivelyConsumingSplits && !dynamicOutputIdle) {
+            readerOutput.markIdle();
+            dynamicOutputIdle = true;
+        } else if (hasActiveSplits && dynamicOutputIdle) {
+            readerOutput.markActive();
+            dynamicOutputIdle = false;
+        }
     }
 
     static Configuration toConfiguration(Properties props) {

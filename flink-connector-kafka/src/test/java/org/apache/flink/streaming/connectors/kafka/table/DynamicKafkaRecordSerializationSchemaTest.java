@@ -118,7 +118,8 @@ class DynamicKafkaRecordSerializationSchemaTest {
                     public void open(InitializationContext context) throws Exception {}
                 };
 
-        int[] metadataPositions = new int[3];
+        int[] metadataPositions = new int[KafkaDynamicSink.WritableMetadata.values().length];
+        Arrays.fill(metadataPositions, -1);
         metadataPositions[KafkaDynamicSink.WritableMetadata.TOPIC.ordinal()] = 1;
         metadataPositions[KafkaDynamicSink.WritableMetadata.HEADERS.ordinal()] = 2;
         metadataPositions[KafkaDynamicSink.WritableMetadata.TIMESTAMP.ordinal()] = 3;

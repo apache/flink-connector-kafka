@@ -28,8 +28,6 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.util.CloseableIterator;
 
-import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -51,6 +49,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.UUID;
 
 import static org.apache.flink.connector.kafka.testutils.DockerImageVersions.APACHE_KAFKA;
@@ -67,13 +66,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class FlinkKafkaIntegrationCompatibilityTest {
 
     private TestKafkaContainer kafkaContainer;
-    private AdminClient adminClient;
 
     @AfterEach
     void tearDown() {
-        if (adminClient != null) {
-            adminClient.close();
-        }
         if (kafkaContainer != null) {
             kafkaContainer.stop();
         }
@@ -99,16 +94,12 @@ class FlinkKafkaIntegrationCompatibilityTest {
         int numRecordsPerPartition = 5;
 
         // Create topics
-        Map<String, Object> adminConfig = new HashMap<>();
-        adminConfig.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        adminClient = AdminClient.create(adminConfig);
-        adminClient
-                .createTopics(
-                        Arrays.asList(
-                                new NewTopic(topic1, numPartitions, (short) 1),
-                                new NewTopic(topic2, numPartitions, (short) 1)))
-                .all()
-                .get();
+        Properties adminConfig = new Properties();
+        adminConfig.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        KafkaUtil.createNewTopicAndWaitForPartitionAssignment(
+                topic1, numPartitions, 1, adminConfig);
+        KafkaUtil.createNewTopicAndWaitForPartitionAssignment(
+                topic2, numPartitions, 1, adminConfig);
 
         // Produce test data to both topics
         // Values in partition N should be {N, N+1, N+2, ..., numRecordsPerPartition-1}
@@ -192,13 +183,9 @@ class FlinkKafkaIntegrationCompatibilityTest {
         int numRecords = 100;
 
         // Create topic
-        Map<String, Object> adminConfig = new HashMap<>();
-        adminConfig.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        adminClient = AdminClient.create(adminConfig);
-        adminClient
-                .createTopics(Collections.singleton(new NewTopic(topic, 1, (short) 1)))
-                .all()
-                .get();
+        Properties adminConfig = new Properties();
+        adminConfig.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        KafkaUtil.createNewTopicAndWaitForPartitionAssignment(topic, 1, 1, adminConfig);
 
         // Create Flink KafkaSink and write records
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();

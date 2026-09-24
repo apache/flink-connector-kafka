@@ -26,6 +26,7 @@ import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.sink.KafkaSinkBuilder;
 import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
+import org.apache.flink.connector.kafka.testutils.KafkaUtil;
 import org.apache.flink.connector.testframe.external.ExternalSystemDataReader;
 import org.apache.flink.connector.testframe.external.sink.DataStreamSinkV2ExternalContext;
 import org.apache.flink.connector.testframe.external.sink.TestingSinkSettings;
@@ -35,7 +36,6 @@ import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
-import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -103,12 +103,10 @@ public class KafkaSinkExternalContext implements DataStreamSinkV2ExternalContext
                 topicName,
                 numPartitions,
                 replicationFactor);
-        NewTopic newTopic = new NewTopic(topicName, numPartitions, replicationFactor);
-        try {
-            kafkaAdminClient.createTopics(Collections.singletonList(newTopic)).all().get();
-        } catch (Exception e) {
-            throw new RuntimeException(String.format("Cannot create topic '%s'", topicName), e);
-        }
+        final Properties properties = new Properties();
+        properties.setProperty(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        KafkaUtil.createNewTopicAndWaitForPartitionAssignment(
+                topicName, numPartitions, replicationFactor, properties);
     }
 
     private void deleteTopic(String topicName) {

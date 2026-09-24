@@ -26,9 +26,13 @@ import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitReader;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
 import org.apache.flink.connector.base.source.reader.synchronization.FutureCompletingBlockingQueue;
+import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
+import org.apache.flink.connector.kafka.dynamic.source.DynamicKafkaSourceOptions;
 import org.apache.flink.connector.kafka.dynamic.source.MetadataUpdateEvent;
+import org.apache.flink.connector.kafka.dynamic.source.metrics.KafkaClusterMetricGroup;
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.metrics.KafkaSourceReaderMetrics;
 import org.apache.flink.connector.kafka.source.reader.KafkaSourceReader;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
@@ -39,7 +43,10 @@ import org.apache.flink.connector.testutils.source.reader.SourceReaderTestBase;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderOutput;
 import org.apache.flink.core.io.InputStatus;
+import org.apache.flink.metrics.Gauge;
 import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
+import org.apache.flink.metrics.testutils.MetricListener;
+import org.apache.flink.runtime.metrics.groups.InternalSourceReaderMetricGroup;
 import org.apache.flink.streaming.connectors.kafka.DynamicKafkaSourceTestHelper;
 
 import com.google.common.collect.ImmutableList;
@@ -62,6 +69,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -75,6 +83,25 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  */
 public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKafkaSourceSplit> {
     private static final String TOPIC = "DynamicKafkaSourceReaderTest";
+
+    private static class TrackingReaderOutput<E> extends TestingReaderOutput<E> {
+        private final List<String> releasedSplitIds = new ArrayList<>();
+
+        @Override
+        public void markIdle() {}
+
+        @Override
+        public void markActive() {}
+
+        @Override
+        public void releaseOutputForSplit(String splitId) {
+            releasedSplitIds.add(splitId);
+        }
+
+        private List<String> releasedSplitIds() {
+            return releasedSplitIds;
+        }
+    }
 
     // we are testing two clusters and SourceReaderTestBase expects there to be a total of 10 splits
     private static final int NUM_SPLITS_PER_CLUSTER = 5;
@@ -96,6 +123,65 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
     @AfterAll
     static void afterAll() throws Exception {
         DynamicKafkaSourceTestHelper.tearDown();
+    }
+
+    @Test
+    void testActiveSplitCountMetricTracksMetadataRemoval() throws Exception {
+        MetricListener metricListener = new MetricListener();
+        TestingReaderContext context =
+                new TestingReaderContext(
+                        new Configuration(),
+                        InternalSourceReaderMetricGroup.mock(metricListener.getMetricGroup()));
+        Properties properties = getRequiredProperties();
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
+                "60000");
+
+        try (DynamicKafkaSourceReader<Integer> reader =
+                createReaderWithoutStart(context, properties)) {
+            reader.start();
+            Optional<Gauge<Integer>> activeSplitCountGauge =
+                    metricListener.getGauge(
+                            KafkaClusterMetricGroup.DYNAMIC_KAFKA_SOURCE_METRIC_GROUP,
+                            DynamicKafkaSourceReader.ACTIVE_SPLIT_COUNT_METRIC);
+            assertThat(activeSplitCountGauge).isPresent();
+            assertThat(activeSplitCountGauge.orElseThrow().getValue()).isZero();
+
+            reader.handleSourceEvents(DynamicKafkaSourceTestHelper.getMetadataUpdateEvent(TOPIC));
+            assertThat(activeSplitCountGauge.orElseThrow().getValue())
+                    .as("cluster readers without assigned splits remain empty")
+                    .isZero();
+            reader.addSplits(
+                    getSplits(
+                            getNumSplits(),
+                            NUM_RECORDS_PER_SPLIT,
+                            Boundedness.CONTINUOUS_UNBOUNDED));
+            assertThat(activeSplitCountGauge.orElseThrow().getValue()).isEqualTo(getNumSplits());
+
+            KafkaStream kafkaStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+            ClusterMetadata cluster1Metadata =
+                    kafkaStream.getClusterMetadataMap().get(kafkaClusterId1);
+            kafkaStream.getClusterMetadataMap().remove(kafkaClusterId0);
+            reader.handleSourceEvents(new MetadataUpdateEvent(Collections.singleton(kafkaStream)));
+            assertThat(activeSplitCountGauge.orElseThrow().getValue())
+                    .isEqualTo(NUM_SPLITS_PER_CLUSTER);
+            assertThat(reader.snapshotState(-1))
+                    .as("retained removed-cluster state is not an active split")
+                    .hasSize(getNumSplits());
+
+            kafkaStream.getClusterMetadataMap().remove(kafkaClusterId1);
+            reader.handleSourceEvents(new MetadataUpdateEvent(Collections.singleton(kafkaStream)));
+            assertThat(activeSplitCountGauge.orElseThrow().getValue()).isZero();
+            assertThat(reader.snapshotState(-1))
+                    .as("all removed-cluster state is retained but inactive")
+                    .hasSize(getNumSplits());
+
+            kafkaStream.getClusterMetadataMap().put(kafkaClusterId1, cluster1Metadata);
+            reader.handleSourceEvents(new MetadataUpdateEvent(Collections.singleton(kafkaStream)));
+            assertThat(activeSplitCountGauge.orElseThrow().getValue())
+                    .as("reactivated retained splits become active again")
+                    .isEqualTo(NUM_SPLITS_PER_CLUSTER);
+        }
     }
 
     @Test
@@ -122,9 +208,112 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
                     splits.stream()
                             .filter(split -> !split.getKafkaClusterId().equals(kafkaClusterId0))
                             .collect(Collectors.toList());
+            List<String> cluster0SplitIds =
+                    splits.stream()
+                            .filter(split -> split.getKafkaClusterId().equals(kafkaClusterId0))
+                            .map(DynamicKafkaSourceSplit::splitId)
+                            .collect(Collectors.toList());
             assertThat(reader.snapshotState(-1))
                     .as("The splits should not contain any split related to cluster 0")
                     .containsExactlyInAnyOrderElementsOf(splitsWithoutCluster0);
+
+            TrackingReaderOutput<Integer> readerOutput = new TrackingReaderOutput<>();
+            assertThat(readerOutput.releasedSplitIds()).isEmpty();
+            reader.pollNext(readerOutput);
+            assertThat(readerOutput.releasedSplitIds())
+                    .as(
+                            "Pending restored split outputs should be released once ReaderOutput exists")
+                    .containsExactlyInAnyOrderElementsOf(cluster0SplitIds);
+        }
+    }
+
+    @Test
+    void testMetadataRemovalReleasesAssignedSplitOutputs() throws Exception {
+        TestingReaderContext context = new TestingReaderContext();
+        try (DynamicKafkaSourceReader<Integer> reader = createReaderWithoutStart(context)) {
+            reader.start();
+            reader.handleSourceEvents(DynamicKafkaSourceTestHelper.getMetadataUpdateEvent(TOPIC));
+
+            DynamicKafkaSourceSplit cluster0Split =
+                    new DynamicKafkaSourceSplit(
+                            kafkaClusterId0,
+                            new KafkaPartitionSplit(
+                                    new TopicPartition(TOPIC, 0),
+                                    0L,
+                                    KafkaPartitionSplit.NO_STOPPING_OFFSET));
+            DynamicKafkaSourceSplit cluster1Split =
+                    new DynamicKafkaSourceSplit(
+                            kafkaClusterId1,
+                            new KafkaPartitionSplit(
+                                    new TopicPartition(TOPIC, 0),
+                                    0L,
+                                    KafkaPartitionSplit.NO_STOPPING_OFFSET));
+            reader.addSplits(ImmutableList.of(cluster0Split, cluster1Split));
+
+            TrackingReaderOutput<Integer> readerOutput = new TrackingReaderOutput<>();
+            reader.pollNext(readerOutput);
+
+            KafkaStream kafkaStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+            kafkaStream.getClusterMetadataMap().remove(kafkaClusterId0);
+            reader.handleSourceEvents(new MetadataUpdateEvent(Collections.singleton(kafkaStream)));
+
+            assertThat(readerOutput.releasedSplitIds())
+                    .as(
+                            "Removed assigned splits should stop contributing to split-local watermarks")
+                    .containsExactly(cluster0Split.splitId());
+        }
+    }
+
+    @Test
+    void testHandleSourceEventRetainsRemovedClusterOffsetsUntilExpired() throws Exception {
+        DynamicKafkaSourceSplit cluster0Split =
+                new DynamicKafkaSourceSplit(
+                        kafkaClusterId0, new KafkaPartitionSplit(new TopicPartition(TOPIC, 0), 10));
+        DynamicKafkaSourceSplit cluster1Split =
+                new DynamicKafkaSourceSplit(
+                        kafkaClusterId1, new KafkaPartitionSplit(new TopicPartition(TOPIC, 0), 20));
+        KafkaStream shrunkKafkaStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+        shrunkKafkaStream.getClusterMetadataMap().remove(kafkaClusterId0);
+
+        TestingReaderContext context = new TestingReaderContext();
+        try (DynamicKafkaSourceReader<Integer> reader =
+                createReaderWithoutStartWithRemovedClusterRetention(context)) {
+            reader.start();
+            KafkaStream kafkaStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+            reader.handleSourceEvents(new MetadataUpdateEvent(Collections.singleton(kafkaStream)));
+
+            reader.addSplits(ImmutableList.of(cluster0Split, cluster1Split));
+
+            reader.handleSourceEvents(
+                    new MetadataUpdateEvent(Collections.singleton(shrunkKafkaStream)));
+
+            DynamicKafkaSourceSplit retainedCluster0Split =
+                    reader.snapshotState(-1).stream()
+                            .filter(split -> split.getKafkaClusterId().equals(kafkaClusterId0))
+                            .findFirst()
+                            .orElseThrow();
+            assertThat(retainedCluster0Split.isRetained()).isTrue();
+            assertThat(retainedCluster0Split.getRetainedUntilMs())
+                    .isGreaterThan(System.currentTimeMillis());
+            assertThat(reader.snapshotState(-1))
+                    .containsExactlyInAnyOrder(retainedCluster0Split, cluster1Split);
+
+            reader.handleSourceEvents(new MetadataUpdateEvent(Collections.singleton(kafkaStream)));
+            assertThat(reader.snapshotState(-1))
+                    .containsExactlyInAnyOrder(cluster0Split, cluster1Split);
+        }
+
+        TestingReaderContext restoredContext = new TestingReaderContext();
+        try (DynamicKafkaSourceReader<Integer> restoredReader =
+                createReaderWithoutStartWithRemovedClusterRetention(restoredContext)) {
+            restoredReader.addSplits(
+                    ImmutableList.of(
+                            cluster0Split.retainUntil(System.currentTimeMillis() - 1),
+                            cluster1Split));
+            restoredReader.start();
+            restoredReader.handleSourceEvents(
+                    new MetadataUpdateEvent(Collections.singleton(shrunkKafkaStream)));
+            assertThat(restoredReader.snapshotState(-1)).containsExactly(cluster1Split);
         }
     }
 
@@ -132,7 +321,7 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
     void testNoSubReadersInputStatus() throws Exception {
         try (DynamicKafkaSourceReader<Integer> reader =
                 (DynamicKafkaSourceReader<Integer>) createReader()) {
-            TestingReaderOutput<Integer> readerOutput = new TestingReaderOutput<>();
+            TrackingReaderOutput<Integer> readerOutput = new TrackingReaderOutput<>();
             InputStatus inputStatus = reader.pollNext(readerOutput);
             assertEquals(
                     InputStatus.NOTHING_AVAILABLE,
@@ -154,7 +343,7 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
     void testNotifyNoMoreSplits() throws Exception {
         TestingReaderContext context = new TestingReaderContext();
         try (DynamicKafkaSourceReader<Integer> reader = createReaderWithoutStart(context)) {
-            TestingReaderOutput<Integer> readerOutput = new TestingReaderOutput<>();
+            TrackingReaderOutput<Integer> readerOutput = new TrackingReaderOutput<>();
             reader.start();
 
             // Splits assigned
@@ -178,6 +367,67 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
 
             assertThat(readerOutput.getEmittedRecords())
                     .hasSize(getNumSplits() * NUM_RECORDS_PER_SPLIT);
+        }
+    }
+
+    @Test
+    void testIdleReaderFinishesWhenNoMoreSplitsArrivesBeforeMetadata() throws Exception {
+        TestingReaderContext context = new TestingReaderContext();
+        try (DynamicKafkaSourceReader<Integer> reader = createReaderWithoutStart(context)) {
+            TrackingReaderOutput<Integer> readerOutput = new TrackingReaderOutput<>();
+            reader.start();
+
+            // The enumerator signals no more splits before the reader receives the metadata
+            // update event, e.g. when an idle reader registers after all bounded
+            // sub-enumerators have already finished split discovery.
+            reader.notifyNoMoreSplits();
+
+            MetadataUpdateEvent metadata =
+                    DynamicKafkaSourceTestHelper.getMetadataUpdateEvent(TOPIC);
+            CompletableFuture<Void> availableBeforeMetadata = reader.isAvailable();
+            reader.handleSourceEvents(metadata);
+
+            assertThat(availableBeforeMetadata)
+                    .as("the metadata update must wake up a task parked on the earlier future")
+                    .isDone();
+            assertThat(reader.pollNext(readerOutput))
+                    .as(
+                            "idle reader must reach END_OF_INPUT even when no-more-splits precedes the metadata update event")
+                    .isEqualTo(InputStatus.END_OF_INPUT);
+        }
+    }
+
+    @Test
+    void testActiveReaderWaitsForNewSplitsAfterMetadataChange() throws Exception {
+        TestingReaderContext context = new TestingReaderContext();
+        try (DynamicKafkaSourceReader<Integer> reader = createReaderWithoutStart(context)) {
+            TrackingReaderOutput<Integer> readerOutput = new TrackingReaderOutput<>();
+            reader.start();
+
+            // First metadata update: only cluster 0 is known, so the reader goes active with a
+            // single sub-reader.
+            KafkaStream clusterZeroOnly = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+            clusterZeroOnly.getClusterMetadataMap().remove(kafkaClusterId1);
+            reader.handleSourceEvents(
+                    new MetadataUpdateEvent(Collections.singleton(clusterZeroOnly)));
+
+            // The enumerator finished discovery for that metadata epoch.
+            reader.notifyNoMoreSplits();
+
+            // Cluster 1 appears. The reader holds no splits, so the metadata change recreates every
+            // sub-reader and only the reader-level flag still remembers the earlier signal. Splits
+            // and a fresh no-more-splits signal for the new metadata arrive after this event.
+            reader.handleSourceEvents(DynamicKafkaSourceTestHelper.getMetadataUpdateEvent(TOPIC));
+
+            assertThat(reader.pollNext(readerOutput))
+                    .as(
+                            "reader must not finish on the stale no-more-splits signal while a newly added cluster still awaits its splits")
+                    .isEqualTo(InputStatus.NOTHING_AVAILABLE);
+
+            reader.notifyNoMoreSplits();
+            assertThat(reader.pollNext(readerOutput))
+                    .as("reader finishes once the enumerator signals again for the new metadata")
+                    .isEqualTo(InputStatus.END_OF_INPUT);
         }
     }
 
@@ -275,11 +525,29 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
 
     private DynamicKafkaSourceReader<Integer> createReaderWithoutStart(
             TestingReaderContext context) {
-        Properties properties = getRequiredProperties();
+        return createReaderWithoutStart(context, getRequiredProperties());
+    }
+
+    private DynamicKafkaSourceReader<Integer> createReaderWithoutStart(
+            TestingReaderContext context, Properties properties) {
         return new DynamicKafkaSourceReader<>(
                 context,
                 KafkaRecordDeserializationSchema.valueOnly(IntegerDeserializer.class),
-                properties);
+                properties,
+                OffsetsInitializer.earliest());
+    }
+
+    private DynamicKafkaSourceReader<Integer> createReaderWithoutStartWithRemovedClusterRetention(
+            TestingReaderContext context) {
+        Properties properties = getRequiredProperties();
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
+                "1000");
+        return new DynamicKafkaSourceReader<>(
+                context,
+                KafkaRecordDeserializationSchema.valueOnly(IntegerDeserializer.class),
+                properties,
+                OffsetsInitializer.earliest());
     }
 
     private SourceReader<Integer, DynamicKafkaSourceSplit> startReader(
@@ -423,7 +691,8 @@ class DynamicKafkaSourceReaderPauseResumeTest {
         return new DynamicKafkaSourceReader<>(
                 new TestingReaderContext(),
                 KafkaRecordDeserializationSchema.valueOnly(IntegerDeserializer.class),
-                properties);
+                properties,
+                OffsetsInitializer.earliest());
     }
 
     private static DynamicKafkaSourceSplit createSplit(
