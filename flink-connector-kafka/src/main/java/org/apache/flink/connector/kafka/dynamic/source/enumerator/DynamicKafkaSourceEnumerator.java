@@ -514,6 +514,14 @@ public class DynamicKafkaSourceEnumerator
         logger.info("Closing enumerators due to metadata change");
 
         closeAllEnumeratorsAndContexts();
+        // This is the point at which the previous generation of sub enumerators stops existing.
+        // Each one is about to be recreated and will signal no more splits again for its new
+        // assignments, and the reader has closed and recreated its sub readers, so every sub reader
+        // is back to noMoreSplitsAssignment == false. The signals recorded for the previous
+        // generation therefore no longer describe any live reader, and keeping them would make this
+        // set suppress the re-signal that a bounded job needs in order to finish after a metadata
+        // change.
+        readersWithNoMoreSplits.clear();
         retainRemovedClusterEnumeratorStates(
                 dynamicKafkaSourceEnumState.getClusterEnumeratorStates(),
                 latestClusterTopicsMap.keySet());
