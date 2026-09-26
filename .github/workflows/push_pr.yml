@@ -20,7 +20,21 @@
 # between several workflows with the same names while preparing a report for GHA usage
 # https://infra-reports.apache.org/#ghactions
 name: Flink Connector Kafka CI
-on: [push, pull_request]
+on:
+  push:
+    paths-ignore: &ignore_list [
+      'docs/**',
+      '.idea/**',
+      '**.md',
+      '.asf.yaml',
+      '.editorconfig',
+      '.git-blame-ignore-revs',
+      '.gitignore',
+      '.gitattributes'
+    ]
+  pull_request:
+    paths-ignore: *ignore_list
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
