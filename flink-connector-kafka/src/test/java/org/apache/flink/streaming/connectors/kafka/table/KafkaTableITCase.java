@@ -1822,6 +1822,21 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
+    public void testProjectionPushdownSelectOnlyValueFields(final String format) throws Exception {
+        final String topic = "testProjectionPushdown_" + format + "_" + UUID.randomUUID();
+        projectionPushdownSetupData(format, topic);
+
+        assertQueryResult(
+                "SELECT c, d FROM kafka",
+                "== Optimized Execution Plan ==\n"
+                        + "TableSourceScan(table=[[default_catalog, default_database, kafka, project=[c, d], metadata=[]]], fields=[c, d])\n",
+                Collections.singletonList("+I(c,d)"));
+
+        cleanupTopic(topic);
+    }
+
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
     public void
             testProjectionPushdownSelectNonContiguousPhysicalFieldsInDifferentOrderFromTableSchema(
                     final String format) throws Exception {
