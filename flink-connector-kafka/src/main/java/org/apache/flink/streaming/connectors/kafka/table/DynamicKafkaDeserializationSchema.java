@@ -118,6 +118,7 @@ class DynamicKafkaDeserializationSchema
         this.outputCollector =
                 new OutputProjectionCollector(
                         physicalArity,
+                        keyDeserialization != null,
                         keyProjector,
                         valueProjector,
                         metadataConverters,
@@ -227,6 +228,8 @@ class DynamicKafkaDeserializationSchema
 
         private final int physicalArity;
 
+        private final boolean hasKey;
+
         private final Decoder.Projector keyProjector;
 
         private final Decoder.Projector valueProjector;
@@ -251,12 +254,14 @@ class DynamicKafkaDeserializationSchema
 
         OutputProjectionCollector(
                 int physicalArity,
+                boolean hasKey,
                 Decoder.Projector keyProjector,
                 Decoder.Projector valueProjector,
                 MetadataConverter[] metadataConverters,
                 boolean upsertMode,
                 @Nullable boolean[] clusterMetadataPositions) {
             this.physicalArity = physicalArity;
+            this.hasKey = hasKey;
             this.keyProjector = keyProjector;
             this.valueProjector = valueProjector;
             this.metadataConverters = metadataConverters;
@@ -267,7 +272,7 @@ class DynamicKafkaDeserializationSchema
         @Override
         public void collect(RowData physicalValueRow) {
             // no key defined
-            if (keyProjector.isEmptyProjection()) {
+            if (!hasKey) {
                 emitRow(null, (GenericRowData) physicalValueRow);
                 return;
             }

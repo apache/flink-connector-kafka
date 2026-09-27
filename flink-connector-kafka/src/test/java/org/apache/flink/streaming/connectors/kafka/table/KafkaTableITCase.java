@@ -1837,6 +1837,70 @@ class KafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
+    public void testProjectionPushdownSkipsRecordsWithNullKey(final String format)
+            throws Exception {
+        final String topic = "testProjectionPushdownNullKey_" + format + "_" + UUID.randomUUID();
+        createTestTopic(topic, 1, 1);
+
+        final String groupId = getStandardProps().getProperty("group.id");
+        final String bootstraps = getBootstrapServers();
+
+        final String createTable =
+                String.format(
+                        "CREATE TABLE kafka (\n"
+                                + "  `a` STRING,\n"
+                                + "  `b` STRING,\n"
+                                + "  `c` STRING,\n"
+                                + "  `d` STRING\n"
+                                + ") WITH (\n"
+                                + "  'connector' = 'kafka',\n"
+                                + "  'topic' = '%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'properties.group.id' = '%s',\n"
+                                + "  'scan.startup.mode' = 'earliest-offset',\n"
+                                + "  'scan.bounded.mode' = 'latest-offset',\n"
+                                + "  %s,\n"
+                                + "  'key.fields' = 'a; b',\n"
+                                + "  %s,\n"
+                                + "  'value.fields-include' = 'EXCEPT_KEY'\n"
+                                + ")",
+                        topic,
+                        bootstraps,
+                        groupId,
+                        keyFormatOptions(format),
+                        valueFormatOptions(format));
+        tEnv.executeSql(createTable);
+
+        // A table without a key format writes records with a null Kafka key to the same topic.
+        final String createValueOnlyTable =
+                String.format(
+                        "CREATE TABLE kafka_value_only (\n"
+                                + "  `c` STRING,\n"
+                                + "  `d` STRING\n"
+                                + ") WITH (\n"
+                                + "  'connector' = 'kafka',\n"
+                                + "  'topic' = '%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'properties.group.id' = '%s',\n"
+                                + "  %s\n"
+                                + ")",
+                        topic, bootstraps, groupId, valueFormatOptions(format));
+        tEnv.executeSql(createValueOnlyTable);
+
+        tEnv.executeSql("INSERT INTO kafka_value_only SELECT 'c_null_key', 'd_null_key'").await();
+        tEnv.executeSql("INSERT INTO kafka SELECT 'a', 'b', 'c', 'd'").await();
+
+        // The record with the null key is skipped whether or not the query selects a key column.
+        assertThat(collectAllRows(tEnv.sqlQuery("SELECT c, d FROM kafka")))
+                .containsExactly(Row.of("c", "d"));
+        assertThat(collectAllRows(tEnv.sqlQuery("SELECT a, c FROM kafka")))
+                .containsExactly(Row.of("a", "c"));
+
+        cleanupTopic(topic);
+    }
+
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
     public void
             testProjectionPushdownSelectNonContiguousPhysicalFieldsInDifferentOrderFromTableSchema(
                     final String format) throws Exception {
