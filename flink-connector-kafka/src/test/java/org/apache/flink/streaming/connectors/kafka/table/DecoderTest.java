@@ -336,6 +336,11 @@ class DecoderTest {
         assertThat(decoder.getDeserializationSchema()).isNull();
         assertThat(decoder.getProjector().isEmptyProjection()).isTrue();
         assertThat(decoder.getProjector().isProjectionNeeded()).isFalse();
+
+        final GenericRowData producedRow = new GenericRowData(0);
+        decoder.getProjector().project(null, producedRow);
+
+        assertThat(producedRow.toString()).isEqualTo(new GenericRowData(0).toString());
     }
 
     @Test
@@ -908,6 +913,40 @@ class DecoderTest {
         final GenericRowData expected = new GenericRowData(2);
         expected.setField(0, null);
         expected.setField(1, "b0_a1");
+
+        assertThat(producedRow.toString()).isEqualTo(expected.toString());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("jsonTestCases")
+    void testProjectsNullsWhenRowIsNull(
+            final Supplier<DecodingFormat<DeserializationSchema<RowData>>> formatSupplier,
+            final Boolean isPushdownEnabled) {
+        final DecodingFormat<DeserializationSchema<RowData>> format = formatSupplier.get();
+
+        final int[][] projectedFields =
+                new int[][] {
+                    new int[] {0}, // a0
+                    new int[] {1, 0} // b0.a1
+                };
+
+        final Decoder decoder =
+                Decoder.create(
+                        new MockContext(),
+                        format,
+                        NESTED_TABLE_DATA_TYPE,
+                        new int[] {0, 1},
+                        null,
+                        projectedFields,
+                        Collections.emptyList(),
+                        isPushdownEnabled);
+
+        final GenericRowData producedRow = new GenericRowData(2);
+        decoder.getProjector().project(null, producedRow);
+
+        final GenericRowData expected = new GenericRowData(2);
+        expected.setField(0, null);
+        expected.setField(1, null);
 
         assertThat(producedRow.toString()).isEqualTo(expected.toString());
     }

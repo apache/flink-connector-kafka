@@ -38,9 +38,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * Decoding messages consists of two potential steps:
@@ -412,40 +412,53 @@ public class Decoder {
         boolean isProjectionNeeded();
 
         /** Copies fields from the deserialized row to their final positions in the produced row. */
-        void project(final RowData deserialized, final GenericRowData producedRow);
+        void project(final @Nullable RowData deserialized, final GenericRowData producedRow);
     }
 
     private static class ProjectorImpl implements Projector {
 
-        private final Map<List<Integer>, Integer> deserializedToProducedPos;
+        private static final long serialVersionUID = 1L;
+
+        private final int[][] deserializedPaths;
+
+        private final int[] producedPos;
+
         private final boolean isProjectionNeeded;
 
         ProjectorImpl(
                 final Map<List<Integer>, Integer> deserializedToProducedPos,
                 final int numDeserializedPhysicalFields,
                 final int numMetadataFields) {
-            this.deserializedToProducedPos = deserializedToProducedPos;
+            final List<Map.Entry<List<Integer>, Integer>> entries =
+                    new ArrayList<>(deserializedToProducedPos.entrySet());
+
+            this.deserializedPaths =
+                    entries.stream()
+                            .map(entry -> entry.getKey().stream().mapToInt(Integer::intValue))
+                            .map(IntStream::toArray)
+                            .toArray(int[][]::new);
+            this.producedPos = entries.stream().mapToInt(Map.Entry::getValue).toArray();
+
             this.isProjectionNeeded =
-                    !(deserializedToProducedPos.size()
-                                    == (numDeserializedPhysicalFields + numMetadataFields)
-                            && samePositions(deserializedToProducedPos));
+                    !deserializedToProducedPos.equals(
+                            identityMapping(numDeserializedPhysicalFields + numMetadataFields));
         }
 
-        private static boolean samePositions(
-                Map<List<Integer>, Integer> deserializedToProducedPos) {
-            return deserializedToProducedPos.entrySet().stream()
-                    .allMatch(
-                            entry -> {
-                                final List<Integer> deserializedPos = entry.getKey();
-                                final List<Integer> producedPos =
-                                        Collections.singletonList(entry.getValue());
-                                return Objects.equals(producedPos, deserializedPos);
-                            });
+        /**
+         * The mapping that copies each of the {@code numFields} deserialized fields to the same
+         * position in the produced row.
+         */
+        private static Map<List<Integer>, Integer> identityMapping(final int numFields) {
+            final Map<List<Integer>, Integer> identity = new HashMap<>();
+            for (int i = 0; i < numFields; i++) {
+                identity.put(Collections.singletonList(i), i);
+            }
+            return identity;
         }
 
         @Override
         public boolean isEmptyProjection() {
-            return deserializedToProducedPos.isEmpty();
+            return producedPos.length == 0;
         }
 
         @Override
@@ -454,18 +467,16 @@ public class Decoder {
         }
 
         @Override
-        public void project(final RowData deserialized, final GenericRowData producedRow) {
-            this.deserializedToProducedPos.forEach(
-                    (deserializedPos, targetPos) -> {
-                        Object value = deserialized;
-                        for (final Integer i : deserializedPos) {
-                            if (value == null) {
-                                break;
-                            }
-                            value = ((GenericRowData) value).getField(i);
-                        }
-                        producedRow.setField(targetPos, value);
-                    });
+        public void project(
+                final @Nullable RowData deserialized, final GenericRowData producedRow) {
+            for (int i = 0; i < deserializedPaths.length; i++) {
+                final int[] path = deserializedPaths[i];
+                Object value = deserialized;
+                for (int depth = 0; depth < path.length && value != null; depth++) {
+                    value = ((GenericRowData) value).getField(path[depth]);
+                }
+                producedRow.setField(producedPos[i], value);
+            }
         }
     }
 }
