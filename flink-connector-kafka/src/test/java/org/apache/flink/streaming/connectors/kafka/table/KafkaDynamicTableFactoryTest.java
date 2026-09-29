@@ -832,6 +832,19 @@ class KafkaDynamicTableFactoryTest {
                             "kafka-sink",
                             namingStrategy);
             assertThat(actualSink).isEqualTo(expectedSink);
+            final DynamicTableSink copiedSink = actualSink.copy();
+            assertThat(copiedSink).isEqualTo(actualSink);
+            assertThat(copiedSink.hashCode()).isEqualTo(actualSink.hashCode());
+
+            for (TransactionNamingStrategy otherStrategy : TransactionNamingStrategy.values()) {
+                if (otherStrategy != namingStrategy) {
+                    final Map<String, String> otherOptions = new HashMap<>(modifiedOptions);
+                    otherOptions.put("sink.transaction-naming-strategy", otherStrategy.name());
+                    assertThat(createTableSink(SCHEMA, otherOptions))
+                            .as("Sinks using %s and %s", otherStrategy, namingStrategy)
+                            .isNotEqualTo(actualSink);
+                }
+            }
         }
     }
 

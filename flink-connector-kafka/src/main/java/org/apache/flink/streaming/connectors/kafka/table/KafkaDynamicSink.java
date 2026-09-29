@@ -341,6 +341,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
                 && Objects.equals(upsertMode, that.upsertMode)
                 && Objects.equals(flushMode, that.flushMode)
                 && Objects.equals(transactionalIdPrefix, that.transactionalIdPrefix)
+                && Objects.equals(transactionNamingStrategy, that.transactionNamingStrategy)
                 && Objects.equals(parallelism, that.parallelism);
     }
 
@@ -363,6 +364,7 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
                 upsertMode,
                 flushMode,
                 transactionalIdPrefix,
+                transactionNamingStrategy,
                 parallelism);
     }
 
