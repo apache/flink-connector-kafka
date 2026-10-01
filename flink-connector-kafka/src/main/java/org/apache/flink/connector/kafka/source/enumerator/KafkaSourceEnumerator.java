@@ -368,8 +368,8 @@ public class KafkaSourceEnumerator
         // A bounded source that has just run its only discovery must reach
         // handlePartitionSplitChanges even when nothing changed: that is the only place that sets
         // noMoreNewPartitionSplits, and so the only path that signals the readers. After a restore
-        // every subscribed partition is already assigned, which makes the change empty
-        // (FLINK-31006). initializePartitionSplits performs no broker I/O for an empty change.
+        // every subscribed partition is already assigned, which makes the change empty.
+        // initializePartitionSplits performs no broker I/O for an empty change.
         // Periodic discovery and unbounded sources keep returning early. Neither can act on an
         // empty change, and treating it as a finished discovery would make the partitions that a
         // later discovery finds resolve against the earliest offset rather than the configured

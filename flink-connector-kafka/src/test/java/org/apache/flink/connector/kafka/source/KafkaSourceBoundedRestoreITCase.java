@@ -18,7 +18,6 @@
 package org.apache.flink.connector.kafka.source;
 
 import org.apache.flink.api.common.JobID;
-import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.configuration.Configuration;
@@ -29,8 +28,8 @@ import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDe
 import org.apache.flink.connector.kafka.testutils.KafkaSourceTestEnv;
 import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.core.testutils.CommonTestUtils;
-import org.apache.flink.runtime.executiongraph.ErrorInfo;
 import org.apache.flink.runtime.jobgraph.JobGraph;
+import org.apache.flink.runtime.jobmaster.JobResult;
 import org.apache.flink.runtime.minicluster.MiniCluster;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -54,8 +53,9 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -69,7 +69,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * subscribed partition already assigned. On an unfixed enumerator that empty partition change makes
  * {@code checkPartitionChanges} return before it reaches the only place that marks the discovery as
  * finished, so the restored readers consume up to their stopping offset and then wait forever for a
- * {@code NoMoreSplitsEvent} that is never sent (FLINK-31006).
+ * {@code NoMoreSplitsEvent} that is never sent.
  *
  * <p>Do not weaken this test by enabling partition discovery, by putting the stopping offset within
  * the records produced before the savepoint, or by running it in batch mode: the first two stop the
@@ -90,8 +90,8 @@ public class KafkaSourceBoundedRestoreITCase {
     private static final int TOTAL_RECORDS = RECORDS_BEFORE_SAVEPOINT + RECORDS_AFTER_SAVEPOINT;
     private static final Duration TIMEOUT = Duration.ofMinutes(2);
 
-    /** Values seen by the pipeline, across both runs of the job. */
-    private static final Set<Integer> COLLECTED = ConcurrentHashMap.newKeySet();
+    /** Values seen by the pipeline in the current run, in the order they were seen. */
+    private static final List<Integer> COLLECTED = new CopyOnWriteArrayList<>();
 
     @TempDir private Path savepointBasePath;
 
@@ -170,44 +170,23 @@ public class KafkaSourceBoundedRestoreITCase {
     }
 
     /**
-     * Waits for the job to finish, failing immediately if it reaches any other terminal state so
-     * that an unrelated failure is reported as itself rather than as the hang under test.
+     * Waits for the job to finish. A job that fails or is cancelled instead rethrows its own cause,
+     * so that an unrelated failure is reported as itself rather than as the hang under test.
      */
     private static void awaitJobFinished(MiniCluster miniCluster, JobID jobId) throws Exception {
-        CommonTestUtils.waitUtil(
-                () -> {
-                    final JobStatus status;
-                    try {
-                        status = miniCluster.getJobStatus(jobId).get();
-                    } catch (Exception e) {
-                        // The job may not be known to the cluster yet.
-                        return false;
-                    }
-                    if (status == JobStatus.FINISHED) {
-                        return true;
-                    }
-                    if (status.isGloballyTerminalState()) {
-                        throw new IllegalStateException(
-                                String.format(
-                                        "The job reached %s instead of finishing. %s",
-                                        status, failureCause(miniCluster, jobId)));
-                    }
-                    return false;
-                },
-                TIMEOUT,
-                Duration.ofMillis(50),
-                "The restored bounded job did not finish; the readers were never told that no "
-                        + "more splits are coming (FLINK-31006)");
-    }
-
-    private static String failureCause(MiniCluster miniCluster, JobID jobId) {
+        final JobResult jobResult;
         try {
-            final ErrorInfo failureInfo =
-                    miniCluster.getArchivedExecutionGraph(jobId).get().getFailureInfo();
-            return failureInfo == null ? "No failure info." : failureInfo.getExceptionAsString();
-        } catch (Exception e) {
-            return "Failure info unavailable: " + e;
+            jobResult =
+                    miniCluster
+                            .requestJobResult(jobId)
+                            .get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            throw new AssertionError(
+                    "The restored bounded job did not finish; the readers were never told that no "
+                            + "more splits are coming",
+                    e);
         }
+        jobResult.toJobExecutionResult(KafkaSourceBoundedRestoreITCase.class.getClassLoader());
     }
 
     @Test
@@ -215,7 +194,7 @@ public class KafkaSourceBoundedRestoreITCase {
             @InjectMiniCluster MiniCluster miniCluster) throws Throwable {
         JobGraph firstJobGraph = getJobGraph(new Configuration());
         JobID firstJobId = firstJobGraph.getJobID();
-        miniCluster.submitJob(firstJobGraph).get();
+        miniCluster.submitJob(firstJobGraph).get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
 
         CommonTestUtils.waitUtil(
                 () -> COLLECTED.size() >= RECORDS_BEFORE_SAVEPOINT,
@@ -230,8 +209,15 @@ public class KafkaSourceBoundedRestoreITCase {
                                 savepointBasePath.toFile().toString(),
                                 false,
                                 SavepointFormatType.CANONICAL)
-                        .get();
+                        .get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
         assertThat(savepointPath).isNotBlank();
+        assertThat(COLLECTED)
+                .as("The first run must consume the records produced before the savepoint once")
+                .containsExactlyElementsOf(
+                        IntStream.range(0, RECORDS_BEFORE_SAVEPOINT)
+                                .boxed()
+                                .collect(Collectors.toList()));
+        COLLECTED.clear();
 
         produce(RECORDS_BEFORE_SAVEPOINT, RECORDS_AFTER_SAVEPOINT);
 
@@ -239,15 +225,17 @@ public class KafkaSourceBoundedRestoreITCase {
         restoreConf.set(StateRecoveryOptions.SAVEPOINT_PATH, savepointPath);
         JobGraph secondJobGraph = getJobGraph(restoreConf);
         JobID secondJobId = secondJobGraph.getJobID();
-        miniCluster.submitJob(secondJobGraph).get();
+        miniCluster.submitJob(secondJobGraph).get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
 
         // The restored source reaches its stopping offset and then needs the enumerator to tell it
         // that no more splits are coming. Without that signal the job hangs here.
         awaitJobFinished(miniCluster, secondJobId);
 
         assertThat(COLLECTED)
-                .as("Every produced record must be consumed across the two runs")
-                .containsExactlyInAnyOrderElementsOf(
-                        IntStream.range(0, TOTAL_RECORDS).boxed().collect(Collectors.toList()));
+                .as("The restored run must resume from the savepoint without replaying records")
+                .containsExactlyElementsOf(
+                        IntStream.range(RECORDS_BEFORE_SAVEPOINT, TOTAL_RECORDS)
+                                .boxed()
+                                .collect(Collectors.toList()));
     }
 }

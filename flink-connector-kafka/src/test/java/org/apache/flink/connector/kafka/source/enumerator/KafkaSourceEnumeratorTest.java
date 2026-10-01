@@ -1007,7 +1007,7 @@ public class KafkaSourceEnumeratorTest {
      * still tell its readers that no more splits are coming. The restored enumerator runs its
      * one-time discovery, finds nothing new, and on an unfixed enumerator returns early before
      * reaching the only place that sets {@code noMoreNewPartitionSplits}, so the readers wait for a
-     * {@code NoMoreSplitsEvent} that never arrives and the job never finishes (FLINK-31006).
+     * {@code NoMoreSplitsEvent} that never arrives and the job never finishes.
      *
      * <p>Do not weaken this test by enabling partition discovery or by leaving a partition out of
      * the restored state: either makes the partition change non-empty and the early return is no
@@ -1110,7 +1110,7 @@ public class KafkaSourceEnumeratorTest {
     /**
      * The same early return leaves a bounded source that subscribes to no existing partition
      * hanging on a fresh start: the partition change is empty from the first discovery on, so the
-     * readers are never told that no more splits are coming (FLINK-31006).
+     * readers are never told that no more splits are coming.
      */
     @Test
     public void testBoundedSourceWithoutPartitionsSignalsNoMoreSplits() throws Throwable {

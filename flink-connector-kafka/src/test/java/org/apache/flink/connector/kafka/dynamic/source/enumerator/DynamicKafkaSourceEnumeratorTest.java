@@ -2197,9 +2197,9 @@ public class DynamicKafkaSourceEnumeratorTest {
 
     /**
      * A bounded DynamicKafkaSource restored with every partition already assigned must still tell
-     * its readers that no more splits are coming. Each sub-enumerator runs its one-time discovery,
-     * finds nothing new, and before FLINK-31006 returned early without ever marking the discovery
-     * as finished, so the readers waited forever and the job never finished.
+     * its readers that no more splits are coming. Each sub-enumerator runs its one-time discovery
+     * and finds nothing new. One that returns early on that empty change never marks the discovery
+     * as finished, so the readers wait forever and the job never finishes.
      */
     @Test
     public void testBoundedRestoreSignalsNoMoreSplitsWithoutPartitionChanges() throws Throwable {
