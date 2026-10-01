@@ -40,6 +40,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -73,19 +74,26 @@ public class KafkaSourceFetcherManager
     }
 
     public void commitOffsets(
-            Map<TopicPartition, OffsetAndMetadata> offsetsToCommit, OffsetCommitCallback callback) {
-        LOG.debug("Committing offsets {}", offsetsToCommit);
-        if (offsetsToCommit.isEmpty()) {
+            Map<TopicPartition, OffsetAndMetadata> offsetsToCommit,
+            Set<TopicPartition> partitionsWithoutOffset,
+            OffsetCommitCallback callback) {
+        LOG.debug(
+                "Committing offsets {} and positions of {}",
+                offsetsToCommit,
+                partitionsWithoutOffset);
+        if (offsetsToCommit.isEmpty() && partitionsWithoutOffset.isEmpty()) {
             return;
         }
         SplitFetcher<ConsumerRecord<byte[], byte[]>, KafkaPartitionSplit> splitFetcher =
                 fetchers.get(0);
         if (splitFetcher != null) {
             // The fetcher thread is still running. This should be the majority of the cases.
-            enqueueOffsetsCommitTask(splitFetcher, offsetsToCommit, callback);
+            enqueueOffsetsCommitTask(
+                    splitFetcher, offsetsToCommit, partitionsWithoutOffset, callback);
         } else {
             splitFetcher = createSplitFetcher();
-            enqueueOffsetsCommitTask(splitFetcher, offsetsToCommit, callback);
+            enqueueOffsetsCommitTask(
+                    splitFetcher, offsetsToCommit, partitionsWithoutOffset, callback);
             startFetcher(splitFetcher);
         }
     }
@@ -93,6 +101,7 @@ public class KafkaSourceFetcherManager
     private void enqueueOffsetsCommitTask(
             SplitFetcher<ConsumerRecord<byte[], byte[]>, KafkaPartitionSplit> splitFetcher,
             Map<TopicPartition, OffsetAndMetadata> offsetsToCommit,
+            Set<TopicPartition> partitionsWithoutOffset,
             OffsetCommitCallback callback) {
         KafkaPartitionSplitReader kafkaReader =
                 (KafkaPartitionSplitReader) splitFetcher.getSplitReader();
@@ -101,7 +110,8 @@ public class KafkaSourceFetcherManager
                 new SplitFetcherTask() {
                     @Override
                     public boolean run() throws IOException {
-                        kafkaReader.notifyCheckpointComplete(offsetsToCommit, callback);
+                        kafkaReader.notifyCheckpointComplete(
+                                offsetsToCommit, partitionsWithoutOffset, callback);
                         return true;
                     }
 
