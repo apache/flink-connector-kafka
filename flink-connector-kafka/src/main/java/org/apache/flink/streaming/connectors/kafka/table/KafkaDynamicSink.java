@@ -325,7 +325,8 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
             return false;
         }
         final KafkaDynamicSink that = (KafkaDynamicSink) o;
-        return Objects.equals(metadataKeys, that.metadataKeys)
+        return Objects.equals(transactionNamingStrategy, that.transactionNamingStrategy)
+                && Objects.equals(metadataKeys, that.metadataKeys)
                 && Objects.equals(consumedDataType, that.consumedDataType)
                 && Objects.equals(physicalDataType, that.physicalDataType)
                 && Objects.equals(keyEncodingFormat, that.keyEncodingFormat)
@@ -341,7 +342,6 @@ public class KafkaDynamicSink implements DynamicTableSink, SupportsWritingMetada
                 && Objects.equals(upsertMode, that.upsertMode)
                 && Objects.equals(flushMode, that.flushMode)
                 && Objects.equals(transactionalIdPrefix, that.transactionalIdPrefix)
-                && Objects.equals(transactionNamingStrategy, that.transactionNamingStrategy)
                 && Objects.equals(parallelism, that.parallelism);
     }
 

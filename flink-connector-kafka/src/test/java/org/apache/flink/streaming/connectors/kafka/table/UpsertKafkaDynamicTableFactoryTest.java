@@ -461,7 +461,7 @@ class UpsertKafkaDynamicTableFactoryTest {
             assertThat(actualSink).isEqualTo(expectedSink);
             final DynamicTableSink copiedSink = actualSink.copy();
             assertThat(copiedSink).isEqualTo(actualSink);
-            assertThat(copiedSink.hashCode()).isEqualTo(actualSink.hashCode());
+            assertThat(copiedSink).hasSameHashCodeAs(actualSink);
 
             for (TransactionNamingStrategy otherStrategy : TransactionNamingStrategy.values()) {
                 if (otherStrategy != namingStrategy) {
