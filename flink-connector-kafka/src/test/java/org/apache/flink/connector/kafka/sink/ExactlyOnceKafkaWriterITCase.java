@@ -275,6 +275,102 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
         }
     }
 
+    /**
+     * With {@code POOLING}, a committed transactional id is reused for a later checkpoint under a
+     * newer epoch. A recovery from the earlier checkpoint still lists the id as precommitted, and
+     * the committer's commit will be fenced. The broker-side transaction reported under the newer
+     * epoch must be aborted on recovery, but the id itself must stay reserved: the committer's
+     * fenced re-commit of the restored transaction is reported on the backchannel after recovery,
+     * and it must not tear down whatever producer the id has been reused for by then (FLINK-40626).
+     */
+    @Test
+    void shouldAbortSupersededPrecommittedTransactionOnRecovery() throws Exception {
+        String prefix = getTransactionalPrefix();
+        Consumer<KafkaSinkBuilder<?>> withPoolingAndPrefix =
+                builder -> withPooling(builder).setTransactionalIdPrefix(prefix);
+        final KafkaWriterState stateOfCheckpoint1;
+        final CheckpointTransaction precommitted;
+        try (final ExactlyOnceKafkaWriter<Integer> failedWriter =
+                createWriter(withPoolingAndPrefix, createInitContext())) {
+            Tuple2<KafkaWriterState, KafkaCommittable> checkpoint1 =
+                    onCheckpointBarrier(failedWriter, 1);
+            stateOfCheckpoint1 = checkpoint1.f0;
+            precommitted =
+                    Iterables.getOnlyElement(stateOfCheckpoint1.getPrecommittedTransactionalIds());
+            assertThat(precommitted.hasKnownEpoch()).isTrue();
+            assertThat(precommitted.getEpoch()).isEqualTo(checkpoint1.f1.getEpoch());
+
+            // the committer commits checkpoint 1 and hands the id back to the pool
+            checkpoint1.f1.getProducer().get().commitTransaction();
+            try (WritableBackchannel<TransactionFinished> backchannel =
+                    getBackchannel(failedWriter)) {
+                backchannel.send(TransactionFinished.successful(precommitted.getTransactionalId()));
+            }
+            onCheckpointBarrier(failedWriter, 2);
+            // checkpoint 3 reuses the id of checkpoint 1 under a bumped epoch
+            KafkaCommittable checkpoint3 = onCheckpointBarrier(failedWriter, 3).f1;
+            assertThat(checkpoint3.getTransactionalId())
+                    .isEqualTo(precommitted.getTransactionalId());
+            assertThat(checkpoint3.getEpoch()).isGreaterThan(precommitted.getEpoch());
+            // the job fails here; the transactions of checkpoints 2 and 3 linger on the broker
+        }
+
+        try (AdminClient admin = AdminClient.create(getKafkaClientConfiguration())) {
+            assertThat(AdminUtils.getOpenTransactionsForTopics(admin, Collections.singleton(topic)))
+                    .hasSize(2);
+
+            // recovery from checkpoint 1 with the same prefix, as on an actual job restart
+            try (final ExactlyOnceKafkaWriter<Integer> recoveredWriter =
+                    restoreWriter(
+                            withPoolingAndPrefix,
+                            List.of(stateOfCheckpoint1),
+                            createInitContext())) {
+                assertThat(recoveredWriter.getTransactionalIdPrefix())
+                        .isEqualTo(stateOfCheckpoint1.getTransactionalIdPrefix());
+                assertThat(
+                                AdminUtils.getOpenTransactionsForTopics(
+                                        admin, Collections.singleton(topic)))
+                        .isEmpty();
+
+                // the id stays reserved: still ongoing, and not reused for the first new
+                // transaction
+                assertThat(recoveredWriter.getProducerPool().getOngoingTransactions())
+                        .extracting(CheckpointTransaction::getTransactionalId)
+                        .contains(precommitted.getTransactionalId());
+                assertThat(recoveredWriter.getCurrentProducer().getTransactionalId())
+                        .isNotEqualTo(precommitted.getTransactionalId());
+
+                // the committer eventually reports its fenced re-commit of the restored
+                // transaction; that must release the id without touching the new transaction
+                try (WritableBackchannel<TransactionFinished> backchannel =
+                        getBackchannel(recoveredWriter)) {
+                    backchannel.send(
+                            TransactionFinished.erroneously(precommitted.getTransactionalId()));
+                    recoveredWriter.write(1, SINK_WRITER_CONTEXT);
+                    recoveredWriter.flush(false);
+                    Collection<KafkaCommittable> committables = recoveredWriter.prepareCommit();
+                    recoveredWriter.snapshotState(1000);
+                    KafkaCommittable committable = Iterables.getOnlyElement(committables);
+                    assertThat(committable.getProducer()).isPresent();
+                    assertThatCode(() -> committable.getProducer().get().commitTransaction())
+                            .doesNotThrowAnyException();
+                }
+                // the restored entry is gone; the id is free again and the next transaction may
+                // take it under the live producer's epoch
+                assertThat(recoveredWriter.getProducerPool().getOngoingTransactions())
+                        .doesNotContain(precommitted)
+                        .filteredOn(
+                                t ->
+                                        t.getTransactionalId()
+                                                .equals(precommitted.getTransactionalId()))
+                        .allSatisfy(
+                                t ->
+                                        assertThat(t.getEpoch())
+                                                .isGreaterThan(precommitted.getEpoch()));
+            }
+        }
+    }
+
     /** Test that producers are reused when committed. */
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
