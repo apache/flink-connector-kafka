@@ -209,7 +209,8 @@ class FlinkKafkaShareAckTransactionCommitterTest {
         return properties;
     }
 
-    private static final class RecordingProducer extends FlinkKafkaInternalProducer<byte[], byte[]> {
+    private static final class RecordingProducer
+            extends FlinkKafkaInternalProducer<byte[], byte[]> {
         private final List<String> events = new ArrayList<>();
         private boolean closed;
         private RuntimeException commitFailure;

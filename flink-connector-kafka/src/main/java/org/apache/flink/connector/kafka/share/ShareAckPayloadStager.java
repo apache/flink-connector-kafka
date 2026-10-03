@@ -37,7 +37,8 @@ public final class ShareAckPayloadStager {
             "org.apache.kafka.clients.consumer.ShareAcknowledgementBatch";
     private static final String SHARE_GROUP_METADATA_CLASS =
             "org.apache.kafka.clients.consumer.ShareGroupMetadata";
-    private static final String TOPIC_ID_PARTITION_CLASS = "org.apache.kafka.common.TopicIdPartition";
+    private static final String TOPIC_ID_PARTITION_CLASS =
+            "org.apache.kafka.common.TopicIdPartition";
     private static final String UUID_CLASS = "org.apache.kafka.common.Uuid";
 
     private ShareAckPayloadStager() {}
@@ -70,8 +71,11 @@ public final class ShareAckPayloadStager {
     }
 
     private static Object groupMetadata(ShareAckPayload payload)
-            throws ClassNotFoundException, NoSuchMethodException, InvocationTargetException,
-                    InstantiationException, IllegalAccessException {
+            throws ClassNotFoundException,
+                    NoSuchMethodException,
+                    InvocationTargetException,
+                    InstantiationException,
+                    IllegalAccessException {
         Class<?> metadataClass = Class.forName(SHARE_GROUP_METADATA_CLASS);
         Constructor<?> constructor =
                 metadataClass.getConstructor(String.class, String.class, Integer.TYPE);
@@ -80,8 +84,11 @@ public final class ShareAckPayloadStager {
     }
 
     private static Object acknowledgements(ShareAckPayload payload)
-            throws ClassNotFoundException, NoSuchMethodException, InvocationTargetException,
-                    InstantiationException, IllegalAccessException {
+            throws ClassNotFoundException,
+                    NoSuchMethodException,
+                    InvocationTargetException,
+                    InstantiationException,
+                    IllegalAccessException {
         Class<?> uuidClass = Class.forName(UUID_CLASS);
         Class<?> topicIdPartitionClass = Class.forName(TOPIC_ID_PARTITION_CLASS);
         Class<?> batchClass = Class.forName(SHARE_ACKNOWLEDGEMENT_BATCH_CLASS);
@@ -92,7 +99,8 @@ public final class ShareAckPayloadStager {
                 topicIdPartitionClass.getConstructor(uuidClass, Integer.TYPE, String.class);
         Constructor<?> batchConstructor =
                 batchClass.getConstructor(Long.TYPE, Long.TYPE, List.class);
-        Constructor<?> acknowledgementsConstructor = acknowledgementsClass.getConstructor(Map.class);
+        Constructor<?> acknowledgementsConstructor =
+                acknowledgementsClass.getConstructor(Map.class);
 
         Map<Object, List<Object>> acknowledgementsByPartition = new LinkedHashMap<>();
         for (ShareAckPayload.TopicPartitionAcknowledgements partition :

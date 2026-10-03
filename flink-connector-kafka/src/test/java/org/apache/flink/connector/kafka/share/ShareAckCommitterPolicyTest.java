@@ -35,8 +35,7 @@ class ShareAckCommitterPolicyTest {
     @Test
     void testAtLeastOnceCommitterCommitsShareAcksOnly() throws Exception {
         List<String> events = new ArrayList<>();
-        RecordingShareAckCommitter shareAckCommitter =
-                new RecordingShareAckCommitter(events);
+        RecordingShareAckCommitter shareAckCommitter = new RecordingShareAckCommitter(events);
         AtLeastOnceShareAckCommitter committer =
                 new AtLeastOnceShareAckCommitter(shareAckCommitter);
         TestingCommitRequest<ShareAckCommittable> request =
@@ -113,8 +112,7 @@ class ShareAckCommitterPolicyTest {
     @Test
     void testOrderedCommitterRetriesShareAcksAfterOutputsAreCommitted() throws Exception {
         List<String> events = new ArrayList<>();
-        RecordingShareAckCommitter shareAckCommitter =
-                new RecordingShareAckCommitter(events);
+        RecordingShareAckCommitter shareAckCommitter = new RecordingShareAckCommitter(events);
         shareAckCommitter.failure = new TimeoutException("retry ack");
         OrderedShareEosCommitter committer =
                 new OrderedShareEosCommitter(
@@ -148,8 +146,7 @@ class ShareAckCommitterPolicyTest {
             ShareAckCommitPhase phase,
             Collection<KafkaCommittable> outputs,
             Collection<ShareAckCommittable> acks) {
-        return new ShareEosCheckpointLedger(
-                "orders-pipeline-v1", 42L, phase, outputs, acks);
+        return new ShareEosCheckpointLedger("orders-pipeline-v1", 42L, phase, outputs, acks);
     }
 
     private static KafkaCommittable outputCommittable(String transactionalId) {
@@ -167,8 +164,7 @@ class ShareAckCommitterPolicyTest {
                 List.of(new ShareAckId("group", "topic-id", "orders", 0, 1L)));
     }
 
-    private static final class RecordingOutputCommitter
-            implements KafkaOutputTransactionCommitter {
+    private static final class RecordingOutputCommitter implements KafkaOutputTransactionCommitter {
         private final List<String> events;
         private String failureTransactionalId;
 
@@ -189,8 +185,7 @@ class ShareAckCommitterPolicyTest {
         public void close() {}
     }
 
-    private static final class RecordingShareAckCommitter
-            implements ShareAckTransactionCommitter {
+    private static final class RecordingShareAckCommitter implements ShareAckTransactionCommitter {
         private final List<String> events;
         private RuntimeException failure;
 
@@ -199,8 +194,7 @@ class ShareAckCommitterPolicyTest {
         }
 
         @Override
-        public TransactionCommitResult commit(ShareAckCommittable committable)
-                throws IOException {
+        public TransactionCommitResult commit(ShareAckCommittable committable) throws IOException {
             events.add("ack:" + committable.getTransactionalId());
             if (failure != null) {
                 throw failure;

@@ -125,7 +125,8 @@ class FlinkKafkaShareAckTransactionalProducerTest {
         return properties;
     }
 
-    private static final class RecordingProducer extends FlinkKafkaInternalProducer<byte[], byte[]> {
+    private static final class RecordingProducer
+            extends FlinkKafkaInternalProducer<byte[], byte[]> {
         private final List<String> events = new ArrayList<>();
         private final String transactionalId;
 

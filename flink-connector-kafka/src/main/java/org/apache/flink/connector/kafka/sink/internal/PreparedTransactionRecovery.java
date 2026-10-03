@@ -32,11 +32,7 @@ final class PreparedTransactionRecovery {
     }
 
     static void initialize(KafkaProducer<?, ?> producer) {
-        invoke(
-                producer,
-                "initTransactions",
-                new Class<?>[] {Boolean.TYPE},
-                new Object[] {true});
+        invoke(producer, "initTransactions", new Class<?>[] {Boolean.TYPE}, new Object[] {true});
     }
 
     static void complete(KafkaProducer<?, ?> producer, String preparedTransactionState) {

@@ -260,7 +260,8 @@ public class ShareAckPayload implements Serializable {
         public AcknowledgementBatch(
                 long firstOffset, long lastOffset, Collection<Byte> acknowledgeTypes) {
             if (lastOffset < firstOffset) {
-                throw new IllegalArgumentException("lastOffset must not be smaller than firstOffset");
+                throw new IllegalArgumentException(
+                        "lastOffset must not be smaller than firstOffset");
             }
             this.firstOffset = firstOffset;
             this.lastOffset = lastOffset;

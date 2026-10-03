@@ -43,8 +43,7 @@ public enum ShareAckDecision {
                 return REJECT;
             default:
                 throw new IllegalArgumentException(
-                        "Unsupported transactional share acknowledgement type id: "
-                                + kafkaTypeId);
+                        "Unsupported transactional share acknowledgement type id: " + kafkaTypeId);
         }
     }
 }

@@ -100,8 +100,7 @@ public final class ShareEosCheckpointLedger implements Serializable {
 
     @Override
     public int hashCode() {
-        return Objects.hash(
-                eosId, checkpointId, phase, outputCommittables, shareAckCommittables);
+        return Objects.hash(eosId, checkpointId, phase, outputCommittables, shareAckCommittables);
     }
 
     @Override

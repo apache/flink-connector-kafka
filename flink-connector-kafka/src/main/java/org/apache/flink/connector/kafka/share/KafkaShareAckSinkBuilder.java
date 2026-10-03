@@ -117,7 +117,8 @@ public class KafkaShareAckSinkBuilder {
                 "%s is too long and may exceed Kafka's transactional id size limit.",
                 KafkaShareAckSink.SHARE_EXACTLY_ONCE_ID_CONFIG);
         checkState(
-                !isTwoPhaseCommitEnabled(kafkaProducerConfig) || !transactionTimeoutExplicitlyConfigured,
+                !isTwoPhaseCommitEnabled(kafkaProducerConfig)
+                        || !transactionTimeoutExplicitlyConfigured,
                 "%s cannot be configured when %s is set to true.",
                 ProducerConfig.TRANSACTION_TIMEOUT_CONFIG,
                 ProducerConfig.TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG);

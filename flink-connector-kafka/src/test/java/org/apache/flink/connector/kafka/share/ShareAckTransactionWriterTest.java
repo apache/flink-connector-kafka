@@ -46,8 +46,7 @@ class ShareAckTransactionWriterTest {
         assertThat(committable.get().getProducerId()).isEqualTo(10L);
         assertThat(committable.get().getProducerEpoch()).isEqualTo((short) 3);
         assertThat(committable.get().getPreparedTransactionState()).contains("10:3");
-        assertThat(committable.get().getShareAckIds())
-                .containsExactly(id(1L), id(2L));
+        assertThat(committable.get().getShareAckIds()).containsExactly(id(1L), id(2L));
         assertThat(writer.hasStagedAcks()).isFalse();
         assertThat(producer.events)
                 .containsExactly(
@@ -85,8 +84,7 @@ class ShareAckTransactionWriterTest {
         assertThatThrownBy(() -> writer.write(record(1L, ShareAckDecision.REJECT)))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("Conflicting share acknowledgement payload");
-        assertThat(producer.events)
-                .containsExactly("begin", "stage:group|topic-id|orders|0|1");
+        assertThat(producer.events).containsExactly("begin", "stage:group|topic-id|orders|0|1");
     }
 
     @Test
@@ -132,8 +130,7 @@ class ShareAckTransactionWriterTest {
         writer.close();
 
         assertThat(producer.events)
-                .containsExactly(
-                        "begin", "stage:group|topic-id|orders|0|1", "abort", "close");
+                .containsExactly("begin", "stage:group|topic-id|orders|0|1", "abort", "close");
     }
 
     @Test

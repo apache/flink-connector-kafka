@@ -102,10 +102,6 @@ public class ShareAckCommittableSerializer
 
     private static ShareAckId readShareAckId(DataInputStream in) throws IOException {
         return new ShareAckId(
-                in.readUTF(),
-                in.readUTF(),
-                in.readUTF(),
-                in.readInt(),
-                in.readLong());
+                in.readUTF(), in.readUTF(), in.readUTF(), in.readInt(), in.readLong());
     }
 }

@@ -40,8 +40,7 @@ public final class AtLeastOnceShareAckCommitter implements Committer<ShareAckCom
             throws IOException, InterruptedException {
         for (CommitRequest<ShareAckCommittable> request : requests) {
             try {
-                TransactionCommitResult result =
-                        shareAckCommitter.commit(request.getCommittable());
+                TransactionCommitResult result = shareAckCommitter.commit(request.getCommittable());
                 if (result == TransactionCommitResult.ALREADY_COMMITTED) {
                     request.signalAlreadyCommitted();
                 }

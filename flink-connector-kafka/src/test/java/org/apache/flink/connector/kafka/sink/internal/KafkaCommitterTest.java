@@ -263,8 +263,7 @@ class KafkaCommitterTest {
                                 .getReadableBackchannel(SUB_ID, ATTEMPT, TRANS_ID)) {
             final MockCommitRequest<KafkaCommittable> request =
                     new MockCommitRequest<>(
-                            new KafkaCommittable(
-                                    PRODUCER_ID, EPOCH, TRANS_ID, "100:0", null));
+                            new KafkaCommittable(PRODUCER_ID, EPOCH, TRANS_ID, "100:0", null));
 
             committer.commit(Collections.singletonList(request));
 

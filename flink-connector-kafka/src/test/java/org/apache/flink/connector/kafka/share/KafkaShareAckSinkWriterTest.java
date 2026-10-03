@@ -56,15 +56,17 @@ class KafkaShareAckSinkWriterTest {
 
         assertThat(producerFactory.transactionalIds)
                 .containsExactly("orders-pipeline-v1-share-ack-2-5");
-        assertThat(committables).singleElement().satisfies(
-                committable -> {
-                    assertThat(committable.getAckScopeId()).isEqualTo("orders-pipeline-v1");
-                    assertThat(committable.getCheckpointId()).isEqualTo(5L);
-                    assertThat(committable.getTransactionalId())
-                            .isEqualTo("orders-pipeline-v1-share-ack-2-5");
-                    assertThat(committable.getShareAckIds())
-                            .containsExactly(id(1L), id(2L));
-                });
+        assertThat(committables)
+                .singleElement()
+                .satisfies(
+                        committable -> {
+                            assertThat(committable.getAckScopeId()).isEqualTo("orders-pipeline-v1");
+                            assertThat(committable.getCheckpointId()).isEqualTo(5L);
+                            assertThat(committable.getTransactionalId())
+                                    .isEqualTo("orders-pipeline-v1-share-ack-2-5");
+                            assertThat(committable.getShareAckIds())
+                                    .containsExactly(id(1L), id(2L));
+                        });
         assertThat(producerFactory.producers.get(0).events)
                 .containsExactly(
                         "begin",
@@ -86,8 +88,9 @@ class KafkaShareAckSinkWriterTest {
 
         assertThat(producerFactory.transactionalIds)
                 .containsExactly("orders-pipeline-v1-share-ack-2-6");
-        assertThat(committables).singleElement().satisfies(
-                committable -> assertThat(committable.getCheckpointId()).isEqualTo(6L));
+        assertThat(committables)
+                .singleElement()
+                .satisfies(committable -> assertThat(committable.getCheckpointId()).isEqualTo(6L));
     }
 
     @Test
@@ -103,8 +106,7 @@ class KafkaShareAckSinkWriterTest {
 
         assertThat(producerFactory.transactionalIds)
                 .containsExactly(
-                        "orders-pipeline-v1-share-ack-2-5",
-                        "orders-pipeline-v1-share-ack-2-6");
+                        "orders-pipeline-v1-share-ack-2-5", "orders-pipeline-v1-share-ack-2-6");
     }
 
     @Test
@@ -117,8 +119,7 @@ class KafkaShareAckSinkWriterTest {
         writer.close();
 
         assertThat(producerFactory.producers.get(0).events)
-                .containsExactly(
-                        "begin", "stage:group|topic-id|orders|0|1", "abort", "close");
+                .containsExactly("begin", "stage:group|topic-id|orders|0|1", "abort", "close");
     }
 
     private static ShareAckRecord record(long offset) {

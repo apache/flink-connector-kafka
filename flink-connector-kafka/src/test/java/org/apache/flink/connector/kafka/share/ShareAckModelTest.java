@@ -31,8 +31,7 @@ class ShareAckModelTest {
     @Test
     void testShareAckRecordBuildsSingleRecordPayload() {
         ShareAckId id = new ShareAckId("group", "topic-id", "orders", 2, 42L);
-        ShareAckRecord record =
-                new ShareAckRecord(id, "member", 7, ShareAckDecision.REJECT);
+        ShareAckRecord record = new ShareAckRecord(id, "member", 7, ShareAckDecision.REJECT);
 
         ShareAckPayload payload = record.toPayload();
 
@@ -80,16 +79,14 @@ class ShareAckModelTest {
         ShareAckCommittableSerializer serializer = new ShareAckCommittableSerializer();
 
         ShareAckCommittable copy =
-                serializer.deserialize(
-                        serializer.getVersion(), serializer.serialize(committable));
+                serializer.deserialize(serializer.getVersion(), serializer.serialize(committable));
 
         assertThat(copy).isEqualTo(committable);
     }
 
     @Test
     void testShareEosCheckpointLedgerAdvancesPhaseImmutably() {
-        KafkaCommittable output =
-                new KafkaCommittable(1L, (short) 2, "output-txn", "1:2", null);
+        KafkaCommittable output = new KafkaCommittable(1L, (short) 2, "output-txn", "1:2", null);
         ShareAckCommittable ack =
                 new ShareAckCommittable(
                         "orders-pipeline-v1",
