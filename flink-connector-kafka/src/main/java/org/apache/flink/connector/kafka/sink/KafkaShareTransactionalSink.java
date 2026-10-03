@@ -19,29 +19,20 @@
 package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.annotation.Experimental;
-import org.apache.flink.api.connector.sink2.Committer;
-import org.apache.flink.api.connector.sink2.CommitterInitContext;
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.connector.sink2.WriterInitContext;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.share.ShareAckPayload;
-import org.apache.flink.core.io.SimpleVersionedSerializer;
-import org.apache.flink.streaming.api.connector.sink2.CommittableMessage;
-import org.apache.flink.streaming.api.connector.sink2.SupportsPostCommitTopology;
-import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.util.function.SerializableFunction;
 
-import java.io.IOException;
 import java.util.Collection;
-import java.util.Collections;
+import java.util.Objects;
 import java.util.Properties;
 
 /** Experimental one-output map sink that stages input ACCEPT in the output transaction. */
 @Experimental
-public final class KafkaShareTransactionalSink<IN>
-        implements TwoPhaseCommittingStatefulSink<IN, KafkaWriterState, KafkaCommittable>,
-                SupportsPostCommitTopology<KafkaCommittable> {
+public final class KafkaShareTransactionalSink<IN> extends KafkaSink<IN> {
     private static final long serialVersionUID = 1L;
-    private final KafkaSink<IN> delegate;
     private final SerializableFunction<IN, Collection<ShareAckPayload>> extractor;
 
     public KafkaShareTransactionalSink(
@@ -49,47 +40,23 @@ public final class KafkaShareTransactionalSink<IN>
             String transactionalIdPrefix,
             KafkaRecordSerializationSchema<IN> serializer,
             SerializableFunction<IN, Collection<ShareAckPayload>> extractor) {
-        delegate =
+        super(
                 KafkaSink.<IN>builder()
                         .setKafkaProducerConfig(properties)
                         .setTransactionalIdPrefix(transactionalIdPrefix)
                         .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
                         .setRecordSerializer(serializer)
-                        .build();
-        this.extractor = extractor;
+                        .build());
+        this.extractor = Objects.requireNonNull(extractor, "extractor");
     }
 
+    @Internal
     @Override
-    public PrecommittingStatefulSinkWriter<IN, KafkaWriterState, KafkaCommittable> createWriter(
-            WriterInitContext context) throws IOException {
-        return restoreWriter(context, Collections.emptyList());
-    }
-
-    @Override
-    public PrecommittingStatefulSinkWriter<IN, KafkaWriterState, KafkaCommittable> restoreWriter(
-            WriterInitContext context, Collection<KafkaWriterState> state) throws IOException {
+    public KafkaWriter<IN> restoreWriter(
+            WriterInitContext context, Collection<KafkaWriterState> state) {
         ExactlyOnceKafkaWriter<IN> writer =
-                (ExactlyOnceKafkaWriter<IN>) delegate.restoreWriter(context, state);
-        return new SameTransactionShareAckKafkaWriter<>(writer, extractor);
-    }
-
-    @Override
-    public Committer<KafkaCommittable> createCommitter(CommitterInitContext context) {
-        return delegate.createCommitter(context);
-    }
-
-    @Override
-    public SimpleVersionedSerializer<KafkaCommittable> getCommittableSerializer() {
-        return delegate.getCommittableSerializer();
-    }
-
-    @Override
-    public SimpleVersionedSerializer<KafkaWriterState> getWriterStateSerializer() {
-        return delegate.getWriterStateSerializer();
-    }
-
-    @Override
-    public void addPostCommitTopology(DataStream<CommittableMessage<KafkaCommittable>> stream) {
-        delegate.addPostCommitTopology(stream);
+                (ExactlyOnceKafkaWriter<IN>) super.restoreWriter(context, state);
+        writer.setShareAckPayloadExtractor(extractor);
+        return writer;
     }
 }

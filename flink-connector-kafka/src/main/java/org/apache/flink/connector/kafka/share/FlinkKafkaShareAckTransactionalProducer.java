@@ -18,7 +18,6 @@
 package org.apache.flink.connector.kafka.share;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
 
 import java.io.IOException;
@@ -26,7 +25,8 @@ import java.util.Objects;
 import java.util.Optional;
 
 @Internal
-public final class FlinkKafkaShareAckTransactionalProducer implements ShareAckTransactionalProducer {
+public final class FlinkKafkaShareAckTransactionalProducer
+        implements ShareAckTransactionalProducer {
 
     private final FlinkKafkaInternalProducer<byte[], byte[]> producer;
     private final PayloadStager payloadStager;
@@ -36,7 +36,6 @@ public final class FlinkKafkaShareAckTransactionalProducer implements ShareAckTr
         this(producer, ShareAckPayloadStager::stage);
     }
 
-    @VisibleForTesting
     FlinkKafkaShareAckTransactionalProducer(
             FlinkKafkaInternalProducer<byte[], byte[]> producer, PayloadStager payloadStager) {
         this.producer = Objects.requireNonNull(producer, "producer");

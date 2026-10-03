@@ -18,7 +18,6 @@
 package org.apache.flink.connector.kafka.share;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
 
 import org.apache.kafka.common.errors.InterruptException;
@@ -46,7 +45,6 @@ public final class FlinkKafkaShareAckTransactionCommitter implements ShareAckTra
         this(producerProperties, FlinkKafkaInternalProducer::new);
     }
 
-    @VisibleForTesting
     FlinkKafkaShareAckTransactionCommitter(
             Properties producerProperties,
             BiFunction<Properties, String, FlinkKafkaInternalProducer<?, ?>> producerFactory) {
@@ -63,14 +61,17 @@ public final class FlinkKafkaShareAckTransactionCommitter implements ShareAckTra
             if (preparedTransactionState.isPresent()) {
                 producer.completePreparedTransaction(preparedTransactionState.get());
             } else {
-                producer.resumeTransaction(committable.getProducerId(), committable.getProducerEpoch());
+                producer.resumeTransaction(
+                        committable.getProducerId(), committable.getProducerEpoch());
                 producer.commitTransaction();
             }
             return TransactionCommitResult.COMMITTED;
         } catch (InterruptException e) {
             Thread.interrupted();
             throw new InterruptedException(e.getMessage());
-        } catch (ProducerFencedException | InvalidTxnStateException | UnknownProducerIdException e) {
+        } catch (ProducerFencedException
+                | InvalidTxnStateException
+                | UnknownProducerIdException e) {
             closeCommitterProducer(producer);
             throw e;
         } catch (RetriableException e) {

@@ -19,6 +19,8 @@ package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.connector.kafka.share.ShareAckPayload;
+import org.apache.flink.connector.kafka.share.ShareAckPayloadStager;
+import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
 
 import java.io.IOException;
 import java.util.Collection;
@@ -32,6 +34,22 @@ class ShareAckPayloadBuffer {
 
     private final Map<String, ShareAckPayload> payloadsById = new LinkedHashMap<>();
     private final Set<String> stagedPayloadIds = new HashSet<>();
+
+    void stageForRecord(
+            Object producer, boolean transactionHasRecords, Collection<ShareAckPayload> payloads)
+            throws IOException {
+        addAll(payloads);
+        stage(
+                producer,
+                transactionHasRecords,
+                (transactionProducer, payload) -> {
+                    ShareAckPayloadStager.stage(transactionProducer, payload);
+                    if (transactionProducer instanceof FlinkKafkaInternalProducer) {
+                        ((FlinkKafkaInternalProducer<?, ?>) transactionProducer)
+                                .markShareAcksStaged();
+                    }
+                });
+    }
 
     void addAll(Collection<ShareAckPayload> payloads) throws IOException {
         for (ShareAckPayload payload : payloads) {

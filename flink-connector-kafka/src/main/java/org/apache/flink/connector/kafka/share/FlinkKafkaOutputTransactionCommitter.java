@@ -18,7 +18,6 @@
 package org.apache.flink.connector.kafka.share;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.sink2.Committer;
 import org.apache.flink.connector.kafka.sink.KafkaCommittable;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
@@ -54,7 +53,6 @@ public final class FlinkKafkaOutputTransactionCommitter implements KafkaOutputTr
                         FlinkKafkaInternalProducer::new));
     }
 
-    @VisibleForTesting
     FlinkKafkaOutputTransactionCommitter(Committer<KafkaCommittable> kafkaCommitter) {
         this.kafkaCommitter = Objects.requireNonNull(kafkaCommitter, "kafkaCommitter");
     }
@@ -126,10 +124,13 @@ public final class FlinkKafkaOutputTransactionCommitter implements KafkaOutputTr
                 throw new TimeoutException("Kafka output transaction commit should be retried.");
             }
             if (knownFailure != null) {
-                throw new IOException("Kafka output transaction commit failed with known reason.", knownFailure);
+                throw new IOException(
+                        "Kafka output transaction commit failed with known reason.", knownFailure);
             }
             if (unknownFailure != null) {
-                throw new IOException("Kafka output transaction commit failed with unknown reason.", unknownFailure);
+                throw new IOException(
+                        "Kafka output transaction commit failed with unknown reason.",
+                        unknownFailure);
             }
             return alreadyCommitted
                     ? TransactionCommitResult.ALREADY_COMMITTED

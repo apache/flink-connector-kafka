@@ -86,6 +86,15 @@ public class KafkaSink<IN>
     private final String transactionalIdPrefix;
     private final TransactionNamingStrategy transactionNamingStrategy;
 
+    KafkaSink(KafkaSink<IN> configuredSink) {
+        this(
+                configuredSink.deliveryGuarantee,
+                configuredSink.kafkaProducerConfig,
+                configuredSink.transactionalIdPrefix,
+                configuredSink.recordSerializer,
+                configuredSink.transactionNamingStrategy);
+    }
+
     KafkaSink(
             DeliveryGuarantee deliveryGuarantee,
             Properties kafkaProducerConfig,

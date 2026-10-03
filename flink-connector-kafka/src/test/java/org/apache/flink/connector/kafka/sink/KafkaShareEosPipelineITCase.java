@@ -36,7 +36,7 @@ import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.source.legacy.RichParallelSourceFunction;
 import org.apache.flink.streaming.api.functions.source.legacy.SourceFunction;
-import org.apache.flink.test.util.MiniClusterWithClientResource;
+import org.apache.flink.test.junit5.MiniClusterExtension;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AlterConfigOp;
@@ -64,6 +64,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.testcontainers.utility.DockerImageName;
 
@@ -92,6 +93,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Timeout(240)
 @ResourceLock("KafkaTestBase")
 class KafkaShareEosPipelineITCase {
+
+    @RegisterExtension
+    static final MiniClusterExtension CLUSTER =
+            new MiniClusterExtension(
+                    new MiniClusterResourceConfiguration.Builder()
+                            .setNumberTaskManagers(2)
+                            .setNumberSlotsPerTaskManager(2)
+                            .build());
 
     private static final String BOOTSTRAP_SERVERS_PROPERTY =
             "flink.kafka.share.it.bootstrap.servers";
@@ -129,14 +138,6 @@ class KafkaShareEosPipelineITCase {
 
         Configuration flinkConfiguration = new Configuration();
         flinkConfiguration.set(RestartStrategyOptions.RESTART_STRATEGY, "none");
-        MiniClusterWithClientResource miniCluster =
-                new MiniClusterWithClientResource(
-                        new MiniClusterResourceConfiguration.Builder()
-                                .setNumberTaskManagers(2)
-                                .setNumberSlotsPerTaskManager(2)
-                                .setConfiguration(flinkConfiguration)
-                                .build());
-        miniCluster.before();
         try (AdminClient admin = createAdmin(context.bootstrapServers)) {
             StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
             env.configure(flinkConfiguration);
@@ -178,9 +179,7 @@ class KafkaShareEosPipelineITCase {
                                     .map(record -> record.inputPartition)
                                     .collect(Collectors.toSet()))
                     .containsExactlyInAnyOrderElementsOf(
-                            IntStream.range(0, partitionCount)
-                                    .boxed()
-                                    .collect(Collectors.toSet()));
+                            IntStream.range(0, partitionCount).boxed().collect(Collectors.toSet()));
             assertThat(
                             outputRecords.stream()
                                     .map(record -> record.mapSubtaskId)
@@ -194,8 +193,6 @@ class KafkaShareEosPipelineITCase {
             List<String> commitEvents = new ArrayList<>(COMMIT_EVENTS);
             assertThat(commitEvents).isNotEmpty();
             assertThat(commitEvents).allMatch(event -> event.startsWith("sink:"));
-        } finally {
-            miniCluster.after();
         }
     }
 
@@ -221,7 +218,12 @@ class KafkaShareEosPipelineITCase {
             alterShareGroupOffsetReset(admin, shareGroupId);
         }
         return new SharePipelineContext(
-                bootstrapServers, suffix, inputTopic, outputTopic, shareGroupId, inputTopicPartitions);
+                bootstrapServers,
+                suffix,
+                inputTopic,
+                outputTopic,
+                shareGroupId,
+                inputTopicPartitions);
     }
 
     private String bootstrapServers() {
@@ -266,9 +268,7 @@ class KafkaShareEosPipelineITCase {
             KafkaShareConsumer.class.getMethod("shareGroupMetadata");
             KafkaShareConsumer.class.getMethod("acknowledgementsForTransaction");
             KafkaProducer.class.getMethod(
-                    "sendShareAcknowledgementsToTransaction",
-                    acknowledgementsClass,
-                    metadataClass);
+                    "sendShareAcknowledgementsToTransaction", acknowledgementsClass, metadataClass);
             return true;
         } catch (ReflectiveOperationException e) {
             return false;
@@ -290,8 +290,7 @@ class KafkaShareEosPipelineITCase {
                                 List.of(
                                         new AlterConfigOp(
                                                 new ConfigEntry(
-                                                        SHARE_AUTO_OFFSET_RESET_CONFIG,
-                                                        "earliest"),
+                                                        SHARE_AUTO_OFFSET_RESET_CONFIG, "earliest"),
                                                 AlterConfigOp.OpType.SET))))
                 .all()
                 .get(30, TimeUnit.SECONDS);
@@ -306,8 +305,7 @@ class KafkaShareEosPipelineITCase {
                 for (int index = 0; index < recordsPerPartition; index++) {
                     String value = "partition-" + partition + "-record-" + index;
                     byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-                    producer.send(new ProducerRecord<>(topic, partition, null, bytes, bytes))
-                            .get();
+                    producer.send(new ProducerRecord<>(topic, partition, null, bytes, bytes)).get();
                 }
             }
             producer.flush();
@@ -341,7 +339,8 @@ class KafkaShareEosPipelineITCase {
             String bootstrapServers, String topic, int expectedRecords) throws Exception {
         Properties properties = new Properties();
         properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        properties.put(ConsumerConfig.GROUP_ID_CONFIG, "share-eos-output-reader-" + UUID.randomUUID());
+        properties.put(
+                ConsumerConfig.GROUP_ID_CONFIG, "share-eos-output-reader-" + UUID.randomUUID());
         properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         properties.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
         properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class);
@@ -495,12 +494,10 @@ class KafkaShareEosPipelineITCase {
                             client.acknowledgeAccept(record);
                         }
                         ShareAckPayload shareAckPayload =
-                                client.shareAckPayload(
-                                        subtaskId + "-" + ackPayloadSequence++);
+                                client.shareAckPayload(subtaskId + "-" + ackPayloadSequence++);
                         for (ConsumerRecord<byte[], byte[]> record : batch) {
                             context.collect(
-                                    ShareSourceRecord.from(
-                                            subtaskId, record, shareAckPayload));
+                                    ShareSourceRecord.from(subtaskId, record, shareAckPayload));
                         }
                         emittedRecords += batch.size();
                         hasUncheckpointedAcks = true;
@@ -526,7 +523,8 @@ class KafkaShareEosPipelineITCase {
 
         private final KafkaShareConsumer<byte[], byte[]> consumer;
 
-        private ReflectiveShareConsumerClient(String bootstrapServers, String groupId, String topic) {
+        private ReflectiveShareConsumerClient(
+                String bootstrapServers, String groupId, String topic) {
             this.consumer =
                     new KafkaShareConsumer<>(
                             shareConsumerProperties(bootstrapServers, groupId),
@@ -586,14 +584,17 @@ class KafkaShareEosPipelineITCase {
         }
 
         @Override
-        public PrecommittingStatefulSinkWriter<ShareSourceRecord, KafkaWriterState, KafkaCommittable>
+        public PrecommittingStatefulSinkWriter<
+                        ShareSourceRecord, KafkaWriterState, KafkaCommittable>
                 createWriter(WriterInitContext context) throws IOException {
             return restoreWriter(context, Collections.emptyList());
         }
 
         @Override
-        public PrecommittingStatefulSinkWriter<ShareSourceRecord, KafkaWriterState, KafkaCommittable>
-                restoreWriter(WriterInitContext context, Collection<KafkaWriterState> recoveredState)
+        public PrecommittingStatefulSinkWriter<
+                        ShareSourceRecord, KafkaWriterState, KafkaCommittable>
+                restoreWriter(
+                        WriterInitContext context, Collection<KafkaWriterState> recoveredState)
                         throws IOException {
             ExactlyOnceKafkaWriter<ShareSourceRecord> writer =
                     new ExactlyOnceKafkaWriter<>(

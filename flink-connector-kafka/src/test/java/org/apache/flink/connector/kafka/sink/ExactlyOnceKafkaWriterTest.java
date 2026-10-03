@@ -18,6 +18,7 @@
 package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.kafka.share.ShareAckPayload;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
 import org.apache.flink.connector.kafka.sink.internal.TransactionAbortStrategyImpl;
 import org.apache.flink.connector.kafka.sink.internal.TransactionNamingStrategyImpl;
@@ -30,7 +31,9 @@ import org.apache.flink.util.TestLoggerExtension;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.errors.ProducerFencedException;
+import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.errors.TransactionAbortedException;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.jupiter.api.Test;
@@ -38,16 +41,77 @@ import org.junit.jupiter.api.extension.ExtendWith;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
 
 /** Tests for {@link ExactlyOnceKafkaWriter}. */
 @ExtendWith(TestLoggerExtension.class)
 class ExactlyOnceKafkaWriterTest {
+
+    @Test
+    void testShareStagingUsesTheOutputProducerBeforePrepare() throws Exception {
+        final ExactlyOnceKafkaWriter<Integer> writer = createWriter(createSinkWriterMetricGroup());
+        final MockProducer producer = new MockProducer(writer.deliveryCallback, null);
+        writer.currentProducer = producer;
+        writer.setShareAckPayloadExtractor(
+                ignored -> List.of(sharePayload()), new RecordingPayloadBuffer());
+        try {
+            writer.write(1, new KafkaWriterTestBase.DummySinkWriterContext());
+            writer.write(1, new KafkaWriterTestBase.DummySinkWriterContext());
+
+            assertThat(producer.events).containsExactly("produce", "stage", "produce");
+            assertThat(writer.prepareCommit()).hasSize(1);
+            assertThat(producer.events).containsExactly("produce", "stage", "produce", "prepare");
+        } finally {
+            writer.close();
+        }
+    }
+
+    @Test
+    void testShareStagingFailureIsPropagatedBeforePrepare() throws Exception {
+        final ExactlyOnceKafkaWriter<Integer> writer = createWriter(createSinkWriterMetricGroup());
+        final MockProducer producer = new MockProducer(writer.deliveryCallback, null);
+        producer.stageException = new TimeoutException("stage failed");
+        writer.currentProducer = producer;
+        writer.setShareAckPayloadExtractor(
+                ignored -> List.of(sharePayload()), new RecordingPayloadBuffer());
+        try {
+            assertThatThrownBy(
+                            () -> writer.write(1, new KafkaWriterTestBase.DummySinkWriterContext()))
+                    .isInstanceOf(TimeoutException.class)
+                    .hasMessage("stage failed");
+            assertThat(producer.events).containsExactly("produce", "stage");
+            assertThat(producer.shareAcksStaged).isFalse();
+        } finally {
+            writer.close();
+        }
+    }
+
+    private static ShareAckPayload sharePayload() {
+        return new ShareAckPayload(
+                "ack",
+                "group",
+                "member",
+                1,
+                List.of(
+                        new ShareAckPayload.TopicPartitionAcknowledgements(
+                                "AAAAAAAAAAAAAAAAAAAAAA",
+                                "input",
+                                0,
+                                List.of(
+                                        new ShareAckPayload.AcknowledgementBatch(
+                                                0, 0, List.of((byte) 1))))));
+    }
 
     @Test
     void testPrepareAcknowledgementOnlyTransaction() throws Exception {
@@ -125,12 +189,37 @@ class ExactlyOnceKafkaWriterTest {
         return properties;
     }
 
+    private static class RecordingPayloadBuffer extends ShareAckPayloadBuffer {
+        @Override
+        void stageForRecord(
+                Object producer,
+                boolean transactionHasRecords,
+                Collection<ShareAckPayload> payloads)
+                throws IOException {
+            addAll(payloads);
+            stage(
+                    producer,
+                    transactionHasRecords,
+                    (p, payload) -> {
+                        final MockProducer mock = (MockProducer) p;
+                        mock.events.add("stage");
+                        if (mock.stageException != null) {
+                            throw mock.stageException;
+                        }
+                        mock.markShareAcksStaged();
+                    });
+        }
+    }
+
     private static class MockProducer extends FlinkKafkaInternalProducer<byte[], byte[]> {
 
         private final Callback callback;
         @Nullable private final RuntimeException abortException;
         private boolean shareAcksStaged;
         private boolean aborted;
+        private boolean recordsSent;
+        private final List<String> events = new ArrayList<>();
+        @Nullable private RuntimeException stageException;
 
         private MockProducer(Callback callback, @Nullable RuntimeException abortException) {
             this(callback, abortException, false);
@@ -148,11 +237,31 @@ class ExactlyOnceKafkaWriterTest {
 
         @Override
         public boolean hasWorkInTransaction() {
-            return abortException != null || shareAcksStaged;
+            return abortException != null || shareAcksStaged || recordsSent;
+        }
+
+        @Override
+        public boolean hasRecordsInTransaction() {
+            return recordsSent;
+        }
+
+        @Override
+        public Future<RecordMetadata> send(
+                ProducerRecord<byte[], byte[]> record, Callback callback) {
+            events.add("produce");
+            recordsSent = true;
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public void markShareAcksStaged() {
+            shareAcksStaged = true;
         }
 
         @Override
         public Optional<String> precommitTransaction() {
+            events.add("prepare");
+            recordsSent = false;
             shareAcksStaged = false;
             return Optional.empty();
         }

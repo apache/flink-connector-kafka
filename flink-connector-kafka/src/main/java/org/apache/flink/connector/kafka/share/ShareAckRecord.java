@@ -17,6 +17,7 @@
 
 package org.apache.flink.connector.kafka.share;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.annotation.PublicEvolving;
 
 import java.io.Serializable;
@@ -58,6 +59,7 @@ public final class ShareAckRecord implements Serializable {
         return decision;
     }
 
+    @Internal
     public ShareAckPayload toPayload() {
         return new ShareAckPayload(
                 id.asString(),

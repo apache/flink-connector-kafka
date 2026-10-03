@@ -18,7 +18,6 @@
 package org.apache.flink.connector.kafka.share;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.sink2.CommittingSinkWriter;
 import org.apache.flink.api.connector.sink2.InitContext;
 import org.apache.flink.api.connector.sink2.SinkWriter;
@@ -56,7 +55,6 @@ final class KafkaShareAckSinkWriter
                 producerFactory(producerProperties));
     }
 
-    @VisibleForTesting
     KafkaShareAckSinkWriter(
             String shareExactlyOnceId,
             int subtaskId,

@@ -36,7 +36,9 @@ import org.apache.flink.streaming.api.lineage.DatasetConfigFacet;
 import org.apache.flink.streaming.api.lineage.LineageDatasetFacet;
 import org.apache.flink.streaming.api.lineage.LineageVertex;
 
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -47,6 +49,7 @@ import java.util.Optional;
 import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link KafkaSink}. */
 public class KafkaSinkTest {
@@ -154,6 +157,56 @@ public class KafkaSinkTest {
                 .hasSize(2) // writer and committer
                 .extracting(StreamNode::getCoLocationGroup)
                 .containsOnly(colocationKey);
+    }
+
+    @Test
+    void testShareSinkInheritsWriterCommitterCoLocation() {
+        final KafkaSink<Object> sink = shareSink("share-colocation");
+        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.<Object>fromData(1).sinkTo(sink);
+
+        assertThat(env.getStreamGraph().getStreamNodes())
+                .filteredOn(node -> !node.getInEdges().isEmpty())
+                .hasSize(2)
+                .extracting(StreamNode::getCoLocationGroup)
+                .containsOnly("share-colocation");
+    }
+
+    @Test
+    void testShareSinkPreservesCustomCoLocation() {
+        final KafkaSink<Object> sink = shareSink("share-colocation");
+        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.<Object>fromData(1)
+                .sinkTo(sink)
+                .getTransformation()
+                .setCoLocationGroupKey("custom-share");
+
+        assertThat(env.getStreamGraph().getStreamNodes())
+                .filteredOn(node -> !node.getInEdges().isEmpty())
+                .hasSize(2)
+                .extracting(StreamNode::getCoLocationGroup)
+                .containsOnly("custom-share");
+    }
+
+    @Test
+    void testShareSinkPreservesBuilderDefaultsAndValidation() {
+        final KafkaSink<Object> sink = shareSink("share-defaults");
+        assertThat(sink.getKafkaProducerConfig())
+                .containsEntry(
+                        ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
+                        ByteArraySerializer.class.getName())
+                .containsEntry(
+                        ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
+                        ByteArraySerializer.class.getName());
+        assertThatThrownBy(() -> shareSink(null)).isInstanceOf(NullPointerException.class);
+    }
+
+    private KafkaSink<Object> shareSink(String prefix) {
+        return new KafkaShareTransactionalSink<>(
+                kafkaProperties,
+                prefix,
+                new TestingKafkaRecordSerializationSchema(),
+                ignored -> Collections.emptyList());
     }
 
     @Test

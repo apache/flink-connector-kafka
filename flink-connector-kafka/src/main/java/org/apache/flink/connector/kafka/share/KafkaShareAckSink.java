@@ -17,8 +17,8 @@
 
 package org.apache.flink.connector.kafka.share;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.annotation.PublicEvolving;
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.connector.sink2.Committer;
 import org.apache.flink.api.connector.sink2.CommitterInitContext;
 import org.apache.flink.api.connector.sink2.Sink;
@@ -33,7 +33,8 @@ import java.util.Properties;
 
 /** Sink for Kafka share-group acknowledgement control records. */
 @PublicEvolving
-public class KafkaShareAckSink implements Sink<ShareAckRecord>, SupportsCommitter<ShareAckCommittable> {
+public class KafkaShareAckSink
+        implements Sink<ShareAckRecord>, SupportsCommitter<ShareAckCommittable> {
 
     public static final String SHARE_EXACTLY_ONCE_ID_CONFIG = "share.exactly-once.id";
 
@@ -59,6 +60,7 @@ public class KafkaShareAckSink implements Sink<ShareAckRecord>, SupportsCommitte
         return new KafkaShareAckSinkWriter(shareExactlyOnceId, kafkaProducerConfig, context);
     }
 
+    @Internal
     @Override
     public Committer<ShareAckCommittable> createCommitter(CommitterInitContext context) {
         switch (deliveryGuarantee) {
@@ -67,26 +69,25 @@ public class KafkaShareAckSink implements Sink<ShareAckRecord>, SupportsCommitte
                 return new AtLeastOnceShareAckCommitter(
                         new FlinkKafkaShareAckTransactionCommitter(kafkaProducerConfig));
             default:
-                throw new IllegalStateException("Unsupported delivery guarantee: " + deliveryGuarantee);
+                throw new IllegalStateException(
+                        "Unsupported delivery guarantee: " + deliveryGuarantee);
         }
     }
 
+    @Internal
     @Override
     public SimpleVersionedSerializer<ShareAckCommittable> getCommittableSerializer() {
         return new ShareAckCommittableSerializer();
     }
 
-    @VisibleForTesting
     DeliveryGuarantee getDeliveryGuarantee() {
         return deliveryGuarantee;
     }
 
-    @VisibleForTesting
     Properties getKafkaProducerConfig() {
         return copyOf(kafkaProducerConfig);
     }
 
-    @VisibleForTesting
     String getShareExactlyOnceId() {
         return shareExactlyOnceId;
     }

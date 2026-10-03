@@ -25,6 +25,7 @@ import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacetProvider;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifier;
+import org.apache.flink.connector.kafka.share.ShareAckPayload;
 import org.apache.flink.connector.kafka.sink.internal.BackchannelFactory;
 import org.apache.flink.connector.kafka.sink.internal.CheckpointTransaction;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
@@ -48,6 +49,8 @@ import org.apache.kafka.common.errors.ProducerFencedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -56,6 +59,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.util.IOUtils.closeAll;
@@ -68,6 +72,31 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  */
 class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     private static final Logger LOG = LoggerFactory.getLogger(ExactlyOnceKafkaWriter.class);
+    @Nullable private Function<IN, Collection<ShareAckPayload>> shareAckPayloadExtractor;
+    @Nullable private ShareAckPayloadBuffer shareAckPayloadBuffer;
+
+    void setShareAckPayloadExtractor(Function<IN, Collection<ShareAckPayload>> extractor) {
+        setShareAckPayloadExtractor(extractor, new ShareAckPayloadBuffer());
+    }
+
+    void setShareAckPayloadExtractor(
+            Function<IN, Collection<ShareAckPayload>> extractor,
+            ShareAckPayloadBuffer payloadBuffer) {
+        this.shareAckPayloadExtractor = checkNotNull(extractor);
+        this.shareAckPayloadBuffer = checkNotNull(payloadBuffer);
+    }
+
+    @Override
+    public void write(@Nullable IN element, Context context) throws IOException {
+        super.write(element, context);
+        if (element != null && shareAckPayloadExtractor != null) {
+            checkNotNull(shareAckPayloadBuffer)
+                    .stageForRecord(
+                            currentProducer,
+                            currentProducer.hasRecordsInTransaction(),
+                            shareAckPayloadExtractor.apply(element));
+        }
+    }
 
     /**
      * Prefix for the transactional id. Must be unique across all sinks writing to the same broker.
@@ -229,6 +258,9 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
                             preparedTransactionState.orElse(null),
                             currentProducer);
             LOG.debug("Prepare {}.", committable);
+            if (shareAckPayloadBuffer != null) {
+                shareAckPayloadBuffer.clear();
+            }
             return Collections.singletonList(committable);
         }
 
