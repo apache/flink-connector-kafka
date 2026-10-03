@@ -33,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class SameTransactionShareAckKafkaWriterTest {
 
     @Test
-    void testStagesShareAcksBeforePreparingSinkTransaction() throws Exception {
+    void testStagesShareAcksDuringWriteBeforePreparingSinkTransaction() throws Exception {
         List<String> events = new ArrayList<>();
         RecordingDelegate delegate = new RecordingDelegate(events);
         RecordingPayloadBuffer payloadBuffer = new RecordingPayloadBuffer(events);
@@ -42,6 +42,8 @@ class SameTransactionShareAckKafkaWriterTest {
                         delegate, ignored -> List.of(payload("ack-0")), payloadBuffer);
 
         writer.write("record", null);
+        assertThat(payloadBuffer.stageCount).isOne();
+        assertThat(delegate.prepareCalls).isZero();
         Collection<KafkaCommittable> committables = writer.prepareCommit();
 
         assertThat(committables).containsExactly(RecordingDelegate.COMMITTABLE);
@@ -75,12 +77,12 @@ class SameTransactionShareAckKafkaWriterTest {
         delegate.failPrepare = false;
         writer.prepareCommit();
 
-        assertThat(payloadBuffer.stageCount).isEqualTo(2);
+        assertThat(payloadBuffer.stageCount).isOne();
         assertThat(payloadBuffer.clearCount).isOne();
     }
 
     @Test
-    void testRejectsShareAcksWithoutSinkRecordsBeforePreparingSinkTransaction() throws Exception {
+    void testRejectsShareAcksWithoutSinkRecordsDuringWrite() throws Exception {
         List<String> events = new ArrayList<>();
         RecordingDelegate delegate = new RecordingDelegate(events);
         delegate.transactionHasRecords = false;
@@ -88,9 +90,7 @@ class SameTransactionShareAckKafkaWriterTest {
         SameTransactionShareAckKafkaWriter<String> writer =
                 new SameTransactionShareAckKafkaWriter<>(
                         delegate, ignored -> List.of(payload("ack-0")), payloadBuffer);
-        writer.write("record", null);
-
-        assertThatThrownBy(writer::prepareCommit)
+        assertThatThrownBy(() -> writer.write("record", null))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("without sink records");
 
@@ -189,9 +189,7 @@ class SameTransactionShareAckKafkaWriterTest {
 
         @Override
         void stage(
-                Object producer,
-                boolean transactionHasRecords,
-                ShareAckPayloadStageFunction stager)
+                Object producer, boolean transactionHasRecords, ShareAckPayloadStageFunction stager)
                 throws IOException {
             if (buffered.isEmpty()) {
                 return;

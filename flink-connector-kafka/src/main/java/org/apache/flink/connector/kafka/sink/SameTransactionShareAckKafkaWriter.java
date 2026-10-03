@@ -20,6 +20,7 @@ package org.apache.flink.connector.kafka.sink;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.connector.kafka.share.ShareAckPayload;
 import org.apache.flink.connector.kafka.share.ShareAckPayloadStager;
+import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
 
 import java.io.IOException;
 import java.util.Collection;
@@ -62,6 +63,15 @@ class SameTransactionShareAckKafkaWriter<IN>
         delegate.write(element, context);
         if (element != null) {
             payloadBuffer.addAll(shareAckPayloadExtractor.apply(element));
+            payloadBuffer.stage(
+                    delegate.currentProducer(),
+                    delegate.currentTransactionHasRecords(),
+                    (producer, payload) -> {
+                        ShareAckPayloadStager.stage(producer, payload);
+                        if (producer instanceof FlinkKafkaInternalProducer) {
+                            ((FlinkKafkaInternalProducer<?, ?>) producer).markShareAcksStaged();
+                        }
+                    });
         }
     }
 
@@ -72,9 +82,6 @@ class SameTransactionShareAckKafkaWriter<IN>
 
     @Override
     public Collection<KafkaCommittable> prepareCommit() throws IOException, InterruptedException {
-        boolean transactionHasRecords = delegate.currentTransactionHasRecords();
-        payloadBuffer.stage(
-                delegate.currentProducer(), transactionHasRecords, ShareAckPayloadStager::stage);
         Collection<KafkaCommittable> committables = delegate.prepareCommit();
         if (!committables.isEmpty()) {
             payloadBuffer.clear();

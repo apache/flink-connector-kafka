@@ -219,8 +219,7 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
 
     @Override
     public Collection<KafkaCommittable> prepareCommit() {
-        // only return a KafkaCommittable if the current transaction has been written some data
-        if (currentProducer.hasRecordsInTransaction()) {
+        if (currentProducer.hasWorkInTransaction()) {
             Optional<String> preparedTransactionState = currentProducer.precommitTransaction();
             KafkaCommittable committable =
                     new KafkaCommittable(
@@ -283,12 +282,12 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     }
 
     private void abortCurrentProducer() {
-        // Abort only if the transaction is known to the broker (at least one record sent).
+        // Abort only when output records or share acks made the transaction known to the broker.
         // Producer may be in precommitted state if we run in batch; aborting would mean data loss.
         // Note that this may leave the transaction open if an error happens in streaming between
         // #prepareCommit and #snapshotState. However, aborting here is best effort anyways and
         // recovery will cleanup the transaction.
-        if (currentProducer.hasRecordsInTransaction()) {
+        if (currentProducer.hasWorkInTransaction()) {
             try {
                 currentProducer.abortTransaction();
             } catch (ProducerFencedException e) {

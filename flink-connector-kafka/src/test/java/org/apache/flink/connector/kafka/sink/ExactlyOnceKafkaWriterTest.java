@@ -39,6 +39,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,6 +48,29 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
 /** Tests for {@link ExactlyOnceKafkaWriter}. */
 @ExtendWith(TestLoggerExtension.class)
 class ExactlyOnceKafkaWriterTest {
+
+    @Test
+    void testPrepareAcknowledgementOnlyTransaction() throws Exception {
+        final ExactlyOnceKafkaWriter<Integer> writer = createWriter(createSinkWriterMetricGroup());
+        final MockProducer producer = new MockProducer(writer.deliveryCallback, null, true);
+        writer.currentProducer = producer;
+
+        assertThat(producer.hasRecordsInTransaction()).isFalse();
+        assertThat(writer.prepareCommit()).hasSize(1);
+        writer.close();
+        assertThat(producer.aborted).isFalse();
+    }
+
+    @Test
+    void testCloseAbortsUnpreparedAcknowledgementOnlyTransaction() throws Exception {
+        final ExactlyOnceKafkaWriter<Integer> writer = createWriter(createSinkWriterMetricGroup());
+        final MockProducer producer = new MockProducer(writer.deliveryCallback, null, true);
+        writer.currentProducer = producer;
+
+        writer.close();
+
+        assertThat(producer.aborted).isTrue();
+    }
 
     @Test
     void testCloseIgnoresAbortTriggeredAsyncError() {
@@ -105,20 +129,47 @@ class ExactlyOnceKafkaWriterTest {
 
         private final Callback callback;
         @Nullable private final RuntimeException abortException;
+        private boolean shareAcksStaged;
+        private boolean aborted;
 
         private MockProducer(Callback callback, @Nullable RuntimeException abortException) {
+            this(callback, abortException, false);
+        }
+
+        private MockProducer(
+                Callback callback,
+                @Nullable RuntimeException abortException,
+                boolean shareAcksStaged) {
             super(getKafkaClientConfiguration());
             this.callback = callback;
             this.abortException = abortException;
+            this.shareAcksStaged = shareAcksStaged;
         }
 
         @Override
-        public boolean hasRecordsInTransaction() {
-            return abortException != null;
+        public boolean hasWorkInTransaction() {
+            return abortException != null || shareAcksStaged;
+        }
+
+        @Override
+        public Optional<String> precommitTransaction() {
+            shareAcksStaged = false;
+            return Optional.empty();
+        }
+
+        @Override
+        public long getProducerId() {
+            return 42L;
+        }
+
+        @Override
+        public short getEpoch() {
+            return 0;
         }
 
         @Override
         public void abortTransaction() {
+            aborted = true;
             callback.onCompletion(null, abortException);
         }
     }

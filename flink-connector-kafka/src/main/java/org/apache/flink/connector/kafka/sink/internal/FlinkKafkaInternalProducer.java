@@ -27,7 +27,9 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.clients.producer.internals.TransactionManager;
 import org.apache.kafka.clients.producer.internals.TransactionalRequestResult;
+import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.errors.ProducerFencedException;
+import org.apache.kafka.common.errors.RetriableException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,6 +60,7 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
 
     @Nullable private String transactionalId;
     private volatile TransactionState transactionState = TransactionState.NOT_IN_TRANSACTION;
+    private volatile boolean shareAcksStaged;
     private volatile boolean closed;
     private final boolean twoPhaseCommitEnabled;
 
@@ -92,6 +95,10 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
     @Override
     public Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback) {
         if (isInTransaction()) {
+            checkState(
+                    transactionState == TransactionState.IN_TRANSACTION
+                            || hasRecordsInTransaction(),
+                    "Transaction is not open for records");
             transactionState = TransactionState.DATA_IN_TRANSACTION;
         }
         return super.send(record, callback);
@@ -110,22 +117,47 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         super.beginTransaction();
         LOG.debug("beginTransaction {}", transactionalId);
         transactionState = TransactionState.IN_TRANSACTION;
+        shareAcksStaged = false;
     }
 
     @Override
     public void abortTransaction() throws ProducerFencedException {
         LOG.debug("abortTransaction {}", transactionalId);
         checkState(isInTransaction(), "Transaction was not started");
-        transactionState = TransactionState.NOT_IN_TRANSACTION;
-        super.abortTransaction();
+        checkState(
+                transactionState != TransactionState.COMMITTING, "Commit is already in progress");
+        transactionState = TransactionState.ABORTING;
+        try {
+            super.abortTransaction();
+        } catch (RetriableException | InterruptException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            resetTransactionState();
+            throw e;
+        }
+        resetTransactionState();
     }
 
     @Override
     public void commitTransaction() throws ProducerFencedException {
         LOG.debug("commitTransaction {}", transactionalId);
         checkState(isInTransaction(), "Transaction was not started");
+        checkState(transactionState != TransactionState.ABORTING, "Abort is already in progress");
+        transactionState = TransactionState.COMMITTING;
+        try {
+            super.commitTransaction();
+        } catch (RetriableException | InterruptException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            resetTransactionState();
+            throw e;
+        }
+        resetTransactionState();
+    }
+
+    private void resetTransactionState() {
         transactionState = TransactionState.NOT_IN_TRANSACTION;
-        super.commitTransaction();
+        shareAcksStaged = false;
     }
 
     public boolean isInTransaction() {
@@ -136,12 +168,24 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         return transactionState == TransactionState.DATA_IN_TRANSACTION;
     }
 
+    public void markShareAcksStaged() {
+        checkState(
+                transactionState == TransactionState.IN_TRANSACTION || hasRecordsInTransaction(),
+                "Transaction is not open for share acknowledgements");
+        shareAcksStaged = true;
+    }
+
+    public boolean hasWorkInTransaction() {
+        return hasRecordsInTransaction()
+                || (transactionState == TransactionState.IN_TRANSACTION && shareAcksStaged);
+    }
+
     public boolean isPrecommitted() {
         return transactionState == TransactionState.PRECOMMITTED;
     }
 
     public Optional<String> precommitTransaction() {
-        checkState(hasRecordsInTransaction(), "Transaction was not started");
+        checkState(hasWorkInTransaction(), "Transaction has no records or share acknowledgements");
         if (twoPhaseCommitEnabled) {
             String preparedTransactionState = PreparedTransactionRecovery.prepare(this);
             transactionState = TransactionState.PRECOMMITTED;
@@ -382,14 +426,7 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
 
             transitionTransactionManagerStateTo(transactionManager, "IN_TRANSACTION");
 
-            // the transactionStarted flag in the KafkaProducer controls whether
-            // an EndTxnRequest will actually be sent to Kafka for a commit
-            // or abort API call. This flag is set only after the first send (i.e.
-            // only if data is actually written to some partition).
-            // In checkpoints, we only ever store metadata of pre-committed
-            // transactions that actually have records; therefore, on restore
-            // when we create recovery producers to resume transactions and commit
-            // them, we should always set this flag.
+            // Recovered committables contain broker work: output records or staged share acks.
             setField(transactionManager, "transactionStarted", true);
         }
         this.transactionState = TransactionState.PRECOMMITTED;
@@ -461,5 +498,7 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         IN_TRANSACTION,
         DATA_IN_TRANSACTION,
         PRECOMMITTED,
+        COMMITTING,
+        ABORTING,
     }
 }

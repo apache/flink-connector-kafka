@@ -45,9 +45,47 @@ class ShareAckPayloadBufferTest {
 
         assertThat(stagedPayloads).containsExactly("ack-0");
 
+        buffer.stage(
+                new Object(),
+                true,
+                (producer, shareAckPayload) -> stagedPayloads.add(shareAckPayload.getId()));
+        assertThat(stagedPayloads).containsExactly("ack-0");
+
         buffer.clear();
 
         assertThat(buffer.isEmpty()).isTrue();
+        buffer.add(payload);
+        buffer.stage(
+                new Object(),
+                true,
+                (producer, shareAckPayload) -> stagedPayloads.add(shareAckPayload.getId()));
+        assertThat(stagedPayloads).containsExactly("ack-0", "ack-0");
+    }
+
+    @Test
+    void testDoesNotRestageSuccessfulPayloadAfterPartialFailure() throws Exception {
+        ShareAckPayloadBuffer buffer = new ShareAckPayloadBuffer();
+        buffer.add(payload("ack-0", "group", 0));
+        buffer.add(payload("ack-1", "group", 0));
+        List<String> stagedPayloads = new ArrayList<>();
+
+        assertThatThrownBy(
+                        () ->
+                                buffer.stage(
+                                        new Object(),
+                                        true,
+                                        (producer, payload) -> {
+                                            if (payload.getId().equals("ack-1")) {
+                                                throw new IOException("stage failed");
+                                            }
+                                            stagedPayloads.add(payload.getId());
+                                        }))
+                .isInstanceOf(IOException.class)
+                .hasMessage("stage failed");
+
+        buffer.stage(
+                new Object(), true, (producer, payload) -> stagedPayloads.add(payload.getId()));
+        assertThat(stagedPayloads).containsExactly("ack-0", "ack-1");
     }
 
     @Test

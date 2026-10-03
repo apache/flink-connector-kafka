@@ -22,13 +22,16 @@ import org.apache.flink.connector.kafka.share.ShareAckPayload;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 @Internal
 class ShareAckPayloadBuffer {
 
     private final Map<String, ShareAckPayload> payloadsById = new LinkedHashMap<>();
+    private final Set<String> stagedPayloadIds = new HashSet<>();
 
     void addAll(Collection<ShareAckPayload> payloads) throws IOException {
         for (ShareAckPayload payload : payloads) {
@@ -58,12 +61,16 @@ class ShareAckPayloadBuffer {
                     "Cannot commit share acknowledgements without sink records in the same Kafka transaction.");
         }
         for (ShareAckPayload payload : payloadsById.values()) {
-            stager.stage(producer, payload);
+            if (!stagedPayloadIds.contains(payload.getId())) {
+                stager.stage(producer, payload);
+                stagedPayloadIds.add(payload.getId());
+            }
         }
     }
 
     void clear() {
         payloadsById.clear();
+        stagedPayloadIds.clear();
     }
 
     @FunctionalInterface
