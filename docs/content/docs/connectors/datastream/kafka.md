@@ -677,6 +677,10 @@ an explanation of the different guarantees.
   transaction.timeout.ms)>> maximum checkpoint duration + maximum restart duration or data loss may
   happen when Kafka expires an uncommitted transaction. 
 
+For a stopped job that cannot recover and leaves a lingering transaction, see the
+[Kafka transaction tool runbook]({{< ref "docs/connectors/datastream/kafka-transaction-tool.md" >}})
+before manually committing or aborting it.
+
 ### Monitoring
 
 Kafka sink exposes the following metrics in the respective [scope]({{< ref "docs/ops/metrics" >}}/#scope).
