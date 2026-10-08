@@ -33,6 +33,7 @@ import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.test.junit5.MiniClusterExtension;
 
 import com.google.common.collect.Iterables;
+import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -40,6 +41,7 @@ import org.apache.kafka.common.errors.ProducerFencedException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
@@ -48,11 +50,13 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import static org.apache.flink.connector.kafka.sink.internal.TransactionalIdFactory.buildTransactionalId;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.drainAllRecordsFromTopic;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
 
 /** Tests for the standalone KafkaWriter. */
@@ -374,6 +378,46 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
         }
     }
 
+    @Test
+    void testPoolingClosesAdminClient() throws Exception {
+        final ExactlyOnceKafkaWriter<Integer> writer =
+                createExactlyOnceWriter(TransactionNamingStrategy.POOLING);
+        // The outer try provides fallback cleanup so a failing test does not leak the client.
+        // The closure assertion runs before that fallback cleanup.
+        try (final Admin adminClient = writer.getAdminClient()) {
+            try (writer) {
+                assertThat(adminClient)
+                        .as("POOLING lists transactions through an admin client")
+                        .isNotNull();
+                assertThat(adminClient.listTopics().names().get(10, TimeUnit.SECONDS))
+                        .contains(topic);
+            }
+
+            assertThatThrownBy(() -> adminClient.listTopics().names().get(10, TimeUnit.SECONDS))
+                    .as("The writer must close its admin client")
+                    .hasRootCauseExactlyInstanceOf(IllegalStateException.class)
+                    .hasRootCauseMessage("Cannot accept new calls when AdminClient is closing.");
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = TransactionNamingStrategy.class,
+            names = "POOLING",
+            mode = EnumSource.Mode.EXCLUDE)
+    void testNonPoolingStrategiesNeverCreateAdminClient(TransactionNamingStrategy namingStrategy)
+            throws Exception {
+        final ExactlyOnceKafkaWriter<Integer> writer = createExactlyOnceWriter(namingStrategy);
+        try (writer) {
+            assertThat(writer.getAdminClient())
+                    .as("Naming strategy %s should not create an admin client", namingStrategy)
+                    .isNull();
+        }
+        assertThat(writer.getAdminClient())
+                .as("Closing the writer must not create an admin client")
+                .isNull();
+    }
+
     /** Test that producers are reused when committed. */
     @Test
     void shouldSkipIdsOfCommitterForPooledTransactions() throws Exception {
@@ -421,6 +465,15 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
             assertThat(writer.getCurrentProducer().getTransactionalId())
                     .isEqualTo(t2.getTransactionalId());
         }
+    }
+
+    private ExactlyOnceKafkaWriter<Integer> createExactlyOnceWriter(
+            TransactionNamingStrategy namingStrategy) throws IOException {
+        return createWriter(
+                builder ->
+                        builder.setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
+                                .setTransactionNamingStrategy(namingStrategy),
+                createInitContext());
     }
 
     private static Collection<FlinkKafkaInternalProducer<byte[], byte[]>> getProducers(
