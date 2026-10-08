@@ -48,6 +48,8 @@ import org.apache.kafka.common.errors.ProducerFencedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -106,7 +108,7 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     private final int totalNumberOfOwnedSubtasks;
     private final int[] ownedSubtaskIds;
 
-    /** Lazily created admin client for {@link TransactionAbortStrategyImpl}. */
+    /** Lazily created admin client for listing transactions and resolving topic patterns. */
     private AdminClient adminClient;
 
     /**
@@ -273,7 +275,8 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
                 this::abortCurrentProducer,
                 () -> closeAll(producerPool),
                 backchannel,
-                super::close);
+                super::close,
+                adminClient);
     }
 
     private void abortCurrentProducer() {
@@ -295,6 +298,11 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     @VisibleForTesting
     ProducerPool getProducerPool() {
         return producerPool;
+    }
+
+    @Nullable
+    Admin getAdminClient() {
+        return adminClient;
     }
 
     @VisibleForTesting
@@ -361,7 +369,7 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
                 prefixesToAbort,
                 startCheckpointId,
                 aborter,
-                this::getAdminClient,
+                this::getOrCreateAdminClient,
                 precommittedTransactionalIds);
     }
 
@@ -375,7 +383,8 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
         if (identifier.getTopics() != null) {
             return identifier.getTopics();
         }
-        return AdminUtils.getTopicsByPattern(getAdminClient(), identifier.getTopicPattern());
+        return AdminUtils.getTopicsByPattern(
+                getOrCreateAdminClient(), identifier.getTopicPattern());
     }
 
     private Optional<KafkaDatasetIdentifier> getDatasetIdentifier() {
@@ -388,7 +397,7 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
         return Optional.empty();
     }
 
-    private Admin getAdminClient() {
+    private Admin getOrCreateAdminClient() {
         if (adminClient == null) {
             adminClient = AdminClient.create(kafkaProducerConfig);
         }
