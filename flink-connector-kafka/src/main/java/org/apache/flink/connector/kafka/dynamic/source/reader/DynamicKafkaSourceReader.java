@@ -51,6 +51,8 @@ import org.apache.flink.streaming.runtime.io.MultipleFuturesAvailabilityHelper;
 import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.UserCodeClassLoader;
+import org.apache.flink.util.clock.Clock;
+import org.apache.flink.util.clock.SystemClock;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -102,6 +104,9 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     private final Set<String> pendingSplitOutputReleases;
     private final List<DynamicKafkaSourceSplit> retainedSplits;
     private final long removedClusterStateRetentionMs;
+    // Retention deadlines are checkpointed and evaluated after a restore in another JVM, so this
+    // clock must report absolute time.
+    private final Clock clock;
 
     private MultipleFuturesAvailabilityHelper availabilityHelper;
     private int availabilityHelperSize;
@@ -123,7 +128,32 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
             KafkaRecordDeserializationSchema<T> deserializationSchema,
             Properties properties,
             OffsetsInitializer startingOffsetsInitializer) {
+        this(
+                readerContext,
+                deserializationSchema,
+                properties,
+                startingOffsetsInitializer,
+                SystemClock.getInstance());
+    }
+
+    /**
+     * Creates a reader that reads the current time through the given {@link Clock}. Removed cluster
+     * retention deadlines are absolute timestamps that are written into checkpoints, so the clock
+     * must report absolute time; production always passes {@link SystemClock#getInstance()}. Tests
+     * pass a manual clock to drive retention expiry instead of racing the wall clock.
+     *
+     * <p>Package-private rather than annotated {@code @VisibleForTesting}: the annotation is itself
+     * non-public Flink API and would add a frozen ArchUnit violation, which {@code
+     * archunit.properties} asks contributors to avoid.
+     */
+    DynamicKafkaSourceReader(
+            SourceReaderContext readerContext,
+            KafkaRecordDeserializationSchema<T> deserializationSchema,
+            Properties properties,
+            OffsetsInitializer startingOffsetsInitializer,
+            Clock clock) {
         this.readerContext = readerContext;
+        this.clock = clock;
         this.clusterReaderMap = new TreeMap<>();
         this.deserializationSchema = deserializationSchema;
         this.properties = properties;
@@ -320,7 +350,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                 currentSplitState);
         Map<String, Set<String>> currentMetadataFromState = new HashMap<>();
         Map<String, List<KafkaPartitionSplit>> filteredNewClusterSplitStateMap = new HashMap<>();
-        long retainedUntilMs = System.currentTimeMillis() + removedClusterStateRetentionMs;
+        long retainedUntilMs = clock.absoluteTimeMillis() + removedClusterStateRetentionMs;
 
         // the data structures above
         for (DynamicKafkaSourceSplit split : currentSplitState) {
@@ -733,7 +763,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         }
 
         releaseOrDeferSplitOutput(pendingSplit.splitId());
-        if (pendingSplit.isRetained(System.currentTimeMillis())) {
+        if (pendingSplit.isRetained(clock.absoluteTimeMillis())) {
             retainedSplits.add(pendingSplit);
         } else {
             logger.info("Removing invalid split for reader: {}", pendingSplit);
@@ -749,7 +779,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
     }
 
     private void pruneExpiredRetainedSplits() {
-        long currentTimeMillis = System.currentTimeMillis();
+        long currentTimeMillis = clock.absoluteTimeMillis();
         retainedSplits.removeIf(
                 split -> split.isRetained() && !split.isRetained(currentTimeMillis));
         pendingSplits.removeIf(split -> split.isRetained() && !split.isRetained(currentTimeMillis));
