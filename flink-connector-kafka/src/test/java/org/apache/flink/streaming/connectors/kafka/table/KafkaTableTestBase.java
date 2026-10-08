@@ -39,6 +39,7 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Timeout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.junit.jupiter.Container;
@@ -53,10 +54,18 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-/** Base class for Kafka Table IT Cases. */
+/**
+ * Base class for Kafka Table IT Cases.
+ *
+ * <p>Tests run on the thread that ran {@code @BeforeEach}, unlike the module's default of a
+ * separate thread: the table planner leaves Calcite's metadata handler provider in a thread-local
+ * there.
+ */
 @Testcontainers
+@Timeout(value = 15, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SAME_THREAD)
 abstract class KafkaTableTestBase extends AbstractTestBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaTableTestBase.class);
