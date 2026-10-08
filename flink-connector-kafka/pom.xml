@@ -35,6 +35,7 @@ under the License.
 	<packaging>jar</packaging>
 
 	<properties>
+		<kafka.test.classifier>test</kafka.test.classifier>
 		<flink.connector.module.config><!--
         FlinkKafkaProducerBaseTest --> --add-opens=java.base/java.lang=ALL-UNNAMED <!--
         FlinkKafkaProducerBaseTest --> --add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED <!--
@@ -168,7 +169,7 @@ under the License.
 			<groupId>org.apache.kafka</groupId>
 			<artifactId>kafka-clients</artifactId>
 			<version>${kafka.version}</version>
-			<classifier>test</classifier>
+			<classifier>${kafka.test.classifier}</classifier>
 			<scope>test</scope>
 		</dependency>
 

@@ -76,6 +76,7 @@ public class KafkaSinkBuilder<IN> {
     private final Properties kafkaProducerConfig;
     private KafkaRecordSerializationSchema<IN> recordSerializer;
     private TransactionNamingStrategy transactionNamingStrategy = TransactionNamingStrategy.DEFAULT;
+    private boolean transactionTimeoutExplicitlyConfigured;
 
     KafkaSinkBuilder() {
         kafkaProducerConfig = new Properties();
@@ -114,6 +115,8 @@ public class KafkaSinkBuilder<IN> {
                 .forEach(k -> LOG.warn("Overwriting the '{}' is not recommended", k));
 
         kafkaProducerConfig.putAll(props);
+        transactionTimeoutExplicitlyConfigured |=
+                props.containsKey(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG);
         return this;
     }
 
@@ -124,6 +127,8 @@ public class KafkaSinkBuilder<IN> {
                 .forEach(k -> LOG.warn("Overwriting the '{}' is not recommended", k));
 
         kafkaProducerConfig.setProperty(key, value);
+        transactionTimeoutExplicitlyConfigured |=
+                ProducerConfig.TRANSACTION_TIMEOUT_CONFIG.equals(key);
         return this;
     }
 
@@ -201,6 +206,12 @@ public class KafkaSinkBuilder<IN> {
             checkState(
                     transactionalIdPrefix != null,
                     "EXACTLY_ONCE delivery guarantee requires a transactionalIdPrefix to be set to provide unique transaction names across multiple KafkaSinks writing to the same Kafka cluster.");
+            checkState(
+                    !isTwoPhaseCommitEnabled(kafkaProducerConfig)
+                            || !transactionTimeoutExplicitlyConfigured,
+                    "%s cannot be configured when %s is set to true.",
+                    ProducerConfig.TRANSACTION_TIMEOUT_CONFIG,
+                    ProducerConfig.TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG);
             if (transactionNamingStrategy.getImpl().requiresKnownTopics()) {
                 checkState(
                         recordSerializer instanceof KafkaDatasetFacetProvider,
@@ -217,11 +228,24 @@ public class KafkaSinkBuilder<IN> {
      */
     public KafkaSink<IN> build() {
         sanityCheck();
+        Properties finalKafkaProducerConfig = new Properties();
+        finalKafkaProducerConfig.putAll(kafkaProducerConfig);
+        if (isTwoPhaseCommitEnabled(finalKafkaProducerConfig)) {
+            finalKafkaProducerConfig.remove(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG);
+        }
         return new KafkaSink<>(
                 deliveryGuarantee,
-                kafkaProducerConfig,
+                finalKafkaProducerConfig,
                 transactionalIdPrefix,
                 recordSerializer,
                 transactionNamingStrategy);
+    }
+
+    private static boolean isTwoPhaseCommitEnabled(Properties properties) {
+        Object value = properties.get(ProducerConfig.TRANSACTION_TWO_PHASE_COMMIT_ENABLE_CONFIG);
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        return value != null && Boolean.parseBoolean(value.toString());
     }
 }

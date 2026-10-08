@@ -25,6 +25,7 @@ import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetFacetProvider;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifier;
+import org.apache.flink.connector.kafka.share.ShareAckPayload;
 import org.apache.flink.connector.kafka.sink.internal.BackchannelFactory;
 import org.apache.flink.connector.kafka.sink.internal.CheckpointTransaction;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
@@ -58,6 +59,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.util.IOUtils.closeAll;
@@ -70,6 +72,31 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  */
 class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     private static final Logger LOG = LoggerFactory.getLogger(ExactlyOnceKafkaWriter.class);
+    @Nullable private Function<IN, Collection<ShareAckPayload>> shareAckPayloadExtractor;
+    @Nullable private ShareAckPayloadBuffer shareAckPayloadBuffer;
+
+    void setShareAckPayloadExtractor(Function<IN, Collection<ShareAckPayload>> extractor) {
+        setShareAckPayloadExtractor(extractor, new ShareAckPayloadBuffer());
+    }
+
+    void setShareAckPayloadExtractor(
+            Function<IN, Collection<ShareAckPayload>> extractor,
+            ShareAckPayloadBuffer payloadBuffer) {
+        this.shareAckPayloadExtractor = checkNotNull(extractor);
+        this.shareAckPayloadBuffer = checkNotNull(payloadBuffer);
+    }
+
+    @Override
+    public void write(@Nullable IN element, Context context) throws IOException {
+        super.write(element, context);
+        if (element != null && shareAckPayloadExtractor != null) {
+            checkNotNull(shareAckPayloadBuffer)
+                    .stageForRecord(
+                            currentProducer,
+                            currentProducer.hasRecordsInTransaction(),
+                            shareAckPayloadExtractor.apply(element));
+        }
+    }
 
     /**
      * Prefix for the transactional id. Must be unique across all sinks writing to the same broker.
@@ -221,11 +248,19 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
 
     @Override
     public Collection<KafkaCommittable> prepareCommit() {
-        // only return a KafkaCommittable if the current transaction has been written some data
-        if (currentProducer.hasRecordsInTransaction()) {
-            KafkaCommittable committable = KafkaCommittable.of(currentProducer);
+        if (currentProducer.hasWorkInTransaction()) {
+            Optional<String> preparedTransactionState = currentProducer.precommitTransaction();
+            KafkaCommittable committable =
+                    new KafkaCommittable(
+                            currentProducer.getProducerId(),
+                            currentProducer.getEpoch(),
+                            currentProducer.getTransactionalId(),
+                            preparedTransactionState.orElse(null),
+                            currentProducer);
             LOG.debug("Prepare {}.", committable);
-            currentProducer.precommitTransaction();
+            if (shareAckPayloadBuffer != null) {
+                shareAckPayloadBuffer.clear();
+            }
             return Collections.singletonList(committable);
         }
 
@@ -280,12 +315,12 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     }
 
     private void abortCurrentProducer() {
-        // Abort only if the transaction is known to the broker (at least one record sent).
+        // Abort only when output records or share acks made the transaction known to the broker.
         // Producer may be in precommitted state if we run in batch; aborting would mean data loss.
         // Note that this may leave the transaction open if an error happens in streaming between
         // #prepareCommit and #snapshotState. However, aborting here is best effort anyways and
         // recovery will cleanup the transaction.
-        if (currentProducer.hasRecordsInTransaction()) {
+        if (currentProducer.hasWorkInTransaction()) {
             try {
                 currentProducer.abortTransaction();
             } catch (ProducerFencedException e) {
