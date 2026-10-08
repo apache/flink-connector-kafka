@@ -632,6 +632,100 @@ public class KafkaSourceEnumeratorTest {
         }
     }
 
+    /** Verifies that in-flight partitions are not rediscovered as new on the next cycle. */
+    @Test
+    public void testInFlightPartitionsNotRediscoveredAsNew() throws Throwable {
+        try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                KafkaSourceEnumerator enumerator =
+                        createEnumerator(context, ENABLE_PERIODIC_PARTITION_DISCOVERY)) {
+            enumerator.start();
+
+            // Register readers so partitions can be assigned.
+            registerReader(context, enumerator, READER0);
+            registerReader(context, enumerator, READER1);
+            registerReader(context, enumerator, READER2);
+
+            // Run discovery once and leave the worker callable pending to simulate a slow
+            // worker.
+            context.runPeriodicCallable(PARTITION_DISCOVERY_CALLABLE_INDEX);
+
+            // The worker callable is now pending.
+            assertThat(context.getOneTimeCallables())
+                    .as("initializePartitionSplits should be pending on the worker")
+                    .hasSize(1);
+
+            // Fire a second cycle before the first init completes.
+            context.runPeriodicCallable(PARTITION_DISCOVERY_CALLABLE_INDEX);
+
+            // The second cycle dispatches nothing because partitions are in flight.
+            assertThat(context.getOneTimeCallables())
+                    .as(
+                            "No additional initializePartitionSplits should be dispatched while partitions are in flight")
+                    .hasSize(1);
+
+            // Run the pending init.
+            context.runNextOneTimeCallable();
+
+            // Verify a single assignment without duplicates.
+            List<SplitsAssignment<KafkaPartitionSplit>> assignments =
+                    context.getSplitsAssignmentSequence();
+            assertThat(assignments).as("Exactly one assignment batch expected").hasSize(1);
+
+            // Count assigned partitions across topics.
+            int totalAssignedPartitions =
+                    assignments.get(0).assignment().values().stream().mapToInt(List::size).sum();
+            int expectedPartitions =
+                    KafkaSourceTestEnv.getPartitionsForTopics(PRE_EXISTING_TOPICS).size();
+            assertThat(totalAssignedPartitions)
+                    .as("Each partition should be assigned exactly once, not duplicated")
+                    .isEqualTo(expectedPartitions);
+        }
+    }
+
+    /** Verifies that a migrated split in flight is not rediscovered on the next cycle. */
+    @Test
+    public void testMigratedSplitInFlightNotRediscovered() throws Throwable {
+        TopicPartition migratedTp = new TopicPartition(TOPIC2, 0);
+        try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                KafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                context,
+                                1L,
+                                OffsetsInitializer.earliest(),
+                                PRE_EXISTING_TOPICS,
+                                Collections.emptySet(),
+                                List.of(new KafkaPartitionSplit(migratedTp, MIGRATED)),
+                                false,
+                                new Properties())) {
+            enumerator.start();
+
+            // Register readers so partitions can be assigned.
+            registerReader(context, enumerator, READER0);
+            registerReader(context, enumerator, READER1);
+            registerReader(context, enumerator, READER2);
+
+            // First cycle dispatches init for migrated and fresh partitions.
+            context.runPeriodicCallable(PARTITION_DISCOVERY_CALLABLE_INDEX);
+            assertThat(context.getOneTimeCallables())
+                    .as("First discovery should dispatch init")
+                    .hasSize(1);
+
+            // Second cycle before init completes dispatches nothing.
+            context.runPeriodicCallable(PARTITION_DISCOVERY_CALLABLE_INDEX);
+            assertThat(context.getOneTimeCallables())
+                    .as("Migrated split in flight should not trigger a second dispatch")
+                    .hasSize(1);
+
+            // Run the pending init and verify the migrated split is assigned.
+            context.runNextOneTimeCallable();
+            assertThat(getAllAssignSplits(context, PRE_EXISTING_TOPICS))
+                    .extracting(KafkaPartitionSplit::getTopicPartition)
+                    .contains(migratedTp);
+        }
+    }
+
     // -------------- some common startup sequence ---------------
 
     private void startEnumeratorAndRegisterReaders(
