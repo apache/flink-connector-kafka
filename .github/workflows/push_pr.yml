@@ -39,6 +39,16 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  weekly_workflow_test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Test weekly matrix selection
+        run: node --test .github/scripts/weekly-matrix.test.js
   compile_and_test:
     strategy:
       matrix:
