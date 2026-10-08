@@ -24,6 +24,7 @@ import org.apache.flink.testutils.logging.LoggerAuditingExtension;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.errors.InvalidPidMappingException;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.assertj.core.api.Condition;
@@ -31,6 +32,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
@@ -40,11 +43,13 @@ import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
+import java.util.stream.Stream;
 
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.slf4j.event.Level.ERROR;
+import static org.junit.jupiter.params.provider.Arguments.arguments;
+import static org.slf4j.event.Level.WARN;
 
 /** Tests for {@link KafkaCommitter}. */
 class KafkaCommitterTest {
@@ -58,8 +63,8 @@ class KafkaCommitterTest {
             MOCK_FACTORY = (properties, transactionalId) -> new MockProducer(properties, null);
 
     @RegisterExtension
-    public final LoggerAuditingExtension errorLogger =
-            new LoggerAuditingExtension(KafkaCommitter.class, ERROR);
+    public final LoggerAuditingExtension committerLogger =
+            new LoggerAuditingExtension(KafkaCommitter.class, WARN);
 
     @AfterEach
     public void check() {
@@ -114,56 +119,119 @@ class KafkaCommitterTest {
         }
     }
 
-    @Test
-    public void testFailJobOnKnownFatalError() throws IOException, InterruptedException {
+    @ParameterizedTest
+    @MethodSource("fencingFailures")
+    public void testFencedProducerIsKnownFailure(
+            RuntimeException failure, boolean reusesTransactionalIds)
+            throws IOException, InterruptedException {
         Properties properties = getProperties();
         try (final KafkaCommitter committer =
                         new KafkaCommitter(
-                                properties, TRANS_ID, SUB_ID, ATTEMPT, false, MOCK_FACTORY);
-                FlinkKafkaInternalProducer<?, ?> producer =
-                        new MockProducer(properties, new ProducerFencedException("test"));
+                                properties,
+                                TRANS_ID,
+                                SUB_ID,
+                                ATTEMPT,
+                                reusesTransactionalIds,
+                                MOCK_FACTORY);
+                FlinkKafkaInternalProducer<?, ?> producer = new MockProducer(properties, failure);
                 ReadableBackchannel<TransactionFinished> backchannel =
                         BackchannelFactory.getInstance()
                                 .getReadableBackchannel(SUB_ID, ATTEMPT, TRANS_ID)) {
-            // will fail because transaction not started
-            final MockCommitRequest<KafkaCommittable> request =
-                    new MockCommitRequest<>(KafkaCommittable.of(producer));
+            final RecordingCommitRequest request =
+                    new RecordingCommitRequest(KafkaCommittable.of(producer));
             committer.commit(Collections.singletonList(request));
-            assertThat(backchannel).has(transactionFinished(false));
+
+            assertThat(request.knownFailure).isSameAs(failure);
+            assertThat(request.getFailedWithUnknownReason()).isNull();
+            assertThat(request.getNumberOfRetries()).isZero();
+            assertThat(request.alreadyCommitted).isFalse();
+            // The writer owns this producer and will dispose of it after the failed
+            // acknowledgement.
+            assertThat(producer.isClosed()).isFalse();
+            assertThat(committer.getCommittingProducer()).isNull();
+            assertThat(backchannel.poll()).isEqualTo(TransactionFinished.erroneously(TRANS_ID));
+            assertThat(backchannel.poll()).isNull();
+            assertThat(committerLogger.getEvents())
+                    .singleElement()
+                    .satisfies(
+                            event -> {
+                                assertThat(event.getLevel().name())
+                                        .isEqualTo(reusesTransactionalIds ? "WARN" : "ERROR");
+                                String message = event.getMessage().getFormattedMessage();
+                                assertThat(message).contains("data loss");
+                                if (failure instanceof InvalidPidMappingException) {
+                                    assertThat(message)
+                                            .contains("transactional.id.expiration.ms")
+                                            .contains("marked as failed and will not be retried")
+                                            .doesNotContain(
+                                                    ProducerConfig.TRANSACTION_TIMEOUT_CONFIG);
+                                } else {
+                                    assertThat(message)
+                                            .contains(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG);
+                                }
+                                assertThat(event.getThrown()).isSameAs(failure);
+                            });
         }
     }
 
-    @Test
-    public void testCommitterProducerClosedOnError() throws IOException, InterruptedException {
+    @ParameterizedTest
+    @MethodSource("fencingFailures")
+    public void testCommitterReplacesFencedProducer(
+            RuntimeException failure, boolean reusesTransactionalIds)
+            throws IOException, InterruptedException {
         Properties properties = getProperties();
         AtomicInteger creationCounter = new AtomicInteger();
-        BiFunction<Properties, String, FlinkKafkaInternalProducer<?, ?>> failingFactory =
-                (props, transactionalId) -> {
-                    creationCounter.incrementAndGet();
-                    return new MockProducer(props, new ProducerFencedException("test"));
-                };
-        try (final KafkaCommitter committer =
+        try (MockProducer failedProducer = new MockProducer(properties, failure);
+                MockProducer replacementProducer = new MockProducer(properties, null);
+                final KafkaCommitter committer =
                         new KafkaCommitter(
-                                properties, TRANS_ID, SUB_ID, ATTEMPT, false, failingFactory);
+                                properties,
+                                TRANS_ID,
+                                SUB_ID,
+                                ATTEMPT,
+                                reusesTransactionalIds,
+                                (props, transactionalId) ->
+                                        creationCounter.getAndIncrement() == 0
+                                                ? failedProducer
+                                                : replacementProducer);
                 ReadableBackchannel<TransactionFinished> backchannel =
                         BackchannelFactory.getInstance()
                                 .getReadableBackchannel(SUB_ID, ATTEMPT, TRANS_ID)) {
-            final MockCommitRequest<KafkaCommittable> request =
-                    new MockCommitRequest<>(new KafkaCommittable(0, (short) 0, TRANS_ID, null));
+            final RecordingCommitRequest request =
+                    new RecordingCommitRequest(new KafkaCommittable(0, (short) 0, TRANS_ID, null));
             committer.commit(Collections.singletonList(request));
 
-            // will not reuse the producer in case of error
-            assertThat(backchannel).has(transactionFinished(false));
+            assertThat(request.knownFailure).isSameAs(failure);
+            assertThat(request.getFailedWithUnknownReason()).isNull();
+            assertThat(request.getNumberOfRetries()).isZero();
+            assertThat(request.alreadyCommitted).isFalse();
+            assertThat(backchannel.poll()).isEqualTo(TransactionFinished.erroneously(TRANS_ID));
+            assertThat(backchannel.poll()).isNull();
+            assertThat(failedProducer.isClosed()).isTrue();
             assertThat(committer.getCommittingProducer()).isNull();
             assertThat(creationCounter.get()).isEqualTo(1);
 
-            // create a second producer
-            committer.commit(Collections.singletonList(request));
+            final RecordingCommitRequest nextRequest =
+                    new RecordingCommitRequest(new KafkaCommittable(1, (short) 0, TRANS_ID, null));
+            committer.commit(Collections.singletonList(nextRequest));
 
-            assertThat(backchannel).has(transactionFinished(false));
-            assertThat(committer.getCommittingProducer()).isNull();
+            assertThat(nextRequest.knownFailure).isNull();
+            assertThat(nextRequest.getFailedWithUnknownReason()).isNull();
+            assertThat(nextRequest.getNumberOfRetries()).isZero();
+            assertThat(backchannel.poll()).isEqualTo(TransactionFinished.successful(TRANS_ID));
+            assertThat(backchannel.poll()).isNull();
+            assertThat(committer.getCommittingProducer()).isSameAs(replacementProducer);
+            assertThat(replacementProducer.isClosed()).isFalse();
             assertThat(creationCounter.get()).isEqualTo(2);
         }
+    }
+
+    private static Stream<Arguments> fencingFailures() {
+        return Stream.of(
+                arguments(new ProducerFencedException("test"), true),
+                arguments(new ProducerFencedException("test"), false),
+                arguments(new InvalidPidMappingException("test"), true),
+                arguments(new InvalidPidMappingException("test"), false));
     }
 
     @Test
@@ -196,7 +264,7 @@ class KafkaCommitterTest {
             assertThat(interrupting).isTrue();
 
             // no errors are logged
-            assertThat(errorLogger.getMessages()).isEmpty();
+            assertThat(committerLogger.getMessages()).isEmpty();
 
             assertThat(backchannel).doesNotHave(transactionFinished(true));
         }
@@ -261,6 +329,27 @@ class KafkaCommitterTest {
         properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         return properties;
+    }
+
+    private static class RecordingCommitRequest extends MockCommitRequest<KafkaCommittable> {
+        private Throwable knownFailure;
+        private boolean alreadyCommitted;
+
+        private RecordingCommitRequest(KafkaCommittable committable) {
+            super(committable);
+        }
+
+        @Override
+        public void signalFailedWithKnownReason(Throwable cause) {
+            knownFailure = cause;
+            super.signalFailedWithKnownReason(cause);
+        }
+
+        @Override
+        public void signalAlreadyCommitted() {
+            alreadyCommitted = true;
+            super.signalAlreadyCommitted();
+        }
     }
 
     private static class MockProducer extends FlinkKafkaInternalProducer<byte[], byte[]> {

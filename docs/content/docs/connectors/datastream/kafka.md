@@ -806,4 +806,24 @@ The reason for this exception is most likely a transaction timeout on the broker
 after a transaction timeout and all of its pending transactions are aborted (each `transactional.id` is
 mapped to a single `producerId`; this is described in more detail in the following [blog post](https://www.confluent.io/blog/simplified-robust-exactly-one-semantics-in-kafka-2-5/)).
 
+### InvalidPidMappingException
+
+This exception means that Kafka no longer associates a producer ID with its transactional ID.
+For example, the broker may have expired the transactional ID, or a checkpoint may contain
+an old producer ID after epoch rollover and subsequent reuse of the transactional ID.
+Check the broker's [`transactional.id.expiration.ms`](https://kafka.apache.org/42/configuration/broker-configs/#transactional.id.expiration.ms)
+setting, which defaults to seven days. This is separate from the producer's `transaction.timeout.ms`:
+transactional IDs do not expire while their transactions are ongoing.
+
+With `EXACTLY_ONCE`, `KafkaSink` marks the affected committable as failed and does not retry it
+or fail the task because of this exception. This applies both to checkpoint recovery and to
+normal commits using the writer's live producer. It logs an ERROR with the `INCREMENTING`
+transaction naming strategy and a WARN with `POOLING`.
+
+During recovery, this can occur for an already committed transaction whose producer ID is
+no longer valid; restarting with the same checkpoint cannot restore the missing mapping.
+The failed acknowledgement does not establish that the transaction was committed. If it was
+aborted or otherwise never committed, its records are unavailable to `read_committed` consumers
+and data may have been lost. Investigate the Kafka broker logs when this error occurs.
+
 {{< top >}}
