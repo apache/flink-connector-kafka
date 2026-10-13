@@ -54,7 +54,7 @@ class ReaderRecoveryGate {
     /** Set on restore; cleared once all readers have registered after the first discovery. */
     private boolean initialReaderRegistrationPending;
 
-    /** Splits reported by readers on registration, pending redistribution. */
+    /** Reported or returned splits awaiting recovery reassignment. */
     private final Map<Integer, List<DynamicKafkaSourceSplit>> pendingReportedSplitsByReader =
             new HashMap<>();
 
@@ -75,6 +75,16 @@ class ReaderRecoveryGate {
                     subtaskId,
                     mergeReportedSplits(
                             pendingReportedSplitsByReader.get(subtaskId), reportedSplits));
+        }
+    }
+
+    /** Retains splits returned while their reader is inactive until recovery reassignment. */
+    void recordReturnedSplits(int readerId, List<DynamicKafkaSourceSplit> returnedSplits) {
+        if (!returnedSplits.isEmpty()) {
+            pendingReportedSplitsByReader.put(
+                    readerId,
+                    mergeReportedSplits(
+                            pendingReportedSplitsByReader.get(readerId), returnedSplits));
         }
     }
 
@@ -157,6 +167,13 @@ class ReaderRecoveryGate {
 
     boolean hasReportedSplits() {
         return !pendingReportedSplitsByReader.isEmpty();
+    }
+
+    /** Returns and removes only the pending splits for the recovering reader. */
+    List<DynamicKafkaSourceSplit> drainReportedSplits(int readerId) {
+        List<DynamicKafkaSourceSplit> reportedSplits =
+                pendingReportedSplitsByReader.remove(readerId);
+        return reportedSplits == null ? Collections.emptyList() : reportedSplits;
     }
 
     /**

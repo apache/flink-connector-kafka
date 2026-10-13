@@ -766,6 +766,119 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
         verifyNumericCheckpointRecovery(false, true, 1, false, false, true, false);
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testLocalFailurePreservesCurrentOwnersAcrossClusterRetention(
+            boolean failWhileInactive) throws Throwable {
+        String streamId = "stream";
+        String clusterId = "cluster-0";
+        String topic = "topic";
+        List<DynamicKafkaSourceSplit> checkpointSplits =
+                createSplits(clusterId, topic, 11).stream()
+                        .map(
+                                split ->
+                                        withOffset(
+                                                split,
+                                                1000L
+                                                        + split.getKafkaPartitionSplit()
+                                                                .getPartition()))
+                        .collect(Collectors.toList());
+        List<DynamicKafkaSourceSplit> historicalReaderZeroSplits =
+                checkpointSplits.stream()
+                        .filter(split -> split.getKafkaPartitionSplit().getPartition() % 2 == 0)
+                        .collect(Collectors.toList());
+        List<DynamicKafkaSourceSplit> historicalReaderOneSplits =
+                checkpointSplits.stream()
+                        .filter(split -> split.getKafkaPartitionSplit().getPartition() % 2 == 1)
+                        .collect(Collectors.toList());
+        KafkaStream stream = createKafkaStream(streamId, clusterId, topic);
+        Properties properties = createGlobalModeProperties();
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "1");
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
+                "60000");
+
+        try (MockKafkaMetadataService metadataService =
+                        new MockKafkaMetadataService(Collections.singleton(stream));
+                MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(2);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                streamId,
+                                metadataService,
+                                context,
+                                properties,
+                                createRestoredState(stream, clusterId, checkpointSplits))) {
+            enumerator.start();
+            registerReaderAndReportRestoredSplits(
+                    context, enumerator, 0, historicalReaderZeroSplits);
+            registerReaderAndReportRestoredSplits(
+                    context, enumerator, 1, historicalReaderOneSplits);
+            context.runPeriodicCallable(0);
+            assertExactCheckpointOffsets(context, 0, checkpointSplits);
+
+            Map<Integer, List<DynamicKafkaSourceSplit>> currentAssignments = new HashMap<>();
+            context.getSplitsAssignmentSequence()
+                    .forEach(
+                            assignment ->
+                                    assignment
+                                            .assignment()
+                                            .forEach(
+                                                    (reader, splits) ->
+                                                            currentAssignments
+                                                                    .computeIfAbsent(
+                                                                            reader,
+                                                                            ignored ->
+                                                                                    new ArrayList<>())
+                                                                    .addAll(splits)));
+            assertThat(historicalReaderZeroSplits.stream())
+                    .anyMatch(currentAssignments.get(1)::contains);
+
+            metadataService.setKafkaStreams(
+                    Collections.singleton(new KafkaStream(streamId, Collections.emptyMap())));
+            context.runPeriodicCallable(0);
+            assertThat(enumerator.snapshotState(1L).getRetainedClusterEnumeratorStates())
+                    .containsKey(clusterId);
+
+            if (!failWhileInactive) {
+                metadataService.setKafkaStreams(Collections.singleton(stream));
+                context.runPeriodicCallable(0);
+            }
+            int assignmentsBeforeFailure = context.getSplitsAssignmentSequence().size();
+            context.unregisterReader(0);
+            enumerator.addSplitsBack(currentAssignments.get(0), 0);
+            registerReaderAndReportRestoredSplits(
+                    context, enumerator, 0, historicalReaderZeroSplits);
+
+            List<DynamicKafkaSourceSplit> recoveredSplits = new ArrayList<>();
+            for (SplitsAssignment<DynamicKafkaSourceSplit> assignment :
+                    context.getSplitsAssignmentSequence()
+                            .subList(
+                                    assignmentsBeforeFailure,
+                                    context.getSplitsAssignmentSequence().size())) {
+                assertThat(assignment.assignment()).containsOnlyKeys(0);
+                recoveredSplits.addAll(assignment.assignment().get(0));
+            }
+            assertThat(recoveredSplits)
+                    .allSatisfy(
+                            split -> assertThat(split.isRetained()).isEqualTo(failWhileInactive));
+            assertThat(
+                            recoveredSplits.stream()
+                                    .map(DynamicKafkaSourceSplit::clearRetention)
+                                    .collect(Collectors.toList()))
+                    .containsExactlyInAnyOrderElementsOf(currentAssignments.get(0));
+
+            if (failWhileInactive) {
+                int assignmentsBeforeReactivation = context.getSplitsAssignmentSequence().size();
+                metadataService.setKafkaStreams(Collections.singleton(stream));
+                context.runPeriodicCallable(0);
+                assertThat(context.getSplitsAssignmentSequence())
+                        .hasSize(assignmentsBeforeReactivation);
+            }
+        }
+    }
+
     @Test
     public void testCheckpointReportsReplacePreinitializedPendingOwnersAndOffsets()
             throws Throwable {
