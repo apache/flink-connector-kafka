@@ -635,6 +635,48 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
     }
 
     @Test
+    public void testLocalFailureBeforeInitialDiscoveryPreservesReportedSplits() throws Throwable {
+        String streamId = "stream";
+        String clusterId = "cluster-0";
+        String topic = "topic";
+        List<DynamicKafkaSourceSplit> checkpointSplits =
+                List.of(
+                        new DynamicKafkaSourceSplit(
+                                clusterId,
+                                new KafkaPartitionSplit(new TopicPartition(topic, 0), 42L)),
+                        new DynamicKafkaSourceSplit(
+                                clusterId,
+                                new KafkaPartitionSplit(new TopicPartition(topic, 1), 43L)));
+        KafkaStream stream = createKafkaStream(streamId, clusterId, topic);
+
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(2);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                streamId,
+                                new MockKafkaMetadataService(Collections.singleton(stream)),
+                                context,
+                                createGlobalModeProperties(),
+                                createRestoredState(stream, clusterId, checkpointSplits))) {
+            enumerator.start();
+            registerReaderAndReportRestoredSplits(context, enumerator, 0, checkpointSplits);
+            registerReaderAndReportRestoredSplits(context, enumerator, 1, Collections.emptyList());
+            assertThat(context.getSplitsAssignmentSequence()).isEmpty();
+
+            // No post-checkpoint assignment exists to return before metadata discovery completes.
+            context.unregisterReader(0);
+            enumerator.addSplitsBack(Collections.emptyList(), 0);
+            registerReaderAndReportRestoredSplits(context, enumerator, 0, Collections.emptyList());
+            assertThat(context.getSplitsAssignmentSequence()).isEmpty();
+
+            context.runNextOneTimeCallable();
+
+            assertExactCheckpointOffsets(context, 0, checkpointSplits);
+            assertSinglePhysicalOwners(context, 0, checkpointSplits.size());
+        }
+    }
+
+    @Test
     public void testInitialRestoreKeepsOneOwnerBeforeAnyLocalFailure() throws Throwable {
         verifyNumericCheckpointRecovery(false, false);
     }

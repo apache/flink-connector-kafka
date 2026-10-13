@@ -96,13 +96,14 @@ class ReaderRecoveryGateTest {
     }
 
     @Test
-    void testEmptyInitialReportIsPartOfTheRecoveryCohort() {
+    void testEmptyReportDuringInitialRecovery() {
         ReaderRecoveryGate gate = new ReaderRecoveryGate(true);
         gate.recordReportedSplits(1, Collections.emptyList());
 
         assertThat(gate.hasPendingRecovery()).isTrue();
-        assertThat(gate.hasReportedSplits()).isTrue();
-        assertThat(gate.drainReportedSplits()).containsEntry(1, Collections.emptyList());
+        assertThat(gate.hasReportedSplits()).isFalse();
+        assertThat(gate.drainReportedSplits()).isEmpty();
+        assertThat(gate.hasPendingRecovery()).isTrue();
     }
 
     @Test

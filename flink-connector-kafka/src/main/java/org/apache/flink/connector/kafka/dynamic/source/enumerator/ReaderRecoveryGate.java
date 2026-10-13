@@ -68,9 +68,9 @@ class ReaderRecoveryGate {
         this.initialReaderRegistrationPending = restoredFromCheckpoint;
     }
 
-    /** Merges initial recovery reports, retaining pending splits even for an empty report. */
+    /** Merges non-empty initial recovery reports with pending splits; empty reports are ignored. */
     void recordReportedSplits(int subtaskId, List<DynamicKafkaSourceSplit> reportedSplits) {
-        if (initialReaderRegistrationPending) {
+        if (initialReaderRegistrationPending && !reportedSplits.isEmpty()) {
             pendingReportedSplitsByReader.put(
                     subtaskId,
                     mergeReportedSplits(
