@@ -119,7 +119,6 @@ public class DynamicKafkaSourceEnumerator
     private boolean splitAssignmentInProgress;
     // Reader checkpoint reports may refer to owners from before recovery redistribution.
     private final Map<String, Integer> currentSplitOwners = new HashMap<>();
-    private boolean flushingPendingSplitAssignments;
 
     public DynamicKafkaSourceEnumerator(
             KafkaStreamSubscriber kafkaStreamSubscriber,
@@ -416,9 +415,7 @@ public class DynamicKafkaSourceEnumerator
 
     private void handleNoMoreSplits() {
         // A cluster callback may run before other clusters have assigned their splits.
-        if (splitAssignmentInProgress
-                || readerRecoveryGate.isReconciliationPending()
-                || flushingPendingSplitAssignments) {
+        if (splitAssignmentInProgress || readerRecoveryGate.isReconciliationPending()) {
             return;
         }
         if (Boundedness.BOUNDED.equals(boundedness)) {
@@ -884,28 +881,16 @@ public class DynamicKafkaSourceEnumerator
     }
 
     private void addReaderToClusterEnumerators(int subtaskId) {
-        addReadersToClusterEnumerators(Collections.singletonList(subtaskId));
+        splitAssignmentStrategy.onReaderAdded(subtaskId);
+        clusterEnumeratorMap.forEach(
+                (cluster, subEnumerator) -> subEnumerator.addReader(subtaskId));
     }
 
     private void flushPendingSplitAssignmentsForRegisteredReaders() {
         List<Integer> registeredReaders = new ArrayList<>(enumContext.registeredReaders().keySet());
         Collections.sort(registeredReaders);
-        addReadersToClusterEnumerators(registeredReaders);
-    }
-
-    private void addReadersToClusterEnumerators(List<Integer> readers) {
-        boolean previousFlushInProgress = flushingPendingSplitAssignments;
-        flushingPendingSplitAssignments = true;
-        try {
-            // A bounded child may synchronously finish during addReader. Finish every
-            // cluster's assignments before forwarding completion to the readers.
-            for (int reader : readers) {
-                splitAssignmentStrategy.onReaderAdded(reader);
-                clusterEnumeratorMap.forEach(
-                        (cluster, subEnumerator) -> subEnumerator.addReader(reader));
-            }
-        } finally {
-            flushingPendingSplitAssignments = previousFlushInProgress;
+        for (int readerId : registeredReaders) {
+            addReaderToClusterEnumerators(readerId);
         }
     }
 
