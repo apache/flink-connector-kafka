@@ -257,8 +257,15 @@ public class DynamicKafkaSourceEnumeratorTest {
             context.registerReader(
                     ReaderInfo.createReaderInfo(0, "restarted", reportedSplitsByReader.get(0)));
             enumerator.addReader(0);
-            assertThat(context.getSplitsAssignmentSequence()).isEmpty();
-            assertThat(context.splitsAtCompletion).isEmpty();
+            assertThat(context.getAssignedSplits(0))
+                    .containsExactlyInAnyOrderElementsOf(reportedSplitsByReader.get(0));
+            assertThat(context.splitsAtCompletion).containsOnlyKeys(0);
+            assertThat(context.splitsAtCompletion.get(0))
+                    .singleElement()
+                    .isEqualTo(
+                            reportedSplitsByReader.get(0).stream()
+                                    .map(DynamicKafkaSourceSplit::splitId)
+                                    .collect(Collectors.toSet()));
 
             context.registerReader(
                     ReaderInfo.createReaderInfo(1, "restarted", reportedSplitsByReader.get(1)));

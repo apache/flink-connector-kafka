@@ -1098,12 +1098,21 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
             events.clear();
             int priorAssignments = context.getSplitsAssignmentSequence().size();
             context.unregisterReader(0);
+            context.unregisterReader(1);
+            List<DynamicKafkaSourceSplit> readerZeroReports = new ArrayList<>(assigned.get(0));
+            readerZeroReports.add(
+                    new DynamicKafkaSourceSplit(
+                                    "removed-cluster",
+                                    new KafkaPartitionSplit(
+                                            new TopicPartition("removed-topic", 0), 5L, 1000L))
+                            .retainUntil(Long.MAX_VALUE));
             enumerator.addSplitsBack(Collections.emptyList(), 0);
-            registerReaderAndReportRestoredSplits(context, enumerator, 0, assigned.get(0));
+            registerReaderAndReportRestoredSplits(context, enumerator, 0, readerZeroReports);
 
-            assertBoundedAssignmentsBeforeCompletion(events, 0, 2);
+            assertBoundedAssignmentsBeforeCompletion(events, 0, 3);
             assertThat(events).noneMatch(event -> event.startsWith("assign:1:"));
-            assertExactCheckpointOffsets(context, priorAssignments, assigned.get(0));
+            assertThat(events).doesNotContain("done:1");
+            assertExactCheckpointOffsets(context, priorAssignments, readerZeroReports);
             context.getSplitsAssignmentSequence().stream()
                     .skip(priorAssignments)
                     .flatMap(assignment -> assignment.assignment().values().stream())
@@ -1112,6 +1121,10 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
                             split ->
                                     assertThat(split.getKafkaPartitionSplit().getStoppingOffset())
                                             .contains(1000L));
+            registerReaderAndReportRestoredSplits(context, enumerator, 1, assigned.get(1));
+            assertBoundedAssignmentsBeforeCompletion(events, 1, 2);
+            assertThat(events.stream().filter(event -> event.equals("done:0"))).hasSize(1);
+            assertThat(events.stream().filter(event -> event.equals("done:1"))).hasSize(1);
         }
     }
 
