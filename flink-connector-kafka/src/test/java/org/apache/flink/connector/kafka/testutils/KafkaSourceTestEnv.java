@@ -206,6 +206,12 @@ public class KafkaSourceTestEnv extends KafkaTestBase {
         return committedOffsets;
     }
 
+    /** Lists the offsets that the given consumer group committed to Kafka. */
+    public static Map<TopicPartition, OffsetAndMetadata> listCommittedOffsets(String groupId)
+            throws Exception {
+        return adminClient.listConsumerGroupOffsets(groupId).partitionsToOffsetAndMetadata().get();
+    }
+
     public static long getEarliestOffset(TopicPartition tp) {
         return tp.partition();
     }

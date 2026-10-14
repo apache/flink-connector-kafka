@@ -48,6 +48,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -56,6 +57,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.StringJoiner;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -64,6 +66,12 @@ import java.util.stream.Collectors;
 public class KafkaPartitionSplitReader
         implements SplitReader<ConsumerRecord<byte[], byte[]>, KafkaPartitionSplit> {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaPartitionSplitReader.class);
+    // The commit delays closing the consumer. The reader waits for its fetcher to close for at most
+    // source.reader.close.timeout, 30 seconds by default.
+    private static final Duration COMMIT_ON_CLOSE_TIMEOUT = Duration.ofSeconds(10);
+    // Replaces the offsets to commit on close once close() has taken them.
+    private static final Map<TopicPartition, OffsetAndMetadata> CLOSING =
+            Collections.unmodifiableMap(new HashMap<>());
 
     private final Properties consumerProps;
     private final Map<TopicPartition, Long> stoppingOffsets;
@@ -82,6 +90,10 @@ public class KafkaPartitionSplitReader
      * #close()}.
      */
     @Nullable private volatile KafkaConsumer<byte[], byte[]> consumer;
+
+    // Set by the task thread before the fetcher shuts down, taken by the fetcher thread in close().
+    private final AtomicReference<Map<TopicPartition, OffsetAndMetadata>> offsetsToCommitOnClose =
+            new AtomicReference<>(Collections.emptyMap());
 
     // Tracking empty splits that has not been added to finished splits in fetch()
     private final Set<String> emptySplits = new HashSet<>();
@@ -297,9 +309,13 @@ public class KafkaPartitionSplitReader
 
     @Override
     public void close() throws Exception {
-        KafkaConsumer<byte[], byte[]> currentConsumer = this.consumer;
-        if (currentConsumer != null) {
-            currentConsumer.close();
+        try {
+            maybeCommitOffsetsOnClose();
+        } finally {
+            KafkaConsumer<byte[], byte[]> currentConsumer = this.consumer;
+            if (currentConsumer != null) {
+                currentConsumer.close();
+            }
         }
     }
 
@@ -339,6 +355,45 @@ public class KafkaPartitionSplitReader
             Map<TopicPartition, OffsetAndMetadata> offsetsToCommit,
             OffsetCommitCallback offsetCommitCallback) {
         ensureConsumer().commitAsync(offsetsToCommit, offsetCommitCallback);
+    }
+
+    /**
+     * Sets the offsets that {@link #close()} commits synchronously before closing the consumer.
+     *
+     * @return false if {@link #close()} has already started and will not commit the offsets.
+     */
+    public boolean commitOffsetsOnClose(Map<TopicPartition, OffsetAndMetadata> offsetsToCommit) {
+        return offsetsToCommitOnClose.getAndUpdate(
+                        current -> current == CLOSING ? CLOSING : offsetsToCommit)
+                != CLOSING;
+    }
+
+    private void maybeCommitOffsetsOnClose() {
+        final Map<TopicPartition, OffsetAndMetadata> offsetsToCommit =
+                offsetsToCommitOnClose.getAndSet(CLOSING);
+        if (offsetsToCommit.isEmpty()) {
+            return;
+        }
+        try {
+            // Shutting down the fetcher wakes up the consumer, which may leave a pending wakeup.
+            retryOnWakeup(
+                    () -> {
+                        // A fetcher started only to commit has not created its consumer yet.
+                        ensureConsumer().commitSync(offsetsToCommit, COMMIT_ON_CLOSE_TIMEOUT);
+                        return null;
+                    },
+                    "committing offsets on close");
+        } catch (RuntimeException e) {
+            // As for the commits on checkpoint, a failed commit does not break the job.
+            kafkaSourceReaderMetrics.recordFailedCommit();
+            LOG.warn("Failed to commit consumer offsets {} on close", offsetsToCommit, e);
+            return;
+        }
+        // Unlike the commits on checkpoint, this skips the committed offset gauges: they are
+        // unregistered with the task, and they throw for a partition whose split this reader never
+        // handled.
+        kafkaSourceReaderMetrics.recordSucceededCommit();
+        LOG.info("Committed consumer offsets {} on close", offsetsToCommit);
     }
 
     @VisibleForTesting

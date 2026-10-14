@@ -90,6 +90,28 @@ public class KafkaSourceFetcherManager
         }
     }
 
+    /**
+     * Commits the given offsets synchronously when the fetcher closes its consumer, after {@link
+     * #close(long)} shut the fetcher down. Must be called before {@link #close(long)}.
+     */
+    public void commitOffsetsOnClose(Map<TopicPartition, OffsetAndMetadata> offsetsToCommit) {
+        // A fetcher that is shutting down stays listed until it exits, so try each of them.
+        for (SplitFetcher<ConsumerRecord<byte[], byte[]>, KafkaPartitionSplit> fetcher :
+                fetchers.values()) {
+            if (((KafkaPartitionSplitReader) fetcher.getSplitReader())
+                    .commitOffsetsOnClose(offsetsToCommit)) {
+                return;
+            }
+        }
+        // No fetcher runs, or all are already closing their consumers. Only a fetcher thread may
+        // use a consumer, so start one that commits as it closes.
+        final SplitFetcher<ConsumerRecord<byte[], byte[]>, KafkaPartitionSplit> splitFetcher =
+                createSplitFetcher();
+        ((KafkaPartitionSplitReader) splitFetcher.getSplitReader())
+                .commitOffsetsOnClose(offsetsToCommit);
+        startFetcher(splitFetcher);
+    }
+
     private void enqueueOffsetsCommitTask(
             SplitFetcher<ConsumerRecord<byte[], byte[]>, KafkaPartitionSplit> splitFetcher,
             Map<TopicPartition, OffsetAndMetadata> offsetsToCommit,

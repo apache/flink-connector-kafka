@@ -46,6 +46,7 @@ import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** The source reader for Kafka partitions. */
 @Internal
@@ -59,6 +60,10 @@ public class KafkaSourceReader<T>
     private final ConcurrentMap<TopicPartition, OffsetAndMetadata> offsetsOfFinishedSplits;
     private final KafkaSourceReaderMetrics kafkaSourceReaderMetrics;
     private final boolean commitOffsetsOnCheckpoint;
+    // Only accessed by the task thread.
+    private long latestCompletedCheckpointId = -1L;
+    // Written by the commit callbacks on the fetcher thread, whether the commit succeeded or not.
+    private final AtomicLong latestFinishedCommitCheckpointId = new AtomicLong(-1L);
 
     public KafkaSourceReader(
             FutureCompletingBlockingQueue<RecordsWithSplitIds<ConsumerRecord<byte[], byte[]>>>
@@ -128,6 +133,7 @@ public class KafkaSourceReader<T>
         if (!commitOffsetsOnCheckpoint) {
             return;
         }
+        latestCompletedCheckpointId = Math.max(latestCompletedCheckpointId, checkpointId);
 
         Map<TopicPartition, OffsetAndMetadata> committedPartitions =
                 offsetsToCommit.get(checkpointId);
@@ -146,6 +152,8 @@ public class KafkaSourceReader<T>
                 .commitOffsets(
                         committedPartitions,
                         (ignored, e) -> {
+                            latestFinishedCommitCheckpointId.accumulateAndGet(
+                                    checkpointId, Math::max);
                             // The offset commit here is needed by the external monitoring. It won't
                             // break Flink job's correctness if we fail to commit the offset here.
                             if (e != null) {
@@ -174,6 +182,43 @@ public class KafkaSourceReader<T>
                                 removeAllOffsetsToCommitUpToCheckpoint(checkpointId);
                             }
                         });
+    }
+
+    /**
+     * Commits the offsets of the latest completed checkpoint if their asynchronous commit has not
+     * finished. The fetcher drops the commit task enqueued by {@link
+     * #notifyCheckpointComplete(long)} when it shuts down before running it, and with {@code
+     * group.protocol=consumer} closing the consumer drops a commit in flight. Stop-with-savepoint
+     * closes the reader right after the savepoint completes, so its offsets would otherwise never
+     * reach Kafka. A commit that failed is not retried, even after a transient failure such as a
+     * coordinator change during a broker restart, so that an unreachable cluster does not delay the
+     * close.
+     */
+    @Override
+    public void close() throws Exception {
+        // Only completed checkpoints advance latestCompletedCheckpointId, so this never commits
+        // the offsets that DynamicKafkaSourceReader snapshots with id -1 outside a checkpoint.
+        final Map<TopicPartition, OffsetAndMetadata> uncommittedOffsets =
+                latestCompletedCheckpointId > latestFinishedCommitCheckpointId.get()
+                        ? offsetsToCommit.get(latestCompletedCheckpointId)
+                        : null;
+        if (uncommittedOffsets != null && !uncommittedOffsets.isEmpty()) {
+            LOG.info(
+                    "Committing the offsets of completed checkpoint {} when closing the reader.",
+                    latestCompletedCheckpointId);
+            try {
+                ((KafkaSourceFetcherManager) splitFetcherManager)
+                        .commitOffsetsOnClose(uncommittedOffsets);
+            } catch (RuntimeException e) {
+                // A failed commit must neither fail the reader nor keep it from closing fetchers.
+                kafkaSourceReaderMetrics.recordFailedCommit();
+                LOG.warn(
+                        "Failed to commit the offsets of checkpoint {} on close",
+                        latestCompletedCheckpointId,
+                        e);
+            }
+        }
+        super.close();
     }
 
     private void removeAllOffsetsToCommitUpToCheckpoint(long checkpointId) {
