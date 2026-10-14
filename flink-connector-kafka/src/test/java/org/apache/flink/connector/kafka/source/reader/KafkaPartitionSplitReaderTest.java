@@ -39,6 +39,7 @@ import org.apache.flink.runtime.metrics.groups.UnregisteredMetricGroups;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
@@ -155,6 +156,68 @@ public class KafkaPartitionSplitReaderTest {
                 Collections.singletonMap(
                         KafkaPartitionSplit.toSplitId(tp),
                         new KafkaPartitionSplit(tp, KafkaPartitionSplit.EARLIEST_OFFSET)));
+    }
+
+    @Test
+    public void testCommitOffsetsOnCloseAfterWakeUp() throws Exception {
+        final String groupId = "commit-offsets-on-close-after-wake-up";
+        final Properties props = new Properties();
+        props.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
+        KafkaPartitionSplitReader reader =
+                createReader(props, UnregisteredMetricsGroup.createSourceReaderMetricGroup());
+        TopicPartition tp = new TopicPartition(TOPIC1, 0);
+        assertThat(
+                        reader.commitOffsetsOnClose(
+                                Collections.singletonMap(tp, new OffsetAndMetadata(3L))))
+                .isTrue();
+        // Shutting down the fetcher wakes up the consumer; the held wakeup must not fail the
+        // commit. The consumer must exist for the wakeup to reach it.
+        reader.consumer();
+        reader.wakeUp();
+        reader.close();
+
+        final Map<TopicPartition, OffsetAndMetadata> committedOffsets =
+                KafkaSourceTestEnv.listCommittedOffsets(groupId);
+        assertThat(committedOffsets).containsOnlyKeys(tp);
+        assertThat(committedOffsets.get(tp).offset()).isEqualTo(3L);
+    }
+
+    @Test
+    public void testCommitOffsetsOnCloseWithoutConsumer() throws Exception {
+        final String groupId = "commit-offsets-on-close-without-consumer";
+        final Properties props = new Properties();
+        props.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
+        // Like a fetcher started only to commit, the reader never creates its consumer before
+        // close.
+        KafkaPartitionSplitReader reader =
+                createReader(props, UnregisteredMetricsGroup.createSourceReaderMetricGroup());
+        TopicPartition tp = new TopicPartition(TOPIC1, 0);
+        assertThat(
+                        reader.commitOffsetsOnClose(
+                                Collections.singletonMap(tp, new OffsetAndMetadata(3L))))
+                .isTrue();
+        reader.close();
+
+        final Map<TopicPartition, OffsetAndMetadata> committedOffsets =
+                KafkaSourceTestEnv.listCommittedOffsets(groupId);
+        assertThat(committedOffsets).containsOnlyKeys(tp);
+        assertThat(committedOffsets.get(tp).offset()).isEqualTo(3L);
+    }
+
+    @Test
+    public void testRejectOffsetsToCommitOnCloseAfterClose() throws Exception {
+        final Properties props = new Properties();
+        props.setProperty(
+                ConsumerConfig.GROUP_ID_CONFIG, "reject-offsets-to-commit-on-close-after-close");
+        KafkaPartitionSplitReader reader =
+                createReader(props, UnregisteredMetricsGroup.createSourceReaderMetricGroup());
+        reader.close();
+
+        assertThat(
+                        reader.commitOffsetsOnClose(
+                                Collections.singletonMap(
+                                        new TopicPartition(TOPIC1, 0), new OffsetAndMetadata(3L))))
+                .isFalse();
     }
 
     @Test
