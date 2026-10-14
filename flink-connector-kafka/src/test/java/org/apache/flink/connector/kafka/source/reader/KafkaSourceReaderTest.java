@@ -62,6 +62,7 @@ import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
@@ -866,6 +867,135 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
         return new KafkaProducer<>(props);
     }
 
+    @ParameterizedTest(name = "group.protocol = {0}")
+    @ValueSource(strings = {"classic", "consumer"})
+    void testCommitOffsetsOfLatestCompletedCheckpointOnClose(String groupProtocol)
+            throws Exception {
+        final String groupId =
+                "testCommitOffsetsOfLatestCompletedCheckpointOnClose-" + groupProtocol;
+        final Properties props = new Properties();
+        props.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
+        props.setProperty(ConsumerConfig.GROUP_PROTOCOL_CONFIG, groupProtocol);
+        try (KafkaSourceReader<Integer> reader =
+                (KafkaSourceReader<Integer>)
+                        createReader(
+                                Boundedness.CONTINUOUS_UNBOUNDED,
+                                new TestingReaderContext(),
+                                (ignore) -> {},
+                                props,
+                                null)) {
+            reader.addSplits(
+                    getSplits(numSplits, NUM_RECORDS_PER_SPLIT, Boundedness.CONTINUOUS_UNBOUNDED));
+            ValidatingSourceOutput output = new ValidatingSourceOutput();
+            pollUntil(
+                    reader,
+                    output,
+                    () -> output.count() == totalNumRecords,
+                    "The reader did not consume all records before timeout.");
+            reader.snapshotState(1L);
+            // Like stop-with-savepoint: the reader closes right after the checkpoint completes,
+            // while the fetcher still blocks in poll() and has not run the enqueued commit.
+            reader.notifyCheckpointComplete(1L);
+        }
+
+        assertCommittedOffsets(groupId, NUM_RECORDS_PER_SPLIT);
+    }
+
+    @Test
+    void testNotCommitOffsetsOfUncompletedCheckpointOnClose() throws Exception {
+        final String groupId = "testNotCommitOffsetsOfUncompletedCheckpointOnClose";
+        try (KafkaSourceReader<Integer> reader =
+                (KafkaSourceReader<Integer>)
+                        createReader(Boundedness.CONTINUOUS_UNBOUNDED, groupId)) {
+            reader.addSplits(
+                    getSplits(numSplits, NUM_RECORDS_PER_SPLIT, Boundedness.CONTINUOUS_UNBOUNDED));
+            reader.snapshotState(1L);
+            reader.notifyCheckpointComplete(1L);
+            ValidatingSourceOutput output = new ValidatingSourceOutput();
+            pollUntil(
+                    reader,
+                    output,
+                    () -> output.count() == totalNumRecords,
+                    "The reader did not consume all records before timeout.");
+            reader.snapshotState(2L);
+        }
+
+        assertCommittedOffsets(groupId, 0L);
+    }
+
+    @Test
+    void testNotCommitOffsetsOfSnapshotWithoutCheckpointOnClose() throws Exception {
+        final String groupId = "testNotCommitOffsetsOfSnapshotWithoutCheckpointOnClose";
+        try (KafkaSourceReader<Integer> reader =
+                (KafkaSourceReader<Integer>)
+                        createReader(Boundedness.CONTINUOUS_UNBOUNDED, groupId)) {
+            reader.addSplits(
+                    getSplits(numSplits, NUM_RECORDS_PER_SPLIT, Boundedness.CONTINUOUS_UNBOUNDED));
+            ValidatingSourceOutput output = new ValidatingSourceOutput();
+            pollUntil(
+                    reader,
+                    output,
+                    () -> output.count() == totalNumRecords,
+                    "The reader did not consume all records before timeout.");
+            // DynamicKafkaSourceReader snapshots its sub-readers with id -1 before closing them.
+            reader.snapshotState(-1L);
+        }
+
+        assertThat(KafkaSourceTestEnv.listCommittedOffsets(groupId)).isEmpty();
+    }
+
+    @Test
+    void testCommitReconciledOffsetsOfLatestCompletedCheckpointOnClose() throws Throwable {
+        final String topic = TOPIC + "CommitReconciledOnClose";
+        final String groupId = "CommitReconciledOnCloseGroup";
+        final TopicPartition emptyPartition = new TopicPartition(topic, 0);
+        final TopicPartition transactionalPartition = new TopicPartition(topic, 1);
+        KafkaSourceTestEnv.createTestTopic(topic, 2, 1);
+
+        // offset 0 = record
+        // offset 1 = record
+        // offset 2 = record
+        // offset 3 = commit marker
+        // offset 4 << log end offset
+        produceInTransaction(topic, transactionalPartition.partition(), 3, true);
+        awaitLastStableOffset(transactionalPartition, 4L);
+
+        final Properties props = new Properties();
+        props.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
+        props.setProperty(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
+        try (KafkaSourceReader<Integer> reader =
+                (KafkaSourceReader<Integer>)
+                        createReader(
+                                Boundedness.CONTINUOUS_UNBOUNDED,
+                                new TestingReaderContext(),
+                                (ignore) -> {},
+                                props,
+                                null)) {
+            // both partitions are assigned together, so the fetch that delivers the records also
+            // records the consumer position of the empty partition
+            reader.addSplits(
+                    Arrays.asList(
+                            new KafkaPartitionSplit(
+                                    emptyPartition, KafkaPartitionSplit.EARLIEST_OFFSET),
+                            new KafkaPartitionSplit(transactionalPartition, 0L)));
+            final TestingReaderOutput<Integer> output = new TestingReaderOutput<>();
+            pollUntil(
+                    reader,
+                    output,
+                    () -> output.getEmittedRecords().size() == 3,
+                    "The reader did not emit all records before timeout.");
+            reader.snapshotState(1L);
+            reader.notifyCheckpointComplete(1L);
+        }
+
+        assertThat(getCommittedOffset(emptyPartition, groupId))
+                .as("The committed offset of the partition without an offset in the checkpoint")
+                .isEqualTo(0L);
+        assertThat(getCommittedOffset(transactionalPartition, groupId))
+                .as("The committed offset of the partition ending with a commit marker")
+                .isEqualTo(4L);
+    }
+
     @Test
     void testNotCommitOffsetsForUninitializedSplits() throws Exception {
         final long checkpointId = 1234L;
@@ -1312,6 +1442,15 @@ public class KafkaSourceReaderTest extends SourceReaderTestBase<KafkaPartitionSp
                         reader.snapshotState(0L).stream()
                                 .noneMatch(split -> split.getTopicPartition().equals(tp)),
                 "The split did not finish before timeout.");
+    }
+
+    private void assertCommittedOffsets(String groupId, long expectedOffset) throws Exception {
+        final Map<TopicPartition, OffsetAndMetadata> committedOffsets =
+                KafkaSourceTestEnv.listCommittedOffsets(groupId);
+        assertThat(committedOffsets).hasSize(numSplits);
+        assertThat(committedOffsets.values())
+                .extracting(OffsetAndMetadata::offset)
+                .containsOnly(expectedOffset);
     }
 
     private long getKafkaConsumerMetric(String name, MetricListener listener) {
