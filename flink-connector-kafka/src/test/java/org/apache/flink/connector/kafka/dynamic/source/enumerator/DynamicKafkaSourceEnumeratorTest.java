@@ -2678,7 +2678,7 @@ public class DynamicKafkaSourceEnumeratorTest {
                 baseClusterMetadata.getStoppingOffsetsInitializer());
     }
 
-    private static class TestKafkaEnumContextProxyFactory
+    static class TestKafkaEnumContextProxyFactory
             implements StoppableKafkaEnumContextProxy.StoppableKafkaEnumContextProxyFactory {
 
         @Override
