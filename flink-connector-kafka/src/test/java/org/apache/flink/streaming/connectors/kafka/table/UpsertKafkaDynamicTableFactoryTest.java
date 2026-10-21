@@ -27,6 +27,7 @@ import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 import org.apache.flink.connector.kafka.source.KafkaSource;
+import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.connector.kafka.source.KafkaSourceTestUtils;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
@@ -138,6 +139,7 @@ class UpsertKafkaDynamicTableFactoryTest {
     static {
         UPSERT_KAFKA_SOURCE_PROPERTIES.setProperty("bootstrap.servers", "dummy");
         UPSERT_KAFKA_SOURCE_PROPERTIES.setProperty("partition.discovery.interval.ms", "1000");
+        UPSERT_KAFKA_SOURCE_PROPERTIES.setProperty("scan.topic-integrity-check.enabled", "false");
 
         UPSERT_KAFKA_SINK_PROPERTIES.setProperty("bootstrap.servers", "dummy");
     }
@@ -242,6 +244,29 @@ class UpsertKafkaDynamicTableFactoryTest {
         ScanTableSource.ScanRuntimeProvider provider =
                 actualUpsertKafkaSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
         assertKafkaSource(provider);
+    }
+
+    @Test
+    void testTableSourceTopicIntegrityCheck() {
+        final KafkaDynamicSource defaultSource =
+                (KafkaDynamicSource) createTableSource(SOURCE_SCHEMA, getFullSourceOptions());
+        assertThat(
+                        defaultSource.properties.getProperty(
+                                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))
+                .isEqualTo("false");
+
+        final Map<String, String> options =
+                getModifiedOptions(
+                        getFullSourceOptions(),
+                        o -> o.put("scan.topic-integrity-check.enabled", "true"));
+        final KafkaDynamicSource enabledSource =
+                (KafkaDynamicSource) createTableSource(SOURCE_SCHEMA, options);
+        assertThat(
+                        enabledSource.properties.getProperty(
+                                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))
+                .isEqualTo("true");
+        assertKafkaSource(
+                enabledSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE));
     }
 
     @Test

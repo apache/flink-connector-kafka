@@ -141,6 +141,7 @@ class KafkaDynamicTableFactoryTest {
         KAFKA_SOURCE_PROPERTIES.setProperty("group.id", "dummy");
         KAFKA_SOURCE_PROPERTIES.setProperty("bootstrap.servers", "dummy");
         KAFKA_SOURCE_PROPERTIES.setProperty("partition.discovery.interval.ms", "1000");
+        KAFKA_SOURCE_PROPERTIES.setProperty("scan.topic-integrity-check.enabled", "false");
 
         KAFKA_SINK_PROPERTIES.setProperty("group.id", "dummy");
         KAFKA_SINK_PROPERTIES.setProperty("bootstrap.servers", "dummy");
@@ -535,6 +536,46 @@ class KafkaDynamicTableFactoryTest {
                 .hasMessage(
                         "auto.offset.reset can not be set to errorStrategy. "
                                 + "Valid values: [latest,earliest,none]");
+    }
+
+    @Test
+    void testTableSourceTopicIntegrityCheck() {
+        final KafkaDynamicSource defaultSource =
+                (KafkaDynamicSource) createTableSource(SCHEMA, getBasicSourceOptions());
+        assertThat(
+                        defaultSource.properties.getProperty(
+                                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))
+                .isEqualTo("false");
+
+        final Map<String, String> options =
+                getModifiedOptions(
+                        getBasicSourceOptions(),
+                        o -> o.put("scan.topic-integrity-check.enabled", "true"));
+        final KafkaDynamicSource enabledSource =
+                (KafkaDynamicSource) createTableSource(SCHEMA, options);
+        assertThat(
+                        enabledSource.properties.getProperty(
+                                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))
+                .isEqualTo("true");
+
+        // the table option wins over a raw properties.* entry
+        final Map<String, String> overriddenOptions =
+                getModifiedOptions(
+                        getBasicSourceOptions(),
+                        o -> {
+                            o.put(
+                                    PROPERTIES_PREFIX
+                                            + KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED
+                                                    .key(),
+                                    "true");
+                            o.put("scan.topic-integrity-check.enabled", "false");
+                        });
+        final KafkaDynamicSource overriddenSource =
+                (KafkaDynamicSource) createTableSource(SCHEMA, overriddenOptions);
+        assertThat(
+                        overriddenSource.properties.getProperty(
+                                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))
+                .isEqualTo("false");
     }
 
     private void testSetOffsetResetForStartFromGroupOffsets(String value) {
