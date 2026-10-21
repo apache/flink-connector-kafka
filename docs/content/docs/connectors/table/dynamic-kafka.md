@@ -174,6 +174,14 @@ Connector Options
       <td>Integer</td>
       <td>Number of consecutive discovery failures before failing the job.</td>
     </tr>
+    <tr>
+      <td><h5>scan.topic-integrity-check.enabled</h5></td>
+      <td>optional</td>
+      <td>no</td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>Whether to verify the id of the topics subscribed on each Kafka cluster during runtime and fail the job if a topic is missing or was recreated. The check is performed on startup and, if <code>scan.topic-partition-discovery.interval</code> is enabled, on every discovery interval.</td>
+    </tr>
     </tbody>
 </table>
 
