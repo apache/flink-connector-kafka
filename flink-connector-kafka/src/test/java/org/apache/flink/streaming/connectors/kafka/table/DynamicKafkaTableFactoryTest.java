@@ -19,6 +19,7 @@
 package org.apache.flink.streaming.connectors.kafka.table;
 
 import org.apache.flink.connector.kafka.dynamic.source.DynamicKafkaSourceOptions;
+import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.table.api.DataTypes;
@@ -108,6 +109,26 @@ class DynamicKafkaTableFactoryTest {
 
         assertThat(tableSource.properties.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG))
                 .isEqualTo("none");
+    }
+
+    @Test
+    void testTableSourceTopicIntegrityCheck() {
+        final DynamicKafkaTableSource defaultSource =
+                (DynamicKafkaTableSource)
+                        createTableSource(SCHEMA, getSingleClusterSourceOptions());
+        assertThat(
+                        defaultSource.properties.getProperty(
+                                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))
+                .isEqualTo("false");
+
+        final Map<String, String> options = getSingleClusterSourceOptions();
+        options.put("scan.topic-integrity-check.enabled", "true");
+        final DynamicKafkaTableSource enabledSource =
+                (DynamicKafkaTableSource) createTableSource(SCHEMA, options);
+        assertThat(
+                        enabledSource.properties.getProperty(
+                                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))
+                .isEqualTo("true");
     }
 
     private static Map<String, String> getSingleClusterSourceOptions() {

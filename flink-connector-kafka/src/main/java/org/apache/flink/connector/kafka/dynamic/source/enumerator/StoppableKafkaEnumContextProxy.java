@@ -25,6 +25,7 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.connector.source.SplitsAssignment;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
+import org.apache.flink.connector.kafka.source.enumerator.metadata.TopicIntegrityException;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.metrics.groups.SplitEnumeratorMetricGroup;
 import org.apache.flink.util.ExceptionUtils;
@@ -263,8 +264,7 @@ public class StoppableKafkaEnumContextProxy
                     throw new HandledFlinkKafkaException(e, kafkaClusterId);
                 }
 
-                Optional<KafkaException> throwable =
-                        ExceptionUtils.findThrowable(e, KafkaException.class);
+                Optional<? extends Throwable> throwable = findKafkaRelatedThrowable(e);
                 // check if Kafka related and if Kafka cluster is inactive
                 if (throwable.isPresent()
                         && !kafkaMetadataService.isClusterActive(kafkaClusterId)) {
@@ -274,6 +274,20 @@ public class StoppableKafkaEnumContextProxy
                 throw e;
             }
         };
+    }
+
+    /**
+     * The topic integrity check reports a missing or recreated topic as a {@link
+     * TopicIntegrityException} without the broker exception as cause, so it has to be matched on
+     * its own to be swallowed for a cluster that is no longer active.
+     */
+    private static Optional<? extends Throwable> findKafkaRelatedThrowable(Throwable t) {
+        Optional<KafkaException> kafkaException =
+                ExceptionUtils.findThrowable(t, KafkaException.class);
+        if (kafkaException.isPresent()) {
+            return kafkaException;
+        }
+        return ExceptionUtils.findThrowable(t, TopicIntegrityException.class);
     }
 
     /**

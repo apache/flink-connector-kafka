@@ -23,6 +23,7 @@ import org.apache.flink.api.connector.source.mocks.MockSplitEnumeratorContext;
 import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
+import org.apache.flink.connector.kafka.source.enumerator.metadata.TopicIntegrityException;
 import org.apache.flink.connector.kafka.testutils.MockKafkaMetadataService;
 import org.apache.flink.core.testutils.CommonTestUtils;
 import org.apache.flink.mock.Whitebox;
@@ -40,6 +41,7 @@ import java.util.Collections;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -131,6 +133,61 @@ public class StoppableKafkaEnumContextProxyTest {
         }
     }
 
+    @Test
+    public void testTopicIntegrityErrorSwallowedOnInactiveCluster() throws Throwable {
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext =
+                        new MockSplitEnumeratorContext<>(2);
+                StoppableKafkaEnumContextProxy enumContextProxy =
+                        createStoppableKafkaEnumContextProxy(enumContext)) {
+
+            AtomicBoolean isCallbackInvoked = new AtomicBoolean();
+            setupKafkaTopicPartitionDiscoveryMockCallable(
+                    enumContextProxy,
+                    isCallbackInvoked,
+                    () -> new TopicIntegrityException("Topic mock-topic was recreated"));
+
+            CommonTestUtils.waitUtil(
+                    () -> enumContext.getOneTimeCallables().size() == 1,
+                    Duration.ofSeconds(15),
+                    "Could not schedule callable within timeout");
+
+            enumContext.runNextOneTimeCallable();
+            assertThat(isCallbackInvoked)
+                    .as("callback should be skipped upon swallowing the topic integrity error.")
+                    .isFalse();
+        }
+    }
+
+    @Test
+    public void testTopicIntegrityErrorThrownOnActiveCluster() throws Throwable {
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> enumContext =
+                        new MockSplitEnumeratorContext<>(2);
+                StoppableKafkaEnumContextProxy enumContextProxy =
+                        createStoppableKafkaEnumContextProxy(enumContext, ACTIVE_KAFKA_CLUSTER)) {
+
+            AtomicBoolean isCallbackInvoked = new AtomicBoolean();
+            setupKafkaTopicPartitionDiscoveryMockCallable(
+                    enumContextProxy,
+                    isCallbackInvoked,
+                    () -> new TopicIntegrityException("Topic mock-topic was recreated"));
+
+            CommonTestUtils.waitUtil(
+                    () -> enumContext.getOneTimeCallables().size() == 1,
+                    Duration.ofSeconds(15),
+                    "Could not schedule callable within timeout");
+
+            assertThatThrownBy(
+                            () ->
+                                    runNextOneTimeCallableAndCatchException(
+                                            enumContext, TopicIntegrityException.class))
+                    .isExactlyInstanceOf(FlinkRuntimeException.class)
+                    .hasCauseInstanceOf(TopicIntegrityException.class);
+            assertThat(isCallbackInvoked)
+                    .as("error callback should be invoked since the cluster is still active.")
+                    .isTrue();
+        }
+    }
+
     private StoppableKafkaEnumContextProxy createStoppableKafkaEnumContextProxy(
             SplitEnumeratorContext enumContext) {
         return createStoppableKafkaEnumContextProxy(enumContext, INACTIVE_KAFKA_CLUSTER);
@@ -158,11 +215,21 @@ public class StoppableKafkaEnumContextProxyTest {
     // exceptions
     private void setupKafkaTopicPartitionDiscoveryMockCallable(
             StoppableKafkaEnumContextProxy enumContextProxy, AtomicBoolean isCallbackInvoked) {
+        setupKafkaTopicPartitionDiscoveryMockCallable(
+                enumContextProxy,
+                isCallbackInvoked,
+                // mock Kafka Exception
+                () -> new TimeoutException("Kafka server timed out"));
+    }
+
+    private void setupKafkaTopicPartitionDiscoveryMockCallable(
+            StoppableKafkaEnumContextProxy enumContextProxy,
+            AtomicBoolean isCallbackInvoked,
+            Supplier<RuntimeException> exceptionSupplier) {
         enumContextProxy.callAsync(
                 () -> {
                     if (throwExceptionFromMainCallable) {
-                        // mock Kafka Exception
-                        throw new TimeoutException("Kafka server timed out");
+                        throw exceptionSupplier.get();
                     } else {
                         // ignore output
                         return null;
@@ -180,12 +247,21 @@ public class StoppableKafkaEnumContextProxyTest {
 
     private void runNextOneTimeCallableAndCatchException(MockSplitEnumeratorContext enumContext)
             throws Throwable {
+        runNextOneTimeCallableAndCatchException(enumContext, TimeoutException.class);
+    }
+
+    private void runNextOneTimeCallableAndCatchException(
+            MockSplitEnumeratorContext enumContext, Class<? extends Throwable> expectedException)
+            throws Throwable {
         try {
             enumContext.runNextOneTimeCallable();
-            fail("TimeoutException should have been thrown");
-        } catch (TimeoutException e) {
-            // catch only Kafka Timeout exceptions since it will be rethrown by
+            fail(expectedException.getSimpleName() + " should have been thrown");
+        } catch (Throwable e) {
+            // catch only the expected exception of the callable since it will be rethrown by
             // `MockSplitEnumeratorContext`
+            if (!expectedException.isInstance(e)) {
+                throw e;
+            }
             AtomicReference<Throwable> errorInMainThread =
                     (AtomicReference<Throwable>)
                             Whitebox.getInternalState(enumContext, "errorInMainThread");
