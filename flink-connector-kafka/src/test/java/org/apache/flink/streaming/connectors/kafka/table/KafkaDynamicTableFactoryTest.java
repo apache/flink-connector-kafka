@@ -105,6 +105,7 @@ import static org.apache.flink.table.factories.utils.FactoryMocks.createTableSin
 import static org.apache.flink.table.factories.utils.FactoryMocks.createTableSource;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link KafkaDynamicTableFactory}. */
@@ -535,6 +536,31 @@ class KafkaDynamicTableFactoryTest {
                 .hasMessage(
                         "auto.offset.reset can not be set to errorStrategy. "
                                 + "Valid values: [latest,earliest,none]");
+    }
+
+    @Test
+    void testTableSourceTopicIntegrityCheck() {
+        final KafkaDynamicSource defaultSource =
+                (KafkaDynamicSource) createTableSource(SCHEMA, getBasicSourceOptions());
+        assertThat(defaultSource.properties)
+                .doesNotContainKey(KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key());
+
+        final Map<String, String> options =
+                getModifiedOptions(
+                        getBasicSourceOptions(),
+                        o -> o.put("scan.topic-integrity-check.enabled", "true"));
+        final KafkaDynamicSource enabledSource =
+                (KafkaDynamicSource) createTableSource(SCHEMA, options);
+        assertThat(
+                        enabledSource.properties.getProperty(
+                                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))
+                .isEqualTo("true");
+        // the builder rejects the check for subscribers that cannot track topic ids
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                enabledSource.getScanRuntimeProvider(
+                                        ScanRuntimeProviderContext.INSTANCE));
     }
 
     private void testSetOffsetResetForStartFromGroupOffsets(String value) {
