@@ -27,6 +27,7 @@ import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 import org.apache.flink.connector.kafka.source.KafkaSource;
+import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.connector.kafka.source.KafkaSourceTestUtils;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
@@ -88,6 +89,7 @@ import java.util.regex.Pattern;
 import static org.apache.flink.core.testutils.FlinkAssertions.anyCauseMatches;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanBoundedMode;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.AVRO_CONFLUENT;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.PROPERTIES_PREFIX;
 import static org.apache.flink.table.factories.FactoryUtil.SOURCE_PARALLELISM;
 import static org.apache.flink.table.factories.utils.FactoryMocks.createTableSink;
 import static org.apache.flink.table.factories.utils.FactoryMocks.createTableSource;
@@ -242,6 +244,44 @@ class UpsertKafkaDynamicTableFactoryTest {
         ScanTableSource.ScanRuntimeProvider provider =
                 actualUpsertKafkaSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
         assertKafkaSource(provider);
+    }
+
+    @Test
+    void testTableSourceTopicIntegrityCheck() {
+        final KafkaDynamicSource defaultSource =
+                (KafkaDynamicSource) createTableSource(SOURCE_SCHEMA, getFullSourceOptions());
+        assertThat(defaultSource.properties)
+                .doesNotContainKey(KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key());
+
+        final Map<String, String> options =
+                getModifiedOptions(
+                        getFullSourceOptions(),
+                        o -> o.put("scan.topic-integrity-check.enabled", "true"));
+        final KafkaDynamicSource enabledSource =
+                (KafkaDynamicSource) createTableSource(SOURCE_SCHEMA, options);
+        assertThat(
+                        enabledSource.properties.getProperty(
+                                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))
+                .isEqualTo("true");
+        assertKafkaSource(
+                enabledSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE));
+
+        // an absent table option keeps a value passed through the properties.* prefix
+        final Map<String, String> passthroughOptions =
+                getModifiedOptions(
+                        getFullSourceOptions(),
+                        o ->
+                                o.put(
+                                        PROPERTIES_PREFIX
+                                                + KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED
+                                                        .key(),
+                                        "true"));
+        final KafkaDynamicSource passthroughSource =
+                (KafkaDynamicSource) createTableSource(SOURCE_SCHEMA, passthroughOptions);
+        assertThat(
+                        passthroughSource.properties.getProperty(
+                                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))
+                .isEqualTo("true");
     }
 
     @Test

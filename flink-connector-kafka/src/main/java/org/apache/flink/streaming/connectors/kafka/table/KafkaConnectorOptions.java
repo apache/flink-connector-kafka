@@ -196,6 +196,15 @@ public class KafkaConnectorOptions {
                                     + "The value 0 disables the partition discovery."
                                     + "The default value is 5 minutes, which is equal to the default value of metadata.max.age.ms in Kafka.");
 
+    public static final ConfigOption<Boolean> SCAN_TOPIC_INTEGRITY_CHECK_ENABLED =
+            ConfigOptions.key("scan.topic-integrity-check.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to verify the id of the subscribed topics during runtime and fail the job "
+                                    + "if a topic is missing or was recreated. The check is repeated periodically "
+                                    + "only if topic partition discovery is enabled.");
+
     // --------------------------------------------------------------------------------------------
     // Sink specific options
     // --------------------------------------------------------------------------------------------
