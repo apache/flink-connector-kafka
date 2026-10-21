@@ -20,6 +20,7 @@ package org.apache.flink.connector.kafka.dynamic.source;
 
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
+import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 
@@ -45,6 +46,29 @@ class DynamicKafkaSourceBuilderTest {
                                 .getProperties()
                                 .getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG))
                 .isNull();
+    }
+
+    @Test
+    void testTopicIntegrityCheckIsDisabledByDefault() {
+        assertThat(
+                        baseBuilder()
+                                .build()
+                                .getProperties()
+                                .getProperty(
+                                        KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))
+                .isNull();
+    }
+
+    @Test
+    void testEnableTopicIntegrityCheck() {
+        assertThat(
+                        baseBuilder()
+                                .enableTopicIntegrityCheck()
+                                .build()
+                                .getProperties()
+                                .getProperty(
+                                        KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))
+                .isEqualTo("true");
     }
 
     @Test

@@ -185,6 +185,17 @@ public class DynamicKafkaSourceBuilder<T> {
     }
 
     /**
+     * Enables the topic integrity check on every Kafka cluster of the subscribed streams: the
+     * source fails if a subscribed topic is deleted or recreated. See {@link
+     * org.apache.flink.connector.kafka.source.KafkaSourceBuilder#enableTopicIntegrityCheck()}.
+     *
+     * @return the builder.
+     */
+    public DynamicKafkaSourceBuilder<T> enableTopicIntegrityCheck() {
+        return setProperty(KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key(), "true");
+    }
+
+    /**
      * Set the enumerator mode used for split assignment.
      *
      * @param enumeratorMode split assignment mode.
