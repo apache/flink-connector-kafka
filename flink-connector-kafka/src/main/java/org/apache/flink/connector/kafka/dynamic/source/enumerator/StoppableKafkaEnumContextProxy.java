@@ -25,6 +25,7 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.connector.source.SplitsAssignment;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
+import org.apache.flink.connector.kafka.source.enumerator.metadata.TopicIntegrityException;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.metrics.groups.SplitEnumeratorMetricGroup;
 import org.apache.flink.util.ExceptionUtils;
@@ -263,9 +264,13 @@ public class StoppableKafkaEnumContextProxy
                     throw new HandledFlinkKafkaException(e, kafkaClusterId);
                 }
 
-                Optional<KafkaException> throwable =
-                        ExceptionUtils.findThrowable(e, KafkaException.class);
                 // check if Kafka related and if Kafka cluster is inactive
+                Optional<Throwable> throwable =
+                        ExceptionUtils.findThrowable(
+                                e,
+                                t ->
+                                        t instanceof KafkaException
+                                                || t instanceof TopicIntegrityException);
                 if (throwable.isPresent()
                         && !kafkaMetadataService.isClusterActive(kafkaClusterId)) {
                     throw new HandledFlinkKafkaException(throwable.get(), kafkaClusterId);
