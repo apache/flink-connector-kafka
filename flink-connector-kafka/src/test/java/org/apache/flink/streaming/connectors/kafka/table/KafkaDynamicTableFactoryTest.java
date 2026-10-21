@@ -537,6 +537,61 @@ class KafkaDynamicTableFactoryTest {
                                 + "Valid values: [latest,earliest,none]");
     }
 
+    @Test
+    void testTableSourceTopicIntegrityCheck() {
+        final KafkaDynamicSource defaultSource =
+                (KafkaDynamicSource) createTableSource(SCHEMA, getBasicSourceOptions());
+        assertThat(defaultSource.properties)
+                .doesNotContainKey(KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key());
+
+        final Map<String, String> options =
+                getModifiedOptions(
+                        getBasicSourceOptions(),
+                        o -> o.put("scan.topic-integrity-check.enabled", "true"));
+        final KafkaDynamicSource enabledSource =
+                (KafkaDynamicSource) createTableSource(SCHEMA, options);
+        assertThat(
+                        enabledSource.properties.getProperty(
+                                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))
+                .isEqualTo("true");
+
+        // the table option wins over a raw properties.* entry
+        final Map<String, String> overriddenOptions =
+                getModifiedOptions(
+                        getBasicSourceOptions(),
+                        o -> {
+                            o.put(
+                                    PROPERTIES_PREFIX
+                                            + KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED
+                                                    .key(),
+                                    "true");
+                            o.put("scan.topic-integrity-check.enabled", "false");
+                        });
+        final KafkaDynamicSource overriddenSource =
+                (KafkaDynamicSource) createTableSource(SCHEMA, overriddenOptions);
+        assertThat(
+                        overriddenSource.properties.getProperty(
+                                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))
+                .isEqualTo("false");
+
+        // an absent table option keeps a value passed through the properties.* prefix
+        final Map<String, String> passthroughOptions =
+                getModifiedOptions(
+                        getBasicSourceOptions(),
+                        o ->
+                                o.put(
+                                        PROPERTIES_PREFIX
+                                                + KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED
+                                                        .key(),
+                                        "true"));
+        final KafkaDynamicSource passthroughSource =
+                (KafkaDynamicSource) createTableSource(SCHEMA, passthroughOptions);
+        assertThat(
+                        passthroughSource.properties.getProperty(
+                                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))
+                .isEqualTo("true");
+    }
+
     private void testSetOffsetResetForStartFromGroupOffsets(String value) {
         final Map<String, String> modifiedOptions =
                 getModifiedOptions(
