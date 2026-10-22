@@ -858,9 +858,9 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {true, false})
+    @MethodSource("collidingSplitOwners")
     public void testLocalFailureKeepsDistinctOwnersWhenActiveAndRetainedSplitIdsCollide(
-            boolean bounded) throws Throwable {
+            boolean bounded, int retainedReader) throws Throwable {
         DynamicKafkaSourceSplit activeSplit =
                 new DynamicKafkaSourceSplit(
                         "a", new KafkaPartitionSplit(new TopicPartition("b-c", 0), 123L, 1000L));
@@ -881,6 +881,14 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
         properties.setProperty(
                 DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE.key(), "per_cluster");
         List<String> events = new ArrayList<>();
+        Map<Integer, List<DynamicKafkaSourceSplit>> reports =
+                Map.of(
+                        0,
+                        retainedReader == 0
+                                ? List.of(activeSplit, retainedSplit)
+                                : List.of(activeSplit),
+                        1,
+                        retainedReader == 1 ? List.of(retainedSplit) : Collections.emptyList());
 
         try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
                         new MockSplitEnumeratorContext<DynamicKafkaSourceSplit>(2) {
@@ -895,7 +903,10 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
                                                                 split ->
                                                                         events.add(
                                                                                 "assign:"
-                                                                                        + reader)));
+                                                                                        + reader
+                                                                                        + ":"
+                                                                                        + split
+                                                                                                .splitId())));
                                 super.assignSplits(assignment);
                             }
 
@@ -919,8 +930,8 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
                                 restoredState,
                                 new NoOpKafkaEnumContextProxyFactory())) {
             enumerator.start();
-            registerReaderAndReportRestoredSplits(context, enumerator, 0, List.of(activeSplit));
-            registerReaderAndReportRestoredSplits(context, enumerator, 1, List.of(retainedSplit));
+            registerReaderAndReportRestoredSplits(context, enumerator, 0, reports.get(0));
+            registerReaderAndReportRestoredSplits(context, enumerator, 1, reports.get(1));
             context.runNextOneTimeCallable();
             completePartitionDiscovery(
                     (KafkaSourceEnumerator)
@@ -930,35 +941,53 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
                                     .get("a"));
 
             assertExactCheckpointOffsets(context, 0, List.of(activeSplit, retainedSplit));
-            context.getSplitsAssignmentSequence()
-                    .forEach(
-                            assignment ->
-                                    assignment
-                                            .assignment()
-                                            .forEach(
-                                                    (reader, splits) ->
-                                                            assertThat(splits)
-                                                                    .containsExactly(
-                                                                            reader == 0
-                                                                                    ? activeSplit
-                                                                                    : retainedSplit)));
+            reports.forEach(
+                    (reader, expected) ->
+                            assertThat(
+                                            context.getSplitsAssignmentSequence().stream()
+                                                    .flatMap(
+                                                            assignment ->
+                                                                    assignment
+                                                                            .assignment()
+                                                                            .getOrDefault(
+                                                                                    reader,
+                                                                                    Collections
+                                                                                            .emptyList())
+                                                                            .stream()))
+                                    .containsExactlyInAnyOrderElementsOf(expected));
 
             int priorAssignments = context.getSplitsAssignmentSequence().size();
             events.clear();
-            context.unregisterReader(1);
-            enumerator.addSplitsBack(Collections.emptyList(), 1);
-            registerReaderAndReportRestoredSplits(context, enumerator, 1, List.of(retainedSplit));
+            context.unregisterReader(retainedReader);
+            enumerator.addSplitsBack(Collections.emptyList(), retainedReader);
+            registerReaderAndReportRestoredSplits(
+                    context, enumerator, retainedReader, reports.get(retainedReader));
 
-            assertExactCheckpointOffsets(context, priorAssignments, List.of(retainedSplit));
+            assertExactCheckpointOffsets(context, priorAssignments, reports.get(retainedReader));
             context.getSplitsAssignmentSequence().stream()
                     .skip(priorAssignments)
-                    .forEach(assignment -> assertThat(assignment.assignment()).containsOnlyKeys(1));
+                    .forEach(
+                            assignment ->
+                                    assertThat(assignment.assignment())
+                                            .containsOnlyKeys(retainedReader));
             if (bounded) {
-                assertThat(events).containsExactly("assign:1", "done:1");
+                assertBoundedAssignmentsBeforeCompletion(
+                        events, retainedReader, reports.get(retainedReader).size());
+                assertThat(events.stream().filter(event -> event.equals("done:" + retainedReader)))
+                        .hasSize(1);
+                assertThat(events).doesNotContain("done:" + (1 - retainedReader));
             } else {
-                assertThat(events).containsExactly("assign:1");
+                assertThat(events).noneMatch(event -> event.startsWith("done:"));
             }
         }
+    }
+
+    private static Stream<Arguments> collidingSplitOwners() {
+        return Stream.of(
+                Arguments.of(true, 0),
+                Arguments.of(true, 1),
+                Arguments.of(false, 0),
+                Arguments.of(false, 1));
     }
 
     @Test

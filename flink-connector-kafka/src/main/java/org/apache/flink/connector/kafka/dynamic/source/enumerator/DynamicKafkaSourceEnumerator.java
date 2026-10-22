@@ -987,13 +987,18 @@ public class DynamicKafkaSourceEnumerator
         List<DynamicKafkaSourceSplit> activeSplits = new ArrayList<>();
         List<DynamicKafkaSourceSplit> retainedSplits = new ArrayList<>();
         long currentTimeMillis = System.currentTimeMillis();
-        Map<String, DynamicKafkaSourceSplit> reportedSplits = new TreeMap<>();
-        restoredSplits.forEach(split -> reportedSplits.put(split.splitId(), split));
+        Map<Tuple2<String, TopicPartition>, DynamicKafkaSourceSplit> reportedSplits =
+                new HashMap<>();
+        restoredSplits.forEach(split -> reportedSplits.put(toPartitionKey(split), split));
         // Returned assignments may have moved to this reader since its restored checkpoint.
         readerRecoveryGate
                 .drainReportedSplits(readerId)
-                .forEach(split -> reportedSplits.put(split.splitId(), split));
-        for (DynamicKafkaSourceSplit split : reportedSplits.values()) {
+                .forEach(split -> reportedSplits.put(toPartitionKey(split), split));
+        List<DynamicKafkaSourceSplit> orderedSplits = new ArrayList<>(reportedSplits.values());
+        orderedSplits.sort(
+                Comparator.comparing(DynamicKafkaSourceSplit::splitId)
+                        .thenComparing(DynamicKafkaSourceSplit::getKafkaClusterId));
+        for (DynamicKafkaSourceSplit split : orderedSplits) {
             if (!isCurrentSplitOwner(split, readerId)) {
                 continue;
             }
