@@ -26,6 +26,7 @@ import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.connector.source.SplitsAssignment;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
@@ -47,6 +48,7 @@ import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.KafkaException;
+import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -118,7 +120,7 @@ public class DynamicKafkaSourceEnumerator
     private final Set<Integer> readersWithNoMoreSplits = new HashSet<>();
     private boolean splitAssignmentInProgress;
     // Reader checkpoint reports may refer to owners from before recovery redistribution.
-    private final Map<String, Integer> currentSplitOwners = new HashMap<>();
+    private final Map<Tuple2<String, TopicPartition>, Integer> currentSplitOwners = new HashMap<>();
 
     public DynamicKafkaSourceEnumerator(
             KafkaStreamSubscriber kafkaStreamSubscriber,
@@ -522,6 +524,7 @@ public class DynamicKafkaSourceEnumerator
 
         // create enumerators
         Set<String> activeSplitIds = new HashSet<>();
+        Set<Tuple2<String, TopicPartition>> knownPartitions = new HashSet<>();
         for (Entry<String, Set<String>> activeClusterTopics : latestClusterTopicsMap.entrySet()) {
             String kafkaClusterId = activeClusterTopics.getKey();
             KafkaSourceEnumState kafkaSourceEnumState =
@@ -541,9 +544,14 @@ public class DynamicKafkaSourceEnumerator
                 Set<SplitAndAssignmentStatus> partitions =
                         filterStateByTopics(kafkaSourceEnumState, activeClusterTopics.getValue());
                 partitions.forEach(
-                        splitStatus ->
-                                activeSplitIds.add(
-                                        toDynamicSplitId(kafkaClusterId, splitStatus.split())));
+                        splitStatus -> {
+                            activeSplitIds.add(
+                                    toDynamicSplitId(kafkaClusterId, splitStatus.split()));
+                            knownPartitions.add(
+                                    Tuple2.of(
+                                            kafkaClusterId,
+                                            splitStatus.split().getTopicPartition()));
+                        });
 
                 newKafkaSourceEnumState =
                         new KafkaSourceEnumState(
@@ -566,7 +574,6 @@ public class DynamicKafkaSourceEnumerator
         }
 
         splitAssignmentStrategy.onMetadataRefresh(activeSplitIds);
-        Set<String> knownSplitIds = new HashSet<>(activeSplitIds);
         // Readers retain removed-cluster splits and reactivate them without a new assignment.
         retainedClusterEnumeratorStates.forEach(
                 (clusterId, retainedState) ->
@@ -575,10 +582,13 @@ public class DynamicKafkaSourceEnumerator
                                 .splits()
                                 .forEach(
                                         splitStatus ->
-                                                knownSplitIds.add(
-                                                        toDynamicSplitId(
-                                                                clusterId, splitStatus.split()))));
-        currentSplitOwners.keySet().retainAll(knownSplitIds);
+                                                knownPartitions.add(
+                                                        Tuple2.of(
+                                                                clusterId,
+                                                                splitStatus
+                                                                        .split()
+                                                                        .getTopicPartition()))));
+        currentSplitOwners.keySet().retainAll(knownPartitions);
         startAllEnumerators();
         tryCompletePendingReaderRegistration();
     }
@@ -655,13 +665,13 @@ public class DynamicKafkaSourceEnumerator
                         signalNoMoreSplitsCallback);
         context.setReaderReadyForAssignment(readerRecoveryGate::isReaderReadyForAssignment);
         context.setSplitAssignmentListener(
-                (reader, split) -> currentSplitOwners.put(split.splitId(), reader));
+                (reader, split) -> currentSplitOwners.put(toPartitionKey(split), reader));
         KafkaSourceEnumerator.SplitOwnerSelector strategyOwnerSelector =
                 splitAssignmentStrategy.createSplitOwnerSelector(kafkaClusterId);
         KafkaSourceEnumerator.SplitOwnerSelector splitOwnerSelector =
                 (split, numReaders) ->
                         currentSplitOwners.computeIfAbsent(
-                                toDynamicSplitId(kafkaClusterId, split),
+                                Tuple2.of(kafkaClusterId, split.getTopicPartition()),
                                 ignored ->
                                         strategyOwnerSelector == null
                                                 ? KafkaSourceEnumerator.getSplitOwner(
@@ -959,11 +969,14 @@ public class DynamicKafkaSourceEnumerator
                         .map(reportedSplit -> reportedSplit.split)
                         .collect(Collectors.toList());
         splitAssignmentStrategy.onRecoveredSplits(activeSplits, enumContext.currentParallelism());
-        activeSplits.forEach(split -> currentSplitOwners.remove(split.splitId()));
+        activeSplits.forEach(split -> currentSplitOwners.remove(toPartitionKey(split)));
 
-        for (ReportedSplit reportedSplit : activeReportedSplits.values()) {
-            addSplitsBackToClusterEnumerators(
-                    Collections.singletonList(reportedSplit.split), reportedSplit.readerId, true);
+        if (!activeSplits.isEmpty()) {
+            // The initial gate blocks every reader until all reports are reconciled, so the
+            // reporting reader only controls a deferred flush. Enqueue one batch per cluster
+            // to replace pending physical copies without scanning once per reported split.
+            int reportingReader = activeReportedSplits.values().iterator().next().readerId;
+            addSplitsBackToClusterEnumerators(activeSplits, reportingReader, true);
         }
 
         assignRetainedSplits(retainedSplitsByReader);
@@ -1010,12 +1023,13 @@ public class DynamicKafkaSourceEnumerator
         // Direct retained assignments bypass the sub-enumerator's assignment listener.
         splitsByReader.forEach(
                 (reader, splits) ->
-                        splits.forEach(split -> currentSplitOwners.put(split.splitId(), reader)));
+                        splits.forEach(
+                                split -> currentSplitOwners.put(toPartitionKey(split), reader)));
         enumContext.assignSplits(new SplitsAssignment<>(splitsByReader));
     }
 
     private boolean isCurrentSplitOwner(DynamicKafkaSourceSplit split, int readerId) {
-        Integer currentOwner = currentSplitOwners.get(split.splitId());
+        Integer currentOwner = currentSplitOwners.get(toPartitionKey(split));
         if (currentOwner == null || currentOwner == readerId) {
             return true;
         }
@@ -1257,6 +1271,11 @@ public class DynamicKafkaSourceEnumerator
             default:
                 return new PerClusterSplitAssignmentStrategy();
         }
+    }
+
+    private static Tuple2<String, TopicPartition> toPartitionKey(DynamicKafkaSourceSplit split) {
+        return Tuple2.of(
+                split.getKafkaClusterId(), split.getKafkaPartitionSplit().getTopicPartition());
     }
 
     private static String toDynamicSplitId(String kafkaClusterId, KafkaPartitionSplit split) {
