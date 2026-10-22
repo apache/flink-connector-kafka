@@ -972,9 +972,9 @@ public class DynamicKafkaSourceEnumerator
         activeSplits.forEach(split -> currentSplitOwners.remove(toPartitionKey(split)));
 
         if (!activeSplits.isEmpty()) {
-            // The initial gate blocks every reader until all reports are reconciled, so the
-            // reporting reader only controls a deferred flush. Enqueue one batch per cluster
-            // to replace pending physical copies without scanning once per reported split.
+            // With the initial gate closed, registeredReaders() is empty, so the reader ID
+            // has no effect here. The flush after reconciliation covers all readers. Enqueue
+            // one batch per cluster to avoid scanning pending copies once per reported split.
             int reportingReader = activeReportedSplits.values().iterator().next().readerId;
             addSplitsBackToClusterEnumerators(activeSplits, reportingReader, true);
         }
