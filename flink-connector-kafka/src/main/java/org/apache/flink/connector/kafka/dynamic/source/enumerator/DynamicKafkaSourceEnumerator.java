@@ -659,13 +659,14 @@ public class DynamicKafkaSourceEnumerator
         KafkaSourceEnumerator.SplitOwnerSelector strategyOwnerSelector =
                 splitAssignmentStrategy.createSplitOwnerSelector(kafkaClusterId);
         KafkaSourceEnumerator.SplitOwnerSelector splitOwnerSelector =
-                strategyOwnerSelector == null
-                        ? null
-                        : (split, numReaders) ->
-                                currentSplitOwners.computeIfAbsent(
-                                        toDynamicSplitId(kafkaClusterId, split),
-                                        ignored ->
-                                                strategyOwnerSelector.getSplitOwner(
+                (split, numReaders) ->
+                        currentSplitOwners.computeIfAbsent(
+                                toDynamicSplitId(kafkaClusterId, split),
+                                ignored ->
+                                        strategyOwnerSelector == null
+                                                ? KafkaSourceEnumerator.getSplitOwner(
+                                                        split.getTopicPartition(), numReaders)
+                                                : strategyOwnerSelector.getSplitOwner(
                                                         split, numReaders));
         SplitEnumeratorContext<KafkaPartitionSplit> assignmentContext =
                 splitAssignmentStrategy.createAssignmentContext(kafkaClusterId, context);
@@ -965,9 +966,7 @@ public class DynamicKafkaSourceEnumerator
                     Collections.singletonList(reportedSplit.split), reportedSplit.readerId, true);
         }
 
-        if (!retainedSplitsByReader.isEmpty()) {
-            enumContext.assignSplits(new SplitsAssignment<>(retainedSplitsByReader));
-        }
+        assignRetainedSplits(retainedSplitsByReader);
     }
 
     private void reassignReportedSplitsFromRestartedReader(
@@ -1000,9 +999,19 @@ public class DynamicKafkaSourceEnumerator
         splitAssignmentStrategy.onSplitsBack(activeSplits, readerId);
         addSplitsBackToClusterEnumerators(activeSplits, readerId, true);
         if (!retainedSplits.isEmpty()) {
-            enumContext.assignSplits(
-                    new SplitsAssignment<>(Collections.singletonMap(readerId, retainedSplits)));
+            assignRetainedSplits(Collections.singletonMap(readerId, retainedSplits));
         }
+    }
+
+    private void assignRetainedSplits(Map<Integer, List<DynamicKafkaSourceSplit>> splitsByReader) {
+        if (splitsByReader.isEmpty()) {
+            return;
+        }
+        // Direct retained assignments bypass the sub-enumerator's assignment listener.
+        splitsByReader.forEach(
+                (reader, splits) ->
+                        splits.forEach(split -> currentSplitOwners.put(split.splitId(), reader)));
+        enumContext.assignSplits(new SplitsAssignment<>(splitsByReader));
     }
 
     private boolean isCurrentSplitOwner(DynamicKafkaSourceSplit split, int readerId) {

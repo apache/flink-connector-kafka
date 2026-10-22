@@ -651,8 +651,7 @@ public class KafkaSourceEnumerator
      * @param numReaders the total number of readers.
      * @return the id of the subtask that owns the split.
      */
-    @VisibleForTesting
-    static int getSplitOwner(TopicPartition tp, int numReaders) {
+    public static int getSplitOwner(TopicPartition tp, int numReaders) {
         int startIndex = ((tp.topic().hashCode() * 31) & 0x7FFFFFFF) % numReaders;
 
         // here, the assumption is that the id of Kafka partitions are always ascending
