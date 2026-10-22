@@ -83,6 +83,11 @@ public class DynamicKafkaSourceEnumerator
     private static final Logger logger =
             LoggerFactory.getLogger(DynamicKafkaSourceEnumerator.class);
 
+    /** Deterministic order for splits whose formatted ids can collide across clusters. */
+    private static final Comparator<DynamicKafkaSourceSplit> SPLIT_ORDER =
+            Comparator.comparing(DynamicKafkaSourceSplit::splitId)
+                    .thenComparing(DynamicKafkaSourceSplit::getKafkaClusterId);
+
     // Each cluster will have its own sub enumerator
     private final Map<String, SplitEnumerator<KafkaPartitionSplit, KafkaSourceEnumState>>
             clusterEnumeratorMap;
@@ -930,7 +935,7 @@ public class DynamicKafkaSourceEnumerator
     }
 
     private void reassignReportedSplits() {
-        Map<String, ReportedSplit> activeReportedSplits = new TreeMap<>();
+        Map<Tuple2<String, TopicPartition>, ReportedSplit> activeReportedSplits = new HashMap<>();
         Map<Integer, List<DynamicKafkaSourceSplit>> retainedSplitsByReader = new TreeMap<>();
         long currentTimeMillis = System.currentTimeMillis();
 
@@ -942,13 +947,13 @@ public class DynamicKafkaSourceEnumerator
                     DynamicKafkaSourceSplit activeSplit = split.clearRetention();
                     ReportedSplit previous =
                             activeReportedSplits.putIfAbsent(
-                                    activeSplit.splitId(),
+                                    toPartitionKey(activeSplit),
                                     new ReportedSplit(activeSplit, readerId));
                     if (previous != null) {
                         throw new IllegalStateException(
                                 String.format(
                                         "Split %s was reported by both reader %d and reader %d",
-                                        activeSplit.splitId(), previous.readerId, readerId));
+                                        activeSplit, previous.readerId, readerId));
                     }
                 } else {
                     DynamicKafkaSourceSplit retainedSplit =
@@ -964,8 +969,11 @@ public class DynamicKafkaSourceEnumerator
             }
         }
 
+        List<ReportedSplit> orderedReportedSplits = new ArrayList<>(activeReportedSplits.values());
+        orderedReportedSplits.sort(
+                Comparator.comparing(reportedSplit -> reportedSplit.split, SPLIT_ORDER));
         List<DynamicKafkaSourceSplit> activeSplits =
-                activeReportedSplits.values().stream()
+                orderedReportedSplits.stream()
                         .map(reportedSplit -> reportedSplit.split)
                         .collect(Collectors.toList());
         splitAssignmentStrategy.onRecoveredSplits(activeSplits, enumContext.currentParallelism());
@@ -975,7 +983,7 @@ public class DynamicKafkaSourceEnumerator
             // With the initial gate closed, registeredReaders() is empty, so the reader ID
             // has no effect here. The flush after reconciliation covers all readers. Enqueue
             // one batch per cluster to avoid scanning pending copies once per reported split.
-            int reportingReader = activeReportedSplits.values().iterator().next().readerId;
+            int reportingReader = orderedReportedSplits.get(0).readerId;
             addSplitsBackToClusterEnumerators(activeSplits, reportingReader, true);
         }
 
@@ -995,9 +1003,7 @@ public class DynamicKafkaSourceEnumerator
                 .drainReportedSplits(readerId)
                 .forEach(split -> reportedSplits.put(toPartitionKey(split), split));
         List<DynamicKafkaSourceSplit> orderedSplits = new ArrayList<>(reportedSplits.values());
-        orderedSplits.sort(
-                Comparator.comparing(DynamicKafkaSourceSplit::splitId)
-                        .thenComparing(DynamicKafkaSourceSplit::getKafkaClusterId));
+        orderedSplits.sort(SPLIT_ORDER);
         for (DynamicKafkaSourceSplit split : orderedSplits) {
             if (!isCurrentSplitOwner(split, readerId)) {
                 continue;
@@ -1278,7 +1284,8 @@ public class DynamicKafkaSourceEnumerator
         }
     }
 
-    private static Tuple2<String, TopicPartition> toPartitionKey(DynamicKafkaSourceSplit split) {
+    /** Identifies the physical partition; formatted split ids collide across clusters. */
+    static Tuple2<String, TopicPartition> toPartitionKey(DynamicKafkaSourceSplit split) {
         return Tuple2.of(
                 split.getKafkaClusterId(), split.getKafkaPartitionSplit().getTopicPartition());
     }

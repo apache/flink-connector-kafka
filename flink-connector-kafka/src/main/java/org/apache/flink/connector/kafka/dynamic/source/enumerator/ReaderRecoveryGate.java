@@ -19,7 +19,10 @@
 package org.apache.flink.connector.kafka.dynamic.source.enumerator;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
+
+import org.apache.kafka.common.TopicPartition;
 
 import javax.annotation.Nullable;
 
@@ -99,7 +102,8 @@ class ReaderRecoveryGate {
     /**
      * Sub-enumerators can assign newly discovered splits while reported splits await reassignment.
      * A checkpoint may therefore contain both pending reports and reader-held splits, which must be
-     * merged on restore. Preferring the current report for overlapping split ids is defensive.
+     * merged on restore. Preferring the current report for the same physical partition is
+     * defensive.
      */
     private static List<DynamicKafkaSourceSplit> mergeReportedSplits(
             @Nullable List<DynamicKafkaSourceSplit> previousReportedSplits,
@@ -107,14 +111,15 @@ class ReaderRecoveryGate {
         if (previousReportedSplits == null || previousReportedSplits.isEmpty()) {
             return new ArrayList<>(reportedSplits);
         }
-        Map<String, DynamicKafkaSourceSplit> mergedBySplitId = new LinkedHashMap<>();
+        Map<Tuple2<String, TopicPartition>, DynamicKafkaSourceSplit> mergedByPartition =
+                new LinkedHashMap<>();
         for (DynamicKafkaSourceSplit split : previousReportedSplits) {
-            mergedBySplitId.put(split.splitId(), split);
+            mergedByPartition.put(DynamicKafkaSourceEnumerator.toPartitionKey(split), split);
         }
         for (DynamicKafkaSourceSplit split : reportedSplits) {
-            mergedBySplitId.put(split.splitId(), split);
+            mergedByPartition.put(DynamicKafkaSourceEnumerator.toPartitionKey(split), split);
         }
-        return new ArrayList<>(mergedBySplitId.values());
+        return new ArrayList<>(mergedByPartition.values());
     }
 
     /** Whether recovery gating is active and registrations must be deferred. */
