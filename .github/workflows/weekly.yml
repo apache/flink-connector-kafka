@@ -35,6 +35,9 @@ jobs:
           flink: 2.2-SNAPSHOT,
           branch: main
         }, {
+          flink: 2.3-SNAPSHOT,
+          branch: main
+        }, {
           flink: 2.2.1,
           branch: v5.0,
           jdk: '17'

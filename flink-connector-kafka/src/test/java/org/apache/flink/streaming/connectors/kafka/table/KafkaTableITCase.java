@@ -155,7 +155,9 @@ class KafkaTableITCase extends KafkaTableTestBase {
                 "SELECT\n"
                         + "  CAST(TUMBLE_END(ts, INTERVAL '5' SECOND) AS VARCHAR),\n"
                         + "  CAST(MAX(log_date) AS VARCHAR),\n"
-                        + "  CAST(MAX(log_time) AS VARCHAR),\n"
+                        // Flink 2.3 renders the precision of TIME (FLINK-17224), TIME(0) renders
+                        // the same on every supported version.
+                        + "  CAST(CAST(MAX(log_time) AS TIME(0)) AS VARCHAR),\n"
                         + "  CAST(MAX(ts) AS VARCHAR),\n"
                         + "  COUNT(*),\n"
                         + "  CAST(MAX(price) AS DECIMAL(10, 2))\n"

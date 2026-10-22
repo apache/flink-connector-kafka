@@ -251,7 +251,8 @@ class KafkaChangelogTableITCase extends KafkaTableTestBase {
                         "INSERT INTO sink "
                                 + "SELECT origin_topic, origin_database, origin_table, origin_sql_type, "
                                 + "origin_pk_names, origin_ts, origin_es, name "
-                                + "FROM canal_source");
+                                + "FROM canal_source"
+                                + onConflictDeduplicate());
 
         /*
          * Canal captures change data on the `products` table:
@@ -386,7 +387,8 @@ class KafkaChangelogTableITCase extends KafkaTableTestBase {
                         "INSERT INTO sink "
                                 + "SELECT origin_topic, origin_database, origin_table, origin_primary_key_columns, "
                                 + "origin_ts, name "
-                                + "FROM maxwell_source");
+                                + "FROM maxwell_source"
+                                + onConflictDeduplicate());
 
         /*
          * Maxwell captures change data on the `products` table:
