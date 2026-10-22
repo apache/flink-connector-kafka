@@ -201,6 +201,29 @@ class ReaderRecoveryGateTest {
     }
 
     @Test
+    void testMergeKeepsDistinctPartitionsWithCollidingSplitIds() {
+        // Cluster "a" topic "b-c" and cluster "a-b" topic "c" both format to split id "a-b-c-0".
+        DynamicKafkaSourceSplit firstSplit =
+                new DynamicKafkaSourceSplit(
+                        "a", new KafkaPartitionSplit(new TopicPartition("b-c", 0), 123L));
+        DynamicKafkaSourceSplit secondSplit =
+                new DynamicKafkaSourceSplit(
+                        "a-b", new KafkaPartitionSplit(new TopicPartition("c", 0), 456L));
+        DynamicKafkaSourceSplit returnedSplit =
+                new DynamicKafkaSourceSplit(
+                        "a-b", new KafkaPartitionSplit(new TopicPartition("c", 0), 789L));
+        assertThat(firstSplit.splitId()).isEqualTo(secondSplit.splitId());
+
+        ReaderRecoveryGate gate = new ReaderRecoveryGate(true);
+        gate.recordReportedSplits(0, Collections.singletonList(firstSplit));
+        gate.recordReportedSplits(0, Collections.singletonList(secondSplit));
+        assertThat(gate.snapshotReportedSplits().get(0)).containsExactly(firstSplit, secondSplit);
+
+        gate.recordReturnedSplits(0, Collections.singletonList(returnedSplit));
+        assertThat(gate.snapshotReportedSplits().get(0)).containsExactly(firstSplit, returnedSplit);
+    }
+
+    @Test
     void testDrainReportedSplitsReturnsReaderOrderAndClears() {
         ReaderRecoveryGate gate = new ReaderRecoveryGate(true);
         DynamicKafkaSourceSplit splitReader2 = split("topic", 2);
