@@ -18,6 +18,7 @@
 
 package org.apache.flink.streaming.connectors.kafka.table;
 
+import org.apache.flink.FlinkVersion;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.connector.kafka.testutils.KafkaUtil;
@@ -104,6 +105,18 @@ abstract class KafkaTableTestBase extends AbstractTestBase {
     void after() {
         // Cancel timer for debug logging
         cancelTimeoutLogger();
+    }
+
+    /**
+     * Since Flink 2.3 (FLIP-558), an insert whose upsert key differs from the primary key of the
+     * sink fails unless it names a conflict strategy. A query without an upsert key, such as an
+     * append-only insert, counts as differing. Flink 2.2 does not know the clause. DEDUPLICATE
+     * keeps the behaviour of earlier versions.
+     */
+    protected static String onConflictDeduplicate() {
+        return FlinkVersion.current().isNewerVersionThan(FlinkVersion.v2_2)
+                ? " ON CONFLICT DO DEDUPLICATE"
+                : "";
     }
 
     public Properties getStandardProps() {

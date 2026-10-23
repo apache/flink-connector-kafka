@@ -52,7 +52,6 @@ import org.apache.flink.connector.testframe.junit.annotations.TestSemantics;
 import org.apache.flink.connector.testframe.testsuites.SinkTestSuiteBase;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
-import org.apache.flink.runtime.clusterframework.ApplicationStatus;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobmaster.JobResult;
 import org.apache.flink.runtime.minicluster.MiniCluster;
@@ -539,11 +538,7 @@ class KafkaSinkITCase {
                         clusterClient);
 
         JobResult jobResult = clusterClient.requestJobResult(thirdJobId).get();
-        assertThat(jobResult.getApplicationStatus())
-                .isEqualTo(
-                        supportedMigration
-                                ? ApplicationStatus.SUCCEEDED
-                                : ApplicationStatus.FAILED);
+        assertThat(jobResult.isSuccess()).isEqualTo(supportedMigration);
 
         if (supportedMigration) {
             final List<Long> committedRecords =
