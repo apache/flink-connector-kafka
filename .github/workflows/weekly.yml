@@ -25,47 +25,293 @@ on:
     - cron: "0 0 * * 0"
   workflow_dispatch:
 jobs:
-  compile_and_test:
+  # Cache released rows by Flink version, connector branch and JDK.
+  # Reuse requires matching connector SHA, shared-CI revisions and workflow file SHA.
+  # The artifact records pending rows; the next run validates their Java and Python jobs.
+  # A 27-day expiry refreshes rows in week four with a day's margin for schedule jitter.
+  # Snapshots always run, and manual dispatch runs every row.
+  # Missing revisions or unusable results cause affected rows to run again.
+  prepare_matrix:
     if: github.repository_owner == 'apache'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Find baseline artifact
+        id: baseline_run
+        uses: actions/github-script@v9
+        with:
+          script: |
+            core.setOutput('run_id', '');
+            try {
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                ...context.repo,
+                workflow_id: 'weekly.yml',
+                branch: context.ref.replace('refs/heads/', ''),
+                per_page: 100,
+              });
+              // A fork PR can have the same branch name; only trust this repository's weekly runs.
+              const baselineRun = data.workflow_runs
+                .filter(run => run.run_number < context.runNumber
+                  && ['schedule', 'workflow_dispatch'].includes(run.event)
+                  && run.head_repository?.full_name === `${context.repo.owner}/${context.repo.repo}`
+                  && run.head_branch === context.ref.replace('refs/heads/', ''))
+                .sort((a, b) => b.run_number - a.run_number)[0];
+              if (baselineRun) {
+                const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+                  ...context.repo,
+                  run_id: baselineRun.id,
+                  per_page: 100,
+                });
+                if (artifacts.some(artifact => artifact.name === 'weekly-matrix' && artifact.expired === false)) {
+                  core.setOutput('run_id', String(baselineRun.id));
+                } else {
+                  core.notice(`No usable weekly-matrix artifact on run ${baselineRun.id}; testing all rows.`);
+                }
+              } else {
+                core.notice('No earlier trusted weekly run; testing all rows.');
+              }
+            } catch (error) {
+              core.warning(`Cannot read previous weekly run; running the full matrix: ${error.message}`);
+            }
+      - name: Download previous matrix
+        if: steps.baseline_run.outputs.run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: weekly-matrix
+          run-id: ${{ steps.baseline_run.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: state
+      - name: Select weekly matrix
+        id: matrix
+        uses: actions/github-script@v9
+        env:
+          BASELINE_RUN_ID: ${{ steps.baseline_run.outputs.run_id }}
+          # Release lines run a single JDK to stay under the ASF limit of 20 concurrent jobs.
+          FLINK_BRANCHES: >-
+            [
+              {"flink": "2.2-SNAPSHOT", "branch": "main"},
+              {"flink": "2.2.1", "branch": "v5.0", "jdk": "17"},
+              {"flink": "2.1.3", "branch": "v5.0", "jdk": "17"},
+              {"flink": "2.0.2", "branch": "v4.0", "jdk": "17"},
+              {"flink": "1.20.5", "branch": "v3.4", "jdk": "11"}
+            ]
+        with:
+          script: |
+            const fs = require('fs');
+            const matrix = JSON.parse(process.env.FLINK_BRANCHES);
+            let baselineRows = {};
+            try {
+              const state = JSON.parse(fs.readFileSync('state/weekly-matrix.json', 'utf8'));
+              if (state?.rows && typeof state.rows === 'object' && !Array.isArray(state.rows)) {
+                baselineRows = state.rows;
+              }
+            } catch (error) {
+              core.info('No usable previous matrix; running the full matrix.');
+            }
+
+            const shas = {};
+            for (const branch of new Set(matrix.map(entry => entry.branch))) {
+              try {
+                const { data } = await github.rest.repos.getBranch({ ...context.repo, branch });
+                shas[branch] = data.commit.sha;
+              } catch (error) {
+                core.warning(`Cannot resolve ${branch}; testing its rows without a baseline: ${error.message}`);
+              }
+            }
+
+            let workflow;
+            try {
+              const { data } = await github.rest.repos.getContent({
+                ...context.repo,
+                path: '.github/workflows/weekly.yml',
+                ref: context.sha,
+              });
+              if (data.type !== 'file' || typeof data.sha !== 'string' || !data.sha) {
+                throw new Error('Workflow file revision is unavailable');
+              }
+              workflow = data.sha;
+            } catch (error) {
+              core.warning(`Cannot resolve weekly workflow; testing all rows: ${error.message}`);
+            }
+
+            let ci;
+            try {
+              const { data: run } = await github.rest.actions.getWorkflowRun({
+                ...context.repo,
+                run_id: context.runId,
+              });
+              const references = run.referenced_workflows || [];
+              const sharedPath = 'apache/flink-connector-shared-utils/.github/workflows/';
+              const hasBothWorkflows = ['ci.yml', 'python_ci.yml'].every(file =>
+                references.some(ref => ref.path.split('@')[0] === sharedPath + file));
+              if (!hasBothWorkflows || references.some(ref => !ref.sha)) {
+                throw new Error('Resolved Java and Python workflow revisions are unavailable');
+              }
+              ci = references.slice().sort((a, b) => a.path.localeCompare(b.path))
+                .map(ref => ref.sha).join(',');
+            } catch (error) {
+              core.warning(`Cannot resolve referenced CI; testing all rows: ${error.message}`);
+            }
+
+            const baselineRunId = process.env.BASELINE_RUN_ID;
+            if (baselineRunId && Object.keys(baselineRows).length > 0) {
+              try {
+                const { data: baselineRun } = await github.rest.actions.getWorkflowRun({
+                  ...context.repo,
+                  run_id: Number(baselineRunId),
+                });
+                if (!['schedule', 'workflow_dispatch'].includes(baselineRun.event)
+                  || baselineRun.head_repository?.full_name !== `${context.repo.owner}/${context.repo.repo}`
+                  || baselineRun.head_branch !== context.ref.replace('refs/heads/', '')
+                  || !(baselineRun.run_number < context.runNumber)) {
+                  throw new Error('Baseline run provenance does not match this weekly workflow');
+                }
+                if (baselineRun.status !== 'completed') {
+                  // Carried green rows were not selected; pending rows remain untrusted until completion.
+                  core.notice(`Run ${baselineRunId} is still in progress; retaining only previously green rows.`);
+                } else {
+                  const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+                    ...context.repo,
+                    run_id: Number(baselineRunId),
+                    filter: 'latest',
+                    per_page: 100,
+                  });
+                  for (const row of matrix.filter(row => !row.flink.endsWith('-SNAPSHOT'))) {
+                    const key = JSON.stringify(row);
+                    if (!baselineRows[key]) continue;
+                    const groups = ['compile_and_test', 'python_test'].map(name => {
+                      const caller = `${name} (${row.flink}, ${row.branch}, ${row.jdk || 'all'})`;
+                      return jobs.filter(job => job.name === caller || job.name.startsWith(caller + ' / '));
+                    });
+                    // Skipped rows retain their timestamp; absent jobs never bless pending rows.
+                    if (groups.every(group => group.length === 0)) continue;
+                    // A successful setup job does not prove that a skipped test job passed.
+                    if (groups.every(group => group.length > 0 && group.every(job => job.conclusion === 'success'))) {
+                      baselineRows[key] = {
+                        ...baselineRows[key], greenAt: baselineRun.created_at, greenRunId: baselineRun.id,
+                      };
+                    } else {
+                      delete baselineRows[key];
+                    }
+                  }
+                }
+              } catch (error) {
+                core.warning(`Cannot validate previous rows; testing all rows: ${error.message}`);
+                baselineRows = {};
+              }
+            } else {
+              baselineRows = {};
+            }
+
+            const selected = [];
+            const rows = {};
+            const decisions = [];
+            const now = Date.now();
+            const day = 24 * 60 * 60 * 1000;
+            const maxAge = 27 * day;
+            const escape = value => String(value).replace(/[&<>"']/g, character =>
+              ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+            for (const row of matrix) {
+              const sha = shas[row.branch];
+              const pinned = { ...row, sha };
+              const snapshot = row.flink.endsWith('-SNAPSHOT');
+              const key = JSON.stringify(row);
+              const baseline = baselineRows[key];
+              const age = now - Date.parse(baseline?.greenAt);
+              const reason = snapshot ? 'Snapshot'
+                : context.eventName !== 'schedule' ? 'Manual dispatch'
+                : !sha ? 'Connector revision unavailable'
+                : !ci || !workflow ? 'CI identity unavailable'
+                : !(age >= 0) ? 'No successful baseline'
+                : baseline.sha !== sha ? 'Connector changed'
+                : baseline.ci !== ci ? 'Shared CI changed'
+                : baseline.workflow !== workflow ? 'Workflow changed'
+                : age >= maxAge ? 'Baseline expired'
+                : 'Unchanged';
+              const skip = reason === 'Unchanged';
+              if (skip) {
+                rows[key] = baseline;
+              } else {
+                selected.push(pinned);
+                if (!snapshot && sha && ci && workflow) {
+                  rows[key] = { sha, ci, workflow, greenAt: null, greenRunId: null };
+                }
+              }
+              const greenRunId = baseline?.greenRunId;
+              const greenLink = age >= 0 && Number.isSafeInteger(greenRunId) && greenRunId > 0
+                ? `<a href="${context.serverUrl || 'https://github.com'}/${context.repo.owner}/${context.repo.repo}/actions/runs/${greenRunId}">#${greenRunId}</a>`
+                : '—';
+              decisions.push([
+                escape(`${row.flink} / ${row.branch} / ${row.jdk || 'all'}`), skip ? 'skip' : 'run', reason,
+                escape(sha || 'unresolved'), greenLink, age >= 0 ? `${Math.floor(age / day)}d` : '—',
+              ]);
+            }
+            core.info(`Selected ${selected.length} of ${matrix.length} rows; snapshots always run.`);
+            core.setOutput('matrix', JSON.stringify(selected));
+            fs.mkdirSync('state', { recursive: true });
+            fs.writeFileSync('state/weekly-matrix.json', JSON.stringify({ rows }));
+            try {
+              core.summary.addHeading('Weekly matrix');
+              if (!ci || !workflow) {
+                const message = 'Cache disabled: shared-CI or weekly workflow revision unavailable. All released rows will run.';
+                core.info(message);
+                core.summary.addRaw(message + '\n\n');
+              }
+              const unresolved = [...new Set(matrix.map(row => row.branch))].filter(branch => !shas[branch]);
+              if (unresolved.length) {
+                const message = `Cache disabled for rows with unresolved connector revisions: ${unresolved.join(', ')}.`;
+                core.info(message);
+                core.summary.addRaw(escape(message) + '\n\n');
+              }
+              core.summary.addTable([
+                ['Row', 'Decision', 'Reason', 'Connector SHA', 'Last green run', 'Age']
+                  .map(data => ({ data, header: true })),
+                ...decisions,
+              ]);
+              await core.summary.write();
+            } catch (error) {
+              core.warning(`Cannot write weekly matrix summary: ${error.message}`);
+            }
+      # The next run validates pending rows against this run's Java and Python job results.
+      - name: Save weekly matrix
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: weekly-matrix
+          path: state/weekly-matrix.json
+          overwrite: true
+          retention-days: 90
+
+  compile_and_test:
+    name: compile_and_test (${{ matrix.flink_branches.flink }}, ${{ matrix.flink_branches.branch }}, ${{ matrix.flink_branches.jdk || 'all' }})
+    needs: prepare_matrix
+    if: github.repository_owner == 'apache' && needs.prepare_matrix.outputs.matrix != '' && needs.prepare_matrix.outputs.matrix != '[]'
     strategy:
       fail-fast: false
       matrix:
-        # Release lines run a single JDK to stay under the ASF limit of 20 concurrent jobs.
-        flink_branches: &flink_branches_matrix [{
-          flink: 2.2-SNAPSHOT,
-          branch: main
-        }, {
-          flink: 2.2.1,
-          branch: v5.0,
-          jdk: '17'
-        }, {
-          flink: 2.1.3,
-          branch: v5.0,
-          jdk: '17'
-        }, {
-          flink: 2.0.2,
-          branch: v4.0,
-          jdk: '17'
-        }, {
-          flink: 1.20.5,
-          branch: v3.4,
-          jdk: '11'
-        }]
+        flink_branches: ${{ fromJSON(needs.prepare_matrix.outputs.matrix) }}
     uses: apache/flink-connector-shared-utils/.github/workflows/ci.yml@ci_utils
     with:
       flink_version: ${{ matrix.flink_branches.flink }}
-      connector_branch: ${{ matrix.flink_branches.branch }}
+      connector_branch: ${{ matrix.flink_branches.sha || matrix.flink_branches.branch }}
       jdk_version: ${{ matrix.flink_branches.jdk || '11, 17, 21' }}
       run_dependency_convergence: false
       timeout_test: 45
   python_test:
-    if: github.repository_owner == 'apache'
+    name: python_test (${{ matrix.flink_branches.flink }}, ${{ matrix.flink_branches.branch }}, ${{ matrix.flink_branches.jdk || 'all' }})
+    needs: prepare_matrix
+    if: github.repository_owner == 'apache' && needs.prepare_matrix.outputs.matrix != '' && needs.prepare_matrix.outputs.matrix != '[]'
     strategy:
       fail-fast: false
       matrix:
-        flink_branches: *flink_branches_matrix
+        flink_branches: ${{ fromJSON(needs.prepare_matrix.outputs.matrix) }}
     uses: apache/flink-connector-shared-utils/.github/workflows/python_ci.yml@ci_utils
     with:
       flink_version: ${{ matrix.flink_branches.flink }}
-      connector_branch: ${{ matrix.flink_branches.branch }}
+      connector_branch: ${{ matrix.flink_branches.sha || matrix.flink_branches.branch }}
       jdk_version: '17'
