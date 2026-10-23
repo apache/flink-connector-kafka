@@ -109,8 +109,9 @@ abstract class KafkaTableTestBase extends AbstractTestBase {
 
     /**
      * Since Flink 2.3 (FLIP-558), an insert whose upsert key differs from the primary key of the
-     * sink fails unless it names a conflict strategy. Flink 2.2 does not know the clause.
-     * DEDUPLICATE keeps the behaviour of earlier versions.
+     * sink fails unless it names a conflict strategy. A query without an upsert key, such as an
+     * append-only insert, counts as differing. Flink 2.2 does not know the clause. DEDUPLICATE
+     * keeps the behaviour of earlier versions.
      */
     protected static String onConflictDeduplicate() {
         return FlinkVersion.current().isNewerVersionThan(FlinkVersion.v2_2)
