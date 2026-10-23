@@ -35,15 +35,23 @@ import org.apache.flink.connector.kafka.dynamic.source.enumerator.subscriber.Kaf
 import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
+import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumerator;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.NoStoppingOffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.connector.kafka.testutils.MockKafkaMetadataService;
+import org.apache.flink.mock.Whitebox;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -54,6 +62,8 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.function.BiConsumer;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -622,6 +632,1083 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
                     .hasSize(1)
                     .allMatch(MetadataUpdateEvent.class::isInstance);
         }
+    }
+
+    @Test
+    public void testLocalFailureBeforeInitialDiscoveryPreservesReportedSplits() throws Throwable {
+        String streamId = "stream";
+        String clusterId = "cluster-0";
+        String topic = "topic";
+        List<DynamicKafkaSourceSplit> checkpointSplits =
+                List.of(
+                        new DynamicKafkaSourceSplit(
+                                clusterId,
+                                new KafkaPartitionSplit(new TopicPartition(topic, 0), 42L)),
+                        new DynamicKafkaSourceSplit(
+                                clusterId,
+                                new KafkaPartitionSplit(new TopicPartition(topic, 1), 43L)));
+        KafkaStream stream = createKafkaStream(streamId, clusterId, topic);
+
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(2);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                streamId,
+                                new MockKafkaMetadataService(Collections.singleton(stream)),
+                                context,
+                                createGlobalModeProperties(),
+                                createRestoredState(stream, clusterId, checkpointSplits))) {
+            enumerator.start();
+            registerReaderAndReportRestoredSplits(context, enumerator, 0, checkpointSplits);
+            registerReaderAndReportRestoredSplits(context, enumerator, 1, Collections.emptyList());
+            assertThat(context.getSplitsAssignmentSequence()).isEmpty();
+
+            // No post-checkpoint assignment exists to return before metadata discovery completes.
+            context.unregisterReader(0);
+            enumerator.addSplitsBack(Collections.emptyList(), 0);
+            registerReaderAndReportRestoredSplits(context, enumerator, 0, Collections.emptyList());
+            assertThat(context.getSplitsAssignmentSequence()).isEmpty();
+
+            context.runNextOneTimeCallable();
+
+            assertExactCheckpointOffsets(context, 0, checkpointSplits);
+            assertSinglePhysicalOwners(context, 0, checkpointSplits.size());
+        }
+    }
+
+    @Test
+    public void testInitialRestoreKeepsOneOwnerBeforeAnyLocalFailure() throws Throwable {
+        verifyNumericCheckpointRecovery(false, false);
+    }
+
+    @Test
+    public void testInitialRestoreDiscoveryBeforeRegistrationKeepsOneOwner() throws Throwable {
+        verifyNumericCheckpointRecovery(true, false);
+    }
+
+    @Test
+    public void testLocalFailureBeforeNewCheckpointKeepsOneOwner() throws Throwable {
+        verifyNumericCheckpointRecovery(false, true);
+    }
+
+    @Test
+    public void testLocalFailureWithReverseRegistrationKeepsOneOwner() throws Throwable {
+        verifyNumericCheckpointRecovery(false, true, 3, true, false, false, false);
+    }
+
+    @Test
+    public void testLocalFailureWithInterleavedReturnsKeepsOneOwner() throws Throwable {
+        verifyNumericCheckpointRecovery(false, true, 3, true, true, false, false);
+    }
+
+    @Test
+    public void testOnlyReaderZeroFailsWithoutMovingSurvivingSplits() throws Throwable {
+        verifyNumericCheckpointRecovery(false, true, 1, false, false, false, false);
+    }
+
+    @Test
+    public void testOnlyReaderOneFailsWithoutMovingSurvivingSplits() throws Throwable {
+        verifyNumericCheckpointRecovery(false, true, 2, false, false, false, false);
+    }
+
+    @Test
+    public void testPerClusterLocalFailureDoesNotReclaimSurvivingReaderSplits() throws Throwable {
+        verifyNumericCheckpointRecovery(false, true, 1, false, false, false, false, "per_cluster");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    public void testLocalFailureOfReactivatedRetainedSplitsKeepsCurrentOwners(int failedReaderMask)
+            throws Throwable {
+        verifyNumericCheckpointRecovery(
+                false, true, failedReaderMask, false, false, false, false, "global", true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testPerClusterLocalFailureAfterRetainedClusterReactivationKeepsRestoredOwner(
+            boolean bounded) throws Throwable {
+        String clusterId = "cluster-0";
+        KafkaStream inactiveStream = new KafkaStream("stream", Collections.emptyMap());
+        KafkaStream activeStream = createKafkaStream("stream", clusterId, "topic");
+        // After rescaling, the retained reader can differ from the per-cluster hash owner.
+        DynamicKafkaSourceSplit checkpointSplit =
+                new DynamicKafkaSourceSplit(
+                        clusterId,
+                        new KafkaPartitionSplit(new TopicPartition("topic", 0), 123L, 1000L));
+        DynamicKafkaSourceSplit retainedSplit = checkpointSplit.retainUntil(Long.MAX_VALUE);
+        assertThat(
+                        KafkaSourceEnumerator.getSplitOwner(
+                                checkpointSplit.getKafkaPartitionSplit().getTopicPartition(), 2))
+                .isEqualTo(1);
+
+        Properties properties = createBaseProperties();
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE.key(), "per_cluster");
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "1");
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
+                "60000");
+        DynamicKafkaSourceEnumState restoredState =
+                new DynamicKafkaSourceEnumState(
+                        Collections.singleton(inactiveStream),
+                        Collections.emptyMap(),
+                        Collections.singletonMap(
+                                clusterId,
+                                new DynamicKafkaSourceEnumState.RetainedClusterState(
+                                        new KafkaSourceEnumState(
+                                                List.of(checkpointSplit.getKafkaPartitionSplit()),
+                                                Collections.emptyList(),
+                                                true),
+                                        Long.MAX_VALUE)),
+                        Collections.emptyMap());
+        List<String> events = new ArrayList<>();
+        try (MockKafkaMetadataService metadataService =
+                        new MockKafkaMetadataService(Collections.singleton(inactiveStream));
+                MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<DynamicKafkaSourceSplit>(2) {
+                            @Override
+                            public void assignSplits(
+                                    SplitsAssignment<DynamicKafkaSourceSplit> assignment) {
+                                assignment
+                                        .assignment()
+                                        .forEach(
+                                                (reader, splits) ->
+                                                        splits.forEach(
+                                                                split ->
+                                                                        events.add(
+                                                                                "assign:"
+                                                                                        + reader
+                                                                                        + ":"
+                                                                                        + split
+                                                                                                .splitId())));
+                                super.assignSplits(assignment);
+                            }
+
+                            @Override
+                            public void signalNoMoreSplits(int reader) {
+                                events.add("done:" + reader);
+                                super.signalNoMoreSplits(reader);
+                            }
+                        };
+                DynamicKafkaSourceEnumerator enumerator =
+                        new DynamicKafkaSourceEnumerator(
+                                new KafkaStreamSetSubscriber(Collections.singleton("stream")),
+                                metadataService,
+                                context,
+                                OffsetsInitializer.earliest(),
+                                bounded
+                                        ? OffsetsInitializer.latest()
+                                        : new NoStoppingOffsetsInitializer(),
+                                properties,
+                                bounded ? Boundedness.BOUNDED : Boundedness.CONTINUOUS_UNBOUNDED,
+                                restoredState,
+                                new NoOpKafkaEnumContextProxyFactory())) {
+            enumerator.start();
+            registerReaderAndReportRestoredSplits(context, enumerator, 0, List.of(retainedSplit));
+            registerReaderAndReportRestoredSplits(context, enumerator, 1, Collections.emptyList());
+            context.runPeriodicCallable(0);
+
+            assertExactCheckpointOffsets(context, 0, List.of(retainedSplit));
+            context.getSplitsAssignmentSequence()
+                    .forEach(assignment -> assertThat(assignment.assignment()).containsOnlyKeys(0));
+            if (bounded) {
+                assertBoundedAssignmentsBeforeCompletion(events, 0, 1);
+                assertThat(events.stream().filter(event -> event.equals("done:0"))).hasSize(1);
+                assertThat(events.stream().filter(event -> event.equals("done:1"))).hasSize(1);
+            }
+
+            int assignmentsBeforeReactivation = context.getSplitsAssignmentSequence().size();
+            metadataService.setKafkaStreams(Collections.singleton(activeStream));
+            context.runPeriodicCallable(0);
+            KafkaSourceEnumerator subEnumerator =
+                    (KafkaSourceEnumerator)
+                            ((Map<?, ?>)
+                                            Whitebox.getInternalState(
+                                                    enumerator, "clusterEnumeratorMap"))
+                                    .get(clusterId);
+            completePartitionDiscovery(subEnumerator);
+            assertThat(context.getSplitsAssignmentSequence())
+                    .hasSize(assignmentsBeforeReactivation);
+
+            for (int attempt = 0; attempt < 2; attempt++) {
+                events.clear();
+                int priorAssignments = context.getSplitsAssignmentSequence().size();
+                context.unregisterReader(0);
+                enumerator.addSplitsBack(List.of(checkpointSplit), 0);
+                registerReaderAndReportRestoredSplits(
+                        context, enumerator, 0, List.of(retainedSplit));
+
+                assertExactCheckpointOffsets(context, priorAssignments, List.of(checkpointSplit));
+                context.getSplitsAssignmentSequence().stream()
+                        .skip(priorAssignments)
+                        .forEach(
+                                assignment ->
+                                        assertThat(assignment.assignment()).containsOnlyKeys(0));
+                if (bounded) {
+                    assertBoundedAssignmentsBeforeCompletion(events, 0, 1);
+                    assertThat(events.stream().filter(event -> event.equals("done:0"))).hasSize(1);
+                    assertThat(events).doesNotContain("done:1");
+                } else {
+                    assertThat(events).noneMatch(event -> event.startsWith("done:"));
+                }
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("collidingSplitOwners")
+    public void testLocalFailureKeepsDistinctOwnersWhenActiveAndRetainedSplitIdsCollide(
+            boolean bounded, int retainedReader) throws Throwable {
+        DynamicKafkaSourceSplit activeSplit =
+                new DynamicKafkaSourceSplit(
+                        "a", new KafkaPartitionSplit(new TopicPartition("b-c", 0), 123L, 1000L));
+        DynamicKafkaSourceSplit retainedSplit =
+                new DynamicKafkaSourceSplit(
+                                "a-b",
+                                new KafkaPartitionSplit(new TopicPartition("c", 0), 456L, 2000L))
+                        .retainUntil(Long.MAX_VALUE);
+        assertThat(activeSplit.splitId()).isEqualTo(retainedSplit.splitId());
+        assertThat(
+                        KafkaSourceEnumerator.getSplitOwner(
+                                activeSplit.getKafkaPartitionSplit().getTopicPartition(), 2))
+                .isZero();
+        KafkaStream activeStream = createKafkaStream("stream", "a", "b-c");
+        DynamicKafkaSourceEnumState restoredState =
+                createRestoredState(activeStream, "a", List.of(activeSplit));
+        Properties properties = createBaseProperties();
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE.key(), "per_cluster");
+        List<String> events = new ArrayList<>();
+        Map<Integer, List<DynamicKafkaSourceSplit>> reports =
+                Map.of(
+                        0,
+                        retainedReader == 0
+                                ? List.of(activeSplit, retainedSplit)
+                                : List.of(activeSplit),
+                        1,
+                        retainedReader == 1 ? List.of(retainedSplit) : Collections.emptyList());
+
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<DynamicKafkaSourceSplit>(2) {
+                            @Override
+                            public void assignSplits(
+                                    SplitsAssignment<DynamicKafkaSourceSplit> assignment) {
+                                assignment
+                                        .assignment()
+                                        .forEach(
+                                                (reader, splits) ->
+                                                        splits.forEach(
+                                                                split ->
+                                                                        events.add(
+                                                                                "assign:"
+                                                                                        + reader
+                                                                                        + ":"
+                                                                                        + split
+                                                                                                .splitId())));
+                                super.assignSplits(assignment);
+                            }
+
+                            @Override
+                            public void signalNoMoreSplits(int reader) {
+                                events.add("done:" + reader);
+                                super.signalNoMoreSplits(reader);
+                            }
+                        };
+                DynamicKafkaSourceEnumerator enumerator =
+                        new DynamicKafkaSourceEnumerator(
+                                new KafkaStreamSetSubscriber(Collections.singleton("stream")),
+                                new MockKafkaMetadataService(Collections.singleton(activeStream)),
+                                context,
+                                OffsetsInitializer.earliest(),
+                                bounded
+                                        ? OffsetsInitializer.latest()
+                                        : new NoStoppingOffsetsInitializer(),
+                                properties,
+                                bounded ? Boundedness.BOUNDED : Boundedness.CONTINUOUS_UNBOUNDED,
+                                restoredState,
+                                new NoOpKafkaEnumContextProxyFactory())) {
+            enumerator.start();
+            registerReaderAndReportRestoredSplits(context, enumerator, 0, reports.get(0));
+            registerReaderAndReportRestoredSplits(context, enumerator, 1, reports.get(1));
+            context.runNextOneTimeCallable();
+            completePartitionDiscovery(
+                    (KafkaSourceEnumerator)
+                            ((Map<?, ?>)
+                                            Whitebox.getInternalState(
+                                                    enumerator, "clusterEnumeratorMap"))
+                                    .get("a"));
+
+            assertExactCheckpointOffsets(context, 0, List.of(activeSplit, retainedSplit));
+            reports.forEach(
+                    (reader, expected) ->
+                            assertThat(
+                                            context.getSplitsAssignmentSequence().stream()
+                                                    .flatMap(
+                                                            assignment ->
+                                                                    assignment
+                                                                            .assignment()
+                                                                            .getOrDefault(
+                                                                                    reader,
+                                                                                    Collections
+                                                                                            .emptyList())
+                                                                            .stream()))
+                                    .containsExactlyInAnyOrderElementsOf(expected));
+
+            int priorAssignments = context.getSplitsAssignmentSequence().size();
+            events.clear();
+            context.unregisterReader(retainedReader);
+            enumerator.addSplitsBack(Collections.emptyList(), retainedReader);
+            registerReaderAndReportRestoredSplits(
+                    context, enumerator, retainedReader, reports.get(retainedReader));
+
+            assertExactCheckpointOffsets(context, priorAssignments, reports.get(retainedReader));
+            context.getSplitsAssignmentSequence().stream()
+                    .skip(priorAssignments)
+                    .forEach(
+                            assignment ->
+                                    assertThat(assignment.assignment())
+                                            .containsOnlyKeys(retainedReader));
+            if (bounded) {
+                assertBoundedAssignmentsBeforeCompletion(
+                        events, retainedReader, reports.get(retainedReader).size());
+                assertThat(events.stream().filter(event -> event.equals("done:" + retainedReader)))
+                        .hasSize(1);
+                assertThat(events).doesNotContain("done:" + (1 - retainedReader));
+            } else {
+                assertThat(events).noneMatch(event -> event.startsWith("done:"));
+            }
+        }
+    }
+
+    private static Stream<Arguments> collidingSplitOwners() {
+        return Stream.of(
+                Arguments.of(true, 0),
+                Arguments.of(true, 1),
+                Arguments.of(false, 0),
+                Arguments.of(false, 1));
+    }
+
+    @Test
+    public void testLocalFailurePreservesStillInactiveRetainedSplit() throws Throwable {
+        String cluster = "cluster-0";
+        KafkaStream stream = createKafkaStream("stream", cluster, "active-topic");
+        DynamicKafkaSourceSplit retained =
+                new DynamicKafkaSourceSplit(
+                                cluster,
+                                new KafkaPartitionSplit(
+                                        new TopicPartition("inactive-topic", 0), 123L))
+                        .retainUntil(Long.MAX_VALUE);
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(2);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                "stream",
+                                new MockKafkaMetadataService(Collections.singleton(stream)),
+                                context,
+                                createGlobalModeProperties(),
+                                createRestoredState(stream, cluster, Collections.emptyList()))) {
+            enumerator.start();
+            registerReaderAndReportRestoredSplits(context, enumerator, 0, List.of(retained));
+            registerReaderAndReportRestoredSplits(context, enumerator, 1, Collections.emptyList());
+            context.runNextOneTimeCallable();
+            assertExactCheckpointOffsets(context, 0, List.of(retained));
+
+            int priorAssignments = context.getSplitsAssignmentSequence().size();
+            context.unregisterReader(0);
+            enumerator.addSplitsBack(Collections.emptyList(), 0);
+            registerReaderAndReportRestoredSplits(context, enumerator, 0, List.of(retained));
+
+            assertExactCheckpointOffsets(context, priorAssignments, List.of(retained));
+            context.getSplitsAssignmentSequence().stream()
+                    .skip(priorAssignments)
+                    .forEach(assignment -> assertThat(assignment.assignment()).containsOnlyKeys(0));
+        }
+    }
+
+    @Test
+    public void testLocalFailureAfterNewCheckpointUsesReportedOffsets() throws Throwable {
+        verifyNumericCheckpointRecovery(false, true, 1, false, false, true, false);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testLocalFailurePreservesCurrentOwnersAcrossClusterRetention(
+            boolean failWhileInactive) throws Throwable {
+        String streamId = "stream";
+        String clusterId = "cluster-0";
+        String topic = "topic";
+        List<DynamicKafkaSourceSplit> checkpointSplits =
+                createSplits(clusterId, topic, 11).stream()
+                        .map(
+                                split ->
+                                        withOffset(
+                                                split,
+                                                1000L
+                                                        + split.getKafkaPartitionSplit()
+                                                                .getPartition()))
+                        .collect(Collectors.toList());
+        List<DynamicKafkaSourceSplit> historicalReaderZeroSplits =
+                checkpointSplits.stream()
+                        .filter(split -> split.getKafkaPartitionSplit().getPartition() % 2 == 0)
+                        .collect(Collectors.toList());
+        List<DynamicKafkaSourceSplit> historicalReaderOneSplits =
+                checkpointSplits.stream()
+                        .filter(split -> split.getKafkaPartitionSplit().getPartition() % 2 == 1)
+                        .collect(Collectors.toList());
+        KafkaStream stream = createKafkaStream(streamId, clusterId, topic);
+        Properties properties = createGlobalModeProperties();
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "1");
+        properties.setProperty(
+                DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
+                "60000");
+
+        try (MockKafkaMetadataService metadataService =
+                        new MockKafkaMetadataService(Collections.singleton(stream));
+                MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(2);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                streamId,
+                                metadataService,
+                                context,
+                                properties,
+                                createRestoredState(stream, clusterId, checkpointSplits))) {
+            enumerator.start();
+            registerReaderAndReportRestoredSplits(
+                    context, enumerator, 0, historicalReaderZeroSplits);
+            registerReaderAndReportRestoredSplits(
+                    context, enumerator, 1, historicalReaderOneSplits);
+            context.runPeriodicCallable(0);
+            assertExactCheckpointOffsets(context, 0, checkpointSplits);
+
+            Map<Integer, List<DynamicKafkaSourceSplit>> currentAssignments = new HashMap<>();
+            context.getSplitsAssignmentSequence()
+                    .forEach(
+                            assignment ->
+                                    assignment
+                                            .assignment()
+                                            .forEach(
+                                                    (reader, splits) ->
+                                                            currentAssignments
+                                                                    .computeIfAbsent(
+                                                                            reader,
+                                                                            ignored ->
+                                                                                    new ArrayList<>())
+                                                                    .addAll(splits)));
+            assertThat(historicalReaderZeroSplits.stream())
+                    .anyMatch(currentAssignments.get(1)::contains);
+
+            metadataService.setKafkaStreams(
+                    Collections.singleton(new KafkaStream(streamId, Collections.emptyMap())));
+            context.runPeriodicCallable(0);
+            assertThat(enumerator.snapshotState(1L).getRetainedClusterEnumeratorStates())
+                    .containsKey(clusterId);
+
+            if (!failWhileInactive) {
+                metadataService.setKafkaStreams(Collections.singleton(stream));
+                context.runPeriodicCallable(0);
+            }
+            int assignmentsBeforeFailure = context.getSplitsAssignmentSequence().size();
+            context.unregisterReader(0);
+            enumerator.addSplitsBack(currentAssignments.get(0), 0);
+            registerReaderAndReportRestoredSplits(
+                    context, enumerator, 0, historicalReaderZeroSplits);
+
+            List<DynamicKafkaSourceSplit> recoveredSplits = new ArrayList<>();
+            for (SplitsAssignment<DynamicKafkaSourceSplit> assignment :
+                    context.getSplitsAssignmentSequence()
+                            .subList(
+                                    assignmentsBeforeFailure,
+                                    context.getSplitsAssignmentSequence().size())) {
+                assertThat(assignment.assignment()).containsOnlyKeys(0);
+                recoveredSplits.addAll(assignment.assignment().get(0));
+            }
+            assertThat(recoveredSplits)
+                    .allSatisfy(
+                            split -> assertThat(split.isRetained()).isEqualTo(failWhileInactive));
+            assertThat(
+                            recoveredSplits.stream()
+                                    .map(DynamicKafkaSourceSplit::clearRetention)
+                                    .collect(Collectors.toList()))
+                    .containsExactlyInAnyOrderElementsOf(currentAssignments.get(0));
+
+            if (failWhileInactive) {
+                int assignmentsBeforeReactivation = context.getSplitsAssignmentSequence().size();
+                metadataService.setKafkaStreams(Collections.singleton(stream));
+                context.runPeriodicCallable(0);
+                assertThat(context.getSplitsAssignmentSequence())
+                        .hasSize(assignmentsBeforeReactivation);
+            }
+        }
+    }
+
+    @Test
+    public void testCheckpointReportsReplacePreinitializedPendingOwnersAndOffsets()
+            throws Throwable {
+        verifyNumericCheckpointRecovery(true, true, 3, true, true, false, true);
+    }
+
+    @Test
+    public void testNewPartitionDiscoveryWaitsForRecoveryAndSurvivesRepeatedLocalFailure()
+            throws Throwable {
+        String cluster = "cluster-0";
+        KafkaStream stream = createKafkaStream("stream", cluster, "topic");
+        List<DynamicKafkaSourceSplit> checkpointSplits = createSplits(cluster, "topic", 2);
+        DynamicKafkaSourceSplit discovered =
+                withOffset(createSplits(cluster, "topic", 3).get(2), 2500L);
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(2);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                "stream",
+                                new MockKafkaMetadataService(Collections.singleton(stream)),
+                                context,
+                                createGlobalModeProperties(),
+                                createRestoredState(stream, cluster, checkpointSplits))) {
+            enumerator.start();
+            context.runNextOneTimeCallable();
+            registerReaderAndReportRestoredSplits(
+                    context, enumerator, 0, Collections.singletonList(checkpointSplits.get(0)));
+            // Invoke the real coordinator callback with a completed broker-discovery result.
+            // No broker or mock owner-selection implementation participates in the regression.
+            Object subEnumerator =
+                    ((Map<?, ?>) Whitebox.getInternalState(enumerator, "clusterEnumeratorMap"))
+                            .get(cluster);
+            Class<?> changeClass =
+                    Class.forName(KafkaSourceEnumerator.class.getName() + "$PartitionSplitChange");
+            Constructor<?> constructor = changeClass.getDeclaredConstructor(Set.class, Set.class);
+            constructor.setAccessible(true);
+            Method handler =
+                    KafkaSourceEnumerator.class.getDeclaredMethod(
+                            "handlePartitionSplitChanges", changeClass, Throwable.class);
+            handler.setAccessible(true);
+            handler.invoke(
+                    subEnumerator,
+                    constructor.newInstance(
+                            Collections.singleton(discovered.getKafkaPartitionSplit()),
+                            Collections.emptySet()),
+                    null);
+            assertThat(context.getSplitsAssignmentSequence()).isEmpty();
+            registerReaderAndReportRestoredSplits(
+                    context, enumerator, 1, Collections.singletonList(checkpointSplits.get(1)));
+            List<DynamicKafkaSourceSplit> expected = new ArrayList<>(checkpointSplits);
+            expected.add(discovered);
+            assertExactCheckpointOffsets(context, 0, expected);
+            Map<Integer, List<DynamicKafkaSourceSplit>> actualOwners = new HashMap<>();
+            context.getSplitsAssignmentSequence()
+                    .forEach(
+                            assignment ->
+                                    assignment
+                                            .assignment()
+                                            .forEach(
+                                                    (reader, splits) ->
+                                                            actualOwners
+                                                                    .computeIfAbsent(
+                                                                            reader,
+                                                                            ignored ->
+                                                                                    new ArrayList<>())
+                                                                    .addAll(splits)));
+            int failedReader =
+                    actualOwners.entrySet().stream()
+                            .filter(entry -> entry.getValue().contains(discovered))
+                            .findFirst()
+                            .get()
+                            .getKey();
+            for (int attempt = 0; attempt < 2; attempt++) {
+                int priorAssignments = context.getSplitsAssignmentSequence().size();
+                context.unregisterReader(failedReader);
+                enumerator.addSplitsBack(actualOwners.get(failedReader), failedReader);
+                registerReaderAndReportRestoredSplits(
+                        context,
+                        enumerator,
+                        failedReader,
+                        Collections.singletonList(checkpointSplits.get(failedReader)));
+                assertExactCheckpointOffsets(
+                        context, priorAssignments, actualOwners.get(failedReader));
+                context.getSplitsAssignmentSequence().stream()
+                        .skip(priorAssignments)
+                        .forEach(
+                                assignment ->
+                                        assertThat(assignment.assignment())
+                                                .containsOnlyKeys(failedReader));
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("boundedRecoveryModes")
+    public void testBoundedRecoveryAssignsAllClustersBeforeNoMoreSplits(
+            String mode, boolean discoverFirst) throws Throwable {
+        verifyBoundedRecoveryAssignmentOrder(mode, discoverFirst, true);
+    }
+
+    @ParameterizedTest
+    @MethodSource("boundedRecoveryModes")
+    public void testBoundedLocalRecoveryAssignsAllClustersBeforeNoMoreSplits(
+            String mode, boolean discoverFirst) throws Throwable {
+        verifyBoundedRecoveryAssignmentOrder(mode, discoverFirst, false);
+    }
+
+    private void verifyBoundedRecoveryAssignmentOrder(
+            String mode, boolean discoverFirst, boolean checkInitialOrder) throws Throwable {
+        Map<String, ClusterMetadata> metadata = new HashMap<>();
+        Map<String, KafkaSourceEnumState> states = new HashMap<>();
+        Map<Integer, List<DynamicKafkaSourceSplit>> reports = new HashMap<>();
+        for (String cluster : List.of("cluster-0", "cluster-1")) {
+            metadata.putAll(createKafkaStream("stream", cluster, "topic").getClusterMetadataMap());
+            List<DynamicKafkaSourceSplit> splits = new ArrayList<>();
+            for (int reader = 0; reader < 2; reader++) {
+                DynamicKafkaSourceSplit split =
+                        new DynamicKafkaSourceSplit(
+                                cluster,
+                                new KafkaPartitionSplit(
+                                        new TopicPartition("topic", reader), 100L + reader, 1000L));
+                splits.add(split);
+                reports.computeIfAbsent(reader, ignored -> new ArrayList<>()).add(split);
+            }
+            states.put(
+                    cluster,
+                    new KafkaSourceEnumState(unwrapSplits(splits), Collections.emptyList(), true));
+        }
+        KafkaStream stream = new KafkaStream("stream", metadata);
+        Properties properties = createBaseProperties();
+        properties.setProperty(DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE.key(), mode);
+        List<String> events = new ArrayList<>();
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<DynamicKafkaSourceSplit>(2) {
+                            @Override
+                            public void assignSplits(
+                                    SplitsAssignment<DynamicKafkaSourceSplit> assignment) {
+                                assignment
+                                        .assignment()
+                                        .forEach(
+                                                (reader, splits) ->
+                                                        splits.forEach(
+                                                                split ->
+                                                                        events.add(
+                                                                                "assign:"
+                                                                                        + reader
+                                                                                        + ":"
+                                                                                        + split
+                                                                                                .splitId())));
+                                super.assignSplits(assignment);
+                            }
+
+                            @Override
+                            public void signalNoMoreSplits(int reader) {
+                                events.add("done:" + reader);
+                                super.signalNoMoreSplits(reader);
+                            }
+                        };
+                DynamicKafkaSourceEnumerator enumerator =
+                        new DynamicKafkaSourceEnumerator(
+                                new KafkaStreamSetSubscriber(Collections.singleton("stream")),
+                                new MockKafkaMetadataService(Collections.singleton(stream)),
+                                context,
+                                OffsetsInitializer.earliest(),
+                                OffsetsInitializer.latest(),
+                                properties,
+                                Boundedness.BOUNDED,
+                                new DynamicKafkaSourceEnumState(
+                                        Collections.singleton(stream), states),
+                                new NoOpKafkaEnumContextProxyFactory())) {
+            enumerator.start();
+            // Complete actual sub-enumerator discovery callbacks without broker I/O. Each
+            // sub-enumerator must subsequently signal completion during its addReader flush.
+            Map<?, ?> subEnumerators =
+                    (Map<?, ?>) Whitebox.getInternalState(enumerator, "clusterEnumeratorMap");
+            Class<?> changeClass =
+                    Class.forName(KafkaSourceEnumerator.class.getName() + "$PartitionSplitChange");
+            Constructor<?> constructor = changeClass.getDeclaredConstructor(Set.class, Set.class);
+            constructor.setAccessible(true);
+            Method handler =
+                    KafkaSourceEnumerator.class.getDeclaredMethod(
+                            "handlePartitionSplitChanges", changeClass, Throwable.class);
+            handler.setAccessible(true);
+            for (Object subEnumerator : subEnumerators.values()) {
+                handler.invoke(
+                        subEnumerator,
+                        constructor.newInstance(Collections.emptySet(), Collections.emptySet()),
+                        null);
+            }
+            if (discoverFirst) {
+                context.runNextOneTimeCallable();
+            }
+            for (int reader = 0; reader < 2; reader++) {
+                registerReaderAndReportRestoredSplits(
+                        context, enumerator, reader, reports.get(reader));
+            }
+            if (!discoverFirst) {
+                context.runNextOneTimeCallable();
+            }
+            if (checkInitialOrder) {
+                assertBoundedAssignmentsBeforeCompletion(events, 0, 2);
+                assertBoundedAssignmentsBeforeCompletion(events, 1, 2);
+            }
+            Map<Integer, List<DynamicKafkaSourceSplit>> assigned = new HashMap<>();
+            context.getSplitsAssignmentSequence()
+                    .forEach(
+                            assignment ->
+                                    assignment
+                                            .assignment()
+                                            .forEach(
+                                                    (reader, splits) ->
+                                                            assigned.computeIfAbsent(
+                                                                            reader,
+                                                                            ignored ->
+                                                                                    new ArrayList<>())
+                                                                    .addAll(splits)));
+            events.clear();
+            int priorAssignments = context.getSplitsAssignmentSequence().size();
+            context.unregisterReader(0);
+            context.unregisterReader(1);
+            List<DynamicKafkaSourceSplit> readerZeroReports = new ArrayList<>(assigned.get(0));
+            readerZeroReports.add(
+                    new DynamicKafkaSourceSplit(
+                                    "removed-cluster",
+                                    new KafkaPartitionSplit(
+                                            new TopicPartition("removed-topic", 0), 5L, 1000L))
+                            .retainUntil(Long.MAX_VALUE));
+            enumerator.addSplitsBack(Collections.emptyList(), 0);
+            registerReaderAndReportRestoredSplits(context, enumerator, 0, readerZeroReports);
+
+            assertBoundedAssignmentsBeforeCompletion(events, 0, 3);
+            assertThat(events).noneMatch(event -> event.startsWith("assign:1:"));
+            assertThat(events).doesNotContain("done:1");
+            assertExactCheckpointOffsets(context, priorAssignments, readerZeroReports);
+            context.getSplitsAssignmentSequence().stream()
+                    .skip(priorAssignments)
+                    .flatMap(assignment -> assignment.assignment().values().stream())
+                    .flatMap(List::stream)
+                    .forEach(
+                            split ->
+                                    assertThat(split.getKafkaPartitionSplit().getStoppingOffset())
+                                            .contains(1000L));
+            registerReaderAndReportRestoredSplits(context, enumerator, 1, assigned.get(1));
+            assertBoundedAssignmentsBeforeCompletion(events, 1, 2);
+            assertThat(events.stream().filter(event -> event.equals("done:0"))).hasSize(1);
+            assertThat(events.stream().filter(event -> event.equals("done:1"))).hasSize(1);
+        }
+    }
+
+    private static Stream<Arguments> boundedRecoveryModes() {
+        return Stream.of(
+                Arguments.of("per_cluster", true),
+                Arguments.of("per_cluster", false),
+                Arguments.of("global", true),
+                Arguments.of("global", false));
+    }
+
+    private static void assertBoundedAssignmentsBeforeCompletion(
+            List<String> events, int reader, int expectedSplits) {
+        String assignmentPrefix = "assign:" + reader + ":";
+        int completion = events.indexOf("done:" + reader);
+        assertThat(completion).as("completion must be signaled: %s", events).isNotNegative();
+        assertThat(events.stream().filter(event -> event.startsWith(assignmentPrefix)))
+                .hasSize(expectedSplits);
+        assertThat(
+                        events.subList(0, completion).stream()
+                                .filter(event -> event.startsWith(assignmentPrefix)))
+                .as("all restored assignments must precede completion: %s", events)
+                .hasSize(expectedSplits);
+    }
+
+    private void verifyNumericCheckpointRecovery(boolean discoverFirst, boolean localFailure)
+            throws Throwable {
+        verifyNumericCheckpointRecovery(discoverFirst, localFailure, 3, false, false, false, false);
+    }
+
+    private void verifyNumericCheckpointRecovery(
+            boolean discoverFirst,
+            boolean localFailure,
+            int failedReaderMask,
+            boolean reverseRegistration,
+            boolean interleavedReturns,
+            boolean checkpointAfterRedistribution,
+            boolean restoredPendingCopies)
+            throws Throwable {
+        verifyNumericCheckpointRecovery(
+                discoverFirst,
+                localFailure,
+                failedReaderMask,
+                reverseRegistration,
+                interleavedReturns,
+                checkpointAfterRedistribution,
+                restoredPendingCopies,
+                "global");
+    }
+
+    private void verifyNumericCheckpointRecovery(
+            boolean discoverFirst,
+            boolean localFailure,
+            int failedReaderMask,
+            boolean reverseRegistration,
+            boolean interleavedReturns,
+            boolean checkpointAfterRedistribution,
+            boolean restoredPendingCopies,
+            String mode)
+            throws Throwable {
+        verifyNumericCheckpointRecovery(
+                discoverFirst,
+                localFailure,
+                failedReaderMask,
+                reverseRegistration,
+                interleavedReturns,
+                checkpointAfterRedistribution,
+                restoredPendingCopies,
+                mode,
+                false);
+    }
+
+    private void verifyNumericCheckpointRecovery(
+            boolean discoverFirst,
+            boolean localFailure,
+            int failedReaderMask,
+            boolean reverseRegistration,
+            boolean interleavedReturns,
+            boolean checkpointAfterRedistribution,
+            boolean restoredPendingCopies,
+            String mode,
+            boolean retainedCheckpointReports)
+            throws Throwable {
+        String streamId = "stream";
+        String clusterId = "cluster-0";
+        String topic = "topic";
+        int parallelism = 2;
+        List<DynamicKafkaSourceSplit> checkpointSplits =
+                createSplits(clusterId, topic, 11).stream()
+                        .map(
+                                split ->
+                                        new DynamicKafkaSourceSplit(
+                                                clusterId,
+                                                new KafkaPartitionSplit(
+                                                        split.getKafkaPartitionSplit()
+                                                                .getTopicPartition(),
+                                                        1000L
+                                                                + split.getKafkaPartitionSplit()
+                                                                        .getTopicPartition()
+                                                                        .partition())))
+                        .collect(Collectors.toList());
+        KafkaStream stream = createKafkaStream(streamId, clusterId, topic);
+        Properties properties = createBaseProperties();
+        properties.setProperty(DynamicKafkaSourceOptions.STREAM_ENUMERATOR_MODE.key(), mode);
+        Map<Integer, List<DynamicKafkaSourceSplit>> checkpointOwners = new HashMap<>();
+        for (DynamicKafkaSourceSplit split : checkpointSplits) {
+            int owner =
+                    split.getKafkaPartitionSplit().getTopicPartition().partition() % parallelism;
+            checkpointOwners
+                    .computeIfAbsent(owner, ignored -> new ArrayList<>())
+                    .add(retainedCheckpointReports ? split.retainUntil(Long.MAX_VALUE) : split);
+        }
+        DynamicKafkaSourceEnumState restoredState =
+                createRestoredState(stream, clusterId, checkpointSplits);
+        if (restoredPendingCopies) {
+            restoredState =
+                    new DynamicKafkaSourceEnumState(
+                            Collections.singleton(stream),
+                            Collections.singletonMap(
+                                    clusterId,
+                                    new KafkaSourceEnumState(
+                                            Collections.emptyList(),
+                                            checkpointSplits.stream()
+                                                    .map(
+                                                            split ->
+                                                                    withOffset(split, 9000L)
+                                                                            .getKafkaPartitionSplit())
+                                                    .collect(Collectors.toList()),
+                                            true)));
+        }
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(parallelism);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                streamId,
+                                new MockKafkaMetadataService(Collections.singleton(stream)),
+                                context,
+                                properties,
+                                restoredState)) {
+            enumerator.start();
+            if (discoverFirst) {
+                context.runNextOneTimeCallable();
+            }
+            for (int reader = 0; reader < parallelism; reader++) {
+                registerReaderAndReportRestoredSplits(
+                        context, enumerator, reader, checkpointOwners.get(reader));
+            }
+            if (!discoverFirst) {
+                context.runNextOneTimeCallable();
+            }
+            assertSinglePhysicalOwners(context, 0, 11);
+            assertExactCheckpointOffsets(context, 0, checkpointSplits);
+            if (!localFailure) {
+                return;
+            }
+            // Model SourceCoordinator local recovery: return all
+            // assignments since the restored checkpoint, then register original checkpoint reports.
+            Map<Integer, List<DynamicKafkaSourceSplit>> uncheckpointedAssignments = new HashMap<>();
+            for (SplitsAssignment<DynamicKafkaSourceSplit> assignment :
+                    context.getSplitsAssignmentSequence()) {
+                assignment
+                        .assignment()
+                        .forEach(
+                                (reader, splits) ->
+                                        uncheckpointedAssignments
+                                                .computeIfAbsent(
+                                                        reader, ignored -> new ArrayList<>())
+                                                .addAll(splits));
+            }
+            int assignmentsBeforeFailure = context.getSplitsAssignmentSequence().size();
+            Map<Integer, List<DynamicKafkaSourceSplit>> currentAssignments = new HashMap<>();
+            uncheckpointedAssignments.forEach(
+                    (reader, splits) -> currentAssignments.put(reader, new ArrayList<>(splits)));
+            if (checkpointAfterRedistribution) {
+                // Runtime no longer returns assignments covered by a completed checkpoint.
+                // Reader reports now use the current owner and the checkpointed next offset.
+                checkpointOwners.clear();
+                currentAssignments.forEach(
+                        (reader, splits) ->
+                                checkpointOwners.put(
+                                        reader,
+                                        splits.stream()
+                                                .map(
+                                                        split ->
+                                                                withOffset(
+                                                                        split,
+                                                                        split.getKafkaPartitionSplit()
+                                                                                        .getStartingOffset()
+                                                                                + 10000L))
+                                                .collect(Collectors.toList())));
+                uncheckpointedAssignments.replaceAll((reader, splits) -> Collections.emptyList());
+            }
+            for (int reader = 0; reader < parallelism; reader++) {
+                if ((failedReaderMask & (1 << reader)) != 0) {
+                    context.unregisterReader(reader);
+                }
+            }
+            if (!interleavedReturns) {
+                for (int reader = 0; reader < parallelism; reader++) {
+                    if ((failedReaderMask & (1 << reader)) != 0) {
+                        enumerator.addSplitsBack(uncheckpointedAssignments.get(reader), reader);
+                    }
+                }
+            }
+            for (int index = 0; index < parallelism; index++) {
+                int reader = reverseRegistration ? parallelism - 1 - index : index;
+                if ((failedReaderMask & (1 << reader)) != 0) {
+                    if (interleavedReturns) {
+                        enumerator.addSplitsBack(uncheckpointedAssignments.get(reader), reader);
+                    }
+                    registerReaderAndReportRestoredSplits(
+                            context, enumerator, reader, checkpointOwners.get(reader));
+                }
+            }
+            Map<Integer, List<DynamicKafkaSourceSplit>> assignmentsAfterFailure = new HashMap<>();
+            context.getSplitsAssignmentSequence().stream()
+                    .skip(assignmentsBeforeFailure)
+                    .forEach(
+                            assignment ->
+                                    assignment
+                                            .assignment()
+                                            .forEach(
+                                                    (reader, splits) ->
+                                                            assignmentsAfterFailure
+                                                                    .computeIfAbsent(
+                                                                            reader,
+                                                                            ignored ->
+                                                                                    new ArrayList<>())
+                                                                    .addAll(splits)));
+            for (int reader = 0; reader < parallelism; reader++) {
+                if ((failedReaderMask & (1 << reader)) == 0) {
+                    assertThat(assignmentsAfterFailure).doesNotContainKey(reader);
+                } else {
+                    List<DynamicKafkaSourceSplit> expected =
+                            checkpointAfterRedistribution
+                                    ? checkpointOwners.get(reader)
+                                    : currentAssignments.get(reader);
+                    assertThat(assignmentsAfterFailure.get(reader))
+                            .as(
+                                    "failed reader %s keeps its actual owner and checkpoint offsets",
+                                    reader)
+                            .containsExactlyInAnyOrderElementsOf(expected);
+                }
+            }
+        }
+    }
+
+    private static DynamicKafkaSourceSplit withOffset(DynamicKafkaSourceSplit split, long offset) {
+        return new DynamicKafkaSourceSplit(
+                split.getKafkaClusterId(),
+                new KafkaPartitionSplit(
+                        split.getKafkaPartitionSplit().getTopicPartition(), offset));
+    }
+
+    private static void completePartitionDiscovery(KafkaSourceEnumerator enumerator)
+            throws Exception {
+        Class<?> changeClass =
+                Class.forName(KafkaSourceEnumerator.class.getName() + "$PartitionSplitChange");
+        Constructor<?> constructor = changeClass.getDeclaredConstructor(Set.class, Set.class);
+        constructor.setAccessible(true);
+        Method handler =
+                KafkaSourceEnumerator.class.getDeclaredMethod(
+                        "handlePartitionSplitChanges", changeClass, Throwable.class);
+        handler.setAccessible(true);
+        handler.invoke(
+                enumerator,
+                constructor.newInstance(Collections.emptySet(), Collections.emptySet()),
+                null);
+    }
+
+    private static void assertExactCheckpointOffsets(
+            MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context,
+            int skipAssignments,
+            List<DynamicKafkaSourceSplit> expected) {
+        assertThat(
+                        context.getSplitsAssignmentSequence().stream()
+                                .skip(skipAssignments)
+                                .flatMap(assignment -> assignment.assignment().values().stream())
+                                .flatMap(List::stream)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    private static void assertSinglePhysicalOwners(
+            MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context,
+            int skipAssignments,
+            int expectedPartitions) {
+        Map<String, Set<Integer>> owners = new HashMap<>();
+        context.getSplitsAssignmentSequence().stream()
+                .skip(skipAssignments)
+                .forEach(
+                        assignment ->
+                                assignment
+                                        .assignment()
+                                        .forEach(
+                                                (reader, splits) ->
+                                                        splits.forEach(
+                                                                split ->
+                                                                        owners.computeIfAbsent(
+                                                                                        split
+                                                                                                .splitId(),
+                                                                                        ignored ->
+                                                                                                new HashSet<>())
+                                                                                .add(reader))));
+        assertThat(owners).hasSize(expectedPartitions);
+        assertThat(owners.entrySet())
+                .as("every physical split must have one active reader: %s", owners)
+                .allSatisfy(entry -> assertThat(entry.getValue()).hasSize(1));
+    }
+
+    private static void registerReaderAndReportRestoredSplits(
+            MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context,
+            DynamicKafkaSourceEnumerator enumerator,
+            int readerId,
+            List<DynamicKafkaSourceSplit> restoredSplits) {
+        context.registerReader(
+                ReaderInfo.createReaderInfo(readerId, "location-" + readerId, restoredSplits));
+        enumerator.addReader(readerId);
     }
 
     private static void registerReadersWithoutReportedSplits(

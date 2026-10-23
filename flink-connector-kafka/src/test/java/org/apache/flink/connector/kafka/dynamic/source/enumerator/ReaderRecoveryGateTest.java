@@ -40,8 +40,7 @@ class ReaderRecoveryGateTest {
         ReaderRecoveryGate gate = new ReaderRecoveryGate(false);
 
         assertThat(gate.hasPendingRecovery()).isFalse();
-        assertThat(gate.shouldDeferMetadataUpdateEvents(false)).isFalse();
-        assertThat(gate.shouldDeferMetadataUpdateEvents(true)).isFalse();
+        assertThat(gate.shouldDeferMetadataUpdateEvents()).isFalse();
         assertThat(gate.hasReportedSplits()).isFalse();
     }
 
@@ -50,56 +49,66 @@ class ReaderRecoveryGateTest {
         ReaderRecoveryGate gate = new ReaderRecoveryGate(true);
 
         assertThat(gate.hasPendingRecovery()).isTrue();
-        assertThat(gate.shouldDeferMetadataUpdateEvents(true)).isTrue();
-        assertThat(gate.shouldDeferMetadataUpdateEvents(false)).isTrue();
+        assertThat(gate.shouldDeferMetadataUpdateEvents()).isTrue();
 
         gate.markInitialRegistrationComplete();
 
         assertThat(gate.hasPendingRecovery()).isFalse();
-        assertThat(gate.shouldDeferMetadataUpdateEvents(true)).isFalse();
+        assertThat(gate.shouldDeferMetadataUpdateEvents()).isFalse();
     }
 
     @Test
-    void testCompletingInitialRegistrationDoesNotReleaseGateWithPendingReportedSplits() {
+    void testDrainingReportsDoesNotReleaseInitialAssignmentGate() {
         ReaderRecoveryGate gate = new ReaderRecoveryGate(true);
         gate.recordReportedSplits(1, Collections.singletonList(split("topic", 0)));
-
-        gate.markInitialRegistrationComplete();
-
-        assertThat(gate.hasPendingRecovery()).isTrue();
-        assertThat(gate.shouldDeferMetadataUpdateEvents(false)).isTrue();
-        assertThat(gate.shouldDeferMetadataUpdateEvents(true)).isFalse();
+        gate.startReaderRegistration(1);
 
         gate.drainReportedSplits();
 
-        assertThat(gate.hasPendingRecovery()).isFalse();
-        assertThat(gate.shouldDeferMetadataUpdateEvents(false)).isFalse();
-        assertThat(gate.shouldDeferMetadataUpdateEvents(true)).isFalse();
-    }
-
-    @Test
-    void testReportedSplitsGateUntilAllReadersRegistered() {
-        ReaderRecoveryGate gate = new ReaderRecoveryGate(false);
-        gate.recordReportedSplits(1, Collections.singletonList(split("topic", 0)));
-
         assertThat(gate.hasPendingRecovery()).isTrue();
-        assertThat(gate.hasReportedSplits()).isTrue();
-        assertThat(gate.shouldDeferMetadataUpdateEvents(false)).isTrue();
-        assertThat(gate.shouldDeferMetadataUpdateEvents(true)).isFalse();
+        assertThat(gate.isReaderReadyForAssignment(1)).isFalse();
+        assertThat(gate.shouldDeferMetadataUpdateEvents()).isTrue();
+
+        gate.markInitialRegistrationComplete();
+
+        assertThat(gate.hasPendingRecovery()).isFalse();
+        assertThat(gate.isReaderReadyForAssignment(1)).isTrue();
+        assertThat(gate.isReconciliationPending()).isFalse();
     }
 
     @Test
-    void testEmptyReportedSplitsAreIgnored() {
+    void testLocalRegistrationOnlyBlocksTheRecoveringReader() {
         ReaderRecoveryGate gate = new ReaderRecoveryGate(false);
-        gate.recordReportedSplits(1, Collections.emptyList());
+        gate.startReaderRegistration(1);
+        gate.recordReportedSplits(1, Collections.singletonList(split("topic", 0)));
 
         assertThat(gate.hasPendingRecovery()).isFalse();
         assertThat(gate.hasReportedSplits()).isFalse();
+        assertThat(gate.isReaderReadyForAssignment(0)).isTrue();
+        assertThat(gate.isReaderReadyForAssignment(1)).isFalse();
+        assertThat(gate.shouldDeferMetadataUpdateEvents()).isTrue();
+
+        gate.completeReaderRegistration(1);
+
+        assertThat(gate.isReaderReadyForAssignment(1)).isTrue();
+        assertThat(gate.isReconciliationPending()).isFalse();
+        assertThat(gate.shouldDeferMetadataUpdateEvents()).isFalse();
+    }
+
+    @Test
+    void testEmptyReportDuringInitialRecovery() {
+        ReaderRecoveryGate gate = new ReaderRecoveryGate(true);
+        gate.recordReportedSplits(1, Collections.emptyList());
+
+        assertThat(gate.hasPendingRecovery()).isTrue();
+        assertThat(gate.hasReportedSplits()).isFalse();
+        assertThat(gate.drainReportedSplits()).isEmpty();
+        assertThat(gate.hasPendingRecovery()).isTrue();
     }
 
     @Test
     void testRepeatedReportMergesSplitsAndPrefersLatestOffsets() {
-        ReaderRecoveryGate gate = new ReaderRecoveryGate(false);
+        ReaderRecoveryGate gate = new ReaderRecoveryGate(true);
         DynamicKafkaSourceSplit firstReport = split("topic", 0);
         DynamicKafkaSourceSplit secondReport = split("topic", 1);
         DynamicKafkaSourceSplit updatedSplit =
@@ -118,7 +127,7 @@ class ReaderRecoveryGateTest {
 
     @Test
     void testSnapshotReportedSplitsIsIndependentAndDoesNotDrain() {
-        ReaderRecoveryGate gate = new ReaderRecoveryGate(false);
+        ReaderRecoveryGate gate = new ReaderRecoveryGate(true);
         DynamicKafkaSourceSplit firstReport = split("topic", 0);
         DynamicKafkaSourceSplit secondReport = split("topic", 1);
         gate.recordReportedSplits(1, Collections.singletonList(firstReport));
@@ -139,8 +148,8 @@ class ReaderRecoveryGateTest {
     }
 
     @Test
-    void testEmptyRepeatedReportRetainsPreviousReport() {
-        ReaderRecoveryGate gate = new ReaderRecoveryGate(false);
+    void testEmptyRepeatedReportPreservesPendingSplits() {
+        ReaderRecoveryGate gate = new ReaderRecoveryGate(true);
         DynamicKafkaSourceSplit firstReport = split("topic", 0);
         gate.recordReportedSplits(1, Collections.singletonList(firstReport));
         gate.recordReportedSplits(1, Collections.emptyList());
@@ -149,8 +158,51 @@ class ReaderRecoveryGateTest {
     }
 
     @Test
-    void testDrainReportedSplitsReturnsReaderOrderAndClears() {
+    void testReturnedSplitsRemainPendingWithoutInitialRecoveryGate() {
         ReaderRecoveryGate gate = new ReaderRecoveryGate(false);
+        DynamicKafkaSourceSplit firstReturnedSplit = split("topic", 0);
+        DynamicKafkaSourceSplit secondReturnedSplit = split("topic", 1);
+        DynamicKafkaSourceSplit updatedSplit =
+                new DynamicKafkaSourceSplit(
+                        "cluster0", new KafkaPartitionSplit(new TopicPartition("topic", 0), 42L));
+        gate.recordReturnedSplits(1, Collections.singletonList(firstReturnedSplit));
+        gate.recordReturnedSplits(1, Arrays.asList(updatedSplit, secondReturnedSplit));
+
+        assertThat(gate.hasPendingRecovery()).isFalse();
+        assertThat(gate.hasReportedSplits()).isTrue();
+        assertThat(gate.snapshotReportedSplits().get(1))
+                .containsExactlyInAnyOrder(updatedSplit, secondReturnedSplit);
+        assertThat(gate.snapshotReportedSplits().get(1).get(0).getStartingOffset()).isEqualTo(42L);
+    }
+
+    @Test
+    void testDrainReportedSplitsForOneReaderPreservesOtherReaders() {
+        ReaderRecoveryGate gate = new ReaderRecoveryGate(false);
+        DynamicKafkaSourceSplit splitReader1 = split("topic", 1);
+        DynamicKafkaSourceSplit splitReader2 = split("topic", 2);
+        gate.recordReturnedSplits(1, Collections.singletonList(splitReader1));
+        gate.recordReturnedSplits(2, Collections.singletonList(splitReader2));
+
+        assertThat(gate.drainReportedSplits(1)).containsExactly(splitReader1);
+        assertThat(gate.drainReportedSplits(1)).isEmpty();
+        assertThat(gate.snapshotReportedSplits()).containsOnlyKeys(2);
+        assertThat(gate.snapshotReportedSplits().get(2)).containsExactly(splitReader2);
+    }
+
+    @Test
+    void testEmptyReturnedSplitsAreIgnored() {
+        ReaderRecoveryGate gate = new ReaderRecoveryGate(false);
+        gate.recordReturnedSplits(1, Collections.emptyList());
+
+        assertThat(gate.hasPendingRecovery()).isFalse();
+        assertThat(gate.hasReportedSplits()).isFalse();
+        assertThat(gate.snapshotReportedSplits()).isEmpty();
+        assertThat(gate.drainReportedSplits(1)).isEmpty();
+    }
+
+    @Test
+    void testDrainReportedSplitsReturnsReaderOrderAndClears() {
+        ReaderRecoveryGate gate = new ReaderRecoveryGate(true);
         DynamicKafkaSourceSplit splitReader2 = split("topic", 2);
         DynamicKafkaSourceSplit splitReader0 = split("topic", 0);
         gate.recordReportedSplits(2, Collections.singletonList(splitReader2));
