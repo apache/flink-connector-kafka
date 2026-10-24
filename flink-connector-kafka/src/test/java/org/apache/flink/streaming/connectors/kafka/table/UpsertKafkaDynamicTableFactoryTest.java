@@ -1004,7 +1004,9 @@ class UpsertKafkaDynamicTableFactoryTest {
                 0,
                 true,
                 FactoryMocks.IDENTIFIER.asSummaryString(),
-                parallelism);
+                parallelism,
+                false,
+                false);
     }
 
     private static KafkaDynamicSink createExpectedSink(

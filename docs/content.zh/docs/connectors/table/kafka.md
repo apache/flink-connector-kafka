@@ -287,6 +287,22 @@ CREATE TABLE KafkaTable (
       </td>
     </tr>
     <tr>
+      <td><h5>key.format.projection-pushdown.enabled</h5></td>
+      <td>可选</td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>启用后，查询投影（projection）会被下推到消息键（Key）格式中。下推的程度取决于该格式对投影下推的支持级别（不支持、顶层或嵌套）。
+      </td>
+    </tr>
+    <tr>
+      <td><h5>value.format.projection-pushdown.enabled</h5></td>
+      <td>可选</td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>启用后，查询投影（projection）会被下推到消息体（Value）格式中。下推的程度取决于该格式对投影下推的支持级别（不支持、顶层或嵌套）。
+      </td>
+    </tr>
+    <tr>
       <td><h5>scan.startup.mode</h5></td>
       <td>可选</td>
       <td style="word-wrap: break-word;">group-offsets</td>

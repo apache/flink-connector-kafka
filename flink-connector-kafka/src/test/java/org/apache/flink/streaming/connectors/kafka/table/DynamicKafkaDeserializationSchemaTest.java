@@ -51,13 +51,48 @@ public class DynamicKafkaDeserializationSchemaTest {
                     }
                 };
 
+        // Empty key projector (no key)
+        Decoder.Projector emptyKeyProjector =
+                new Decoder.Projector() {
+                    @Override
+                    public boolean isEmptyProjection() {
+                        return true;
+                    }
+
+                    @Override
+                    public boolean isProjectionNeeded() {
+                        return false;
+                    }
+
+                    @Override
+                    public void project(RowData deserialized, GenericRowData producedRow) {}
+                };
+        // Value projector: copy field 0 to position 0
+        Decoder.Projector valueProjector =
+                new Decoder.Projector() {
+                    @Override
+                    public boolean isEmptyProjection() {
+                        return false;
+                    }
+
+                    @Override
+                    public boolean isProjectionNeeded() {
+                        return true;
+                    }
+
+                    @Override
+                    public void project(RowData deserialized, GenericRowData producedRow) {
+                        producedRow.setField(0, ((GenericRowData) deserialized).getField(0));
+                    }
+                };
+
         DynamicKafkaDeserializationSchema schema =
                 new DynamicKafkaDeserializationSchema(
                         1,
                         null,
-                        new int[0],
+                        emptyKeyProjector,
                         new SingleRowDeserializationSchema(),
-                        new int[] {0},
+                        valueProjector,
                         true,
                         metadataConverters,
                         TypeInformation.of(RowData.class),
