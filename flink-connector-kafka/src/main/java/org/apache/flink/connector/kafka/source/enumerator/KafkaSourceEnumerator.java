@@ -144,7 +144,10 @@ public class KafkaSourceEnumerator
     // This flag will be marked as true if periodically partition discovery is disabled AND the
     // initializing partition discovery has finished.
     private boolean noMoreNewPartitionSplits = false;
-    // this flag will be marked as true if initial partitions are discovered after enumerator starts
+    // Set once a discovery result reaches handlePartitionSplitChanges: a non-empty one, or an empty
+    // one of a bounded source with one-time discovery. Partitions found after that start from the
+    // earliest offset rather than the configured one, so an unbounded source's empty change must
+    // not set it.
     private boolean initialDiscoveryFinished;
 
     private final boolean topicIntegrityCheckEnabled;
@@ -365,7 +368,12 @@ public class KafkaSourceEnumerator
 
         final PartitionChange partitionChange =
                 getPartitionChange(fetchedPartitions, !initialDiscoveryFinished);
-        if (partitionChange.isEmpty()) {
+        // A bounded source must reach handlePartitionSplitChanges even when nothing changed, as
+        // that is where its readers are signalled. After a restore every subscribed partition is
+        // already assigned, so the change is empty.
+        final boolean boundedOneTimeDiscovery =
+                boundedness == Boundedness.BOUNDED && partitionDiscoveryIntervalMs <= 0;
+        if (partitionChange.isEmpty() && !boundedOneTimeDiscovery) {
             return;
         }
         context.callAsync(
