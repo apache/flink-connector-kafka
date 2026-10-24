@@ -121,7 +121,9 @@ class FlinkKafkaInternalProducerITCase {
         try (FlinkKafkaInternalProducer<String, String> resumedProducer =
                 new FlinkKafkaInternalProducer<>(getProperties(), transactionalId)) {
             resumedProducer.resumeTransaction(
-                    snapshottedCommittable.getProducerId(), snapshottedCommittable.getEpoch());
+                    snapshottedCommittable.getProducerId(),
+                    snapshottedCommittable.getEpoch(),
+                    snapshottedCommittable.getTransactionV2Enabled());
             resumedProducer.commitTransaction();
         }
 
@@ -142,7 +144,9 @@ class FlinkKafkaInternalProducerITCase {
         try (FlinkKafkaInternalProducer<String, String> resumedProducer =
                 new FlinkKafkaInternalProducer<>(getProperties(), "dummy")) {
             resumedProducer.resumeTransaction(
-                    snapshottedCommittable.getProducerId(), snapshottedCommittable.getEpoch());
+                    snapshottedCommittable.getProducerId(),
+                    snapshottedCommittable.getEpoch(),
+                    snapshottedCommittable.getTransactionV2Enabled());
 
             assertThatThrownBy(resumedProducer::commitTransaction)
                     .isInstanceOf(InvalidTxnStateException.class);
@@ -198,7 +202,10 @@ class FlinkKafkaInternalProducerITCase {
 
         try (FlinkKafkaInternalProducer<String, String> resumedProducer =
                 new FlinkKafkaInternalProducer<>(getProperties(), transactionalId)) {
-            resumedProducer.resumeTransaction(committable.getProducerId(), committable.getEpoch());
+            resumedProducer.resumeTransaction(
+                    committable.getProducerId(),
+                    committable.getEpoch(),
+                    committable.getTransactionV2Enabled());
             AbstractThrowableAssert<?, ? extends Throwable> secondOp =
                     assertThatCode(
                             () -> {
