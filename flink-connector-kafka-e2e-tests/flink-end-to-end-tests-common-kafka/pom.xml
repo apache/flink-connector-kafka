@@ -77,6 +77,19 @@ under the License.
                 </exclusion>
             </exclusions>
         </dependency>
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-confluent-schema-registry-test</artifactId>
+            <version>${project.version}</version>
+            <!-- ensure the job jar is built beforehand; also provides the generated Avro classes -->
+            <scope>provided</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
 		<dependency>
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-connector-kafka</artifactId>
@@ -184,6 +197,11 @@ under the License.
             </exclusions>
 			<scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-clients</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -205,6 +223,15 @@ under the License.
                         <artifactItem>
                             <groupId>org.apache.flink</groupId>
                             <artifactId>flink-streaming-kafka-test</artifactId>
+                            <type>jar</type>
+                            <overWrite>true</overWrite>
+                            <outputDirectory>${project.build.directory}/dependencies</outputDirectory>
+                        </artifactItem>
+                        <artifactItem>
+                            <groupId>org.apache.flink</groupId>
+                            <artifactId>flink-confluent-schema-registry-test</artifactId>
+                            <classifier>shaded</classifier>
+                            <destFileName>confluent-schema-registry-test.jar</destFileName>
                             <type>jar</type>
                             <overWrite>true</overWrite>
                             <outputDirectory>${project.build.directory}/dependencies</outputDirectory>
