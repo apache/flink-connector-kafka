@@ -135,11 +135,11 @@ under the License.
 
 		<dependency>
 			<groupId>org.testcontainers</groupId>
-			<artifactId>kafka</artifactId>
+			<artifactId>testcontainers-kafka</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>org.testcontainers</groupId>
-			<artifactId>junit-jupiter</artifactId>
+			<artifactId>testcontainers-junit-jupiter</artifactId>
 		</dependency>
 
         <dependency>
@@ -253,7 +253,7 @@ under the License.
                             <outputDirectory>${project.build.directory}/dependencies</outputDirectory>
                         </artifactItem>
                     </artifactItems>
-					<ignoredUnusedDeclaredDependencies>org.apache.flink:flink-streaming-kafka-test,org.apache.flink:flink-sql-avro,org.apache.flink:flink-sql-avro-confluent-registry,org.apache.flink:flink-connector-base,org.apache.flink:flink-sql-connector-kafka,org.testcontainers:kafka
+					<ignoredUnusedDeclaredDependencies>org.apache.flink:flink-streaming-kafka-test,org.apache.flink:flink-sql-avro,org.apache.flink:flink-sql-avro-confluent-registry,org.apache.flink:flink-connector-base,org.apache.flink:flink-sql-connector-kafka,org.testcontainers:testcontainers-kafka
 					</ignoredUnusedDeclaredDependencies>
                 </configuration>
             </plugin>
