@@ -193,6 +193,22 @@ Connector Options
       </td>
     </tr>
     <tr>
+      <td><h5>scan.topic-partition-discovery.interval</h5></td>
+      <td>optional</td>
+      <td>no</td>
+      <td style="word-wrap: break-word;">5 minutes</td>
+      <td>Duration</td>
+      <td>Interval at which the source finds new Kafka topics and partitions. To disable this feature, set the value to 0.</td>
+    </tr>
+    <tr>
+      <td><h5>scan.topic-integrity-check.enabled</h5></td>
+      <td>optional</td>
+      <td>no</td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>Whether to verify the id of the subscribed topics during runtime and fail the job if a topic is missing or was recreated. The check is performed on startup and, if <code>scan.topic-partition-discovery.interval</code> is enabled, on every discovery interval.</td>
+    </tr>
+    <tr>
       <td><h5>scan.parallelism</h5></td>
       <td>optional</td>
       <td>no</td>

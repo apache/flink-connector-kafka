@@ -170,6 +170,14 @@ CREATE TABLE DynamicKafkaTable (
       <td>Integer</td>
       <td>连续发现失败次数阈值，超过将触发作业失败。</td>
     </tr>
+    <tr>
+      <td><h5>scan.topic-integrity-check.enabled</h5></td>
+      <td>可选</td>
+      <td>否</td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>是否在运行时校验所订阅 topic 的 id，并在 topic 缺失或被重建时使作业失败。检查会在启动时执行；如果开启了 <code>scan.topic-partition-discovery.interval</code>，则在每个探测周期都会执行。</td>
+    </tr>
     </tbody>
 </table>
 

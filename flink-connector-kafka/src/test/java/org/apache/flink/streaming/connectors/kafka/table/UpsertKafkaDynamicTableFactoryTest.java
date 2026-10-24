@@ -27,6 +27,7 @@ import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 import org.apache.flink.connector.kafka.source.KafkaSource;
+import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.connector.kafka.source.KafkaSourceTestUtils;
 import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
@@ -242,6 +243,27 @@ class UpsertKafkaDynamicTableFactoryTest {
         ScanTableSource.ScanRuntimeProvider provider =
                 actualUpsertKafkaSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
         assertKafkaSource(provider);
+    }
+
+    @Test
+    void testTableSourceTopicIntegrityCheck() {
+        final KafkaDynamicSource defaultSource =
+                (KafkaDynamicSource) createTableSource(SOURCE_SCHEMA, getFullSourceOptions());
+        assertThat(defaultSource.properties)
+                .doesNotContainKey(KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key());
+
+        final Map<String, String> options =
+                getModifiedOptions(
+                        getFullSourceOptions(),
+                        o -> o.put("scan.topic-integrity-check.enabled", "true"));
+        final KafkaDynamicSource enabledSource =
+                (KafkaDynamicSource) createTableSource(SOURCE_SCHEMA, options);
+        assertThat(
+                        enabledSource.properties.getProperty(
+                                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))
+                .isEqualTo("true");
+        assertKafkaSource(
+                enabledSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE));
     }
 
     @Test

@@ -74,6 +74,7 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_PARALLELISM;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_MODE;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_TIMESTAMP_MILLIS;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_TOPIC_INTEGRITY_CHECK_ENABLED;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_TOPIC_PARTITION_DISCOVERY;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FIELDS_INCLUDE;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
@@ -119,6 +120,7 @@ public class DynamicKafkaTableFactory implements DynamicTableSourceFactory {
         options.add(SCAN_BOUNDED_MODE);
         options.add(SCAN_BOUNDED_TIMESTAMP_MILLIS);
         options.add(SCAN_TOPIC_PARTITION_DISCOVERY);
+        options.add(SCAN_TOPIC_INTEGRITY_CHECK_ENABLED);
         options.add(SCAN_PARALLELISM);
         options.add(DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS);
         options.add(DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_FAILURE_THRESHOLD);
@@ -160,6 +162,10 @@ public class DynamicKafkaTableFactory implements DynamicTableSourceFactory {
         properties.setProperty(
                 KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(),
                 Long.toString(partitionDiscoveryInterval.toMillis()));
+
+        if (tableOptions.get(SCAN_TOPIC_INTEGRITY_CHECK_ENABLED)) {
+            properties.setProperty(KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key(), "true");
+        }
 
         applyDynamicDiscoveryOptions(tableOptions, properties);
 

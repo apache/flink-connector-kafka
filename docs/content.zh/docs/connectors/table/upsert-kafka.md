@@ -181,6 +181,22 @@ of all available metadata fields.
        </td>
     </tr>
     <tr>
+      <td><h5>scan.topic-partition-discovery.interval</h5></td>
+      <td>optional</td>
+      <td>no</td>
+      <td style="word-wrap: break-word;">5分钟</td>
+      <td>Duration</td>
+      <td>Consumer 定期探测动态创建的 Kafka topic 和 partition 的时间间隔。需要显式地设置为 0 才能关闭此功能。</td>
+    </tr>
+    <tr>
+      <td><h5>scan.topic-integrity-check.enabled</h5></td>
+      <td>optional</td>
+      <td>no</td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>是否在运行时校验所订阅 topic 的 id，并在 topic 缺失或被重建时使作业失败。检查会在启动时执行；如果开启了 <code>scan.topic-partition-discovery.interval</code>，则在每个探测周期都会执行。</td>
+    </tr>
+    <tr>
       <td><h5>scan.parallelism</h5></td>
       <td>optional</td>
       <td>no</td>

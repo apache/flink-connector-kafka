@@ -560,7 +560,10 @@ public class DynamicKafkaSourceEnumerator
 
                 newKafkaSourceEnumState =
                         new KafkaSourceEnumState(
-                                partitions, kafkaSourceEnumState.initialDiscoveryFinished());
+                                partitions,
+                                kafkaSourceEnumState.initialDiscoveryFinished(),
+                                filterTrackedTopicIds(
+                                        kafkaSourceEnumState, activeClusterTopics.getValue()));
             } else {
                 newKafkaSourceEnumState = new KafkaSourceEnumState(Collections.emptySet(), false);
             }
@@ -1208,6 +1211,18 @@ public class DynamicKafkaSourceEnumerator
         return kafkaSourceEnumState.splits().stream()
                 .filter(splitStatus -> activeTopics.contains(splitStatus.split().getTopic()))
                 .collect(Collectors.toSet());
+    }
+
+    /**
+     * Keeps the tracked topic ids of the still active topics, so a topic recreated while the
+     * enumerators are being restarted on a metadata change is still detected by the topic integrity
+     * check.
+     */
+    private Map<String, String> filterTrackedTopicIds(
+            KafkaSourceEnumState kafkaSourceEnumState, Set<String> activeTopics) {
+        return kafkaSourceEnumState.trackedTopicIdsByName().entrySet().stream()
+                .filter(entry -> activeTopics.contains(entry.getKey()))
+                .collect(Collectors.toMap(Entry::getKey, Entry::getValue));
     }
 
     private static String summarizeSplitOffsets(Collection<KafkaPartitionSplit> splits) {

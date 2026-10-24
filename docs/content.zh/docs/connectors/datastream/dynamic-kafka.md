@@ -302,6 +302,13 @@ There are configuration options in DynamicKafkaSourceOptions that can be configu
 In addition to this list, see the [regular Kafka connector]({{< ref "docs/connectors/datastream/kafka" >}}#additional-properties) for
 a list of applicable properties.
 
+### Topic 完整性检查
+将属性 `scan.topic-integrity-check.enabled` 设置为 `true`，即可对 stream 中每个 Kafka 集群所订阅的 topic 启用
+[Topic 完整性检查]({{< ref "docs/connectors/datastream/kafka" >}}#topic-integrity-check)：
+如果 topic 被删除或重建，Source 会以 `TopicIntegrityException` 失败。检查在启动时以及每个
+[分区发现]({{< ref "docs/connectors/datastream/kafka" >}}#dynamic-partition-discovery)周期执行，
+所跟踪的 topic id 会按集群保存在 checkpoint 中，并在 stream 元数据变更时保留。
+
 ### Metrics
 
 <table class="table table-bordered">

@@ -849,6 +849,76 @@ public class DynamicKafkaSourceEnumeratorTest {
     }
 
     @Test
+    public void testTrackedTopicIdsSurviveMetadataChange() throws Throwable {
+        final String topic2 = TOPIC + "_integrity";
+
+        DynamicKafkaSourceTestHelper.createTopic(topic2, NUM_SPLITS_PER_CLUSTER, 1);
+        DynamicKafkaSourceTestHelper.produceToKafka(
+                topic2, NUM_SPLITS_PER_CLUSTER, NUM_RECORDS_PER_SPLIT);
+
+        final Set<KafkaStream> initialStreams =
+                Collections.singleton(
+                        new KafkaStream(
+                                TOPIC,
+                                DynamicKafkaSourceTestHelper.getClusterMetadataMap(
+                                        0, TOPIC, topic2)));
+        final Set<KafkaStream> updatedStreams =
+                Collections.singleton(
+                        new KafkaStream(
+                                TOPIC,
+                                DynamicKafkaSourceTestHelper.getClusterMetadataMap(0, TOPIC)));
+
+        try (MockKafkaMetadataService metadataService =
+                        new MockKafkaMetadataService(initialStreams);
+                MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                context,
+                                metadataService,
+                                (properties) -> {
+                                    properties.setProperty(
+                                            DynamicKafkaSourceOptions
+                                                    .STREAM_METADATA_DISCOVERY_INTERVAL_MS
+                                                    .key(),
+                                            "1");
+                                    properties.setProperty(
+                                            KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key(),
+                                            "true");
+                                })) {
+            enumerator.start();
+            context.runPeriodicCallable(0);
+            runAllOneTimeCallables(context);
+            mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, 0);
+            mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, 1);
+
+            final Map<String, String> initialTrackedIds =
+                    getTrackedTopicIds(enumerator.snapshotState(-1));
+            assertThat(initialTrackedIds).containsOnlyKeys(TOPIC, topic2);
+
+            metadataService.setKafkaStreams(updatedStreams);
+            context.runPeriodicCallable(0);
+
+            // the restarted enumerators have not rediscovered the topics yet, so the ids can only
+            // come from the state carried over the metadata change
+            assertThat(getTrackedTopicIds(enumerator.snapshotState(-1)))
+                    .containsOnly(Map.entry(TOPIC, initialTrackedIds.get(TOPIC)));
+
+            runAllOneTimeCallables(context);
+            mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, 2);
+
+            assertThat(getTrackedTopicIds(enumerator.snapshotState(-1)))
+                    .containsOnly(Map.entry(TOPIC, initialTrackedIds.get(TOPIC)));
+        }
+    }
+
+    private static Map<String, String> getTrackedTopicIds(DynamicKafkaSourceEnumState state) {
+        return state.getClusterEnumeratorStates().values().stream()
+                .flatMap(clusterState -> clusterState.trackedTopicIdsByName().entrySet().stream())
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+    }
+
+    @Test
     public void testEnumeratorStateRetainsRemovedClusterUntilExpired() throws Throwable {
         int restoredParallelism = NUM_SUBTASKS + 1;
         KafkaStream initialStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
