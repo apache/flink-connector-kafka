@@ -535,7 +535,7 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
         kafkaClusterMetricGroupManager.close();
     }
 
-    private KafkaSourceReader<T> createReader(String kafkaClusterId) throws Exception {
+    KafkaSourceReader<T> createReader(String kafkaClusterId) throws Exception {
         FutureCompletingBlockingQueue<RecordsWithSplitIds<ConsumerRecord<byte[], byte[]>>>
                 elementsQueue = new FutureCompletingBlockingQueue<>();
         Properties readerSpecificProperties = new Properties();
