@@ -2160,6 +2160,12 @@ public class DynamicKafkaSourceEnumeratorTest {
 
     private DynamicKafkaSourceEnumerator createBoundedEnumerator(
             SplitEnumeratorContext<DynamicKafkaSourceSplit> context) {
+        return createBoundedEnumerator(context, new DynamicKafkaSourceEnumState());
+    }
+
+    private DynamicKafkaSourceEnumerator createBoundedEnumerator(
+            SplitEnumeratorContext<DynamicKafkaSourceSplit> context,
+            DynamicKafkaSourceEnumState enumState) {
         Properties properties = new Properties();
         properties.setProperty(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "0");
         properties.setProperty(
@@ -2173,7 +2179,7 @@ public class DynamicKafkaSourceEnumeratorTest {
                 OffsetsInitializer.latest(),
                 properties,
                 Boundedness.BOUNDED,
-                new DynamicKafkaSourceEnumState(),
+                enumState,
                 new TestKafkaEnumContextProxyFactory());
     }
 
@@ -2200,6 +2206,36 @@ public class DynamicKafkaSourceEnumeratorTest {
                 new MockKafkaMetadataService(
                         Collections.singleton(DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC))),
                 applyPropertiesConsumer);
+    }
+
+    /**
+     * A bounded DynamicKafkaSource restored with every partition already assigned must still tell
+     * its readers that no more splits are coming. Each sub-enumerator runs its one-time discovery
+     * and finds nothing new. One that returns early on that empty change never marks the discovery
+     * as finished, so the readers wait forever and the job never finishes.
+     */
+    @Test
+    public void testBoundedRestoreSignalsNoMoreSplitsWithoutPartitionChanges() throws Throwable {
+        try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                DynamicKafkaSourceEnumerator enumerator =
+                        createBoundedEnumerator(context, getCheckpointState())) {
+            enumerator.start();
+
+            for (int reader = 0; reader < NUM_SUBTASKS; reader++) {
+                mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, reader);
+            }
+            runAllOneTimeCallables(context);
+
+            assertThat(context.getSplitsAssignmentSequence())
+                    .as("Every partition is already assigned, so nothing may be assigned again")
+                    .isEmpty();
+            for (int reader = 0; reader < NUM_SUBTASKS; reader++) {
+                assertThat(context.hasNoMoreSplits(reader))
+                        .as("Reader %s must be told that no more splits are coming", reader)
+                        .isTrue();
+            }
+        }
     }
 
     private DynamicKafkaSourceEnumerator createEnumerator(
