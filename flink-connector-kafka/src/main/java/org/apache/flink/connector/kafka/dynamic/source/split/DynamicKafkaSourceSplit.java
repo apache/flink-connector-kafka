@@ -52,7 +52,31 @@ public class DynamicKafkaSourceSplit extends KafkaPartitionSplit {
 
     @Override
     public String splitId() {
-        return kafkaClusterId + "-" + kafkaPartitionSplit.splitId();
+        return toSplitId(kafkaClusterId, kafkaPartitionSplit.splitId());
+    }
+
+    /**
+     * Formats the id of the split for a partition of a Kafka cluster.
+     *
+     * <p>The id identifies a physical partition: Flink keeps one split-local output per id and
+     * releases it when the split finishes, so two partitions that share an id share a watermark
+     * generator and stop holding back the combined watermark of the reader as soon as either of
+     * them finishes. Topic names may contain {@code '-'}, so simply prefixing the partition id with
+     * the cluster id is ambiguous: cluster {@code a} with topic {@code b-c} and cluster {@code a-b}
+     * with topic {@code c} would both format partition {@code 0} as {@code a-b-c-0}.
+     *
+     * <p>The cluster id is therefore prefixed with its length. The prefix consists of digits only,
+     * so the first {@code '-'} that follows it terminates the number, and the cluster id has
+     * exactly that many characters: the cluster id can be read back unambiguously and the rest of
+     * the id is the unchanged partition id. This makes the encoding injective over the pairs of
+     * cluster id and partition id, which are unique per physical partition.
+     *
+     * @param kafkaClusterId the id of the Kafka cluster
+     * @param kafkaPartitionSplitId the id of the partition, see {@link
+     *     KafkaPartitionSplit#splitId()}
+     */
+    public static String toSplitId(String kafkaClusterId, String kafkaPartitionSplitId) {
+        return kafkaClusterId.length() + "-" + kafkaClusterId + "-" + kafkaPartitionSplitId;
     }
 
     public String getKafkaClusterId() {

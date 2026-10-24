@@ -21,6 +21,7 @@ package org.apache.flink.connector.kafka.dynamic.source.reader;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
+import org.apache.flink.connector.kafka.dynamic.source.split.DynamicKafkaSourceSplit;
 import org.apache.flink.connector.kafka.source.metrics.KafkaSourceReaderMetrics;
 import org.apache.flink.connector.kafka.source.reader.KafkaPartitionSplitReader;
 
@@ -53,7 +54,7 @@ public class KafkaPartitionSplitReaderWrapper extends KafkaPartitionSplitReader
         return new WrappedRecordsWithSplitIds(super.fetch(), kafkaClusterId);
     }
 
-    private static final class WrappedRecordsWithSplitIds
+    static final class WrappedRecordsWithSplitIds
             implements RecordsWithSplitIds<ConsumerRecord<byte[], byte[]>> {
 
         private final RecordsWithSplitIds<ConsumerRecord<byte[], byte[]>> delegate;
@@ -73,7 +74,7 @@ public class KafkaPartitionSplitReaderWrapper extends KafkaPartitionSplitReader
             if (nextSplit == null) {
                 return nextSplit;
             } else {
-                return kafkaClusterId + "-" + nextSplit;
+                return DynamicKafkaSourceSplit.toSplitId(kafkaClusterId, nextSplit);
             }
         }
 
@@ -86,7 +87,10 @@ public class KafkaPartitionSplitReaderWrapper extends KafkaPartitionSplitReader
         @Override
         public Set<String> finishedSplits() {
             return delegate.finishedSplits().stream()
-                    .map(finishedSplit -> kafkaClusterId + "-" + finishedSplit)
+                    .map(
+                            finishedSplit ->
+                                    DynamicKafkaSourceSplit.toSplitId(
+                                            kafkaClusterId, finishedSplit))
                     .collect(Collectors.toSet());
         }
 
