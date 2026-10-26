@@ -44,6 +44,9 @@ data as normal Kafka messages value, and write DELETE data as Kafka messages wit
 partition data on the values of the primary key columns, so the update/deletion messages on the same
 key will fall into the same partition.
 
+Use the [Kafka connector]({{< ref "docs/connectors/table/kafka" >}}) for topics where each record is an insert or a change event
+in a CDC format.
+
 Dependencies
 ------------
 
