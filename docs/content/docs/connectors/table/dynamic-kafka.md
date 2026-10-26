@@ -24,13 +24,18 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Dynamic Kafka SQL Connector
+# Dynamic Kafka SQL Connector _`Experimental`_
 
 {{< label "Scan Source: Unbounded" >}}
 
 The Dynamic Kafka connector allows for reading data from Kafka topics that can move across
 clusters without restarting the job. Streams are resolved via a Kafka metadata service. This is
 especially useful for cluster migrations and dynamic topic/cluster changes.
+
+{{< hint info >}}
+Use this connector when the topics or clusters to read from change while the job runs, for example
+during a cluster migration. Otherwise, use the [Kafka connector]({{< ref "docs/connectors/table/kafka" >}}).
+{{< /hint >}}
 
 Dependencies
 ------------

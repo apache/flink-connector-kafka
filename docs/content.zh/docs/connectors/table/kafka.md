@@ -31,6 +31,21 @@ under the License.
 
 Kafka 连接器提供从 Kafka topic 中消费和写入数据的能力。
 
+Which Kafka connector to use
+----------------------------
+
+Three SQL connectors work with Kafka:
+
+- `kafka` (this page) reads and writes records as they are. Each record is an insert, unless the
+  topic holds change events in a [CDC format]({{< ref "docs/connectors/table/formats/overview" >}}) such as Debezium. Use this connector by
+  default.
+- [`upsert-kafka`]({{< ref "docs/connectors/table/upsert-kafka" >}}) treats a topic as a table with a primary key: each record is the latest
+  value for its key, and a record with a null value deletes the key. Use it to read compacted
+  topics, or to write results that are updated over time, such as aggregations.
+- [`dynamic-kafka`]({{< ref "docs/connectors/table/dynamic-kafka" >}}) reads topics that move between Kafka clusters while the job runs,
+  resolved through a Kafka metadata service. Use it when topics or clusters change at runtime, for
+  example during a cluster migration.
+
 依赖
 ------------
 
@@ -547,6 +562,7 @@ Flink 提供了几种 CDC 格式：
 * [debezium]({{< ref "docs/connectors/table/formats/debezium.md" >}}) 
 * [canal]({{< ref "docs/connectors/table/formats/canal.md" >}})
 * [maxwell]({{< ref "docs/connectors/table/formats/maxwell.md" >}}) 
+* [ogg]({{< ref "docs/connectors/table/formats/ogg.md" >}})
 
 ### Sink 分区
 
