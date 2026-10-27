@@ -1,7 +1,6 @@
 #
 #Tue Feb 03 14:34:47 CET 2026
 Return\ and\ argument\ types\ of\ methods\ annotated\ with\ @Public\ must\ be\ annotated\ with\ @Public.=690729ae-756f-4ccc-831b-2667db3fdae5
-Connector\ production\ code\ must\ not\ depend\ on\ non-public\ API\ outside\ of\ connector\ packages=3030609a-c417-456d-af43-1799a4445197
 ITCASE\ tests\ should\ use\ a\ MiniCluster\ resource\ or\ extension=86dfd459-67a9-4b26-9b5c-0b0bbf22681a
 Production\ code\ must\ not\ call\ methods\ annotated\ with\ @VisibleForTesting=27a0a5e4-29c2-4069-b381-952746c90862
 JUnit\ 4\ is\ forbidden\ in\ flink-connector-kafka.\ Please\ use\ JUnit\ 5\ (org.junit.jupiter.*)\ instead.=f902c3ff-48e5-424e-923f-3705c14930a0
