@@ -40,6 +40,7 @@ import java.lang.reflect.Method;
 import java.time.Duration;
 import java.util.Properties;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.apache.flink.util.Preconditions.checkState;
 
@@ -203,7 +204,7 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         TransactionalRequestResult result = enqueueNewPartitions();
         Object sender = getField("sender");
         invoke(sender, "wakeup");
-        result.await();
+        result.await(Long.MAX_VALUE, TimeUnit.MILLISECONDS, "flushing new partitions");
     }
 
     /**
