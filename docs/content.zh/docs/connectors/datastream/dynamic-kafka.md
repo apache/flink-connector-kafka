@@ -33,8 +33,9 @@ an existing Kafka cluster/topic (cluster migration/failover/other infrastructure
 makes these operations automated so that they are transparent to Kafka consumers.
 
 {{< hint info >}}
-Use this connector when the topics or clusters to read from change while the job runs, for example
-during a cluster migration. Otherwise, use the [Kafka connector]({{< ref "docs/connectors/datastream/kafka" >}}).
+Use this connector to read one stream from several Kafka clusters, or when the topics or clusters to
+read from change while the job runs, for example during a cluster migration. Otherwise, use the
+[Kafka connector]({{< ref "docs/connectors/datastream/kafka" >}}).
 {{< /hint >}}
 
 ## Dependency

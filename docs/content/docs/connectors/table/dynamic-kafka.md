@@ -33,8 +33,9 @@ clusters without restarting the job. Streams are resolved via a Kafka metadata s
 especially useful for cluster migrations and dynamic topic/cluster changes.
 
 {{< hint info >}}
-Use this connector when the topics or clusters to read from change while the job runs, for example
-during a cluster migration. Otherwise, use the [Kafka connector]({{< ref "docs/connectors/table/kafka" >}}).
+Use this connector to read from several Kafka clusters through a custom metadata service, or when the
+topics or clusters to read from change while the job runs, for example during a cluster migration.
+Otherwise, use the [Kafka connector]({{< ref "docs/connectors/table/kafka" >}}).
 {{< /hint >}}
 
 Dependencies
