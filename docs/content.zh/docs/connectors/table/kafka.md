@@ -43,9 +43,9 @@ Three SQL connectors work with Kafka:
   value for its key, and a record with a null value deletes the key. Use it to read compacted
   topics, or to write results that are updated over time, such as aggregations.
 - [`dynamic-kafka`]({{< ref "docs/connectors/table/dynamic-kafka" >}}) reads topics from one or more Kafka clusters, resolved through a
-  Kafka metadata service, and follows them when they move between clusters while the job runs. Use
-  it to read from several clusters at once, or when topics or clusters change at runtime, for
-  example during a cluster migration.
+  Kafka metadata service. Use it to read from several clusters at once, or to follow topics that
+  move between clusters while the job runs, for example during a cluster migration. Both need your
+  own Java [`KafkaMetadataService`]({{< ref "docs/connectors/datastream/dynamic-kafka" >}}#kafka-metadata-service) implementation.
 
 依赖
 ------------
