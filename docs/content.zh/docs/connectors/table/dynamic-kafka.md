@@ -32,8 +32,9 @@ Dynamic Kafka 连接器允许从可跨集群变更的 Kafka 主题读取数据�
 流的解析由 Kafka 元数据服务完成，尤其适用于集群迁移和动态主题/集群变更场景。
 
 {{< hint info >}}
-Use this connector when the topics or clusters to read from change while the job runs, for example
-during a cluster migration. Otherwise, use the [Kafka connector]({{< ref "docs/connectors/table/kafka" >}}).
+Use this connector to read from several Kafka clusters through a custom metadata service, or when the
+topics or clusters to read from change while the job runs, for example during a cluster migration.
+Otherwise, use the [Kafka connector]({{< ref "docs/connectors/table/kafka" >}}).
 {{< /hint >}}
 
 依赖

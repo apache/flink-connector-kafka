@@ -42,8 +42,9 @@ Three SQL connectors work with Kafka:
 - [`upsert-kafka`]({{< ref "docs/connectors/table/upsert-kafka" >}}) treats a topic as a table with a primary key: each record is the latest
   value for its key, and a record with a null value deletes the key. Use it to read compacted
   topics, or to write results that are updated over time, such as aggregations.
-- [`dynamic-kafka`]({{< ref "docs/connectors/table/dynamic-kafka" >}}) reads topics that move between Kafka clusters while the job runs,
-  resolved through a Kafka metadata service. Use it when topics or clusters change at runtime, for
+- [`dynamic-kafka`]({{< ref "docs/connectors/table/dynamic-kafka" >}}) reads topics from one or more Kafka clusters, resolved through a
+  Kafka metadata service, and follows them when they move between clusters while the job runs. Use
+  it to read from several clusters at once, or when topics or clusters change at runtime, for
   example during a cluster migration.
 
 依赖
