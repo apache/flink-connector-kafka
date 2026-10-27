@@ -32,6 +32,12 @@ topics and/or clusters, without requiring a job restart. This is especially usef
 an existing Kafka cluster/topic (cluster migration/failover/other infrastructure changes) and when you need direct integration with Hybrid Source. The solution 
 makes these operations automated so that they are transparent to Kafka consumers.
 
+{{< hint info >}}
+Use this connector to read one stream from several Kafka clusters, or when the topics or clusters to
+read from change while the job runs, for example during a cluster migration. Otherwise, use the
+[Kafka connector]({{< ref "docs/connectors/datastream/kafka" >}}).
+{{< /hint >}}
+
 ## Dependency
 
 For details on Kafka compatibility, please refer to the official [Kafka documentation](https://kafka.apache.org/protocol.html#protocol_compatibility).
