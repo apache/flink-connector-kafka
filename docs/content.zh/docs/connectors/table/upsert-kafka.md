@@ -35,6 +35,9 @@ Upsert Kafka 连接器支持以 upsert 方式从 Kafka topic 中读取数据并�
 
 作为 sink，upsert-kafka 连接器可以消费 changelog 流。它会将 INSERT/UPDATE_AFTER 数据作为正常的 Kafka 消息写入，并将 DELETE 数据以 value 为空的 Kafka 消息写入（表示对应 key 的消息被删除）。Flink 将根据主键列的值对数据进行分区，从而保证主键上的消息有序，因此同一主键上的更新/删除消息将落在同一分区中。
 
+Use the [Kafka connector]({{< ref "docs/connectors/table/kafka" >}}) for topics where each record is an insert or a change event
+in a CDC format.
+
 依赖
 ------------
 
