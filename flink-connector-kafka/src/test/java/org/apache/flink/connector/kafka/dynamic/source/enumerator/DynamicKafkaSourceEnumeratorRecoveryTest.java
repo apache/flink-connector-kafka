@@ -860,8 +860,8 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
     }
 
     @ParameterizedTest
-    @MethodSource("collidingSplitOwners")
-    public void testLocalFailureKeepsDistinctOwnersWhenActiveAndRetainedSplitIdsCollide(
+    @MethodSource("ambiguousClusterAndTopicIds")
+    public void testLocalFailureKeepsDistinctOwnersForAmbiguousClusterAndTopicIds(
             boolean bounded, int retainedReader) throws Throwable {
         DynamicKafkaSourceSplit activeSplit =
                 new DynamicKafkaSourceSplit(
@@ -871,7 +871,9 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
                                 "a-b",
                                 new KafkaPartitionSplit(new TopicPartition("c", 0), 456L, 2000L))
                         .retainUntil(Long.MAX_VALUE);
-        assertThat(activeSplit.splitId()).isEqualTo(retainedSplit.splitId());
+        assertThat(activeSplit.splitId())
+                .as("the partitions must not share a split id")
+                .isNotEqualTo(retainedSplit.splitId());
         assertThat(
                         KafkaSourceEnumerator.getSplitOwner(
                                 activeSplit.getKafkaPartitionSplit().getTopicPartition(), 2))
@@ -984,7 +986,7 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
         }
     }
 
-    private static Stream<Arguments> collidingSplitOwners() {
+    private static Stream<Arguments> ambiguousClusterAndTopicIds() {
         return Stream.of(
                 Arguments.of(true, 0),
                 Arguments.of(true, 1),
@@ -994,12 +996,14 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testInitialRecoveryReRegistrationKeepsPartitionsWithCollidingSplitIds(
+    public void testInitialRecoveryReRegistrationKeepsPartitionsWithAmbiguousClusterAndTopicIds(
             boolean bounded) throws Throwable {
         DynamicKafkaSourceSplit activeSplit = createSplit("a", "b-c", 123L, 1000L);
         DynamicKafkaSourceSplit retainedSplit =
                 createSplit("a-b", "c", 456L, 2000L).retainUntil(Long.MAX_VALUE);
-        assertThat(activeSplit.splitId()).isEqualTo(retainedSplit.splitId());
+        assertThat(activeSplit.splitId())
+                .as("the partitions must not share a split id")
+                .isNotEqualTo(retainedSplit.splitId());
         KafkaStream stream = createKafkaStream("stream", "a", "b-c");
         List<DynamicKafkaSourceSplit> report = List.of(activeSplit, retainedSplit);
 
@@ -1030,12 +1034,14 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    public void testRestoredPendingReportsKeepPartitionsWithCollidingSplitIds(boolean bounded)
-            throws Throwable {
+    public void testRestoredPendingReportsKeepPartitionsWithAmbiguousClusterAndTopicIds(
+            boolean bounded) throws Throwable {
         DynamicKafkaSourceSplit activeSplit = createSplit("a", "b-c", 123L, 1000L);
         DynamicKafkaSourceSplit retainedSplit =
                 createSplit("a-b", "c", 456L, 2000L).retainUntil(Long.MAX_VALUE);
-        assertThat(activeSplit.splitId()).isEqualTo(retainedSplit.splitId());
+        assertThat(activeSplit.splitId())
+                .as("the partitions must not share a split id")
+                .isNotEqualTo(retainedSplit.splitId());
         KafkaStream stream = createKafkaStream("stream", "a", "b-c");
         List<DynamicKafkaSourceSplit> report = List.of(activeSplit, retainedSplit);
         // A checkpoint taken while the initial gate was pending carries reader 0's report.
@@ -1074,12 +1080,14 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
     }
 
     @ParameterizedTest
-    @MethodSource("collidingSplitModes")
-    public void testInitialRecoveryKeepsActivePartitionsWithCollidingSplitIds(
+    @MethodSource("ambiguousClusterAndTopicModes")
+    public void testInitialRecoveryKeepsActivePartitionsWithAmbiguousClusterAndTopicIds(
             String mode, boolean bounded) throws Throwable {
         DynamicKafkaSourceSplit firstSplit = createSplit("a", "b-c", 123L, 1000L);
         DynamicKafkaSourceSplit secondSplit = createSplit("a-b", "c", 456L, 2000L);
-        assertThat(firstSplit.splitId()).isEqualTo(secondSplit.splitId());
+        assertThat(firstSplit.splitId())
+                .as("the partitions must not share a split id")
+                .isNotEqualTo(secondSplit.splitId());
         KafkaStream stream = createKafkaStream("stream", Map.of("a", "b-c", "a-b", "c"));
         DynamicKafkaSourceEnumState restoredState =
                 createRestoredState(
@@ -1139,12 +1147,14 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
     }
 
     @ParameterizedTest
-    @MethodSource("collidingSplitModes")
-    public void testLocalRestartKeepsActivePartitionsWithCollidingSplitIds(
+    @MethodSource("ambiguousClusterAndTopicModes")
+    public void testLocalRestartKeepsActivePartitionsWithAmbiguousClusterAndTopicIds(
             String mode, boolean bounded) throws Throwable {
         DynamicKafkaSourceSplit firstSplit = createSplit("a", "b-c", 10L, 1000L);
         DynamicKafkaSourceSplit secondSplit = createSplit("a-b", "c", 20L, 2000L);
-        assertThat(firstSplit.splitId()).isEqualTo(secondSplit.splitId());
+        assertThat(firstSplit.splitId())
+                .as("the partitions must not share a split id")
+                .isNotEqualTo(secondSplit.splitId());
         KafkaStream stream = createKafkaStream("stream", Map.of("a", "b-c", "a-b", "c"));
 
         try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
@@ -1177,7 +1187,7 @@ public class DynamicKafkaSourceEnumeratorRecoveryTest {
         }
     }
 
-    private static Stream<Arguments> collidingSplitModes() {
+    private static Stream<Arguments> ambiguousClusterAndTopicModes() {
         return Stream.of(
                 Arguments.of("per_cluster", true),
                 Arguments.of("per_cluster", false),
