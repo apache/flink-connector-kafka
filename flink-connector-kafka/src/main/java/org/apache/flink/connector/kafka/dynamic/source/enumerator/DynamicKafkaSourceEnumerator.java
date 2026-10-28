@@ -280,11 +280,15 @@ public class DynamicKafkaSourceEnumerator
                         summarizeSplitOffsets(state.assignedSplits()),
                         summarizeSplitOffsets(state.unassignedSplits()));
             }
-            this.latestClusterTopicsMap.put(
-                    clusterId,
-                    state.assignedSplits().stream()
-                            .map(KafkaPartitionSplit::getTopic)
-                            .collect(Collectors.toSet()));
+            // Subscribe to every topic known from the checkpoint, not only to the topics with
+            // assigned splits. so the first discovery doesn't drop the tracked id of a topic whose
+            // splits were still unassigned.
+            Set<String> restoredTopics =
+                    state.splits().stream()
+                            .map(splitStatus -> splitStatus.split().getTopic())
+                            .collect(Collectors.toCollection(HashSet::new));
+            restoredTopics.addAll(state.trackedTopicIdsByName().keySet());
+            this.latestClusterTopicsMap.put(clusterId, restoredTopics);
             clusterEnumState
                     .getValue()
                     .splits()
@@ -560,7 +564,10 @@ public class DynamicKafkaSourceEnumerator
 
                 newKafkaSourceEnumState =
                         new KafkaSourceEnumState(
-                                partitions, kafkaSourceEnumState.initialDiscoveryFinished());
+                                partitions,
+                                kafkaSourceEnumState.initialDiscoveryFinished(),
+                                filterTrackedTopicIds(
+                                        kafkaSourceEnumState, activeClusterTopics.getValue()));
             } else {
                 newKafkaSourceEnumState = new KafkaSourceEnumState(Collections.emptySet(), false);
             }
@@ -1208,6 +1215,18 @@ public class DynamicKafkaSourceEnumerator
         return kafkaSourceEnumState.splits().stream()
                 .filter(splitStatus -> activeTopics.contains(splitStatus.split().getTopic()))
                 .collect(Collectors.toSet());
+    }
+
+    /**
+     * Keeps the tracked topic ids of the still active topics, so a topic recreated while the
+     * enumerators are being restarted on a metadata change is still detected by the topic integrity
+     * check.
+     */
+    private Map<String, String> filterTrackedTopicIds(
+            KafkaSourceEnumState kafkaSourceEnumState, Set<String> activeTopics) {
+        return kafkaSourceEnumState.trackedTopicIdsByName().entrySet().stream()
+                .filter(entry -> activeTopics.contains(entry.getKey()))
+                .collect(Collectors.toMap(Entry::getKey, Entry::getValue));
     }
 
     private static String summarizeSplitOffsets(Collection<KafkaPartitionSplit> splits) {

@@ -317,6 +317,14 @@ There are configuration options in DynamicKafkaSourceOptions that can be configu
 In addition to this list, see the [regular Kafka connector]({{< ref "docs/connectors/datastream/kafka" >}}#additional-properties) for
 a list of applicable properties.
 
+### Topic Integrity Check
+Setting the property `scan.topic-integrity-check.enabled` to `true` enables the
+[topic integrity check]({{< ref "docs/connectors/datastream/kafka" >}}#topic-integrity-check) for the topics
+subscribed on every Kafka cluster of the stream: the source fails with a `TopicIntegrityException` if a
+topic is deleted or recreated. The check runs on startup and on every
+[partition discovery]({{< ref "docs/connectors/datastream/kafka" >}}#dynamic-partition-discovery) interval,
+and the tracked topic ids are checkpointed per cluster and kept when the stream metadata changes.
+
 ### Metrics
 
 <table class="table table-bordered">

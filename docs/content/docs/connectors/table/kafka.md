@@ -392,6 +392,14 @@ Connector Options
       <td>Interval for consumer to discover dynamically created Kafka topics and partitions periodically. To disable this feature, you need to explicitly set the 'scan.topic-partition-discovery.interval' value to 0.</td>
     </tr>
     <tr>
+      <td><h5>scan.topic-integrity-check.enabled</h5></td>
+      <td>optional</td>
+      <td>yes</td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>Whether to verify the id of the subscribed topics during runtime and fail the job if a topic is missing or was recreated. The check is performed on startup and, if <code>scan.topic-partition-discovery.interval</code> is enabled, on every discovery interval.</td>
+    </tr>
+    <tr>
       <td><h5>scan.parallelism</h5></td>
       <td>optional</td>
       <td>no</td>
