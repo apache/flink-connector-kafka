@@ -333,9 +333,9 @@ public class DynamicKafkaSourceBuilder<T> {
                 configuredOffsetResetStrategy, startingOffsetsInitializer)) {
             logger.warn(
                     "Configured {}={} differs from the {} strategy derived from the starting "
-                            + "offsets initializer. The source will use the initializer for "
-                            + "startup, but Kafka may reset to {} if an initialized offset "
-                            + "becomes unavailable.",
+                            + "offsets initializer. Kafka will reset to {} if a starting "
+                            + "offset is unavailable, including partitions without a "
+                            + "committed offset when starting from committed offsets.",
                     ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
                     configuredOffsetReset,
                     startingOffsetsInitializer.getAutoOffsetResetStrategy().name().toLowerCase(),
