@@ -19,6 +19,7 @@
 package org.apache.flink.streaming.connectors.kafka.table;
 
 import org.apache.flink.connector.kafka.dynamic.source.DynamicKafkaSourceOptions;
+import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.table.api.DataTypes;
@@ -36,6 +37,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.PROPERTIES_PREFIX;
 import static org.apache.flink.table.factories.utils.FactoryMocks.createTableSource;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
@@ -108,6 +110,35 @@ class DynamicKafkaTableFactoryTest {
 
         assertThat(tableSource.properties.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG))
                 .isEqualTo("none");
+    }
+
+    @Test
+    void testTableSourceTopicIntegrityCheck() {
+        final DynamicKafkaTableSource defaultSource =
+                (DynamicKafkaTableSource)
+                        createTableSource(SCHEMA, getSingleClusterSourceOptions());
+        assertThat(defaultSource.properties)
+                .doesNotContainKey(KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key());
+
+        final Map<String, String> options = getSingleClusterSourceOptions();
+        options.put("scan.topic-integrity-check.enabled", "true");
+        final DynamicKafkaTableSource enabledSource =
+                (DynamicKafkaTableSource) createTableSource(SCHEMA, options);
+        assertThat(
+                        enabledSource.properties.getProperty(
+                                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))
+                .isEqualTo("true");
+
+        // an absent table option keeps a value passed through the properties.* prefix
+        final Map<String, String> passthroughOptions = getSingleClusterSourceOptions();
+        passthroughOptions.put(
+                PROPERTIES_PREFIX + KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key(), "true");
+        final DynamicKafkaTableSource passthroughSource =
+                (DynamicKafkaTableSource) createTableSource(SCHEMA, passthroughOptions);
+        assertThat(
+                        passthroughSource.properties.getProperty(
+                                KafkaSourceOptions.TOPIC_INTEGRITY_CHECK_ENABLED.key()))
+                .isEqualTo("true");
     }
 
     private static Map<String, String> getSingleClusterSourceOptions() {

@@ -182,6 +182,22 @@ Connector Options
       <td>Integer</td>
       <td>Number of consecutive discovery failures before failing the job.</td>
     </tr>
+    <tr>
+      <td><h5>scan.topic-partition-discovery.interval</h5></td>
+      <td>optional</td>
+      <td>no</td>
+      <td style="word-wrap: break-word;">5 minutes</td>
+      <td>Duration</td>
+      <td>Interval for the consumer to periodically discover dynamically created Kafka topics and partitions on each Kafka cluster. To disable this feature, explicitly set the value to 0.</td>
+    </tr>
+    <tr>
+      <td><h5>scan.topic-integrity-check.enabled</h5></td>
+      <td>optional</td>
+      <td>no</td>
+      <td style="word-wrap: break-word;">false</td>
+      <td>Boolean</td>
+      <td>Whether to verify the id of the topics subscribed on each Kafka cluster during runtime and fail the job if a topic is missing or was recreated. The check is performed on startup and, if <code>scan.topic-partition-discovery.interval</code> is enabled, on every discovery interval.</td>
+    </tr>
     </tbody>
 </table>
 
