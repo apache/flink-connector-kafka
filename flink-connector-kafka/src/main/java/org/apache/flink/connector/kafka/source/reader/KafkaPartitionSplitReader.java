@@ -48,6 +48,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -56,6 +57,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.StringJoiner;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -64,6 +66,10 @@ import java.util.stream.Collectors;
 public class KafkaPartitionSplitReader
         implements SplitReader<ConsumerRecord<byte[], byte[]>, KafkaPartitionSplit> {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaPartitionSplitReader.class);
+    // The commit returns once Kafka acknowledges it, and only an unreachable group coordinator
+    // makes it delay closing the consumer by this long. The reader waits for its fetcher to close
+    // for at most source.reader.close.timeout, 30 seconds by default.
+    private static final Duration COMMIT_ON_CLOSE_TIMEOUT = Duration.ofSeconds(10);
 
     private final Properties consumerProps;
     private final Map<TopicPartition, Long> stoppingOffsets;
@@ -82,6 +88,10 @@ public class KafkaPartitionSplitReader
      * #close()}.
      */
     @Nullable private volatile KafkaConsumer<byte[], byte[]> consumer;
+
+    // Set by the task thread before the fetcher shuts down, taken by the fetcher thread in close().
+    private final AtomicReference<OffsetsToCommitOnClose> offsetsToCommitOnClose =
+            new AtomicReference<>(OffsetsToCommitOnClose.NONE);
 
     // Tracking empty splits that has not been added to finished splits in fetch()
     private final Set<String> emptySplits = new HashSet<>();
@@ -313,9 +323,13 @@ public class KafkaPartitionSplitReader
 
     @Override
     public void close() throws Exception {
-        KafkaConsumer<byte[], byte[]> currentConsumer = this.consumer;
-        if (currentConsumer != null) {
-            currentConsumer.close();
+        try {
+            maybeCommitOffsetsOnClose();
+        } finally {
+            KafkaConsumer<byte[], byte[]> currentConsumer = this.consumer;
+            if (currentConsumer != null) {
+                currentConsumer.close();
+            }
         }
     }
 
@@ -380,6 +394,65 @@ public class KafkaPartitionSplitReader
                     }
                 });
         consumer.commitAsync(reconciled, offsetCommitCallback);
+    }
+
+    /**
+     * Sets the offsets of a completed checkpoint that {@link #close()} commits synchronously before
+     * closing the consumer. They are reconciled with the consumer position as in {@link
+     * #notifyCheckpointComplete}.
+     *
+     * @return false if {@link #close()} has already started and will not commit the offsets.
+     */
+    public boolean commitOffsetsOnClose(
+            Map<TopicPartition, OffsetAndMetadata> offsetsToCommit,
+            Set<TopicPartition> partitionsWithoutOffset) {
+        final OffsetsToCommitOnClose offsets =
+                new OffsetsToCommitOnClose(offsetsToCommit, partitionsWithoutOffset);
+        return offsetsToCommitOnClose.getAndUpdate(
+                        current -> current == OffsetsToCommitOnClose.CLOSING ? current : offsets)
+                != OffsetsToCommitOnClose.CLOSING;
+    }
+
+    private void maybeCommitOffsetsOnClose() {
+        final OffsetsToCommitOnClose offsets =
+                offsetsToCommitOnClose.getAndSet(OffsetsToCommitOnClose.CLOSING);
+        if (offsets.isEmpty()) {
+            return;
+        }
+        final Map<TopicPartition, OffsetAndMetadata> reconciled;
+        try {
+            // A fetcher started only to commit has not created its consumer yet. It has no
+            // assignment, so reconciling leaves its offsets as they are.
+            final KafkaConsumer<byte[], byte[]> consumer = ensureConsumer();
+            // The fetch loop has exited, so the positions that reconciling reads no longer change.
+            reconciled =
+                    reconcileOffsetsToCommit(
+                            consumer, offsets.offsetsToCommit, offsets.partitionsWithoutOffset);
+            if (reconciled.isEmpty()) {
+                LOG.debug(
+                        "No offsets left to commit on close after reconciling {} and positions of {}",
+                        offsets.offsetsToCommit,
+                        offsets.partitionsWithoutOffset);
+                return;
+            }
+            // Shutting down the fetcher wakes up the consumer, which may leave a pending wakeup.
+            retryOnWakeup(
+                    () -> {
+                        consumer.commitSync(reconciled, COMMIT_ON_CLOSE_TIMEOUT);
+                        return null;
+                    },
+                    "committing offsets on close");
+        } catch (RuntimeException e) {
+            // As for the commits on checkpoint, a failed commit does not break the job.
+            kafkaSourceReaderMetrics.recordFailedCommit();
+            LOG.warn("Failed to commit consumer offsets {} on close", offsets.offsetsToCommit, e);
+            return;
+        }
+        // Unlike the commits on checkpoint, this skips the committed offset gauges: they are
+        // unregistered with the task, and they throw for a partition whose split this reader never
+        // handled.
+        kafkaSourceReaderMetrics.recordSucceededCommit();
+        LOG.info("Committed consumer offsets {} on close", reconciled);
     }
 
     @VisibleForTesting
@@ -806,6 +879,29 @@ public class KafkaPartitionSplitReader
         @Override
         public Set<String> finishedSplits() {
             return finishedSplits;
+        }
+    }
+
+    /** The offsets that {@link #close()} commits, handed over by the task thread. */
+    private static final class OffsetsToCommitOnClose {
+        static final OffsetsToCommitOnClose NONE =
+                new OffsetsToCommitOnClose(Collections.emptyMap(), Collections.emptySet());
+        // Replaces the offsets to commit on close once close() has taken them.
+        static final OffsetsToCommitOnClose CLOSING =
+                new OffsetsToCommitOnClose(Collections.emptyMap(), Collections.emptySet());
+
+        final Map<TopicPartition, OffsetAndMetadata> offsetsToCommit;
+        final Set<TopicPartition> partitionsWithoutOffset;
+
+        OffsetsToCommitOnClose(
+                Map<TopicPartition, OffsetAndMetadata> offsetsToCommit,
+                Set<TopicPartition> partitionsWithoutOffset) {
+            this.offsetsToCommit = offsetsToCommit;
+            this.partitionsWithoutOffset = partitionsWithoutOffset;
+        }
+
+        boolean isEmpty() {
+            return offsetsToCommit.isEmpty() && partitionsWithoutOffset.isEmpty();
         }
     }
 }
