@@ -83,10 +83,9 @@ public class DynamicKafkaSourceEnumerator
     private static final Logger logger =
             LoggerFactory.getLogger(DynamicKafkaSourceEnumerator.class);
 
-    /** Deterministic order for splits whose formatted ids can collide across clusters. */
+    /** Deterministic order of the reported splits. Split ids are unique per physical partition. */
     private static final Comparator<DynamicKafkaSourceSplit> SPLIT_ORDER =
-            Comparator.comparing(DynamicKafkaSourceSplit::splitId)
-                    .thenComparing(DynamicKafkaSourceSplit::getKafkaClusterId);
+            Comparator.comparing(DynamicKafkaSourceSplit::splitId);
 
     // Each cluster will have its own sub enumerator
     private final Map<String, SplitEnumerator<KafkaPartitionSplit, KafkaSourceEnumState>>
@@ -291,7 +290,8 @@ public class DynamicKafkaSourceEnumerator
                     .forEach(
                             splitStatus ->
                                     activeSplitIds.add(
-                                            toDynamicSplitId(clusterId, splitStatus.split())));
+                                            DynamicKafkaSourceSplit.toDynamicSplitId(
+                                                    clusterId, splitStatus.split().splitId())));
 
             createEnumeratorWithAssignedTopicPartitions(
                     clusterId,
@@ -551,7 +551,8 @@ public class DynamicKafkaSourceEnumerator
                 partitions.forEach(
                         splitStatus -> {
                             activeSplitIds.add(
-                                    toDynamicSplitId(kafkaClusterId, splitStatus.split()));
+                                    DynamicKafkaSourceSplit.toDynamicSplitId(
+                                            kafkaClusterId, splitStatus.split().splitId()));
                             knownPartitions.add(
                                     Tuple2.of(
                                             kafkaClusterId,
@@ -1284,14 +1285,10 @@ public class DynamicKafkaSourceEnumerator
         }
     }
 
-    /** Identifies the physical partition; formatted split ids collide across clusters. */
+    /** Identifies the physical partition a split belongs to. */
     static Tuple2<String, TopicPartition> toPartitionKey(DynamicKafkaSourceSplit split) {
         return Tuple2.of(
                 split.getKafkaClusterId(), split.getKafkaPartitionSplit().getTopicPartition());
-    }
-
-    private static String toDynamicSplitId(String kafkaClusterId, KafkaPartitionSplit split) {
-        return kafkaClusterId + "-" + split.splitId();
     }
 
     private interface SplitAssignmentStrategy {
@@ -1362,7 +1359,8 @@ public class DynamicKafkaSourceEnumerator
 
         private int assignSplitOwner(
                 String kafkaClusterId, KafkaPartitionSplit split, int numReaders) {
-            final String splitId = toDynamicSplitId(kafkaClusterId, split);
+            final String splitId =
+                    DynamicKafkaSourceSplit.toDynamicSplitId(kafkaClusterId, split.splitId());
             return splitOwnerAssigner.assignSplitOwner(splitId, numReaders);
         }
     }
