@@ -36,6 +36,7 @@ import com.google.common.collect.Iterables;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
+import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.assertj.core.api.SoftAssertions;
@@ -59,6 +60,10 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.StringJoiner;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiConsumer;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -635,6 +640,166 @@ public class KafkaSourceEnumeratorTest {
         }
     }
 
+    /** Verifies that in-flight partitions are not rediscovered as new on the next cycle. */
+    @Test
+    public void testInFlightPartitionsNotRediscoveredAsNew() throws Throwable {
+        try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                KafkaSourceEnumerator enumerator =
+                        createEnumerator(context, ENABLE_PERIODIC_PARTITION_DISCOVERY)) {
+            enumerator.start();
+
+            // Register readers so partitions can be assigned.
+            registerReader(context, enumerator, READER0);
+            registerReader(context, enumerator, READER1);
+            registerReader(context, enumerator, READER2);
+
+            // Run discovery once and leave the worker callable pending to simulate a slow
+            // worker.
+            context.runPeriodicCallable(PARTITION_DISCOVERY_CALLABLE_INDEX);
+
+            // The worker callable is now pending.
+            assertThat(context.getOneTimeCallables())
+                    .as("initializePartitionSplits should be pending on the worker")
+                    .hasSize(1);
+
+            // Fire a second cycle before the first init completes.
+            context.runPeriodicCallable(PARTITION_DISCOVERY_CALLABLE_INDEX);
+
+            // The second cycle dispatches nothing because partitions are in flight.
+            assertThat(context.getOneTimeCallables())
+                    .as(
+                            "No additional initializePartitionSplits should be dispatched while partitions are in flight")
+                    .hasSize(1);
+
+            // Run the pending init.
+            context.runNextOneTimeCallable();
+
+            // Verify a single assignment without duplicates.
+            List<SplitsAssignment<KafkaPartitionSplit>> assignments =
+                    context.getSplitsAssignmentSequence();
+            assertThat(assignments).as("Exactly one assignment batch expected").hasSize(1);
+
+            // Count assigned partitions across topics.
+            int totalAssignedPartitions =
+                    assignments.get(0).assignment().values().stream().mapToInt(List::size).sum();
+            int expectedPartitions =
+                    KafkaSourceTestEnv.getPartitionsForTopics(PRE_EXISTING_TOPICS).size();
+            assertThat(totalAssignedPartitions)
+                    .as("Each partition should be assigned exactly once, not duplicated")
+                    .isEqualTo(expectedPartitions);
+        }
+    }
+
+    /** Verifies that a migrated split in flight is not rediscovered on the next cycle. */
+    @Test
+    public void testMigratedSplitInFlightNotRediscovered() throws Throwable {
+        TopicPartition migratedTp = new TopicPartition(TOPIC2, 0);
+        try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                KafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                context,
+                                1L,
+                                OffsetsInitializer.earliest(),
+                                PRE_EXISTING_TOPICS,
+                                Collections.emptySet(),
+                                List.of(new KafkaPartitionSplit(migratedTp, MIGRATED)),
+                                false,
+                                new Properties())) {
+            enumerator.start();
+
+            // Register readers so partitions can be assigned.
+            registerReader(context, enumerator, READER0);
+            registerReader(context, enumerator, READER1);
+            registerReader(context, enumerator, READER2);
+
+            // First cycle dispatches init for migrated and fresh partitions.
+            context.runPeriodicCallable(PARTITION_DISCOVERY_CALLABLE_INDEX);
+            assertThat(context.getOneTimeCallables())
+                    .as("First discovery should dispatch init")
+                    .hasSize(1);
+
+            // Second cycle before init completes dispatches nothing.
+            context.runPeriodicCallable(PARTITION_DISCOVERY_CALLABLE_INDEX);
+            assertThat(context.getOneTimeCallables())
+                    .as("Migrated split in flight should not trigger a second dispatch")
+                    .hasSize(1);
+
+            // Run the pending init and verify the migrated split is assigned.
+            context.runNextOneTimeCallable();
+            assertThat(getAllAssignSplits(context, PRE_EXISTING_TOPICS))
+                    .extracting(KafkaPartitionSplit::getTopicPartition)
+                    .contains(migratedTp);
+        }
+    }
+
+    /**
+     * Verifies that a partition whose initialization failed benignly is discovered again. The
+     * context swallows the failure like StoppableKafkaEnumContextProxy does for an inactive
+     * cluster, so the enumerator never sees an error callback and must release the in-flight state
+     * itself.
+     */
+    @Test
+    public void testPartitionsReleasedWhenInitializationFailureIsSuppressed() throws Throwable {
+        final AtomicBoolean failNextInitialization = new AtomicBoolean(true);
+        final OffsetsInitializer failingOnce =
+                new OffsetsInitializer() {
+                    @Override
+                    public Map<TopicPartition, Long> getPartitionOffsets(
+                            Collection<TopicPartition> partitions,
+                            PartitionOffsetsRetriever partitionOffsetsRetriever) {
+                        if (failNextInitialization.getAndSet(false)) {
+                            throw new KafkaException("Simulated benign initialization failure");
+                        }
+                        return OffsetsInitializer.earliest()
+                                .getPartitionOffsets(partitions, partitionOffsetsRetriever);
+                    }
+
+                    @Override
+                    public OffsetResetStrategy getAutoOffsetResetStrategy() {
+                        return OffsetResetStrategy.EARLIEST;
+                    }
+                };
+
+        try (SuppressingSplitEnumeratorContext context =
+                        new SuppressingSplitEnumeratorContext(NUM_SUBTASKS);
+                KafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                context,
+                                ENABLE_PERIODIC_PARTITION_DISCOVERY,
+                                EXCLUDE_DYNAMIC_TOPIC,
+                                failingOnce)) {
+            enumerator.start();
+            registerReader(context, enumerator, READER0);
+            registerReader(context, enumerator, READER1);
+            registerReader(context, enumerator, READER2);
+
+            // The first initialization fails and its failure is swallowed.
+            context.runPeriodicCallable(PARTITION_DISCOVERY_CALLABLE_INDEX);
+            context.runNextOneTimeCallable();
+            context.awaitCoordinatorThread();
+            assertThat(context.getSplitsAssignmentSequence())
+                    .as("Nothing is assigned after the swallowed failure")
+                    .isEmpty();
+
+            // The next discovery cycle must dispatch the same partitions again.
+            context.runPeriodicCallable(PARTITION_DISCOVERY_CALLABLE_INDEX);
+            assertThat(context.getOneTimeCallables())
+                    .as("The partitions must be released for another initialization attempt")
+                    .hasSize(1);
+            context.runNextOneTimeCallable();
+
+            List<SplitsAssignment<KafkaPartitionSplit>> assignments =
+                    context.getSplitsAssignmentSequence();
+            assertThat(assignments).as("Exactly one assignment batch expected").hasSize(1);
+            assertThat(assignments.get(0).assignment().values().stream().mapToInt(List::size).sum())
+                    .as("Each partition should be assigned exactly once")
+                    .isEqualTo(
+                            KafkaSourceTestEnv.getPartitionsForTopics(PRE_EXISTING_TOPICS).size());
+        }
+    }
+
     // -------------- some common startup sequence ---------------
 
     private void startEnumeratorAndRegisterReaders(
@@ -1169,6 +1334,36 @@ public class KafkaSourceEnumeratorTest {
         public void signalNoMoreSplits(int subtask) {
             events.add("signalNoMoreSplits:" + subtask);
             super.signalNoMoreSplits(subtask);
+        }
+    }
+
+    /**
+     * Drops the handler call for a failed one-time callable, as StoppableKafkaEnumContextProxy does
+     * for a benign failure.
+     */
+    private static class SuppressingSplitEnumeratorContext
+            extends MockSplitEnumeratorContext<KafkaPartitionSplit> {
+
+        private SuppressingSplitEnumeratorContext(int parallelism) {
+            super(parallelism);
+        }
+
+        @Override
+        public <T> void callAsync(Callable<T> callable, BiConsumer<T, Throwable> handler) {
+            super.callAsync(
+                    callable,
+                    (result, error) -> {
+                        if (error == null) {
+                            handler.accept(result, null);
+                        }
+                    });
+        }
+
+        /** Returns once everything queued on the coordinator thread so far has run. */
+        private void awaitCoordinatorThread() throws Exception {
+            CompletableFuture<Void> reached = new CompletableFuture<>();
+            runInCoordinatorThread(() -> reached.complete(null));
+            reached.get();
         }
     }
 
