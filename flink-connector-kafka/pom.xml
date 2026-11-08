@@ -419,6 +419,31 @@ under the License.
 					</execution>
 				</executions>
 			</plugin>
+
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<properties>
+						<!-- Fail a hung test method after 15 minutes, with its stack trace, instead of
+							letting it consume the CI job's timeout. A test can override this with @Timeout.
+							The test body runs in a separate thread so that a method which swallows the
+							interrupt still fails on time and the rest of the suite runs. The thread dump
+							is printed just before the interrupt.
+							The default covers test methods only. A lifecycle default would run every
+							@BeforeEach, the test and every @AfterEach on different threads, so a hang in
+							setup or teardown is still bounded only by the CI step timeout.
+							KafkaTableTestBase repeats the 15 minutes in its @Timeout annotation: keep the
+							two in step. -->
+						<configurationParameters>
+							junit.jupiter.execution.timeout.testable.method.default = 15 m
+							junit.jupiter.execution.timeout.thread.mode.default = SEPARATE_THREAD
+							junit.jupiter.execution.timeout.mode = disabled_on_debug
+							junit.jupiter.execution.timeout.threaddump.enabled = true
+						</configurationParameters>
+					</properties>
+				</configuration>
+			</plugin>
 		</plugins>
 	</build>
 
