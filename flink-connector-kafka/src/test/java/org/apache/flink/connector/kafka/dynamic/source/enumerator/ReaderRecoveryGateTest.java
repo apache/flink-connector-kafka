@@ -201,8 +201,9 @@ class ReaderRecoveryGateTest {
     }
 
     @Test
-    void testMergeKeepsDistinctPartitionsWithCollidingSplitIds() {
-        // Cluster "a" topic "b-c" and cluster "a-b" topic "c" both format to split id "a-b-c-0".
+    void testMergeKeepsDistinctPartitionsWithAmbiguousClusterAndTopicIds() {
+        // Cluster "a" topic "b-c" and cluster "a-b" topic "c" are the same partition name once the
+        // cluster id and the partition id are joined, so the split ids have to stay distinct.
         DynamicKafkaSourceSplit firstSplit =
                 new DynamicKafkaSourceSplit(
                         "a", new KafkaPartitionSplit(new TopicPartition("b-c", 0), 123L));
@@ -212,7 +213,7 @@ class ReaderRecoveryGateTest {
         DynamicKafkaSourceSplit returnedSplit =
                 new DynamicKafkaSourceSplit(
                         "a-b", new KafkaPartitionSplit(new TopicPartition("c", 0), 789L));
-        assertThat(firstSplit.splitId()).isEqualTo(secondSplit.splitId());
+        assertThat(firstSplit.splitId()).isNotEqualTo(secondSplit.splitId());
 
         ReaderRecoveryGate gate = new ReaderRecoveryGate(true);
         gate.recordReportedSplits(0, Collections.singletonList(firstSplit));

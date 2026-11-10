@@ -174,6 +174,22 @@ class GlobalSplitOwnerAssignerTest {
         assertThat(13 % parallelism).isEqualTo(3);
     }
 
+    @Test
+    void testRecoveredSplitsOfAmbiguousClusterAndTopicIdsGetTheirOwnOwner() {
+        GlobalSplitOwnerAssigner assigner = new GlobalSplitOwnerAssigner();
+
+        // Cluster "a" with topic "b-c" and cluster "a-b" with topic "c" format the same split id
+        // when the cluster id and the partition id are joined with '-'.
+        DynamicKafkaSourceSplit shortClusterIdSplit = split("a", "b-c", 0);
+        DynamicKafkaSourceSplit longClusterIdSplit = split("a-b", "c", 0);
+        assigner.onRecoveredSplits(Arrays.asList(shortClusterIdSplit, longClusterIdSplit), 2);
+
+        assertThat(assigner.assignSplitOwner(shortClusterIdSplit.splitId(), 2)).isEqualTo(0);
+        assertThat(assigner.assignSplitOwner(longClusterIdSplit.splitId(), 2))
+                .as("each recovered partition needs its own owner")
+                .isEqualTo(1);
+    }
+
     private static Map<Integer, List<String>> initAssignments(int parallelism) {
         GlobalSplitOwnerAssigner assigner = new GlobalSplitOwnerAssigner();
         Map<Integer, List<String>> assignments = new LinkedHashMap<>();
