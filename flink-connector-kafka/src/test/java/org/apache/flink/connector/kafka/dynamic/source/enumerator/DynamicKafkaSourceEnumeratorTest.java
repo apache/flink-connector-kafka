@@ -287,6 +287,68 @@ public class DynamicKafkaSourceEnumeratorTest {
     }
 
     @Test
+    public void testBoundedSourceCompletesReadersAgainAfterMetadataChange() throws Throwable {
+        // The stream moves off cluster 0 and onto cluster 1.
+        KafkaStream kafkaStreamOnFirstCluster = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+        kafkaStreamOnFirstCluster
+                .getClusterMetadataMap()
+                .remove(DynamicKafkaSourceTestHelper.getKafkaClusterId(1));
+        KafkaStream kafkaStreamOnSecondCluster = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+        kafkaStreamOnSecondCluster
+                .getClusterMetadataMap()
+                .remove(DynamicKafkaSourceTestHelper.getKafkaClusterId(0));
+
+        MockKafkaMetadataService mockKafkaMetadataService =
+                new MockKafkaMetadataService(Collections.singleton(kafkaStreamOnFirstCluster));
+
+        try (RecordingSplitEnumeratorContext context = new RecordingSplitEnumeratorContext();
+                DynamicKafkaSourceEnumerator enumerator =
+                        createBoundedEnumerator(
+                                context,
+                                mockKafkaMetadataService,
+                                (properties) ->
+                                        properties.setProperty(
+                                                DynamicKafkaSourceOptions
+                                                        .STREAM_METADATA_DISCOVERY_INTERVAL_MS
+                                                        .key(),
+                                                "1"),
+                                new DynamicKafkaSourceEnumState())) {
+            enumerator.start();
+            // Discovery is periodic at this interval, so the first round has to be driven before
+            // any reader can be told that there is nothing more coming.
+            context.runPeriodicCallable(0);
+            runAllOneTimeCallables(context);
+            for (int reader = 0; reader < NUM_SUBTASKS; reader++) {
+                mockRegisterReaderAndSendReaderStartupEvent(context, enumerator, reader);
+            }
+            runAllOneTimeCallables(context);
+
+            for (int reader = 0; reader < NUM_SUBTASKS; reader++) {
+                assertThat(context.splitsAtCompletion.get(reader))
+                        .as(
+                                "reader %s should have been told once before the metadata change",
+                                reader)
+                        .hasSize(1);
+            }
+
+            // The reader recreates its sub readers on a metadata change, so each must be told
+            // again.
+            mockKafkaMetadataService.setKafkaStreams(
+                    Collections.singleton(kafkaStreamOnSecondCluster));
+            context.runPeriodicCallable(0);
+            runAllOneTimeCallables(context);
+
+            for (int reader = 0; reader < NUM_SUBTASKS; reader++) {
+                assertThat(context.splitsAtCompletion.get(reader))
+                        .as(
+                                "reader %s should have been told again after the metadata change",
+                                reader)
+                        .hasSize(2);
+            }
+        }
+    }
+
+    @Test
     public void testStartupWithContinuousDiscovery() throws Throwable {
         try (MockSplitEnumeratorContext<DynamicKafkaSourceSplit> context =
                         new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
@@ -2166,14 +2228,27 @@ public class DynamicKafkaSourceEnumeratorTest {
     private DynamicKafkaSourceEnumerator createBoundedEnumerator(
             SplitEnumeratorContext<DynamicKafkaSourceSplit> context,
             DynamicKafkaSourceEnumState enumState) {
+        return createBoundedEnumerator(
+                context,
+                new MockKafkaMetadataService(
+                        Collections.singleton(DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC))),
+                (properties) -> {},
+                enumState);
+    }
+
+    private DynamicKafkaSourceEnumerator createBoundedEnumerator(
+            SplitEnumeratorContext<DynamicKafkaSourceSplit> context,
+            KafkaMetadataService kafkaMetadataService,
+            Consumer<Properties> applyPropertiesConsumer,
+            DynamicKafkaSourceEnumState enumState) {
         Properties properties = new Properties();
-        properties.setProperty(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "0");
-        properties.setProperty(
+        applyPropertiesConsumer.accept(properties);
+        properties.putIfAbsent(KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(), "0");
+        properties.putIfAbsent(
                 DynamicKafkaSourceOptions.STREAM_METADATA_DISCOVERY_INTERVAL_MS.key(), "0");
         return new DynamicKafkaSourceEnumerator(
                 new KafkaStreamSetSubscriber(Collections.singleton(TOPIC)),
-                new MockKafkaMetadataService(
-                        Collections.singleton(DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC))),
+                kafkaMetadataService,
                 context,
                 OffsetsInitializer.earliest(),
                 OffsetsInitializer.latest(),
