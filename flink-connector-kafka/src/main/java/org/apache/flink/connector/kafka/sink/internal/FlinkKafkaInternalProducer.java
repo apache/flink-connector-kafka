@@ -298,6 +298,18 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
      * https://github.com/apache/kafka/commit/5d2422258cb975a137a42a4e08f03573c49a387e#diff-f4ef1afd8792cd2a2e9069cd7ddea630
      */
     public void resumeTransaction(long producerId, short epoch) {
+        resumeTransaction(producerId, epoch, false);
+    }
+
+    /**
+     * Resumes a transaction with an explicitly known original protocol.
+     *
+     * <p>Set {@code useTransactionV2} only when the original transaction used V2. The cluster's
+     * current feature level cannot identify the protocol of an older transaction. Otherwise the
+     * producer's existing protocol state is retained, as in {@link #resumeTransaction(long,
+     * short)}.
+     */
+    public void resumeTransaction(long producerId, short epoch, boolean useTransactionV2) {
         checkState(!isInTransaction(), "Already in transaction %s", transactionalId);
         checkState(
                 producerId >= 0 && epoch >= 0,
@@ -312,6 +324,11 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
 
         Object transactionManager = getTransactionManager();
         synchronized (transactionManager) {
+            if (useTransactionV2) {
+                // Kafka snapshots this flag before negotiating features for EndTxn. V2 retries
+                // must use the original epoch, which the broker advances when committing.
+                setField(transactionManager, "isTransactionV2Enabled", true);
+            }
             Object txnPartitionMap = getField(transactionManager, "txnPartitionMap");
 
             transitionTransactionManagerStateTo(transactionManager, "INITIALIZING");
