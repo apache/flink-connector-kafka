@@ -28,6 +28,7 @@ import org.apache.flink.util.IOUtils;
 
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.errors.InterruptException;
+import org.apache.kafka.common.errors.InvalidPidMappingException;
 import org.apache.kafka.common.errors.InvalidTxnStateException;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.errors.RetriableException;
@@ -106,8 +107,12 @@ public class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
                 LOG.warn(
                         "Encountered retriable exception while committing {}.", transactionalId, e);
                 request.retryLater();
-            } catch (ProducerFencedException e) {
-                logFencedRequest(request, e);
+            } catch (ProducerFencedException | InvalidPidMappingException e) {
+                // Reusing a transactional ID can invalidate either the epoch or, after rollover,
+                // the producer ID. Neither can be retried with the same checkpointed identity.
+                // Report a known failure, not a successful commit: the old transaction may also
+                // have been aborted or expired.
+                logKnownCommitFailure(request, e);
                 handleFailedTransaction(producer);
                 request.signalFailedWithKnownReason(e);
             } catch (InvalidTxnStateException e) {
@@ -150,9 +155,21 @@ public class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
         }
     }
 
-    private void logFencedRequest(
-            CommitRequest<KafkaCommittable> request, ProducerFencedException e) {
-        if (reusesTransactionalIds) {
+    private void logKnownCommitFailure(
+            CommitRequest<KafkaCommittable> request, RuntimeException e) {
+        if (e instanceof InvalidPidMappingException) {
+            String message =
+                    "Unable to commit transaction ({}) because its producer ID is no longer mapped to the transactional ID."
+                            + " The broker may have expired the transactional ID according to 'transactional.id.expiration.ms',"
+                            + " or its producer ID may have changed after epoch rollover and transactional ID reuse."
+                            + " The committable is marked as failed and will not be retried."
+                            + " If the transaction was not already committed, this may indicate data loss. Please check the Kafka broker logs.";
+            if (reusesTransactionalIds) {
+                LOG.warn(message, request, e);
+            } else {
+                LOG.error(message, request, e);
+            }
+        } else if (reusesTransactionalIds) {
             // If checkpoint 1 succeeds, checkpoint 2 is aborted, and checkpoint 3 may reuse the id
             // of checkpoint 1. A recovery of checkpoint 1 would show that the transaction has been
             // fenced.
@@ -219,7 +236,10 @@ public class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
         } else {
             committingProducer.setTransactionId(committable.getTransactionalId());
         }
-        committingProducer.resumeTransaction(committable.getProducerId(), committable.getEpoch());
+        committingProducer.resumeTransaction(
+                committable.getProducerId(),
+                committable.getEpoch(),
+                committable.getTransactionV2Enabled());
         return committingProducer;
     }
 }

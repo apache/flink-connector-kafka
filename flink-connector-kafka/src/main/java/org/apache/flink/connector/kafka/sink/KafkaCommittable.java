@@ -36,6 +36,8 @@ public class KafkaCommittable {
     private final long producerId;
     private final short epoch;
     private final String transactionalId;
+    // Legacy committables do not record the protocol used by the original transaction.
+    @Nullable private final Boolean transactionV2Enabled;
     @Nullable private FlinkKafkaInternalProducer<?, ?> producer;
 
     public KafkaCommittable(
@@ -43,9 +45,19 @@ public class KafkaCommittable {
             short epoch,
             String transactionalId,
             @Nullable FlinkKafkaInternalProducer<?, ?> producer) {
+        this(producerId, epoch, transactionalId, null, producer);
+    }
+
+    public KafkaCommittable(
+            long producerId,
+            short epoch,
+            String transactionalId,
+            @Nullable Boolean transactionV2Enabled,
+            @Nullable FlinkKafkaInternalProducer<?, ?> producer) {
         this.producerId = producerId;
         this.epoch = epoch;
         this.transactionalId = transactionalId;
+        this.transactionV2Enabled = transactionV2Enabled;
         this.producer = producer;
     }
 
@@ -54,6 +66,7 @@ public class KafkaCommittable {
                 producer.getProducerId(),
                 producer.getEpoch(),
                 producer.getTransactionalId(),
+                producer.isTransactionV2Enabled(),
                 producer);
     }
 
@@ -67,6 +80,12 @@ public class KafkaCommittable {
 
     public String getTransactionalId() {
         return transactionalId;
+    }
+
+    /** Returns the original transaction protocol, or null when it was not checkpointed. */
+    @Nullable
+    public Boolean getTransactionV2Enabled() {
+        return transactionV2Enabled;
     }
 
     public Optional<FlinkKafkaInternalProducer<?, ?>> getProducer() {
@@ -83,6 +102,8 @@ public class KafkaCommittable {
                 + ", transactionalId='"
                 + transactionalId
                 + '\''
+                + ", transactionV2Enabled="
+                + transactionV2Enabled
                 + ", producer="
                 + producer
                 + '}';
@@ -99,11 +120,12 @@ public class KafkaCommittable {
         KafkaCommittable that = (KafkaCommittable) o;
         return producerId == that.producerId
                 && epoch == that.epoch
+                && Objects.equals(transactionV2Enabled, that.transactionV2Enabled)
                 && transactionalId.equals(that.transactionalId);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(producerId, epoch, transactionalId);
+        return Objects.hash(producerId, epoch, transactionalId, transactionV2Enabled);
     }
 }

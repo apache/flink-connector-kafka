@@ -688,4 +688,24 @@ Flink 通过 Kafka 连接器提供了一流的支持，可以对 Kerberos 配置
 这个错误是由于 `FlinkKafkaProducer` 所生成的 `transactional.id` 与其他应用所使用的的产生了冲突。多数情况下，由于 `FlinkKafkaProducer` 产生的 ID 都是以 `taskName + "-" + operatorUid` 为前缀的，这些产生冲突的应用也是使用了相同 Job Graph 的 Flink Job。
 我们可以使用 `setTransactionalIdPrefix()` 方法来覆盖默认的行为，为每个不同的 Job 分配不同的 `transactional.id` 前缀来解决这个问题。
 
+### InvalidPidMappingException
+
+此异常表示 Kafka 中某个生产者 ID 与其事务 ID 之间的映射已失效。
+例如，broker 可能已将该事务 ID 标记为过期；或者在生产者 epoch 回绕且事务 ID 随后被复用后，
+checkpoint 中仍保存着旧的生产者 ID。
+请检查 broker 的 [`transactional.id.expiration.ms`](https://kafka.apache.org/42/configuration/broker-configs/#transactional.id.expiration.ms)
+配置，其默认值为七天。该配置与生产者的 `transaction.timeout.ms` 不同：
+事务进行期间，其事务 ID 不会过期。
+
+在 `EXACTLY_ONCE` 模式下，`KafkaSink` 会将受影响的待提交项（committable）标记为失败，
+不再重试该提交，也不会因该异常而导致任务失败。这一行为既适用于从 checkpoint 恢复时的提交，
+也适用于使用 writer 当前持有的生产者进行的正常提交。
+使用 `INCREMENTING` 事务命名策略时会记录 ERROR 日志，使用 `POOLING` 时则记录 WARN 日志。
+
+恢复期间，已提交事务的生产者 ID 如果已失效，也可能触发此异常；
+从同一个 checkpoint 重启无法恢复已丢失的映射。
+失败确认并不能证明该事务已经提交。如果该事务已被中止或因其他原因从未提交，
+则 `read_committed` 消费者无法读取其记录，数据可能已经丢失。
+出现此错误时，请检查 Kafka broker 日志。
+
 {{< top >}}

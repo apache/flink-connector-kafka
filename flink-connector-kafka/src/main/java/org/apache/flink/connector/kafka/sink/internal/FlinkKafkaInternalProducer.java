@@ -171,6 +171,10 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         return (long) getField(producerIdAndEpoch, "producerId");
     }
 
+    public boolean isTransactionV2Enabled() {
+        return ((TransactionManager) getTransactionManager()).isTransactionV2Enabled();
+    }
+
     /**
      * Sets the transactional id and sets the transaction manager state to uninitialized.
      *
@@ -298,6 +302,11 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
      * https://github.com/apache/kafka/commit/5d2422258cb975a137a42a4e08f03573c49a387e#diff-f4ef1afd8792cd2a2e9069cd7ddea630
      */
     public void resumeTransaction(long producerId, short epoch) {
+        resumeTransaction(producerId, epoch, null);
+    }
+
+    public void resumeTransaction(
+            long producerId, short epoch, @Nullable Boolean transactionV2Enabled) {
         checkState(!isInTransaction(), "Already in transaction %s", transactionalId);
         checkState(
                 producerId >= 0 && epoch >= 0,
@@ -335,6 +344,17 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
             // when we create recovery producers to resume transactions and commit
             // them, we should always set this flag.
             setField(transactionManager, "transactionStarted", true);
+            // EndTxn must use the protocol with which the checkpointed transaction started.
+            // V2 enables idempotent commit retries even when completing the transaction rotated
+            // the producer ID. A fresh transaction manager otherwise defaults to V1.
+            // This selects EndTxn's protocol, not a permanent client setting: Kafka may discover
+            // V2 support while completing a V1 transaction and issue InitProducerId afterwards
+            // to bump the epoch before its next transaction.
+            // Legacy checkpoints have an unknown protocol. Preserve the previous recovery
+            // behavior, including protocol discovery from earlier commits on a reused producer.
+            if (transactionV2Enabled != null) {
+                setField(transactionManager, "isTransactionV2Enabled", transactionV2Enabled);
+            }
         }
         this.transactionState = TransactionState.PRECOMMITTED;
     }
