@@ -54,7 +54,7 @@ under the License.
 		<!-- Main Dependencies -->
 		<confluent.version>7.9.2</confluent.version>
 		<flink.version>2.2.1</flink.version>
-		<kafka.version>4.2.0</kafka.version>
+		<kafka.version>4.4.0</kafka.version>
 
 		<!-- Other Dependencies -->
 		<avro.version>1.12.2</avro.version>
@@ -264,6 +264,13 @@ under the License.
 				<groupId>net.bytebuddy</groupId>
 				<artifactId>byte-buddy-agent</artifactId>
 				<version>${byte-buddy.version}</version>
+			</dependency>
+
+			<!-- For dependency convergence (zstd-jni from kafka-clients vs. testcontainers) -->
+			<dependency>
+				<groupId>org.jetbrains</groupId>
+				<artifactId>annotations</artifactId>
+				<version>24.1.0</version>
 			</dependency>
 
 			<dependency>

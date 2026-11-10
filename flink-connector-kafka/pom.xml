@@ -169,7 +169,7 @@ under the License.
 			<groupId>org.apache.kafka</groupId>
 			<artifactId>kafka-clients</artifactId>
 			<version>${kafka.version}</version>
-			<classifier>test</classifier>
+			<classifier>test-fixtures</classifier>
 			<scope>test</scope>
 		</dependency>
 
