@@ -74,7 +74,7 @@ This file provides guidance for AI coding agents working with the Apache Flink K
 
 - `flink-connector-kafka` — The connector: `KafkaSource`, `KafkaSink`, `DynamicKafkaSource`, and the Table/SQL factories. Also publishes a test-jar with `KafkaTestEnvironment*` and `testutils`.
 - `flink-sql-connector-kafka` — Shaded SQL jar; relocates `org.apache.kafka`. Bundled dependencies are listed in `src/main/resources/META-INF/NOTICE`.
-- `flink-connector-kafka-e2e-tests/` — `flink-streaming-kafka-test` (the job), `flink-streaming-kafka-test-base` (shared classes), `flink-end-to-end-tests-common-kafka` (the tests).
+- `flink-connector-kafka-e2e-tests/` — `flink-streaming-kafka-test` (the job), `flink-confluent-schema-registry-test` (the Confluent Schema Registry job), `flink-streaming-kafka-test-base` (shared classes), `flink-end-to-end-tests-common-kafka` (the tests).
 - `flink-python` — PyFlink wrappers (`pyflink/datastream/connectors/kafka.py`) and their tests (`pyflink/datastream/connectors/tests/test_kafka.py`). Maven packaging `pom`, no Java.
 
 ### Supporting directories
