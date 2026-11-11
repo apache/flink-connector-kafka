@@ -195,7 +195,9 @@ public class UpsertKafkaDynamicTableFactory
                 boundedOptions.boundedTimestampMillis,
                 true,
                 context.getObjectIdentifier().asSummaryString(),
-                parallelism);
+                parallelism,
+                false,
+                false);
     }
 
     @Override

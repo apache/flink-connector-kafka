@@ -70,6 +70,7 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.KEY_FIELDS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.KEY_FIELDS_PREFIX;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.KEY_FORMAT;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.KEY_FORMAT_PROJECTION_PUSHDOWN_ENABLED;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.PROPS_BOOTSTRAP_SERVERS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.PROPS_GROUP_ID;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_BOUNDED_MODE;
@@ -89,6 +90,7 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TRANSACTION_NAMING_STRATEGY;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FIELDS_INCLUDE;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT_PROJECTION_PUSHDOWN_ENABLED;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.PROPERTIES_PREFIX;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.StartupOptions;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.autoCompleteSchemaRegistrySubject;
@@ -139,6 +141,8 @@ public class KafkaDynamicTableFactory
         options.add(KEY_FORMAT);
         options.add(KEY_FIELDS);
         options.add(KEY_FIELDS_PREFIX);
+        options.add(KEY_FORMAT_PROJECTION_PUSHDOWN_ENABLED);
+        options.add(VALUE_FORMAT_PROJECTION_PUSHDOWN_ENABLED);
         options.add(VALUE_FORMAT);
         options.add(VALUE_FIELDS_INCLUDE);
         options.add(TOPIC);
@@ -236,6 +240,12 @@ public class KafkaDynamicTableFactory
 
         final Integer parallelism = tableOptions.getOptional(SCAN_PARALLELISM).orElse(null);
 
+        final boolean keyProjectionPushdownEnabled =
+                tableOptions.get(KEY_FORMAT_PROJECTION_PUSHDOWN_ENABLED);
+
+        final boolean valueProjectionPushdownEnabled =
+                tableOptions.get(VALUE_FORMAT_PROJECTION_PUSHDOWN_ENABLED);
+
         return createKafkaTableSource(
                 physicalDataType,
                 keyDecodingFormat.orElse(null),
@@ -253,7 +263,9 @@ public class KafkaDynamicTableFactory
                 boundedOptions.specificOffsets,
                 boundedOptions.boundedTimestampMillis,
                 context.getObjectIdentifier().asSummaryString(),
-                parallelism);
+                parallelism,
+                keyProjectionPushdownEnabled,
+                valueProjectionPushdownEnabled);
     }
 
     @Override
@@ -420,7 +432,9 @@ public class KafkaDynamicTableFactory
             Map<TopicPartition, Long> specificEndOffsets,
             long endTimestampMillis,
             String tableIdentifier,
-            Integer parallelism) {
+            Integer parallelism,
+            boolean keyProjectionPushdownEnabled,
+            boolean valueProjectionPushdownEnabled) {
         return new KafkaDynamicSource(
                 physicalDataType,
                 keyDecodingFormat,
@@ -439,7 +453,9 @@ public class KafkaDynamicTableFactory
                 endTimestampMillis,
                 false,
                 tableIdentifier,
-                parallelism);
+                parallelism,
+                keyProjectionPushdownEnabled,
+                valueProjectionPushdownEnabled);
     }
 
     protected KafkaDynamicSink createKafkaTableSink(
