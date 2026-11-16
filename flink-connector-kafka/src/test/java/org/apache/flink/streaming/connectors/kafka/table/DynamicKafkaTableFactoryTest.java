@@ -28,6 +28,7 @@ import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.factories.TestFormatFactory;
+import org.apache.flink.table.runtime.connector.source.ScanRuntimeProviderContext;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.junit.jupiter.api.Test;
@@ -110,6 +111,22 @@ class DynamicKafkaTableFactoryTest {
 
         assertThat(tableSource.properties.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG))
                 .isEqualTo("none");
+    }
+
+    @Test
+    void testTableSourceAcceptsByDurationOffsetResetWithGroupOffsets() {
+        final Map<String, String> options = getSingleClusterSourceOptions();
+        options.put("scan.startup.mode", "group-offsets");
+        options.put("properties." + ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "by_duration:PT1H");
+
+        final DynamicKafkaTableSource tableSource =
+                (DynamicKafkaTableSource) createTableSource(SCHEMA, options);
+        // builds the DynamicKafkaSource, which resolves the group-offsets initializer
+        assertThat(tableSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE))
+                .isNotNull();
+
+        assertThat(tableSource.properties.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG))
+                .isEqualTo("by_duration:PT1H");
     }
 
     @Test

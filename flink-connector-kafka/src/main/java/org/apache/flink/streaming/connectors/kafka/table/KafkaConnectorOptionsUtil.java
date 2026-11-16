@@ -25,6 +25,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaPartitioner;
+import org.apache.flink.connector.kafka.source.KafkaPropertiesUtil;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkFixedPartitioner;
@@ -45,18 +46,15 @@ import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.DELIVERY_GUARANTEE;
@@ -124,27 +122,9 @@ class KafkaConnectorOptionsUtil {
         if (resetStrategy == null) {
             return;
         }
-        String normalizedResetStrategy = resetStrategy.toLowerCase(Locale.ROOT);
-
-        boolean valid =
-                Arrays.stream(OffsetResetStrategy.values())
-                        .anyMatch(
-                                strategy ->
-                                        strategy.name()
-                                                .toLowerCase(Locale.ROOT)
-                                                .equals(normalizedResetStrategy));
-        if (!valid) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "%s can not be set to %s. Valid values: [%s]",
-                            ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                            resetStrategy,
-                            Arrays.stream(OffsetResetStrategy.values())
-                                    .map(Enum::name)
-                                    .map(value -> value.toLowerCase(Locale.ROOT))
-                                    .collect(Collectors.joining(","))));
-        }
-        properties.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, normalizedResetStrategy);
+        properties.setProperty(
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                KafkaPropertiesUtil.normalizeAutoOffsetReset(resetStrategy));
     }
 
     public static void validateTopic(ReadableConfig tableOptions) {
