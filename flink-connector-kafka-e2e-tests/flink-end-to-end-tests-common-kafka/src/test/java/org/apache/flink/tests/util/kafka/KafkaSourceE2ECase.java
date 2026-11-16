@@ -30,6 +30,7 @@ import org.apache.flink.connector.testframe.testsuites.SourceTestSuiteBase;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.test.resources.ResourceTestUtils;
 
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.testcontainers.containers.GenericContainer;
 
 import java.util.Arrays;
@@ -59,6 +60,10 @@ public class KafkaSourceE2ECase extends SourceTestSuiteBase<String> {
                     .fromContainer((GenericContainer) kafkaContainer.getContainer())
                     .bindWithFlinkContainer(flink.getFlinkContainers().getJobManager())
                     .build();
+
+    @RegisterExtension
+    final ContainerLogsOnFailure containerLogsOnFailure =
+            new ContainerLogsOnFailure(flink, kafkaContainer.getContainer());
 
     // Defines 2 External context Factories, so test cases will be invoked twice using these two
     // kinds of external contexts.
