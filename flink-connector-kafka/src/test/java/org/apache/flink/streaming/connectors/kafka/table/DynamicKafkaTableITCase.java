@@ -22,6 +22,7 @@ import org.apache.flink.connector.kafka.dynamic.metadata.ClusterMetadata;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaMetadataService;
 import org.apache.flink.connector.kafka.dynamic.metadata.KafkaStream;
 import org.apache.flink.table.api.Table;
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.table.utils.TableTestMatchers;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.function.RunnableWithException;
@@ -31,7 +32,10 @@ import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.assertj.core.api.ThrowingConsumer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -183,6 +187,73 @@ class DynamicKafkaTableITCase extends KafkaTableTestBase {
         assertThat(rows)
                 .containsExactlyInAnyOrderElementsOf(
                         Arrays.asList(Row.of(1, "a"), Row.of(2, "b"), Row.of(3, "c")));
+
+        cleanupTopic(topic);
+    }
+
+    @ParameterizedTest(name = "value.fields-include: {0}")
+    @ValueSource(strings = {"ALL", "EXCEPT_KEY"})
+    void testValueFormatMetadataWithKeyFields(final String valueFieldsInclude) throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.LOCAL_TIME_ZONE, "UTC");
+        final String topic = "dynamic_value_format_metadata_topic_" + UUID.randomUUID();
+        createTestTopic(topic, 1, 1);
+        final String bootstraps = getBootstrapServers();
+        final String groupId = getStandardProps().getProperty("group.id");
+
+        // write the key and the Debezium value as raw bytes
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE raw_writer (\n"
+                                + "  `k` STRING,\n"
+                                + "  `v` STRING\n"
+                                + ") WITH (\n"
+                                + "  'connector' = 'kafka',\n"
+                                + "  'topic' = '%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'key.format' = 'raw',\n"
+                                + "  'key.fields' = 'k',\n"
+                                + "  'value.format' = 'raw',\n"
+                                + "  'value.fields-include' = 'EXCEPT_KEY'\n"
+                                + ")",
+                        topic, bootstraps));
+        tEnv.executeSql(
+                        "INSERT INTO raw_writer VALUES ('{\"id\":1}', "
+                                + "'{\"before\":null,\"after\":{\"id\":1,\"name\":\"a\"},"
+                                + "\"source\":{\"ts_ms\":1700000000000,\"db\":\"inventory\"},"
+                                + "\"op\":\"c\"}')")
+                .await();
+
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE dynamic_kafka (\n"
+                                + "  `id` INT,\n"
+                                + "  `name` STRING,\n"
+                                + "  `src_ts` TIMESTAMP_LTZ(3) METADATA FROM 'value.source.timestamp' VIRTUAL,\n"
+                                + "  `src_db` STRING METADATA FROM 'value.source.database' VIRTUAL\n"
+                                + ") WITH (\n"
+                                + "  'connector' = '%s',\n"
+                                + "  'stream-ids' = '%s',\n"
+                                + "  'metadata-service' = 'single-cluster',\n"
+                                + "  'metadata-service.cluster-id' = 'cluster-0',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'properties.group.id' = '%s',\n"
+                                + "  'scan.startup.mode' = 'earliest-offset',\n"
+                                + "  'key.format' = 'json',\n"
+                                + "  'key.fields' = 'id',\n"
+                                + "  'value.format' = 'debezium-json',\n"
+                                + "  'value.fields-include' = '%s'\n"
+                                + ")",
+                        DynamicKafkaTableFactory.IDENTIFIER,
+                        topic,
+                        bootstraps,
+                        groupId,
+                        valueFieldsInclude));
+
+        final List<Row> result = collectRows(tEnv.sqlQuery("SELECT * FROM dynamic_kafka"), 1);
+
+        assertThat(result)
+                .containsExactly(
+                        Row.of(1, "a", Instant.ofEpochMilli(1_700_000_000_000L), "inventory"));
 
         cleanupTopic(topic);
     }

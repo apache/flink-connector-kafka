@@ -534,12 +534,14 @@ public class KafkaDynamicSource
         final int adjustedPhysicalArity =
                 DataType.getFieldDataTypes(producedDataType).size() - metadataKeys.size();
 
-        // adjust value format projection to include value format's metadata columns at the end
+        // adjust value format projection to include value format's metadata columns at the end;
+        // they follow the physical columns, which key and value projections may share when
+        // 'value.fields-include' is ALL
         final int[] adjustedValueProjection =
                 IntStream.concat(
                                 IntStream.of(valueProjection),
                                 IntStream.range(
-                                        keyProjection.length + valueProjection.length,
+                                        DataType.getFieldCount(physicalDataType),
                                         adjustedPhysicalArity))
                         .toArray();
 
