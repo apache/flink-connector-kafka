@@ -302,12 +302,10 @@ public class DynamicKafkaSourceReader<T> implements SourceReader<T, DynamicKafka
                                 : startingOffsetsInitializer;
                 clusterProperties.setProperty(
                         ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                        KafkaPropertiesUtil.resolveAutoOffsetResetStrategy(
-                                        properties,
-                                        clusterProperties,
-                                        effectiveStartingOffsetsInitializer)
-                                .name()
-                                .toLowerCase());
+                        KafkaPropertiesUtil.resolveAutoOffsetReset(
+                                properties,
+                                clusterProperties,
+                                effectiveStartingOffsetsInitializer));
                 newClustersProperties.put(clusterMetadataMapEntry.getKey(), clusterProperties);
             }
         }

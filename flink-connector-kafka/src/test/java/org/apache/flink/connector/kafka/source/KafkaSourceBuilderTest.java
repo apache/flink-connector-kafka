@@ -111,6 +111,31 @@ public class KafkaSourceBuilderTest {
     }
 
     @Test
+    public void testAutoOffsetResetAcceptsByDuration() {
+        KafkaSource<String> kafkaSource =
+                getBasicBuilder()
+                        .setGroupId("groupId")
+                        .setStartingOffsets(OffsetsInitializer.committedOffsets())
+                        .setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "by_duration:PT1H")
+                        .build();
+
+        assertThat(getAutoOffsetResetStrategy(kafkaSource)).isEqualTo("by_duration:PT1H");
+    }
+
+    @Test
+    public void testAutoOffsetResetRejectsValueTheConsumerRejects() {
+        assertThatThrownBy(
+                        () ->
+                                getBasicBuilder()
+                                        .setProperty(
+                                                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                                                "by_duration:")
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageStartingWith("auto.offset.reset can not be set to by_duration:.");
+    }
+
+    @Test
     public void testAutoOffsetResetExplicitPropertyOverridesInitializerStrategy() {
         KafkaSource<String> kafkaSource =
                 getBasicBuilder()

@@ -30,7 +30,6 @@ import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDe
 import org.apache.flink.util.function.SerializableSupplier;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.Deserializer;
@@ -485,12 +484,11 @@ public class KafkaSourceBuilder<OUT> {
         maybeOverride(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false", false);
         String configuredOffsetReset = props.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
         if (configuredOffsetReset != null) {
-            OffsetResetStrategy configuredOffsetResetStrategy =
-                    KafkaPropertiesUtil.getResetStrategy(configuredOffsetReset);
-            String normalizedOffsetReset = configuredOffsetResetStrategy.name().toLowerCase();
+            String normalizedOffsetReset =
+                    KafkaPropertiesUtil.normalizeAutoOffsetReset(configuredOffsetReset);
             props.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, normalizedOffsetReset);
             if (KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
-                    configuredOffsetResetStrategy, startingOffsetsInitializer)) {
+                    normalizedOffsetReset, startingOffsetsInitializer)) {
                 LOG.warn(
                         "Configured {}={} differs from the {} strategy derived from the starting "
                                 + "offsets initializer. The source will use the initializer for "

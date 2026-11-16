@@ -489,10 +489,15 @@ public class KafkaDynamicSource
                         properties.getProperty(
                                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
                                 OffsetResetStrategy.NONE.name());
-                OffsetResetStrategy offsetResetStrategy =
-                        KafkaPropertiesUtil.getResetStrategy(offsetResetConfig);
+                // A strategy the enum cannot represent, such as by_duration, stays in the
+                // properties and is applied by the consumer; the initializer then only marks
+                // the committed offsets as the starting position.
                 startingOffsetsInitializer =
-                        OffsetsInitializer.committedOffsets(offsetResetStrategy);
+                        KafkaPropertiesUtil.parseOffsetResetStrategy(
+                                        KafkaPropertiesUtil.normalizeAutoOffsetReset(
+                                                offsetResetConfig))
+                                .map(OffsetsInitializer::committedOffsets)
+                                .orElseGet(OffsetsInitializer::committedOffsets);
                 break;
             case SPECIFIC_OFFSETS:
                 Map<TopicPartition, Long> offsets = new HashMap<>();

@@ -34,7 +34,6 @@ import org.apache.flink.util.StringUtils;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -338,10 +337,10 @@ public class DynamicKafkaSourceBuilder<T> {
             return;
         }
 
-        OffsetResetStrategy configuredOffsetResetStrategy =
-                KafkaPropertiesUtil.getResetStrategy(configuredOffsetReset);
+        String normalizedOffsetReset =
+                KafkaPropertiesUtil.normalizeAutoOffsetReset(configuredOffsetReset);
         if (KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
-                configuredOffsetResetStrategy, startingOffsetsInitializer)) {
+                normalizedOffsetReset, startingOffsetsInitializer)) {
             logger.warn(
                     "Configured {}={} differs from the {} strategy derived from the starting "
                             + "offsets initializer. The source will use the initializer for "
