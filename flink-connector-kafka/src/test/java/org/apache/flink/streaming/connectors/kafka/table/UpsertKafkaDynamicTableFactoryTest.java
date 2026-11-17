@@ -45,6 +45,8 @@ import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.S
 import org.apache.flink.streaming.connectors.kafka.testutils.MockPartitionOffsetsRetriever;
 import org.apache.flink.streaming.runtime.operators.sink.SinkWriterOperatorFactory;
 import org.apache.flink.table.api.DataTypes;
+import org.apache.flink.table.api.EnvironmentSettings;
+import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ResolvedSchema;
@@ -177,9 +179,29 @@ class UpsertKafkaDynamicTableFactoryTest {
         assertThat(actualSource).isEqualTo(expectedSource);
 
         final KafkaDynamicSource actualUpsertKafkaSource = (KafkaDynamicSource) actualSource;
+        assertThat(actualUpsertKafkaSource.getChangelogMode().keyOnlyDeletes()).isTrue();
         ScanTableSource.ScanRuntimeProvider provider =
                 actualUpsertKafkaSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
         assertKafkaSource(provider);
+    }
+
+    @Test
+    void testChangelogNormalizeIsKeptForConsumerRequiringFullDeletes() {
+        final TableEnvironment tEnv =
+                TableEnvironment.create(EnvironmentSettings.inStreamingMode());
+        final String tableOptions =
+                "WITH ('connector' = 'upsert-kafka', 'topic' = '%s',"
+                        + " 'properties.bootstrap.servers' = 'dummy',"
+                        + " 'key.format' = 'json', 'value.format' = 'json')";
+        tEnv.executeSql(
+                "CREATE TABLE source (k STRING, v BIGINT, PRIMARY KEY (k) NOT ENFORCED) "
+                        + String.format(tableOptions, SOURCE_TOPIC));
+        tEnv.executeSql(
+                "CREATE TABLE sink (k STRING, v BIGINT, PRIMARY KEY (k) NOT ENFORCED) "
+                        + String.format(tableOptions, SINK_TOPIC));
+
+        assertThat(tEnv.explainSql("INSERT INTO sink SELECT * FROM source"))
+                .contains("ChangelogNormalize");
     }
 
     @Test
