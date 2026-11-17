@@ -26,6 +26,8 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 
 import javax.annotation.Nonnull;
 
+import java.time.Duration;
+import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Properties;
@@ -34,6 +36,15 @@ import java.util.stream.Collectors;
 /** Utility class for modify Kafka properties. */
 @Internal
 public class KafkaPropertiesUtil {
+
+    private static final String BY_DURATION_PREFIX = "by_duration:";
+
+    private static final String VALID_RESET_STRATEGIES =
+            Arrays.stream(OffsetResetStrategy.values())
+                            .map(Enum::name)
+                            .map(String::toLowerCase)
+                            .collect(Collectors.joining(","))
+                    + ",by_duration:<duration>";
 
     private KafkaPropertiesUtil() {}
 
@@ -72,10 +83,39 @@ public class KafkaPropertiesUtil {
                                                 "%s can not be set to %s. Valid values: [%s]",
                                                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
                                                 offsetResetConfig,
-                                                Arrays.stream(OffsetResetStrategy.values())
-                                                        .map(Enum::name)
-                                                        .map(String::toLowerCase)
-                                                        .collect(Collectors.joining(",")))));
+                                                VALID_RESET_STRATEGIES)));
+    }
+
+    /**
+     * Returns whether the configured reset strategy is a KIP-1106 duration based strategy, i.e.
+     * {@code by_duration:<ISO-8601 duration>}. It cannot be mapped to {@link OffsetResetStrategy}.
+     */
+    public static boolean isDurationBasedReset(@Nonnull String offsetResetConfig) {
+        return offsetResetConfig.regionMatches(
+                true, 0, BY_DURATION_PREFIX, 0, BY_DURATION_PREFIX.length());
+    }
+
+    /**
+     * Validates a duration based reset strategy and returns it with a canonical prefix. The
+     * duration itself is kept verbatim because lower-casing the whole value, or writing back a
+     * value derived from Kafka's parsed strategy, would drop or corrupt the ISO-8601 duration.
+     */
+    public static String normalizeDurationBasedReset(@Nonnull String offsetResetConfig) {
+        String normalized =
+                BY_DURATION_PREFIX + offsetResetConfig.substring(BY_DURATION_PREFIX.length());
+        try {
+            Duration.parse(normalized.substring(BY_DURATION_PREFIX.length()));
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "%s can not be set to %s. Valid values: [%s]",
+                            ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                            offsetResetConfig,
+                            VALID_RESET_STRATEGIES),
+                    e);
+        }
+
+        return normalized;
     }
 
     /** Returns whether the configured strategy opposes a positional initializer strategy. */

@@ -32,6 +32,7 @@ import java.util.Properties;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link KafkaPropertiesUtil}. */
 class KafkaPropertiesUtilTest {
@@ -67,6 +68,38 @@ class KafkaPropertiesUtilTest {
                                 resetProperties("earliest"),
                                 OffsetsInitializer.latest()))
                 .isEqualTo(OffsetResetStrategy.EARLIEST);
+    }
+
+    @Test
+    void testDetectsDurationBasedResetStrategies() {
+        assertThat(KafkaPropertiesUtil.isDurationBasedReset("by_duration:PT1H")).isTrue();
+        assertThat(KafkaPropertiesUtil.isDurationBasedReset("BY_DURATION:PT1H")).isTrue();
+        assertThat(KafkaPropertiesUtil.isDurationBasedReset("By_Duration:PT1H")).isTrue();
+        assertThat(KafkaPropertiesUtil.isDurationBasedReset("earliest")).isFalse();
+        assertThat(KafkaPropertiesUtil.isDurationBasedReset("latest")).isFalse();
+        assertThat(KafkaPropertiesUtil.isDurationBasedReset("none")).isFalse();
+        assertThat(KafkaPropertiesUtil.isDurationBasedReset("by_duratio")).isFalse();
+    }
+
+    @Test
+    void testNormalizesDurationBasedResetStrategyPrefixOnly() {
+        assertThat(KafkaPropertiesUtil.normalizeDurationBasedReset("by_duration:PT1H30M"))
+                .isEqualTo("by_duration:PT1H30M");
+        assertThat(KafkaPropertiesUtil.normalizeDurationBasedReset("BY_DURATION:PT1H30M"))
+                .isEqualTo("by_duration:PT1H30M");
+        assertThat(KafkaPropertiesUtil.normalizeDurationBasedReset("By_Duration:PT30M"))
+                .isEqualTo("by_duration:PT30M");
+    }
+
+    @Test
+    void testRejectsInvalidDuration() {
+        assertThatThrownBy(
+                        () -> KafkaPropertiesUtil.normalizeDurationBasedReset("by_duration:PT1H30"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("can not be set to by_duration:PT1H30");
+
+        assertThatThrownBy(() -> KafkaPropertiesUtil.normalizeDurationBasedReset("by_duration:"))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @ParameterizedTest

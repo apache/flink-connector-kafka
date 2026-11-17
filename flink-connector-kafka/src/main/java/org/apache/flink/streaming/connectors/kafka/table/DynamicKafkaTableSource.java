@@ -501,8 +501,12 @@ public class DynamicKafkaTableSource
                         properties.getProperty(
                                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
                                 OffsetResetStrategy.NONE.name());
+                // by_duration (KIP-1106) has no OffsetResetStrategy constant; the property stays
+                // in the consumer config, so keep the initializer's default strategy.
                 OffsetResetStrategy offsetResetStrategy =
-                        KafkaPropertiesUtil.getResetStrategy(offsetResetConfig);
+                        KafkaPropertiesUtil.isDurationBasedReset(offsetResetConfig)
+                                ? OffsetResetStrategy.NONE
+                                : KafkaPropertiesUtil.getResetStrategy(offsetResetConfig);
                 startingOffsetsInitializer =
                         OffsetsInitializer.committedOffsets(offsetResetStrategy);
                 break;
