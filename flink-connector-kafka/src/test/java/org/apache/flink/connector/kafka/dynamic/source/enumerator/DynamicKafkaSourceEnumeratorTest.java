@@ -2398,7 +2398,7 @@ public class DynamicKafkaSourceEnumeratorTest {
     }
 
     private static String dynamicSplitId(String clusterId, KafkaPartitionSplit split) {
-        return clusterId + "-" + split.splitId();
+        return DynamicKafkaSourceSplit.toDynamicSplitId(clusterId, split.splitId());
     }
 
     private void verifyExpectedTopicPartitions(
