@@ -118,6 +118,8 @@ public class KafkaSink<IN>
                     transactionalIdPrefix,
                     context.getTaskInfo().getIndexOfThisSubtask(),
                     context.getTaskInfo().getAttemptNumber(),
+                    // POOLING reuses IDs, so fencing and invalid producer mappings are logged at
+                    // WARN.
                     transactionNamingStrategy == TransactionNamingStrategy.POOLING,
                     FlinkKafkaInternalProducer::new);
         }
