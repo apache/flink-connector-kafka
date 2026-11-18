@@ -28,6 +28,7 @@ import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.BoundedOptions;
 import org.apache.flink.table.api.ValidationException;
+import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.connector.ChangelogMode;
@@ -232,13 +233,16 @@ public class UpsertKafkaDynamicTableFactory
         SinkBufferFlushMode flushMode =
                 new SinkBufferFlushMode(batchSize, batchInterval.toMillis());
 
+        final ResolvedSchema schema = context.getCatalogTable().getResolvedSchema();
+        final boolean keyOnlyDeletes = supportsKeyOnlyDeletes(tableOptions, schema);
+
         // use {@link org.apache.kafka.clients.producer.internals.DefaultPartitioner}.
         // it will use hash partition if key is set else in round-robin behaviour.
         return new KafkaDynamicSink(
                 context.getPhysicalRowDataType(),
                 context.getPhysicalRowDataType(),
                 keyEncodingFormat,
-                new EncodingFormatWrapper(valueEncodingFormat),
+                new EncodingFormatWrapper(valueEncodingFormat, keyOnlyDeletes),
                 keyValueProjections.f0,
                 keyValueProjections.f1,
                 keyPrefix,
@@ -252,6 +256,35 @@ public class UpsertKafkaDynamicTableFactory
                 parallelism,
                 tableOptions.get(TRANSACTIONAL_ID_PREFIX),
                 tableOptions.get(TRANSACTION_NAMING_STRATEGY));
+    }
+
+    private static boolean supportsKeyOnlyDeletes(
+            ReadableConfig tableOptions, ResolvedSchema schema) {
+        return writesToSingleTopic(tableOptions) && hasOnlyNullableValueColumns(schema);
+    }
+
+    /**
+     * A tombstone only needs the key, as long as the sink knows the target topic. With a topic list
+     * or pattern, each row picks its topic from the {@code topic} metadata column, which a key-only
+     * delete does not guarantee to carry. This makes sinks writing to multiple topics incompatible
+     * with key-only deletes.
+     */
+    private static boolean writesToSingleTopic(ReadableConfig tableOptions) {
+        final List<String> topics = getTopics(tableOptions);
+        return topics != null && topics.size() == 1;
+    }
+
+    /**
+     * Key-only deletes leave the value columns NULL, which the NOT NULL enforcer of Flink versions
+     * without FLINK-40477 rejects. Remove once the minimum Flink version supported by the connector
+     * contains this fix (Flink 2.4 and later).
+     */
+    private static boolean hasOnlyNullableValueColumns(ResolvedSchema schema) {
+        final List<String> keyColumns = schema.getPrimaryKey().get().getColumns();
+        return schema.getColumns().stream()
+                .filter(Column::isPersisted)
+                .filter(column -> !keyColumns.contains(column.getName()))
+                .allMatch(column -> column.getDataType().getLogicalType().isNullable());
     }
 
     private Tuple2<int[], int[]> createKeyValueProjections(ResolvedCatalogTable catalogTable) {
@@ -403,17 +436,13 @@ public class UpsertKafkaDynamicTableFactory
     protected static class EncodingFormatWrapper
             implements EncodingFormat<SerializationSchema<RowData>> {
         private final EncodingFormat<SerializationSchema<RowData>> innerEncodingFormat;
-
-        public static final ChangelogMode SINK_CHANGELOG_MODE =
-                ChangelogMode.newBuilder()
-                        .addContainedKind(RowKind.INSERT)
-                        .addContainedKind(RowKind.UPDATE_AFTER)
-                        .addContainedKind(RowKind.DELETE)
-                        .build();
+        private final boolean keyOnlyDeletes;
 
         public EncodingFormatWrapper(
-                EncodingFormat<SerializationSchema<RowData>> innerEncodingFormat) {
+                EncodingFormat<SerializationSchema<RowData>> innerEncodingFormat,
+                boolean keyOnlyDeletes) {
             this.innerEncodingFormat = innerEncodingFormat;
+            this.keyOnlyDeletes = keyOnlyDeletes;
         }
 
         @Override
@@ -424,7 +453,7 @@ public class UpsertKafkaDynamicTableFactory
 
         @Override
         public ChangelogMode getChangelogMode() {
-            return SINK_CHANGELOG_MODE;
+            return ChangelogMode.upsert(keyOnlyDeletes);
         }
 
         @Override
@@ -438,12 +467,13 @@ public class UpsertKafkaDynamicTableFactory
             }
 
             EncodingFormatWrapper that = (EncodingFormatWrapper) obj;
-            return Objects.equals(innerEncodingFormat, that.innerEncodingFormat);
+            return Objects.equals(innerEncodingFormat, that.innerEncodingFormat)
+                    && keyOnlyDeletes == that.keyOnlyDeletes;
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(innerEncodingFormat);
+            return Objects.hash(innerEncodingFormat, keyOnlyDeletes);
         }
     }
 }
