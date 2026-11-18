@@ -133,6 +133,15 @@ public class KafkaSourceEnumerator
     private final Map<Integer, Set<KafkaPartitionSplit>> pendingPartitionSplitAssignment =
             new HashMap<>();
 
+    /**
+     * Whether split initialization is in flight on the worker thread. Discovery results that arrive
+     * meanwhile are dropped, because the partitions being initialized are not yet in {@link
+     * #assignedSplits} or {@link #pendingPartitionSplitAssignment} and would be initialized and
+     * assigned a second time. The next discovery cycle picks up whatever was dropped. Accessed only
+     * from the coordinator thread.
+     */
+    private boolean partitionInitializationInFlight;
+
     private final SplitOwnerSelector splitOwnerSelector;
 
     /** The consumer group id used for this KafkaSource. */
@@ -366,6 +375,11 @@ public class KafkaSourceEnumerator
                     "Failed to list subscribed topic partitions due to ", t);
         }
 
+        if (partitionInitializationInFlight) {
+            LOG.debug("Skipping discovery result because split initialization is in flight.");
+            return;
+        }
+
         final PartitionChange partitionChange =
                 getPartitionChange(fetchedPartitions, !initialDiscoveryFinished);
         // A bounded source must reach handlePartitionSplitChanges even when nothing changed, as
@@ -376,9 +390,26 @@ public class KafkaSourceEnumerator
         if (partitionChange.isEmpty() && !boundedOneTimeDiscovery) {
             return;
         }
+        partitionInitializationInFlight = true;
         context.callAsync(
-                () -> initializePartitionSplits(partitionChange),
-                this::handlePartitionSplitChanges);
+                () -> {
+                    try {
+                        return initializePartitionSplits(partitionChange);
+                    } catch (Throwable failure) {
+                        // A context may suppress a failure without calling the handler below:
+                        // StoppableKafkaEnumContextProxy does when the cluster is inactive.
+                        // Nothing of this batch was assigned, so release the flag and let the
+                        // next discovery cycle retry it.
+                        context.runInCoordinatorThread(
+                                () -> partitionInitializationInFlight = false);
+                        throw failure;
+                    }
+                },
+                (result, error) -> {
+                    // Clear before handling so that a throwing handler cannot leave the flag set.
+                    partitionInitializationInFlight = false;
+                    handlePartitionSplitChanges(result, error);
+                });
     }
 
     /**
