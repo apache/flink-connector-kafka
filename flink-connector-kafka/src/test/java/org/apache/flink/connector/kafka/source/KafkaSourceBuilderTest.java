@@ -111,6 +111,40 @@ public class KafkaSourceBuilderTest {
     }
 
     @Test
+    public void testAutoOffsetResetAcceptsDurationBasedStrategy() {
+        KafkaSource<String> kafkaSource =
+                getBasicBuilder()
+                        .setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "by_duration:PT1H30M")
+                        .build();
+
+        // the duration must survive the build untouched, lower-casing it would corrupt ISO-8601
+        assertThat(getAutoOffsetResetStrategy(kafkaSource)).isEqualTo("by_duration:PT1H30M");
+    }
+
+    @Test
+    public void testAutoOffsetResetNormalizesDurationBasedStrategyPrefix() {
+        KafkaSource<String> kafkaSource =
+                getBasicBuilder()
+                        .setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "BY_DURATION:PT30M")
+                        .build();
+
+        assertThat(getAutoOffsetResetStrategy(kafkaSource)).isEqualTo("by_duration:PT30M");
+    }
+
+    @Test
+    public void testAutoOffsetResetRejectsInvalidDuration() {
+        assertThatThrownBy(
+                        () ->
+                                getBasicBuilder()
+                                        .setProperty(
+                                                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                                                "by_duration:not-a-duration")
+                                        .build())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("can not be set to by_duration:not-a-duration");
+    }
+
+    @Test
     public void testAutoOffsetResetExplicitPropertyOverridesInitializerStrategy() {
         KafkaSource<String> kafkaSource =
                 getBasicBuilder()

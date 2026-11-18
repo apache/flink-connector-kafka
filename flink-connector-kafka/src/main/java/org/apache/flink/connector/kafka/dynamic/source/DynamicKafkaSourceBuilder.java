@@ -334,7 +334,9 @@ public class DynamicKafkaSourceBuilder<T> {
 
     private void warnIfOffsetResetStrategyOpposesStartingOffsetsInitializer() {
         String configuredOffsetReset = props.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
-        if (configuredOffsetReset == null) {
+        if (configuredOffsetReset == null
+                || KafkaPropertiesUtil.isDurationBasedReset(configuredOffsetReset)) {
+            // by_duration (KIP-1106) is not one of the positional strategies the warning compares.
             return;
         }
 

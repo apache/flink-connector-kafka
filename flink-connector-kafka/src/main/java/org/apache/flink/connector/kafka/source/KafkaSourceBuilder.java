@@ -484,7 +484,14 @@ public class KafkaSourceBuilder<OUT> {
         }
         maybeOverride(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false", false);
         String configuredOffsetReset = props.getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG);
-        if (configuredOffsetReset != null) {
+        if (configuredOffsetReset != null
+                && KafkaPropertiesUtil.isDurationBasedReset(configuredOffsetReset)) {
+            // KIP-1106: by_duration has no OffsetResetStrategy constant and lower-casing the value
+            // would corrupt the ISO-8601 duration, so pass it through as configured.
+            props.setProperty(
+                    ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                    KafkaPropertiesUtil.normalizeDurationBasedReset(configuredOffsetReset));
+        } else if (configuredOffsetReset != null) {
             OffsetResetStrategy configuredOffsetResetStrategy =
                     KafkaPropertiesUtil.getResetStrategy(configuredOffsetReset);
             String normalizedOffsetReset = configuredOffsetResetStrategy.name().toLowerCase();
