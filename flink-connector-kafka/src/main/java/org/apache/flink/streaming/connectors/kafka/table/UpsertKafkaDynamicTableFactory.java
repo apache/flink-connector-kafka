@@ -357,6 +357,7 @@ public class UpsertKafkaDynamicTableFactory
                 ChangelogMode.newBuilder()
                         .addContainedKind(RowKind.UPDATE_AFTER)
                         .addContainedKind(RowKind.DELETE)
+                        .keyOnlyDeletes(true)
                         .build();
 
         public DecodingFormatWrapper(
