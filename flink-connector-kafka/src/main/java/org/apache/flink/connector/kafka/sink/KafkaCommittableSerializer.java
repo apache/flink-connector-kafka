@@ -27,9 +27,11 @@ import java.io.IOException;
 
 class KafkaCommittableSerializer implements SimpleVersionedSerializer<KafkaCommittable> {
 
+    private static final int VERSION_WITH_PREPARED_TRANSACTION_STATE = 2;
+
     @Override
     public int getVersion() {
-        return 1;
+        return VERSION_WITH_PREPARED_TRANSACTION_STATE;
     }
 
     @Override
@@ -39,6 +41,10 @@ class KafkaCommittableSerializer implements SimpleVersionedSerializer<KafkaCommi
             out.writeShort(state.getEpoch());
             out.writeLong(state.getProducerId());
             out.writeUTF(state.getTransactionalId());
+            out.writeBoolean(state.getPreparedTransactionState().isPresent());
+            if (state.getPreparedTransactionState().isPresent()) {
+                out.writeUTF(state.getPreparedTransactionState().get());
+            }
             out.flush();
             return baos.toByteArray();
         }
@@ -46,12 +52,21 @@ class KafkaCommittableSerializer implements SimpleVersionedSerializer<KafkaCommi
 
     @Override
     public KafkaCommittable deserialize(int version, byte[] serialized) throws IOException {
+        if (version < 1 || version > getVersion()) {
+            throw new IOException("Unknown version: " + version);
+        }
+
         try (final ByteArrayInputStream bais = new ByteArrayInputStream(serialized);
                 final DataInputStream in = new DataInputStream(bais)) {
             final short epoch = in.readShort();
             final long producerId = in.readLong();
             final String transactionalId = in.readUTF();
-            return new KafkaCommittable(producerId, epoch, transactionalId, null);
+            final String preparedTransactionState =
+                    version >= VERSION_WITH_PREPARED_TRANSACTION_STATE && in.readBoolean()
+                            ? in.readUTF()
+                            : null;
+            return new KafkaCommittable(
+                    producerId, epoch, transactionalId, preparedTransactionState, null);
         }
     }
 }
