@@ -243,7 +243,9 @@ Please note that the following keys will be set by the builder:
 - ```auto.offset.reset``` is set from ```OffsetsInitializer#getAutoOffsetResetStrategy()```
   for the starting offsets unless it is explicitly configured. The initializer selects the initial
   position, while an explicitly configured ```auto.offset.reset``` controls what happens if an
-  initialized position later becomes unavailable.
+  initialized position later becomes unavailable. With ```OffsetsInitializer.committedOffsets()```,
+  an explicitly configured ```auto.offset.reset``` also decides where a partition without a
+  committed offset starts.
 - ```partition.discovery.interval.ms``` is overridden to -1 when
   ```setBounded(OffsetsInitializer)``` has been invoked
 

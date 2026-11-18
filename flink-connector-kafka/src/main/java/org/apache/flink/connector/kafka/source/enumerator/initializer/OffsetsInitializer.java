@@ -100,7 +100,9 @@ public interface OffsetsInitializer extends Serializable {
 
     /**
      * Get an {@link OffsetsInitializer} which initializes the offsets to the committed offsets. An
-     * exception will be thrown at runtime if there is no committed offsets.
+     * exception will be thrown at runtime if there is no committed offsets, unless {@code
+     * auto.offset.reset} is explicitly configured to {@code earliest} or {@code latest} on the
+     * source.
      *
      * @return an offset initializer which initialize the offsets to the committed offsets.
      */
@@ -111,7 +113,8 @@ public interface OffsetsInitializer extends Serializable {
     /**
      * Get an {@link OffsetsInitializer} which initializes the offsets to the committed offsets. Use
      * the given {@link OffsetResetStrategy} to initialize the offsets if the committed offsets does
-     * not exist.
+     * not exist. An explicitly configured {@code auto.offset.reset} on the source takes precedence
+     * over the given strategy.
      *
      * @param offsetResetStrategy the offset reset strategy to use when the committed offsets do not
      *     exist.
