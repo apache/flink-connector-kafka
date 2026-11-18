@@ -48,6 +48,8 @@ import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
 import org.apache.flink.metrics.testutils.MetricListener;
 import org.apache.flink.runtime.metrics.groups.InternalSourceReaderMetricGroup;
 import org.apache.flink.streaming.connectors.kafka.DynamicKafkaSourceTestHelper;
+import org.apache.flink.util.clock.Clock;
+import org.apache.flink.util.clock.ManualClock;
 
 import com.google.common.collect.ImmutableList;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -73,6 +75,7 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -105,6 +108,11 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
 
     // we are testing two clusters and SourceReaderTestBase expects there to be a total of 10 splits
     private static final int NUM_SPLITS_PER_CLUSTER = 5;
+
+    // Removed cluster retention is driven by a ManualClock, so these are exact expected values
+    // rather than a window that has to be raced. ManualClock counts nanoseconds internally.
+    private static final long CLOCK_START_MS = 1_000_000L;
+    private static final long RETENTION_MS = 60_000L;
 
     private static String kafkaClusterId0;
     private static String kafkaClusterId1;
@@ -265,55 +273,112 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
     }
 
     @Test
-    void testHandleSourceEventRetainsRemovedClusterOffsetsUntilExpired() throws Exception {
-        DynamicKafkaSourceSplit cluster0Split =
-                new DynamicKafkaSourceSplit(
-                        kafkaClusterId0, new KafkaPartitionSplit(new TopicPartition(TOPIC, 0), 10));
-        DynamicKafkaSourceSplit cluster1Split =
-                new DynamicKafkaSourceSplit(
-                        kafkaClusterId1, new KafkaPartitionSplit(new TopicPartition(TOPIC, 0), 20));
+    void testMetadataRemovalRetainsRemovedClusterSplitUntilItsDeadline() throws Exception {
+        ManualClock clock = manualClock();
+        TestingReaderContext context = new TestingReaderContext();
+        try (DynamicKafkaSourceReader<Integer> reader =
+                createReaderWithoutStartWithRemovedClusterRetention(context, clock)) {
+            startReaderAndRemoveCluster0(reader);
+
+            DynamicKafkaSourceSplit retainedCluster0Split =
+                    cluster0Split().retainUntil(CLOCK_START_MS + RETENTION_MS);
+            assertThat(reader.snapshotState(-1))
+                    .as("removed cluster offsets are retained with an absolute deadline")
+                    .containsExactlyInAnyOrder(retainedCluster0Split, cluster1Split());
+
+            clock.advanceTime(RETENTION_MS - 1, TimeUnit.MILLISECONDS);
+            assertThat(reader.snapshotState(-1))
+                    .as("the retained split survives up to the millisecond before its deadline")
+                    .containsExactlyInAnyOrder(retainedCluster0Split, cluster1Split());
+
+            clock.advanceTime(1, TimeUnit.MILLISECONDS);
+            assertThat(reader.snapshotState(-1))
+                    .as("the retained split is dropped once the clock reaches its deadline")
+                    .containsExactly(cluster1Split());
+        }
+    }
+
+    @Test
+    void testRetainedSplitIsReactivatedWhenClusterReturnsBeforeItsDeadline() throws Exception {
+        ManualClock clock = manualClock();
+        TestingReaderContext context = new TestingReaderContext();
+        try (DynamicKafkaSourceReader<Integer> reader =
+                createReaderWithoutStartWithRemovedClusterRetention(context, clock)) {
+            startReaderAndRemoveCluster0(reader);
+
+            clock.advanceTime(RETENTION_MS - 1, TimeUnit.MILLISECONDS);
+            reader.handleSourceEvents(
+                    new MetadataUpdateEvent(
+                            Collections.singleton(
+                                    DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC))));
+
+            assertThat(reader.snapshotState(-1))
+                    .as("a cluster re-added before its deadline resumes from the retained offsets")
+                    .containsExactlyInAnyOrder(cluster0Split(), cluster1Split());
+        }
+    }
+
+    @Test
+    void testExpiredRetainedSplitIsNotReactivatedWhenClusterReturns() throws Exception {
+        ManualClock clock = manualClock();
+        TestingReaderContext context = new TestingReaderContext();
+        try (DynamicKafkaSourceReader<Integer> reader =
+                createReaderWithoutStartWithRemovedClusterRetention(context, clock)) {
+            startReaderAndRemoveCluster0(reader);
+
+            clock.advanceTime(RETENTION_MS, TimeUnit.MILLISECONDS);
+            reader.handleSourceEvents(
+                    new MetadataUpdateEvent(
+                            Collections.singleton(
+                                    DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC))));
+
+            assertThat(reader.snapshotState(-1))
+                    .as(
+                            "offsets dropped at the deadline are not revived by a later metadata update")
+                    .containsExactly(cluster1Split());
+        }
+    }
+
+    @Test
+    void testRestoredSplitIsRetainedUntilItsDeadlineAndThenDropped() throws Exception {
         KafkaStream shrunkKafkaStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
         shrunkKafkaStream.getClusterMetadataMap().remove(kafkaClusterId0);
 
+        ManualClock clock = manualClock();
+        DynamicKafkaSourceSplit restoredCluster0Split =
+                cluster0Split().retainUntil(CLOCK_START_MS + 1);
         TestingReaderContext context = new TestingReaderContext();
         try (DynamicKafkaSourceReader<Integer> reader =
-                createReaderWithoutStartWithRemovedClusterRetention(context)) {
+                createReaderWithoutStartWithRemovedClusterRetention(context, clock)) {
+            reader.addSplits(ImmutableList.of(restoredCluster0Split, cluster1Split()));
             reader.start();
-            KafkaStream kafkaStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
-            reader.handleSourceEvents(new MetadataUpdateEvent(Collections.singleton(kafkaStream)));
-
-            reader.addSplits(ImmutableList.of(cluster0Split, cluster1Split));
-
             reader.handleSourceEvents(
                     new MetadataUpdateEvent(Collections.singleton(shrunkKafkaStream)));
 
-            DynamicKafkaSourceSplit retainedCluster0Split =
-                    reader.snapshotState(-1).stream()
-                            .filter(split -> split.getKafkaClusterId().equals(kafkaClusterId0))
-                            .findFirst()
-                            .orElseThrow();
-            assertThat(retainedCluster0Split.isRetained()).isTrue();
-            assertThat(retainedCluster0Split.getRetainedUntilMs())
-                    .isGreaterThan(System.currentTimeMillis());
             assertThat(reader.snapshotState(-1))
-                    .containsExactlyInAnyOrder(retainedCluster0Split, cluster1Split);
+                    .as("a restored split whose deadline has not passed stays retained")
+                    .containsExactlyInAnyOrder(restoredCluster0Split, cluster1Split());
 
-            reader.handleSourceEvents(new MetadataUpdateEvent(Collections.singleton(kafkaStream)));
+            clock.advanceTime(1, TimeUnit.MILLISECONDS);
             assertThat(reader.snapshotState(-1))
-                    .containsExactlyInAnyOrder(cluster0Split, cluster1Split);
+                    .as("it is dropped as soon as the clock reaches its restored deadline")
+                    .containsExactly(cluster1Split());
         }
 
-        TestingReaderContext restoredContext = new TestingReaderContext();
-        try (DynamicKafkaSourceReader<Integer> restoredReader =
-                createReaderWithoutStartWithRemovedClusterRetention(restoredContext)) {
-            restoredReader.addSplits(
+        TestingReaderContext expiredContext = new TestingReaderContext();
+        try (DynamicKafkaSourceReader<Integer> expiredReader =
+                createReaderWithoutStartWithRemovedClusterRetention(
+                        expiredContext, manualClock())) {
+            expiredReader.addSplits(
                     ImmutableList.of(
-                            cluster0Split.retainUntil(System.currentTimeMillis() - 1),
-                            cluster1Split));
-            restoredReader.start();
-            restoredReader.handleSourceEvents(
+                            cluster0Split().retainUntil(CLOCK_START_MS - 1), cluster1Split()));
+            expiredReader.start();
+            expiredReader.handleSourceEvents(
                     new MetadataUpdateEvent(Collections.singleton(shrunkKafkaStream)));
-            assertThat(restoredReader.snapshotState(-1)).containsExactly(cluster1Split);
+
+            assertThat(expiredReader.snapshotState(-1))
+                    .as("a restored split that is already past its deadline is dropped")
+                    .containsExactly(cluster1Split());
         }
     }
 
@@ -538,16 +603,45 @@ public class DynamicKafkaSourceReaderTest extends SourceReaderTestBase<DynamicKa
     }
 
     private DynamicKafkaSourceReader<Integer> createReaderWithoutStartWithRemovedClusterRetention(
-            TestingReaderContext context) {
+            TestingReaderContext context, Clock clock) {
         Properties properties = getRequiredProperties();
         properties.setProperty(
                 DynamicKafkaSourceOptions.STREAM_METADATA_REMOVED_CLUSTER_RETENTION_MS.key(),
-                "1000");
+                Long.toString(RETENTION_MS));
         return new DynamicKafkaSourceReader<>(
                 context,
                 KafkaRecordDeserializationSchema.valueOnly(IntegerDeserializer.class),
                 properties,
-                OffsetsInitializer.earliest());
+                OffsetsInitializer.earliest(),
+                clock);
+    }
+
+    private static ManualClock manualClock() {
+        return new ManualClock(TimeUnit.MILLISECONDS.toNanos(CLOCK_START_MS));
+    }
+
+    private static DynamicKafkaSourceSplit cluster0Split() {
+        return new DynamicKafkaSourceSplit(
+                kafkaClusterId0, new KafkaPartitionSplit(new TopicPartition(TOPIC, 0), 10));
+    }
+
+    private static DynamicKafkaSourceSplit cluster1Split() {
+        return new DynamicKafkaSourceSplit(
+                kafkaClusterId1, new KafkaPartitionSplit(new TopicPartition(TOPIC, 0), 20));
+    }
+
+    /** Starts the reader with both clusters assigned, then removes cluster 0 from the metadata. */
+    private static void startReaderAndRemoveCluster0(DynamicKafkaSourceReader<Integer> reader) {
+        KafkaStream shrunkKafkaStream = DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC);
+        shrunkKafkaStream.getClusterMetadataMap().remove(kafkaClusterId0);
+
+        reader.start();
+        reader.handleSourceEvents(
+                new MetadataUpdateEvent(
+                        Collections.singleton(DynamicKafkaSourceTestHelper.getKafkaStream(TOPIC))));
+        reader.addSplits(ImmutableList.of(cluster0Split(), cluster1Split()));
+        reader.handleSourceEvents(
+                new MetadataUpdateEvent(Collections.singleton(shrunkKafkaStream)));
     }
 
     private SourceReader<Integer, DynamicKafkaSourceSplit> startReader(
