@@ -167,6 +167,71 @@ public class KafkaPartitionSplitReaderTest {
     }
 
     @Test
+    public void testCommitOffsetsOnCloseAfterWakeUp() throws Exception {
+        final String groupId = "commit-offsets-on-close-after-wake-up";
+        final Properties props = new Properties();
+        props.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
+        KafkaPartitionSplitReader reader =
+                createReader(props, UnregisteredMetricsGroup.createSourceReaderMetricGroup());
+        TopicPartition tp = new TopicPartition(TOPIC1, 0);
+        assertThat(
+                        reader.commitOffsetsOnClose(
+                                Collections.singletonMap(tp, new OffsetAndMetadata(3L)),
+                                Collections.emptySet()))
+                .isTrue();
+        // Shutting down the fetcher wakes up the consumer; the held wakeup must not fail the
+        // commit. The consumer must exist for the wakeup to reach it.
+        reader.consumer();
+        reader.wakeUp();
+        reader.close();
+
+        final Map<TopicPartition, OffsetAndMetadata> committedOffsets =
+                KafkaSourceTestEnv.listCommittedOffsets(groupId);
+        assertThat(committedOffsets).containsOnlyKeys(tp);
+        assertThat(committedOffsets.get(tp).offset()).isEqualTo(3L);
+    }
+
+    @Test
+    public void testCommitOffsetsOnCloseWithoutConsumer() throws Exception {
+        final String groupId = "commit-offsets-on-close-without-consumer";
+        final Properties props = new Properties();
+        props.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
+        // Like a fetcher started only to commit, the reader never creates its consumer before
+        // close.
+        KafkaPartitionSplitReader reader =
+                createReader(props, UnregisteredMetricsGroup.createSourceReaderMetricGroup());
+        TopicPartition tp = new TopicPartition(TOPIC1, 0);
+        assertThat(
+                        reader.commitOffsetsOnClose(
+                                Collections.singletonMap(tp, new OffsetAndMetadata(3L)),
+                                Collections.emptySet()))
+                .isTrue();
+        reader.close();
+
+        final Map<TopicPartition, OffsetAndMetadata> committedOffsets =
+                KafkaSourceTestEnv.listCommittedOffsets(groupId);
+        assertThat(committedOffsets).containsOnlyKeys(tp);
+        assertThat(committedOffsets.get(tp).offset()).isEqualTo(3L);
+    }
+
+    @Test
+    public void testRejectOffsetsToCommitOnCloseAfterClose() throws Exception {
+        final Properties props = new Properties();
+        props.setProperty(
+                ConsumerConfig.GROUP_ID_CONFIG, "reject-offsets-to-commit-on-close-after-close");
+        KafkaPartitionSplitReader reader =
+                createReader(props, UnregisteredMetricsGroup.createSourceReaderMetricGroup());
+        reader.close();
+
+        assertThat(
+                        reader.commitOffsetsOnClose(
+                                Collections.singletonMap(
+                                        new TopicPartition(TOPIC1, 0), new OffsetAndMetadata(3L)),
+                                Collections.emptySet()))
+                .isFalse();
+    }
+
+    @Test
     public void testNumBytesInCounter() throws Exception {
         final OperatorMetricGroup operatorMetricGroup =
                 UnregisteredMetricGroups.createUnregisteredOperatorMetricGroup();
@@ -651,6 +716,114 @@ public class KafkaPartitionSplitReaderTest {
         assertThat(reader.lastCommittedOffsets).doesNotContainKey(unassignedWithOffset);
     }
 
+    /** The offset of a checkpoint taken while a transactional topic is idle stops at its marker. */
+    @Test
+    void testCommitOffsetsOnCloseAdvancesOverCommitMarker() throws Throwable {
+        final String topic = "CommitOnCloseAdvancesOverCommitMarker";
+        final String groupId = topic + "Group";
+        final TopicPartition tp = new TopicPartition(topic, 0);
+        KafkaSourceTestEnv.createTestTopic(topic, 1, 1);
+
+        // offset 0 = record
+        // offset 1 = commit marker
+        produceRecordInTransaction(tp);
+
+        final KafkaPartitionSplitReader reader = createReadCommittedReader(groupId);
+        assignSplit(reader, new KafkaPartitionSplit(tp, 0L));
+        fetchUntil(
+                reader,
+                () -> Long.valueOf(2L).equals(reader.lastKnownPositions.get(tp)),
+                "The consumer did not move past the commit marker.");
+
+        commitOffsetsOnClose(
+                reader,
+                Collections.singletonMap(tp, new OffsetAndMetadata(1L)),
+                Collections.emptySet());
+        assertThat(getCommittedOffset(tp, groupId)).isEqualTo(2L);
+    }
+
+    /**
+     * An earlier checkpoint has already committed past the commit marker. The savepoint holds the
+     * same offset, but cannot be advanced as a record was fetched after it was taken.
+     */
+    @Test
+    void testCommitOffsetsOnCloseDoesNotMoveCommittedOffsetBackwards() throws Throwable {
+        final String topic = "CommitOnCloseDoesNotGoBackwards";
+        final String groupId = topic + "Group";
+        final TopicPartition tp = new TopicPartition(topic, 0);
+        KafkaSourceTestEnv.createTestTopic(topic, 1, 1);
+
+        // offset 0 = record
+        // offset 1 = commit marker
+        produceRecordInTransaction(tp);
+
+        final KafkaPartitionSplitReader reader = createReadCommittedReader(groupId);
+        assignSplit(reader, new KafkaPartitionSplit(tp, 0L));
+        final Map<TopicPartition, OffsetAndMetadata> snapshot =
+                Collections.singletonMap(tp, new OffsetAndMetadata(1L));
+        fetchUntil(
+                reader,
+                () -> Long.valueOf(2L).equals(reader.lastKnownPositions.get(tp)),
+                "The consumer did not move past the commit marker.");
+        commitOffsets(reader, snapshot, Collections.emptySet());
+        assertThat(getCommittedOffset(tp, groupId))
+                .as("The committed offset of the earlier checkpoint")
+                .isEqualTo(2L);
+
+        // offset 2 = record
+        // offset 3 = commit marker
+        produceRecordInTransaction(tp);
+        fetchUntil(
+                reader,
+                () -> Long.valueOf(2L).equals(reader.lastFetchedOffsets.get(tp)),
+                "The record at offset 2 was not fetched.");
+
+        commitOffsetsOnClose(reader, snapshot, Collections.emptySet());
+        assertThat(getCommittedOffset(tp, groupId)).isEqualTo(2L);
+    }
+
+    @Test
+    void testCommitOffsetsOnCloseDoesNotSkipRecordFetchedAfterCheckpoint() throws Throwable {
+        final String topic = "CommitOnCloseDoesNotSkipFetchedRecord";
+        final String groupId = topic + "Group";
+        final TopicPartition tp = new TopicPartition(topic, 0);
+        KafkaSourceTestEnv.createTestTopic(topic, 1, 1);
+
+        // offset 0 = record
+        // offset 1 = commit marker
+        // offset 2 = record
+        // offset 3 = commit marker
+        produceRecordInTransaction(tp);
+        produceRecordInTransaction(tp);
+
+        final KafkaPartitionSplitReader reader = createReadCommittedReader(groupId);
+        assignSplit(reader, new KafkaPartitionSplit(tp, 0L));
+        fetchUntil(
+                reader,
+                () -> Long.valueOf(2L).equals(reader.lastFetchedOffsets.get(tp)),
+                "The record at offset 2 was not fetched.");
+
+        // the checkpoint was taken after the record at offset 0 was emitted
+        commitOffsetsOnClose(
+                reader,
+                Collections.singletonMap(tp, new OffsetAndMetadata(1L)),
+                Collections.emptySet());
+        assertThat(getCommittedOffset(tp, groupId)).isEqualTo(1L);
+    }
+
+    @Test
+    void testCommitPartitionWithoutOffsetOnClose() throws Exception {
+        final String groupId = "CommitPartitionWithoutOffsetOnCloseGroup";
+        final KafkaPartitionSplitReader reader = createReadCommittedReader(groupId);
+        // an empty partition, so the split never emits a record
+        final TopicPartition tp = new TopicPartition(TOPIC3, 0);
+        assignSplit(reader, new KafkaPartitionSplit(tp, KafkaPartitionSplit.EARLIEST_OFFSET));
+        reader.fetch();
+
+        commitOffsetsOnClose(reader, Collections.emptyMap(), Collections.singleton(tp));
+        assertThat(getCommittedOffset(tp, groupId)).isEqualTo(0L);
+    }
+
     // ------------------
 
     private void assignSplitsAndFetchUntilFinish(KafkaPartitionSplitReader reader, int readerId)
@@ -743,6 +916,23 @@ public class KafkaPartitionSplitReaderTest {
         // the partitions under test have no records to deliver, so do not wait for them
         props.setProperty(KafkaSourceOptions.POLL_TIMEOUT_MS.key(), "100");
         return createReader(props, UnregisteredMetricsGroup.createSourceReaderMetricGroup());
+    }
+
+    private KafkaPartitionSplitReader createReadCommittedReader(String groupId) {
+        final Properties props = new Properties();
+        props.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
+        props.setProperty(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
+        props.setProperty(KafkaSourceOptions.POLL_TIMEOUT_MS.key(), "100");
+        return createReader(props, UnregisteredMetricsGroup.createSourceReaderMetricGroup());
+    }
+
+    private static void commitOffsetsOnClose(
+            KafkaPartitionSplitReader reader,
+            Map<TopicPartition, OffsetAndMetadata> offsetsToCommit,
+            Set<TopicPartition> partitionsWithoutOffset)
+            throws Exception {
+        assertThat(reader.commitOffsetsOnClose(offsetsToCommit, partitionsWithoutOffset)).isTrue();
+        reader.close();
     }
 
     private static void assignSplit(KafkaPartitionSplitReader reader, KafkaPartitionSplit split) {

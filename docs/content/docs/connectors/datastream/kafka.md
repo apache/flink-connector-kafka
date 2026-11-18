@@ -328,6 +328,8 @@ describes details about how to define a ```WatermarkStrategy#withIdleness```.
 ### Consumer Offset Committing
 Kafka source commits the current consuming offset when checkpoints are **completed**, for 
 ensuring the consistency between Flink's checkpoint state and committed offsets on Kafka brokers. 
+The commit is asynchronous. When the source closes before the commit of the latest completed
+checkpoint has finished, as on stop-with-savepoint, it commits those offsets synchronously on close.
 
 If checkpointing is not enabled, Kafka source relies on Kafka consumer's internal automatic periodic 
 offset committing logic, configured by ```enable.auto.commit``` and ```auto.commit.interval.ms``` in

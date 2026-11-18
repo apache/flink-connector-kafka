@@ -299,6 +299,8 @@ env.fromSource(kafkaSource, new CustomWatermarkStrategy(), "Kafka Source With Cu
 Kafka source 在 checkpoint **完成**时提交当前的消费位点 ，以保证 Flink 的 checkpoint 状态和 Kafka broker 上的提交位点一致。如果未开启 
 checkpoint，Kafka source 依赖于 Kafka consumer 内部的位点定时自动提交逻辑，自动提交功能由 ```enable.auto.commit``` 和 
 ```auto.commit.interval.ms``` 两个 Kafka consumer 配置项进行配置。
+位点是异步提交的。如果 Source 在最近一次完成的 checkpoint 的位点提交结束之前关闭（例如 stop-with-savepoint 时），
+Source 会在关闭时同步提交这些位点。
 
 注意：Kafka source **不依赖**于 broker 上提交的位点来恢复失败的作业。提交位点只是为了上报 Kafka consumer 和消费组的消费进度，以在 broker 端进行监控。
 
