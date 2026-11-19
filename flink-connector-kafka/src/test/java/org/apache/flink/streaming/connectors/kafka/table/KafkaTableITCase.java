@@ -1113,6 +1113,67 @@ class KafkaTableITCase extends KafkaTableTestBase {
         cleanupTopic(topic);
     }
 
+    @ParameterizedTest(name = "value.fields-include: {0}")
+    @ValueSource(strings = {"ALL", "EXCEPT_KEY"})
+    void testValueFormatMetadataWithKeyFields(final String valueFieldsInclude) throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.LOCAL_TIME_ZONE, "UTC");
+        final String topic = "value_format_metadata_topic_" + UUID.randomUUID();
+        createTestTopic(topic, 1, 1);
+        final String bootstraps = getBootstrapServers();
+        final String groupId = getStandardProps().getProperty("group.id");
+
+        // write the key and the Debezium value as raw bytes
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE raw_writer (\n"
+                                + "  `k` STRING,\n"
+                                + "  `v` STRING\n"
+                                + ") WITH (\n"
+                                + "  'connector' = 'kafka',\n"
+                                + "  'topic' = '%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'key.format' = 'raw',\n"
+                                + "  'key.fields' = 'k',\n"
+                                + "  'value.format' = 'raw',\n"
+                                + "  'value.fields-include' = 'EXCEPT_KEY'\n"
+                                + ")",
+                        topic, bootstraps));
+        tEnv.executeSql(
+                        "INSERT INTO raw_writer VALUES ('{\"id\":1}', "
+                                + "'{\"before\":null,\"after\":{\"id\":1,\"name\":\"a\"},"
+                                + "\"source\":{\"ts_ms\":1700000000000,\"db\":\"inventory\"},"
+                                + "\"op\":\"c\"}')")
+                .await();
+
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE kafka (\n"
+                                + "  `id` INT,\n"
+                                + "  `name` STRING,\n"
+                                + "  `src_ts` TIMESTAMP_LTZ(3) METADATA FROM 'value.source.timestamp' VIRTUAL,\n"
+                                + "  `src_db` STRING METADATA FROM 'value.source.database' VIRTUAL\n"
+                                + ") WITH (\n"
+                                + "  'connector' = 'kafka',\n"
+                                + "  'topic' = '%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'properties.group.id' = '%s',\n"
+                                + "  'scan.startup.mode' = 'earliest-offset',\n"
+                                + "  'key.format' = 'json',\n"
+                                + "  'key.fields' = 'id',\n"
+                                + "  'value.format' = 'debezium-json',\n"
+                                + "  'value.fields-include' = '%s'\n"
+                                + ")",
+                        topic, bootstraps, groupId, valueFieldsInclude));
+
+        final List<Row> result = collectRows(tEnv.sqlQuery("SELECT * FROM kafka"), 1);
+
+        assertThat(result)
+                .containsExactly(
+                        Row.of(1, "a", Instant.ofEpochMilli(1_700_000_000_000L), "inventory"));
+
+        cleanupTopic(topic);
+    }
+
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
     void testKafkaTemporalJoinChangelog(final String format) throws Exception {
