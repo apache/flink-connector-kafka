@@ -35,6 +35,7 @@ under the License.
 
     <modules>
         <module>flink-streaming-kafka-test</module>
+        <module>flink-confluent-schema-registry-test</module>
         <module>flink-streaming-kafka-test-base</module>
         <module>flink-end-to-end-tests-common-kafka</module>
     </modules>
