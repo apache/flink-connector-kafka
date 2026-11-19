@@ -26,12 +26,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
+import java.util.Locale;
 import java.util.Properties;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link KafkaPropertiesUtil}. */
 class KafkaPropertiesUtilTest {
@@ -39,34 +42,69 @@ class KafkaPropertiesUtilTest {
     @Test
     void testUsesInitializerStrategyWhenResetPropertiesAreAbsent() {
         assertThat(
-                        KafkaPropertiesUtil.resolveAutoOffsetResetStrategy(
+                        KafkaPropertiesUtil.resolveAutoOffsetReset(
                                 new Properties(), new Properties(), OffsetsInitializer.earliest()))
-                .isEqualTo(OffsetResetStrategy.EARLIEST);
+                .isEqualTo("earliest");
 
         assertThat(
-                        KafkaPropertiesUtil.resolveAutoOffsetResetStrategy(
+                        KafkaPropertiesUtil.resolveAutoOffsetReset(
                                 new Properties(), new Properties(), OffsetsInitializer.latest()))
-                .isEqualTo(OffsetResetStrategy.LATEST);
+                .isEqualTo("latest");
     }
 
     @Test
     void testClusterResetPropertyOverridesInitializerStrategy() {
         assertThat(
-                        KafkaPropertiesUtil.resolveAutoOffsetResetStrategy(
+                        KafkaPropertiesUtil.resolveAutoOffsetReset(
                                 new Properties(),
                                 resetProperties("none"),
                                 OffsetsInitializer.earliest()))
-                .isEqualTo(OffsetResetStrategy.NONE);
+                .isEqualTo("none");
     }
 
     @Test
     void testClusterResetPropertyOverridesGlobalAndInitializerStrategies() {
         assertThat(
-                        KafkaPropertiesUtil.resolveAutoOffsetResetStrategy(
+                        KafkaPropertiesUtil.resolveAutoOffsetReset(
                                 resetProperties("none"),
                                 resetProperties("earliest"),
                                 OffsetsInitializer.latest()))
-                .isEqualTo(OffsetResetStrategy.EARLIEST);
+                .isEqualTo("earliest");
+    }
+
+    @Test
+    void testResolvesByDurationReset() {
+        assertThat(
+                        KafkaPropertiesUtil.resolveAutoOffsetReset(
+                                resetProperties("by_duration:PT1H"),
+                                new Properties(),
+                                OffsetsInitializer.earliest()))
+                .isEqualTo("by_duration:PT1H");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"earliest", "EARLIEST", "Latest", "none"})
+    void testNormalizesEnumStrategiesToLowerCase(String offsetReset) {
+        assertThat(KafkaPropertiesUtil.normalizeAutoOffsetReset(offsetReset))
+                .isEqualTo(offsetReset.toLowerCase(Locale.ROOT));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"by_duration:PT1H", "by_duration:P1DT30M"})
+    void testAcceptsByDurationUnchanged(String offsetReset) {
+        assertThat(KafkaPropertiesUtil.normalizeAutoOffsetReset(offsetReset))
+                .isEqualTo(offsetReset);
+        assertThat(KafkaPropertiesUtil.parseOffsetResetStrategy(offsetReset)).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"errorStrategy", "by_duration:", "by_duration:-PT1H", " latest"})
+    void testRejectsValuesTheConsumerRejects(String offsetReset) {
+        assertThatThrownBy(() -> KafkaPropertiesUtil.normalizeAutoOffsetReset(offsetReset))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageStartingWith(
+                        "auto.offset.reset can not be set to " + offsetReset + ". Valid values: ")
+                .hasMessageContaining("by_duration");
     }
 
     @ParameterizedTest
@@ -82,9 +120,24 @@ class KafkaPropertiesUtilTest {
 
         assertThat(
                         KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
-                                configuredResetStrategy,
+                                configuredResetStrategy.name().toLowerCase(Locale.ROOT),
                                 OffsetsInitializer.committedOffsets(initializerResetStrategy)))
                 .isEqualTo(expected);
+    }
+
+    @ParameterizedTest
+    @MethodSource("allOffsetResetStrategies")
+    void testByDurationNeverOpposesInitializerStrategy(
+            OffsetResetStrategy initializerResetStrategy) {
+        assertThat(
+                        KafkaPropertiesUtil.hasOpposingOffsetResetStrategies(
+                                "by_duration:PT1H",
+                                OffsetsInitializer.committedOffsets(initializerResetStrategy)))
+                .isFalse();
+    }
+
+    private static Stream<OffsetResetStrategy> allOffsetResetStrategies() {
+        return Arrays.stream(OffsetResetStrategy.values());
     }
 
     private static Stream<Arguments> allOffsetResetStrategyPairs() {

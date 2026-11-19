@@ -23,13 +23,15 @@ import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsIni
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
+import org.apache.kafka.common.config.ConfigDef;
+import org.apache.kafka.common.config.ConfigException;
 
 import javax.annotation.Nonnull;
 
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Properties;
-import java.util.stream.Collectors;
 
 /** Utility class for modify Kafka properties. */
 @Internal
@@ -43,12 +45,15 @@ public class KafkaPropertiesUtil {
         }
     }
 
-    /** Resolves an explicit cluster or global reset strategy before the initializer default. */
-    public static OffsetResetStrategy resolveAutoOffsetResetStrategy(
+    /**
+     * Resolves an explicit cluster or global {@code auto.offset.reset} before the initializer
+     * default, and returns it in the form {@link #normalizeAutoOffsetReset(String)} produces.
+     */
+    public static String resolveAutoOffsetReset(
             @Nonnull Properties globalProperties,
             @Nonnull Properties clusterProperties,
             @Nonnull OffsetsInitializer startingOffsetsInitializer) {
-        return getResetStrategy(
+        return normalizeAutoOffsetReset(
                 clusterProperties.getProperty(
                         ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
                         globalProperties.getProperty(
@@ -56,37 +61,64 @@ public class KafkaPropertiesUtil {
                                 startingOffsetsInitializer.getAutoOffsetResetStrategy().name())));
     }
 
-    /** Parses the configured auto offset reset strategy. */
-    public static OffsetResetStrategy getResetStrategy(@Nonnull String offsetResetConfig) {
-        return Arrays.stream(OffsetResetStrategy.values())
-                .filter(
-                        offsetResetStrategy ->
-                                offsetResetStrategy
-                                        .name()
-                                        .equals(offsetResetConfig.toUpperCase(Locale.ROOT)))
-                .findAny()
-                .orElseThrow(
-                        () ->
-                                new IllegalArgumentException(
-                                        String.format(
-                                                "%s can not be set to %s. Valid values: [%s]",
-                                                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                                                offsetResetConfig,
-                                                Arrays.stream(OffsetResetStrategy.values())
-                                                        .map(Enum::name)
-                                                        .map(String::toLowerCase)
-                                                        .collect(Collectors.joining(",")))));
+    /**
+     * Validates a configured {@code auto.offset.reset} and returns the value to pass to the
+     * consumer.
+     *
+     * <p>{@code earliest}, {@code latest} and {@code none} are accepted in any case and returned in
+     * lower case. Any other value, such as {@code by_duration:PT1H}, is checked by the validator of
+     * the {@code kafka-clients} version on the classpath and returned unchanged, so the connector
+     * accepts exactly the strategies the consumer accepts.
+     *
+     * @throws IllegalArgumentException if the consumer would reject the value
+     */
+    public static String normalizeAutoOffsetReset(@Nonnull String offsetResetConfig) {
+        Optional<OffsetResetStrategy> strategy = parseOffsetResetStrategy(offsetResetConfig);
+        if (strategy.isPresent()) {
+            return strategy.get().name().toLowerCase(Locale.ROOT);
+        }
+        ConfigDef.Validator validator =
+                ConsumerConfig.configDef()
+                        .configKeys()
+                        .get(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG)
+                        .validator;
+        try {
+            validator.ensureValid(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, offsetResetConfig);
+        } catch (ConfigException e) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "%s can not be set to %s. Valid values: %s",
+                            ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, offsetResetConfig, validator),
+                    e);
+        }
+        return offsetResetConfig;
     }
 
-    /** Returns whether the configured strategy opposes a positional initializer strategy. */
+    /**
+     * Returns the {@link OffsetResetStrategy} named by {@code offsetResetConfig}, ignoring case, or
+     * an empty result for a strategy the enum cannot represent, such as {@code by_duration}. It
+     * does not validate the value; see {@link #normalizeAutoOffsetReset(String)}.
+     */
+    public static Optional<OffsetResetStrategy> parseOffsetResetStrategy(
+            @Nonnull String offsetResetConfig) {
+        return Arrays.stream(OffsetResetStrategy.values())
+                .filter(strategy -> strategy.name().equalsIgnoreCase(offsetResetConfig))
+                .findAny();
+    }
+
+    /** Returns whether the configured reset opposes a positional initializer strategy. */
     public static boolean hasOpposingOffsetResetStrategies(
-            @Nonnull OffsetResetStrategy configuredResetStrategy,
+            @Nonnull String configuredOffsetReset,
             @Nonnull OffsetsInitializer startingOffsetsInitializer) {
         OffsetResetStrategy initializerResetStrategy =
                 startingOffsetsInitializer.getAutoOffsetResetStrategy();
-        return isPositionalResetStrategy(configuredResetStrategy)
-                && isPositionalResetStrategy(initializerResetStrategy)
-                && configuredResetStrategy != initializerResetStrategy;
+        return parseOffsetResetStrategy(configuredOffsetReset)
+                .map(
+                        configuredResetStrategy ->
+                                isPositionalResetStrategy(configuredResetStrategy)
+                                        && isPositionalResetStrategy(initializerResetStrategy)
+                                        && configuredResetStrategy != initializerResetStrategy)
+                .orElse(false);
     }
 
     private static boolean isPositionalResetStrategy(OffsetResetStrategy resetStrategy) {
