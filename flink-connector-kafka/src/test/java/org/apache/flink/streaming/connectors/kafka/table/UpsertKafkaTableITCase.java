@@ -532,6 +532,89 @@ class UpsertKafkaTableITCase extends KafkaTableTestBase {
 
     @ParameterizedTest(name = "format: {0}")
     @MethodSource("formats")
+    void testUpsertKafkaSourceSinkWithKeyOnlyDeletes(final String format) throws Exception {
+        final String sourceTopic = "key_only_deletes_source_" + format + "_" + UUID.randomUUID();
+        final String sinkTopic = "key_only_deletes_sink_" + format + "_" + UUID.randomUUID();
+        createTestTopic(sourceTopic, 1, 1);
+        createTestTopic(sinkTopic, 1, 1);
+
+        final List<Row> changelog =
+                Arrays.asList(
+                        changelogRow("+I", 1L, "payload 1"),
+                        changelogRow("+I", 2L, "payload 2"),
+                        changelogRow("+U", 1L, "payload 1-new"),
+                        changelogRow("-D", 2L, null));
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE changelog_values (\n"
+                                + "  `id` BIGINT,\n"
+                                + "  `payload` STRING,\n"
+                                + "  PRIMARY KEY (id) NOT ENFORCED\n"
+                                + ") WITH (\n"
+                                + "  'connector' = 'values',\n"
+                                + "  'data-id' = '%s',\n"
+                                + "  'changelog-mode' = 'I,UA,D',\n"
+                                + "  'source.produces-delete-by-key' = 'true'\n"
+                                + ")",
+                        TestValuesTableFactory.registerData(changelog)));
+        createBoundedUpsertKafkaTable("upsert_source", sourceTopic, format);
+        createBoundedUpsertKafkaTable("upsert_sink", sinkTopic, format);
+        tEnv.executeSql("INSERT INTO upsert_source SELECT * FROM changelog_values").await();
+
+        final String insertSql = "INSERT INTO upsert_sink SELECT * FROM upsert_source";
+        assertThat(tEnv.explainSql(insertSql)).doesNotContain("ChangelogNormalize");
+        tEnv.executeSql(insertSql).await();
+
+        final String keyOnlyDeletesSink = "key_only_deletes_" + format;
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE %s (\n"
+                                + "  `id` BIGINT,\n"
+                                + "  `payload` STRING,\n"
+                                + "  PRIMARY KEY (id) NOT ENFORCED\n"
+                                + ") WITH (\n"
+                                + "  'connector' = 'values',\n"
+                                + "  'sink-insert-only' = 'false',\n"
+                                + "  'sink.supports-delete-by-key' = 'true'\n"
+                                + ")",
+                        keyOnlyDeletesSink));
+        tEnv.executeSql("INSERT INTO " + keyOnlyDeletesSink + " SELECT * FROM upsert_sink")
+                .await();
+
+        final List<Row> expected =
+                Arrays.asList(
+                        changelogRow("+I", 1L, "payload 1"),
+                        changelogRow("+I", 2L, "payload 2"),
+                        changelogRow("+I", 1L, "payload 1-new"),
+                        changelogRow("-D", 2L, null));
+        assertThat(TestValuesTableFactory.getRawResults(keyOnlyDeletesSink))
+                .satisfies(matching(deepEqualTo(expected, false)));
+
+        deleteTestTopic(sourceTopic);
+        deleteTestTopic(sinkTopic);
+    }
+
+    private void createBoundedUpsertKafkaTable(
+            final String table, final String topic, final String format) {
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE %s (\n"
+                                + "  `id` BIGINT,\n"
+                                + "  `payload` STRING,\n"
+                                + "  PRIMARY KEY (id) NOT ENFORCED\n"
+                                + ") WITH (\n"
+                                + "  'connector' = 'upsert-kafka',\n"
+                                + "  'topic' = '%s',\n"
+                                + "  'properties.bootstrap.servers' = '%s',\n"
+                                + "  'key.format' = '%s',\n"
+                                + "  'value.format' = '%s',\n"
+                                + "  'scan.bounded.mode' = 'latest-offset'\n"
+                                + ")",
+                        table, topic, getBootstrapServers(), format, format));
+    }
+
+    @ParameterizedTest(name = "format: {0}")
+    @MethodSource("formats")
     void testUpsertKafkaSourceSinkWithBoundedTimestamp(final String format) throws Exception {
         final String topic = "bounded_upsert_" + format + "_" + UUID.randomUUID();
         createTestTopic(topic, 1, 1);

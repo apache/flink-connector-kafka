@@ -75,6 +75,8 @@ import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.kafka.clients.consumer.OffsetAndTimestamp;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import javax.annotation.Nullable;
 
@@ -186,7 +188,24 @@ class UpsertKafkaDynamicTableFactoryTest {
     }
 
     @Test
-    void testChangelogNormalizeIsKeptForConsumerRequiringFullDeletes() {
+    void testChangelogNormalizeIsRemovedForSinkAcceptingKeyOnlyDeletes() {
+        assertThat(explainInsertIntoSink("k STRING, v BIGINT", SINK_TOPIC))
+                .doesNotContain("ChangelogNormalize");
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "k STRING, v BIGINT NOT NULL | " + SINK_TOPIC,
+                "k STRING, v BIGINT, topic STRING METADATA | " + SINK_TOPIC + ";otherTopic"
+            })
+    void testChangelogNormalizeIsKeptForSinkRequiringFullDeletes(
+            String sinkColumns, String sinkTopics) {
+        assertThat(explainInsertIntoSink(sinkColumns, sinkTopics)).contains("ChangelogNormalize");
+    }
+
+    private static String explainInsertIntoSink(String sinkColumns, String sinkTopics) {
         final TableEnvironment tEnv =
                 TableEnvironment.create(EnvironmentSettings.inStreamingMode());
         final String tableOptions =
@@ -197,11 +216,10 @@ class UpsertKafkaDynamicTableFactoryTest {
                 "CREATE TABLE source (k STRING, v BIGINT, PRIMARY KEY (k) NOT ENFORCED) "
                         + String.format(tableOptions, SOURCE_TOPIC));
         tEnv.executeSql(
-                "CREATE TABLE sink (k STRING, v BIGINT, PRIMARY KEY (k) NOT ENFORCED) "
-                        + String.format(tableOptions, SINK_TOPIC));
-
-        assertThat(tEnv.explainSql("INSERT INTO sink SELECT * FROM source"))
-                .contains("ChangelogNormalize");
+                String.format(
+                        "CREATE TABLE sink (%s, PRIMARY KEY (k) NOT ENFORCED) %s",
+                        sinkColumns, String.format(tableOptions, sinkTopics)));
+        return tEnv.explainSql("INSERT INTO sink (k, v) SELECT k, v FROM source");
     }
 
     @Test
@@ -338,6 +356,7 @@ class UpsertKafkaDynamicTableFactoryTest {
         // Test sink format.
         final KafkaDynamicSink actualUpsertKafkaSink = (KafkaDynamicSink) actualSink;
         assertThat(actualSink).isEqualTo(expectedSink);
+        assertThat(actualSink.getChangelogMode(ChangelogMode.all()).keyOnlyDeletes()).isTrue();
 
         // Test kafka producer.
         DynamicTableSink.SinkRuntimeProvider provider =
@@ -381,6 +400,7 @@ class UpsertKafkaDynamicTableFactoryTest {
         // Test sink format.
         final KafkaDynamicSink actualUpsertKafkaSink = (KafkaDynamicSink) actualSink;
         assertThat(actualSink).isEqualTo(expectedSink);
+        assertThat(actualSink.getChangelogMode(ChangelogMode.all()).keyOnlyDeletes()).isFalse();
 
         // Test kafka producer.
         DynamicTableSink.SinkRuntimeProvider provider =
@@ -1088,7 +1108,8 @@ class UpsertKafkaDynamicTableFactoryTest {
                 consumedDataType,
                 consumedDataType,
                 keyEncodingFormat,
-                new UpsertKafkaDynamicTableFactory.EncodingFormatWrapper(valueEncodingFormat),
+                new UpsertKafkaDynamicTableFactory.EncodingFormatWrapper(
+                        valueEncodingFormat, topics != null && topics.size() == 1),
                 keyProjection,
                 valueProjection,
                 keyPrefix,
