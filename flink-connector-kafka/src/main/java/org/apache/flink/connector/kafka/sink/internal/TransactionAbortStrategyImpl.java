@@ -153,7 +153,8 @@ public enum TransactionAbortStrategyImpl {
         }
 
         private boolean hasKnownPrefix(String name, Context context) {
-            return context.getPrefixesToAbort().stream().anyMatch(name::startsWith);
+            return context.getPrefixesToAbort().stream()
+                    .anyMatch(prefix -> TransactionalIdFactory.hasPrefix(name, prefix));
         }
     };
 
