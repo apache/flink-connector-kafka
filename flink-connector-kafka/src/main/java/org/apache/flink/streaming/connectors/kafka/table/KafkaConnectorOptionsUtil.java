@@ -278,7 +278,7 @@ class KafkaConnectorOptionsUtil {
         return tableOptions.getOptional(TOPIC_PATTERN).map(Pattern::compile).orElse(null);
     }
 
-    private static boolean isSingleTopic(ReadableConfig tableOptions) {
+    static boolean isSingleTopic(ReadableConfig tableOptions) {
         // Option 'topic-pattern' is regarded as multi-topics.
         return tableOptions.getOptional(TOPIC).map(t -> t.size() == 1).orElse(false);
     }

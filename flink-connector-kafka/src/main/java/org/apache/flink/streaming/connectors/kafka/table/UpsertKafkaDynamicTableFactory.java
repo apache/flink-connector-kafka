@@ -84,6 +84,7 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getKafkaProperties;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getTopicPattern;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getTopics;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.isSingleTopic;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.validateScanBoundedMode;
 
 /** Upsert-Kafka factory. */
@@ -258,20 +259,15 @@ public class UpsertKafkaDynamicTableFactory
                 tableOptions.get(TRANSACTION_NAMING_STRATEGY));
     }
 
-    private static boolean supportsKeyOnlyDeletes(
-            ReadableConfig tableOptions, ResolvedSchema schema) {
-        return writesToSingleTopic(tableOptions) && hasOnlyNullableValueColumns(schema);
-    }
-
     /**
      * A tombstone only needs the key, as long as the sink knows the target topic. With a topic list
      * or pattern, each row picks its topic from the {@code topic} metadata column, which a key-only
      * delete does not guarantee to carry. This makes sinks writing to multiple topics incompatible
      * with key-only deletes.
      */
-    private static boolean writesToSingleTopic(ReadableConfig tableOptions) {
-        final List<String> topics = getTopics(tableOptions);
-        return topics != null && topics.size() == 1;
+    private static boolean supportsKeyOnlyDeletes(
+            ReadableConfig tableOptions, ResolvedSchema schema) {
+        return isSingleTopic(tableOptions) && hasOnlyNullableValueColumns(schema);
     }
 
     /**
