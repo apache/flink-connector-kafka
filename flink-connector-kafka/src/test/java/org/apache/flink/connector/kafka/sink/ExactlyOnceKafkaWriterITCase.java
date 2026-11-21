@@ -27,6 +27,7 @@ import org.apache.flink.connector.kafka.sink.internal.TransactionFinished;
 import org.apache.flink.connector.kafka.sink.internal.TransactionOwnership;
 import org.apache.flink.connector.kafka.sink.internal.WritableBackchannel;
 import org.apache.flink.connector.kafka.util.AdminUtils;
+import org.apache.flink.core.testutils.CommonTestUtils;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
@@ -35,16 +36,19 @@ import org.apache.flink.test.junit5.MiniClusterExtension;
 import com.google.common.collect.Iterables;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.TransactionListing;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -54,6 +58,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import static org.apache.flink.connector.kafka.sink.internal.TransactionalIdFactory.buildTransactionalId;
+import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createNewTopicAndWaitForPartitionAssignment;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.drainAllRecordsFromTopic;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -277,6 +282,73 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
                 }
             }
         }
+    }
+
+    /**
+     * Test that writer does not abort the transactions of other producers, even if their
+     * transactional ids start with the prefix of the writer.
+     */
+    @ParameterizedTest
+    @CsvSource({
+        // sinks with a prefix that extends the prefix of the writer
+        "0-0-0, true",
+        "0-0-0, false",
+        "-2-0-0, true",
+        "-2-0-0, false",
+        // producers that are not a sink
+        "-a-b, true",
+        "-a-b, false"
+    })
+    void shouldNotAbortTransactionsOfOtherProducers(String otherIdSuffix, boolean sameTopic)
+            throws Exception {
+        final Properties properties = getKafkaClientConfiguration();
+        final String prefix = "sink-" + topic;
+        final String otherTopic = sameTopic ? topic : topic + "-other";
+        final byte[] value = {1};
+        if (!sameTopic) {
+            // without a producer on the topic of the writer, the open transactions of all topics
+            // are listed
+            createNewTopicAndWaitForPartitionAssignment(otherTopic, 1, (short) 1, properties);
+        }
+
+        try (FlinkKafkaInternalProducer<byte[], byte[]> otherProducer =
+                new FlinkKafkaInternalProducer<>(properties, prefix + otherIdSuffix)) {
+            otherProducer.initTransactions();
+            otherProducer.beginTransaction();
+            otherProducer.send(new ProducerRecord<>(otherTopic, value));
+            otherProducer.flush();
+            // the writer has to see the transaction, otherwise the test does not cover its filter
+            try (Admin admin = AdminClient.create(properties)) {
+                assertThat(AdminUtils.getOpenTransactionsForTopics(admin, List.of(topic)))
+                        .extracting(TransactionListing::transactionalId)
+                        .contains(prefix + otherIdSuffix);
+            }
+
+            try (final ExactlyOnceKafkaWriter<Integer> writer =
+                    createWriter(
+                            builder -> withPooling(builder).setTransactionalIdPrefix(prefix),
+                            createInitContext())) {
+                assertThatCode(otherProducer::commitTransaction).doesNotThrowAnyException();
+            }
+        }
+
+        // the broker confirms the commit before it writes the commit markers
+        CommonTestUtils.waitUtil(
+                () -> {
+                    final List<ConsumerRecord<byte[], byte[]>> records =
+                            drainAllRecordsFromTopic(otherTopic, properties, true);
+                    if (records.isEmpty()) {
+                        return false;
+                    }
+                    assertThat(records)
+                            .singleElement()
+                            .extracting(ConsumerRecord::value)
+                            .isEqualTo(value);
+                    return true;
+                },
+                Duration.ofSeconds(30),
+                Duration.ofMillis(100),
+                "The committed record of the other producer is not visible on " + otherTopic);
     }
 
     /** Test that producers are reused when committed. */
