@@ -24,6 +24,7 @@ import org.apache.flink.testutils.logging.LoggerAuditingExtension;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.errors.NetworkException;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.assertj.core.api.Condition;
@@ -35,7 +36,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.net.ServerSocket;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -86,6 +90,163 @@ class KafkaCommitterTest {
 
             assertThat(request.getNumberOfRetries()).isEqualTo(1);
             assertThat(backchannel).doesNotHave(transactionFinished(true));
+        }
+    }
+
+    /**
+     * A commit that timed out is still pending in the Kafka client, so the retry has to repeat the
+     * call on the producer of the writer.
+     */
+    @Test
+    public void testRetryWithWriterProducerAfterTimeout() throws IOException, InterruptedException {
+        Properties properties = getProperties();
+        try (final KafkaCommitter committer =
+                        new KafkaCommitter(
+                                properties, TRANS_ID, SUB_ID, ATTEMPT, false, MOCK_FACTORY);
+                FlinkKafkaInternalProducer<Object, Object> producer =
+                        new FlinkKafkaInternalProducer<>(properties, TRANS_ID);
+                ReadableBackchannel<TransactionFinished> backchannel =
+                        BackchannelFactory.getInstance()
+                                .getReadableBackchannel(SUB_ID, ATTEMPT, TRANS_ID)) {
+            producer.resumeTransaction(PRODUCER_ID, EPOCH);
+            final MockCommitRequest<KafkaCommittable> request =
+                    new MockCommitRequest<>(KafkaCommittable.of(producer));
+
+            committer.commit(Collections.singletonList(request));
+            assertThat(request.getNumberOfRetries()).isEqualTo(1);
+
+            committer.commit(Collections.singletonList(request));
+
+            assertThat(request.getFailedWithUnknownReason()).isNull();
+            assertThat(request.getNumberOfRetries()).isEqualTo(2);
+            assertThat(backchannel.poll()).isNull();
+        }
+    }
+
+    /**
+     * The retry of a restored committable has to repeat the commit on the producer of the first
+     * attempt. If the producer is initialized again, the Kafka client cannot complete the commit
+     * that is still pending.
+     */
+    @Test
+    public void testRetryWithCommitterProducerAfterTimeout()
+            throws IOException, InterruptedException {
+        Properties properties = getProperties();
+        List<ResumeCountingProducer> producers = new ArrayList<>();
+        try (final KafkaCommitter committer =
+                        new KafkaCommitter(
+                                properties,
+                                TRANS_ID,
+                                SUB_ID,
+                                ATTEMPT,
+                                false,
+                                resumeCountingFactory(producers));
+                ReadableBackchannel<TransactionFinished> backchannel =
+                        BackchannelFactory.getInstance()
+                                .getReadableBackchannel(SUB_ID, ATTEMPT, TRANS_ID)) {
+            final MockCommitRequest<KafkaCommittable> request =
+                    new MockCommitRequest<>(
+                            new KafkaCommittable(PRODUCER_ID, EPOCH, TRANS_ID, null));
+
+            committer.commit(Collections.singletonList(request));
+            assertThat(request.getNumberOfRetries()).isEqualTo(1);
+
+            committer.commit(Collections.singletonList(request));
+
+            assertThat(request.getFailedWithUnknownReason()).isNull();
+            assertThat(request.getNumberOfRetries()).isEqualTo(2);
+            assertThat(producers).hasSize(1);
+            assertThat(producers.get(0).resumeCount).isEqualTo(1);
+            assertThat(backchannel.poll()).isNull();
+        }
+    }
+
+    /**
+     * After a scale-down, the committer can recover transactions from multiple writers and retry
+     * them together. Each transaction needs its own producer until the commit finishes.
+     */
+    @Test
+    public void testRetryRestoredCommittablesOnTheirOriginalProducers()
+            throws IOException, InterruptedException {
+        Properties properties = getProperties();
+        List<ResumeCountingProducer> producers = new ArrayList<>();
+        try (final KafkaCommitter committer =
+                        new KafkaCommitter(
+                                properties,
+                                TRANS_ID,
+                                SUB_ID,
+                                ATTEMPT,
+                                false,
+                                resumeCountingFactory(producers));
+                ReadableBackchannel<TransactionFinished> backchannel =
+                        BackchannelFactory.getInstance()
+                                .getReadableBackchannel(SUB_ID, ATTEMPT, TRANS_ID)) {
+            final MockCommitRequest<KafkaCommittable> request =
+                    new MockCommitRequest<>(
+                            new KafkaCommittable(PRODUCER_ID, EPOCH, TRANS_ID, null));
+            final MockCommitRequest<KafkaCommittable> otherRequest =
+                    new MockCommitRequest<>(
+                            new KafkaCommittable(PRODUCER_ID, EPOCH, TRANS_ID + "-other", null));
+
+            for (int attempt = 1; attempt <= 2; attempt++) {
+                committer.commit(Arrays.asList(request, otherRequest));
+
+                assertThat(request.getNumberOfRetries()).isEqualTo(attempt);
+                assertThat(otherRequest.getNumberOfRetries()).isEqualTo(attempt);
+                assertThat(backchannel.poll()).isNull();
+            }
+            assertThat(producers)
+                    .hasSize(2)
+                    .allSatisfy(
+                            producer -> {
+                                assertThat(producer.resumeCount).isOne();
+                                assertThat(producer.isClosed()).isFalse();
+                            });
+        }
+        assertThat(producers).allMatch(FlinkKafkaInternalProducer::isClosed);
+    }
+
+    /**
+     * Only a commit that timed out is still pending in the Kafka client. After any other retriable
+     * error the commit is over, so the committer keeps its producer and initializes it again for
+     * the retry.
+     */
+    @Test
+    public void testRetryWithCommitterProducerAfterOtherRetriableError()
+            throws IOException, InterruptedException {
+        Properties properties = getProperties();
+        List<ResumeCountingProducer> producers = new ArrayList<>();
+        try (final KafkaCommitter committer =
+                        new KafkaCommitter(
+                                properties,
+                                TRANS_ID,
+                                SUB_ID,
+                                ATTEMPT,
+                                false,
+                                (props, transactionalId) -> {
+                                    ResumeCountingProducer producer =
+                                            new FailedCommitProducer(props, transactionalId);
+                                    producers.add(producer);
+                                    return producer;
+                                });
+                ReadableBackchannel<TransactionFinished> backchannel =
+                        BackchannelFactory.getInstance()
+                                .getReadableBackchannel(SUB_ID, ATTEMPT, TRANS_ID)) {
+            final MockCommitRequest<KafkaCommittable> request =
+                    new MockCommitRequest<>(
+                            new KafkaCommittable(PRODUCER_ID, EPOCH, TRANS_ID, null));
+
+            committer.commit(Collections.singletonList(request));
+            assertThat(request.getNumberOfRetries()).isEqualTo(1);
+            assertThat(committer.getCommittingProducer()).isSameAs(producers.get(0));
+
+            committer.commit(Collections.singletonList(request));
+
+            assertThat(request.getFailedWithUnknownReason()).isNull();
+            assertThat(request.getNumberOfRetries()).isEqualTo(2);
+            assertThat(producers).hasSize(1);
+            assertThat(producers.get(0).resumeCount).isEqualTo(2);
+            assertThat(backchannel.poll()).isNull();
         }
     }
 
@@ -261,6 +422,60 @@ class KafkaCommitterTest {
         properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         return properties;
+    }
+
+    private static BiFunction<Properties, String, FlinkKafkaInternalProducer<?, ?>>
+            resumeCountingFactory(List<ResumeCountingProducer> producers) {
+        return (properties, transactionalId) -> {
+            ResumeCountingProducer producer =
+                    new ResumeCountingProducer(properties, transactionalId);
+            producers.add(producer);
+            return producer;
+        };
+    }
+
+    /** Counts how often the committer initializes the producer for a transaction. */
+    private static class ResumeCountingProducer extends FlinkKafkaInternalProducer<byte[], byte[]> {
+        private int resumeCount;
+
+        public ResumeCountingProducer(Properties properties, String transactionalId) {
+            super(properties, transactionalId);
+        }
+
+        @Override
+        public void resumeTransaction(long producerId, short epoch) {
+            resumeCount++;
+            super.resumeTransaction(producerId, epoch);
+        }
+    }
+
+    /**
+     * Fails every commit with a retriable error that is not a timeout. The transaction is over
+     * then, as in {@link FlinkKafkaInternalProducer#commitTransaction()}.
+     */
+    private static class FailedCommitProducer extends ResumeCountingProducer {
+        private boolean inTransaction;
+
+        public FailedCommitProducer(Properties properties, String transactionalId) {
+            super(properties, transactionalId);
+        }
+
+        @Override
+        public void resumeTransaction(long producerId, short epoch) {
+            super.resumeTransaction(producerId, epoch);
+            inTransaction = true;
+        }
+
+        @Override
+        public void commitTransaction() throws ProducerFencedException {
+            inTransaction = false;
+            throw new NetworkException("test");
+        }
+
+        @Override
+        public boolean isInTransaction() {
+            return inTransaction;
+        }
     }
 
     private static class MockProducer extends FlinkKafkaInternalProducer<byte[], byte[]> {

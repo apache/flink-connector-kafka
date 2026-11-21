@@ -31,6 +31,7 @@ import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.errors.InvalidTxnStateException;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.errors.RetriableException;
+import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.errors.UnknownProducerIdException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,6 +41,8 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.function.BiFunction;
@@ -61,6 +64,11 @@ public class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
     private final boolean reusesTransactionalIds;
     private final BiFunction<Properties, String, FlinkKafkaInternalProducer<?, ?>> producerFactory;
     private final WritableBackchannel<TransactionFinished> backchannel;
+
+    /** Kafka keeps a timed-out commit pending on the producer that issued it. */
+    private final Map<KafkaCommittable, FlinkKafkaInternalProducer<?, ?>> pendingProducers =
+            new HashMap<>();
+
     @Nullable private FlinkKafkaInternalProducer<?, ?> committingProducer;
 
     public KafkaCommitter(
@@ -102,6 +110,17 @@ public class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
                 producer = writerProducer.orElseGet(() -> getProducer(committable));
                 producer.commitTransaction();
                 backchannel.send(TransactionFinished.successful(committable.getTransactionalId()));
+            } catch (TimeoutException e) {
+                LOG.warn("Timed out while committing {}.", transactionalId, e);
+                // The commit is not over: the Kafka client keeps it pending and answers the next
+                // commit call on this producer with its result, whichever transaction that call is
+                // for. Only the retry of this committable may therefore use the producer again.
+                // The producer of the writer is not affected; it comes back with the committable.
+                if (producer != null && producer == committingProducer) {
+                    pendingProducers.put(committable, producer);
+                    committingProducer = null;
+                }
+                request.retryLater();
             } catch (RetriableException e) {
                 LOG.warn(
                         "Encountered retriable exception while committing {}.", transactionalId, e);
@@ -192,8 +211,8 @@ public class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
         closeCommitterProducer(producer);
     }
 
-    private void closeCommitterProducer(FlinkKafkaInternalProducer<?, ?> producer) {
-        if (producer == this.committingProducer) {
+    private void closeCommitterProducer(@Nullable FlinkKafkaInternalProducer<?, ?> producer) {
+        if (producer != null && producer == this.committingProducer) {
             this.committingProducer.close();
             this.committingProducer = null;
         }
@@ -202,17 +221,28 @@ public class KafkaCommitter implements Committer<KafkaCommittable>, Closeable {
     @Override
     public void close() throws IOException {
         try {
-            IOUtils.closeAll(backchannel, committingProducer);
+            IOUtils.closeAll(
+                    backchannel,
+                    committingProducer,
+                    () -> IOUtils.closeAll(pendingProducers.values()));
         } catch (Exception e) {
             ExceptionUtils.rethrow(e);
         }
     }
 
     /**
-     * Creates a producer that can commit into the same transaction as the upstream producer that
+     * Returns a producer that can commit into the same transaction as the upstream producer that
      * was serialized into {@link KafkaCommittable}.
+     *
+     * <p>Only a retry can use a producer with a pending commit. All other restored transactions
+     * share one reusable producer while their commits succeed.
      */
     private FlinkKafkaInternalProducer<?, ?> getProducer(KafkaCommittable committable) {
+        if (pendingProducers.containsKey(committable)) {
+            closeCommitterProducer(committingProducer);
+            committingProducer = pendingProducers.remove(committable);
+            return committingProducer;
+        }
         if (committingProducer == null) {
             committingProducer =
                     producerFactory.apply(kafkaProducerConfig, committable.getTransactionalId());
