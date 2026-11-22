@@ -28,6 +28,7 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.clients.producer.internals.TransactionManager;
 import org.apache.kafka.clients.producer.internals.TransactionalRequestResult;
 import org.apache.kafka.common.errors.ProducerFencedException;
+import org.apache.kafka.common.errors.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -111,8 +112,16 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
     public void commitTransaction() throws ProducerFencedException {
         LOG.debug("commitTransaction {}", transactionalId);
         checkState(isInTransaction(), "Transaction was not started");
+        final TransactionState stateBeforeCommit = transactionState;
         transactionState = TransactionState.NOT_IN_TRANSACTION;
-        super.commitTransaction();
+        try {
+            super.commitTransaction();
+        } catch (TimeoutException e) {
+            // The commit is not over: the client keeps it pending and only accepts this call
+            // again, which then waits for the same request.
+            transactionState = stateBeforeCommit;
+            throw e;
+        }
     }
 
     public boolean isInTransaction() {
