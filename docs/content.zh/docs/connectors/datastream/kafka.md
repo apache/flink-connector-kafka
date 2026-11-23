@@ -283,6 +283,22 @@ Source 启动或恢复时执行一次。
 
 当某个 Topic 被检测为缺失或被重建时，Source 会抛出 ```TopicIntegrityException``` 并使作业失败。
 
+<a name="removing-topics-from-the-subscription"></a>
+
+### 从订阅中移除 Topic
+Kafka Source 一旦将分片分配给某个读取器，就不会再收回该分片。如果从订阅中移除了某个 Topic（例如修改了
+```setTopics(String...)```），并从 checkpoint 或 savepoint 恢复作业，读取器会从状态中恢复被移除 Topic 的分片，
+并在读取已订阅 Topic 的同时继续读取它。对于不再匹配 ```setTopicPattern(Pattern)``` 正则表达式的 Topic，以及从
+```setPartitions(Set)``` 中移除的分区，情况也是如此。动态分区检查能够检测到这些分区，但只会记录
+```Discovered removed partitions: [...]``` 日志。Topic 完整性检查也不会检测到它们，因为它只检查已订阅的 Topic。
+
+要停止读取被移除的 Topic，请修改 Source 的 ```uid```，并使用 ```--allow-non-restored-state``` 参数从 savepoint
+重启作业。这会丢弃该 Source 所有分片的 offset，而不仅仅是被移除 Topic 的 offset，因此新的 Source 会从其起始消费位点开始读取。
+如果要从上一个作业提交的 offset 继续消费，请启用消费位点提交，并使用 ```OffsetsInitializer.committedOffsets()```。
+
+如果 Topic 经常变化，可以考虑使用 [Dynamic Kafka 连接器]({{< ref "docs/connectors/datastream/dynamic-kafka" >}})。
+它会根据当前的元数据过滤恢复的分片，并停止读取已从元数据中移除的 Topic。
+
 ### 事件时间和水印
 默认情况下，Kafka Source 使用 Kafka 消息中的时间戳作为事件时间。您可以定义自己的水印策略（Watermark Strategy）
 以从消息中提取事件时间，并向下游发送水印：

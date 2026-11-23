@@ -306,6 +306,26 @@ topics are only checked once during source startup or recovery.
 
 When a topic is found missing or recreated, the source fails with a ```TopicIntegrityException```.
 
+### Removing Topics from the Subscription
+The Kafka source never revokes a split once it has been assigned to a reader. If you remove a topic
+from the subscription (for example by changing ```setTopics(String...)```) and restore the job from a
+checkpoint or savepoint, the readers restore the splits of the removed topic from state and keep
+reading it alongside the subscribed topics. The same applies to a topic that no longer matches the
+pattern of ```setTopicPattern(Pattern)``` and to partitions removed from ```setPartitions(Set)```.
+Partition discovery detects such partitions, but only logs ```Discovered removed partitions: [...]```.
+The <a href="#topic-integrity-check">topic integrity check</a> does not detect them either, because
+it only checks the subscribed topics.
+
+To stop reading a removed topic, change the ```uid``` of the source and restart the job from the
+savepoint with ```--allow-non-restored-state```. This drops the offsets of all splits of the source,
+not only of the removed topic, so the new source starts from its starting offsets. To continue from
+the offsets committed by the previous job, enable [offset committing](#consumer-offset-committing)
+and use ```OffsetsInitializer.committedOffsets()```.
+
+If the topics change regularly, consider the
+[Dynamic Kafka connector]({{< ref "docs/connectors/datastream/dynamic-kafka" >}}). It filters the
+restored splits against its current metadata and stops reading topics that were removed from it.
+
 ### Event Time and Watermarks
 By default, the record will use the timestamp embedded in Kafka ```ConsumerRecord``` as the event
 time. You can define your own ```WatermarkStrategy``` for extract event time from the record itself,
