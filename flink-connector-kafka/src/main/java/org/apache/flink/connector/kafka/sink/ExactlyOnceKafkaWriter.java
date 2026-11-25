@@ -39,7 +39,6 @@ import org.apache.flink.connector.kafka.sink.internal.TransactionNamingStrategyI
 import org.apache.flink.connector.kafka.sink.internal.TransactionOwnership;
 import org.apache.flink.connector.kafka.util.AdminUtils;
 import org.apache.flink.runtime.checkpoint.CheckpointIDCounter;
-import org.apache.flink.util.FlinkRuntimeException;
 
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -149,12 +148,6 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
         this.transactionNamingStrategy =
                 checkNotNull(
                         transactionNamingStrategy, "transactionNamingStrategy must not be null");
-
-        try {
-            recordSerializer.open(schemaContext, kafkaSinkContext);
-        } catch (Exception e) {
-            throw new FlinkRuntimeException("Cannot initialize schema.", e);
-        }
 
         this.recoveredStates = checkNotNull(recoveredStates, "recoveredStates");
         TaskInfo taskInfo = sinkInitContext.getTaskInfo();
