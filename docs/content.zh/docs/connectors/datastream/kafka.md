@@ -543,6 +543,9 @@ stream.sink_to(sink)
 构建时需要提供 ```KafkaRecordSerializationSchema``` 来将输入数据转换为 Kafka 的 ```ProducerRecord```。Flink 提供了 schema 构建器
 以提供一些通用的组件，例如消息键（key）/消息体（value）序列化、topic 选择、消息分区，同样也可以通过实现对应的接口来进行更丰富的控制。
 
+自定义实现可以重写 `open` 方法以在序列化第一条记录之前获取资源，并重写 `close` 方法来释放这些资源。
+`close` 会在 sink writer 关闭时调用，包括 writer 初始化失败的情况，因此它可能在 `open` 失败之后被调用。
+
 {{< tabs "KafkaSink#Serializer" >}}
 {{< tab "Java" >}}
 ```java

@@ -626,6 +626,10 @@ the data stream to Kafka producer records.
 Flink offers a schema builder to provide some common building blocks i.e. key/value serialization, topic
 selection, partitioning. You can also implement the interface on your own to exert more control.
 
+A custom implementation can override `open` to acquire resources before the first record is
+serialized and `close` to release them. `close` is called when the sink writer is closed, which
+includes a writer whose initialization failed, so it may follow a failed `open`.
+
 {{< tabs "KafkaSink#Serializer" >}}
 {{< tab "Java" >}}
 ```java
