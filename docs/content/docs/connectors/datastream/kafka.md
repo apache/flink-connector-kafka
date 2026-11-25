@@ -320,7 +320,11 @@ To stop reading a removed topic, change the ```uid``` of the source and restart 
 savepoint with ```--allow-non-restored-state```. This drops the offsets of all splits of the source,
 not only of the removed topic, so the new source starts from its starting offsets. To continue from
 the offsets committed by the previous job, enable [offset committing](#consumer-offset-committing)
-and use ```OffsetsInitializer.committedOffsets()```.
+and use ```OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST)```. The reset strategy
+applies to partitions without committed offsets, such as the partitions of a newly subscribed topic.
+With ```committedOffsets()```, which uses ```OffsetResetStrategy.NONE```, the source fails with a
+```NoOffsetForPartitionException``` on such partitions. The committed offsets can be behind the
+savepoint, so some records may be read again.
 
 If the topics change regularly, consider the
 [Dynamic Kafka connector]({{< ref "docs/connectors/datastream/dynamic-kafka" >}}). It filters the
