@@ -270,8 +270,7 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
                 () -> closeAll(producerPool),
                 backchannel,
                 super::close,
-                adminClient,
-                recordSerializer::close);
+                adminClient);
     }
 
     private void abortCurrentProducer() {

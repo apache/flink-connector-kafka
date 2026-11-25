@@ -17,6 +17,7 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
@@ -42,6 +43,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for the standalone KafkaWriter. */
 public class KafkaWriterITCase extends KafkaWriterTestBase {
@@ -126,21 +128,72 @@ public class KafkaWriterITCase extends KafkaWriterTestBase {
     @EnumSource(
             value = DeliveryGuarantee.class,
             names = {"AT_LEAST_ONCE", "EXACTLY_ONCE"})
-    public void testRecordSerializerIsClosedWithWriter(DeliveryGuarantee guarantee)
+    public void testRecordSerializerIsOpenedAndClosedOnceWithWriter(DeliveryGuarantee guarantee)
             throws Exception {
-        final AtomicInteger closeCalls = new AtomicInteger();
-        final KafkaRecordSerializationSchema<Integer> delegate = new IntegerRecordSerializer(topic);
+        final LifecycleRecordSerializer serializer = new LifecycleRecordSerializer(topic, false);
         final KafkaWriter<Integer> writer =
                 createWriter(
                         builder ->
-                                builder.setDeliveryGuarantee(guarantee)
-                                        .setRecordSerializer(
-                                                new ClosingRecordSerializer(delegate, closeCalls)),
+                                ((KafkaSinkBuilder<Integer>) builder)
+                                        .setDeliveryGuarantee(guarantee)
+                                        .setRecordSerializer(serializer),
                         createInitContext());
 
-        assertThat(closeCalls).hasValue(0);
+        assertThat(serializer.openCalls).hasValue(1);
+        assertThat(serializer.closeCalls).hasValue(0);
         writer.close();
-        assertThat(closeCalls).hasValue(1);
+        assertThat(serializer.openCalls).hasValue(1);
+        assertThat(serializer.closeCalls).hasValue(1);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = DeliveryGuarantee.class,
+            names = {"AT_LEAST_ONCE", "EXACTLY_ONCE"})
+    public void testRecordSerializerIsClosedWhenOpenFails(DeliveryGuarantee guarantee) {
+        final LifecycleRecordSerializer serializer = new LifecycleRecordSerializer(topic, true);
+
+        assertThatThrownBy(
+                        () ->
+                                createWriter(
+                                        builder ->
+                                                ((KafkaSinkBuilder<Integer>) builder)
+                                                        .setDeliveryGuarantee(guarantee)
+                                                        .setRecordSerializer(serializer),
+                                        createInitContext()))
+                .hasRootCauseMessage("open failed");
+
+        assertThat(serializer.openCalls).hasValue(1);
+        assertThat(serializer.closeCalls).hasValue(1);
+    }
+
+    @Test
+    public void testRecordSerializerIsNotOpenedWhenWriterConstructionFails() throws Exception {
+        final String prefix = "duplicate-prefix-" + topic;
+        try (final KafkaWriter<Integer> ignored =
+                createWriter(
+                        builder ->
+                                builder.setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
+                                        .setTransactionalIdPrefix(prefix),
+                        createInitContext())) {
+            final LifecycleRecordSerializer serializer =
+                    new LifecycleRecordSerializer(topic, false);
+
+            assertThatThrownBy(
+                            () ->
+                                    createWriter(
+                                            builder ->
+                                                    ((KafkaSinkBuilder<Integer>) builder)
+                                                            .setDeliveryGuarantee(
+                                                                    DeliveryGuarantee.EXACTLY_ONCE)
+                                                            .setTransactionalIdPrefix(prefix)
+                                                            .setRecordSerializer(serializer),
+                                            createInitContext()))
+                    .hasMessageContaining("duplicate transactionalIdPrefix");
+
+            assertThat(serializer.openCalls).hasValue(0);
+            assertThat(serializer.closeCalls).hasValue(0);
+        }
     }
 
     @Test
@@ -223,14 +276,26 @@ public class KafkaWriterITCase extends KafkaWriterTestBase {
         }
     }
 
-    private static class ClosingRecordSerializer implements KafkaRecordSerializationSchema<Integer> {
+    private static class LifecycleRecordSerializer
+            implements KafkaRecordSerializationSchema<Integer> {
         private final KafkaRecordSerializationSchema<Integer> delegate;
-        private final AtomicInteger closeCalls;
+        private final boolean failOnOpen;
+        final AtomicInteger openCalls = new AtomicInteger();
+        final AtomicInteger closeCalls = new AtomicInteger();
 
-        ClosingRecordSerializer(
-                KafkaRecordSerializationSchema<Integer> delegate, AtomicInteger closeCalls) {
-            this.delegate = delegate;
-            this.closeCalls = closeCalls;
+        LifecycleRecordSerializer(String topic, boolean failOnOpen) {
+            this.delegate = new IntegerRecordSerializer(topic);
+            this.failOnOpen = failOnOpen;
+        }
+
+        @Override
+        public void open(
+                SerializationSchema.InitializationContext context, KafkaSinkContext sinkContext)
+                throws Exception {
+            openCalls.incrementAndGet();
+            if (failOnOpen) {
+                throw new IOException("open failed");
+            }
         }
 
         @Override
