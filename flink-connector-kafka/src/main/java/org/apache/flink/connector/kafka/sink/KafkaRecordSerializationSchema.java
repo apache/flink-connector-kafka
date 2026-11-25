@@ -54,6 +54,12 @@ public interface KafkaRecordSerializationSchema<T> extends Serializable {
             throws Exception {}
 
     /**
+     * Closes this schema and releases any resources acquired in {@link #open}. It is called when
+     * the writer is closed. Calling it on an already closed schema must have no effect.
+     */
+    default void close() throws Exception {}
+
+    /**
      * Serializes given element and returns it as a {@link ProducerRecord}.
      *
      * @param element element to be serialized

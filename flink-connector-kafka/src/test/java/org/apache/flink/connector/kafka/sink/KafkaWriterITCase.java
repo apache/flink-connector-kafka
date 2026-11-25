@@ -26,6 +26,7 @@ import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.test.junit5.MiniClusterExtension;
 
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -37,6 +38,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -120,6 +122,27 @@ public class KafkaWriterITCase extends KafkaWriterTestBase {
         }
     }
 
+    @ParameterizedTest
+    @EnumSource(
+            value = DeliveryGuarantee.class,
+            names = {"AT_LEAST_ONCE", "EXACTLY_ONCE"})
+    public void testRecordSerializerIsClosedWithWriter(DeliveryGuarantee guarantee)
+            throws Exception {
+        final AtomicInteger closeCalls = new AtomicInteger();
+        final KafkaRecordSerializationSchema<Integer> delegate = new IntegerRecordSerializer(topic);
+        final KafkaWriter<Integer> writer =
+                createWriter(
+                        builder ->
+                                builder.setDeliveryGuarantee(guarantee)
+                                        .setRecordSerializer(
+                                                new ClosingRecordSerializer(delegate, closeCalls)),
+                        createInitContext());
+
+        assertThat(closeCalls).hasValue(0);
+        writer.close();
+        assertThat(closeCalls).hasValue(1);
+    }
+
     @Test
     public void testCurrentSendTimeMetric() throws Exception {
         try (final KafkaWriter<Integer> writer = createWriter(DeliveryGuarantee.AT_LEAST_ONCE)) {
@@ -197,6 +220,28 @@ public class KafkaWriterITCase extends KafkaWriterTestBase {
                                         .setDeliveryGuarantee(guarantee),
                         createInitContext())) {
             assertThat(metricListener.getGauge(KAFKA_METRIC_WITH_GROUP_NAME)).isNotPresent();
+        }
+    }
+
+    private static class ClosingRecordSerializer implements KafkaRecordSerializationSchema<Integer> {
+        private final KafkaRecordSerializationSchema<Integer> delegate;
+        private final AtomicInteger closeCalls;
+
+        ClosingRecordSerializer(
+                KafkaRecordSerializationSchema<Integer> delegate, AtomicInteger closeCalls) {
+            this.delegate = delegate;
+            this.closeCalls = closeCalls;
+        }
+
+        @Override
+        public ProducerRecord<byte[], byte[]> serialize(
+                Integer element, KafkaSinkContext context, Long timestamp) {
+            return delegate.serialize(element, context, timestamp);
+        }
+
+        @Override
+        public void close() {
+            closeCalls.incrementAndGet();
         }
     }
 }

@@ -201,7 +201,7 @@ class KafkaWriter<IN>
     public void close() throws Exception {
         markClosed();
         LOG.debug("Closing writer with {}", currentProducer);
-        closeAll(currentProducer);
+        closeAll(currentProducer, recordSerializer::close);
         checkState(
                 currentProducer.isClosed(), "Could not close current producer " + currentProducer);
         currentProducer = null;
