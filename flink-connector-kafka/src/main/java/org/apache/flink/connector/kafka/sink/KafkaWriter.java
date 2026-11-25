@@ -78,6 +78,7 @@ class KafkaWriter<IN>
     protected final KafkaRecordSerializationSchema<IN> recordSerializer;
     protected final Callback deliveryCallback;
     protected final KafkaRecordSerializationSchema.KafkaSinkContext kafkaSinkContext;
+    protected final SerializationSchema.InitializationContext schemaContext;
     private volatile Exception asyncProducerException;
     private final Map<String, KafkaMetricMutableWrapper> previouslyCreatedMetrics = new HashMap<>();
     private final SinkWriterMetricGroup metricGroup;
@@ -142,18 +143,23 @@ class KafkaWriter<IN>
                         sinkInitContext.getTaskInfo().getIndexOfThisSubtask(),
                         sinkInitContext.getTaskInfo().getNumberOfParallelSubtasks(),
                         kafkaProducerConfig);
+        this.schemaContext = schemaContext;
+
+        initFlinkMetrics();
+    }
+
+    protected final void openSchema() {
         try {
             recordSerializer.open(schemaContext, kafkaSinkContext);
         } catch (Exception e) {
             throw new FlinkRuntimeException("Cannot initialize schema.", e);
         }
-
-        initFlinkMetrics();
     }
 
     public void initialize() {
         // Workaround for FLINK-37612: ensure that we are not leaking producers
         try {
+            openSchema();
             this.currentProducer = new FlinkKafkaInternalProducer<>(this.kafkaProducerConfig);
             initKafkaMetrics(this.currentProducer);
         } catch (Throwable t) {

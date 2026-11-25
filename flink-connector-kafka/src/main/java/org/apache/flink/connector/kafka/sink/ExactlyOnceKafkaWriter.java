@@ -186,6 +186,7 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     public void initialize() {
         // Workaround for FLINK-37612: ensure that we are not leaking producers
         try {
+            openSchema();
             abortLingeringTransactions(
                     checkNotNull(recoveredStates, "recoveredStates"), restoredCheckpointId + 1);
             this.currentProducer = startTransaction(restoredCheckpointId + 1);
