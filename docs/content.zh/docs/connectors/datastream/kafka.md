@@ -675,7 +675,7 @@ Flink 通过 Kafka 连接器提供了一流的支持，可以对 Kerberos 配置
 * 在 Consumer 上设置 `setCommitOffsetsOnCheckpoints(true)`，以便读 offset 提交到 Kafka。务必在停止和恢复 savepoint 前执行此操作。你可能需要在旧的连接器版本上进行停止/重启循环来启用此设置。
 * 在 Consumer 上设置 `setStartFromGroupOffsets(true)`，以便我们从 Kafka 获取读 offset。这只会在 Flink 状态中没有读 offset 时生效，这也是为什么下一步非要重要的原因。
 * 修改 source/sink 分配到的 `uid`。这会确保新的 source/sink 不会从旧的 sink/source 算子中读取状态。
-* 使用 `--allow-non-restored-state` 参数启动新 job，因为我们在 savepoint 中仍然有先前连接器版本的状态。
+* 使用 `--allowNonRestoredState`（`-n`）参数启动新 job，因为我们在 savepoint 中仍然有先前连接器版本的状态。
 
 <a name="troubleshooting"></a>
 

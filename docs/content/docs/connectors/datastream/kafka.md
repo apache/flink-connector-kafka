@@ -790,7 +790,7 @@ to follow these steps:
   in Flink state, which is why the next step is very important.
 * Change the assigned `uid` of your source/sink. This makes sure the new
   source/sink doesn't read state from the old source/sink operators.
-* Start the new job with `--allow-non-restored-state` because we still have the
+* Start the new job with `--allowNonRestoredState` (`-n`) because we still have the
   state of the previous connector version in the savepoint.
 
 ## Troubleshooting
