@@ -28,6 +28,7 @@ import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.test.junit5.MiniClusterExtension;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.errors.RecordTooLargeException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -196,6 +197,80 @@ public class KafkaWriterITCase extends KafkaWriterTestBase {
         }
     }
 
+    @ParameterizedTest
+    @EnumSource(
+            value = DeliveryGuarantee.class,
+            names = {"AT_LEAST_ONCE", "EXACTLY_ONCE"})
+    public void testCloseRethrowsRecordSerializerCloseFailure(DeliveryGuarantee guarantee)
+            throws Exception {
+        final LifecycleRecordSerializer serializer =
+                new LifecycleRecordSerializer(topic, false, true);
+        final KafkaWriter<Integer> writer =
+                createWriter(guarantee, serializer, createSinkWriterMetricGroup(), false);
+
+        assertThatThrownBy(writer::close)
+                .isInstanceOf(IOException.class)
+                .hasMessage("close failed")
+                .hasNoSuppressedExceptions();
+
+        assertThat(serializer.closeCalls).hasValue(1);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = DeliveryGuarantee.class,
+            names = {"AT_LEAST_ONCE", "EXACTLY_ONCE"})
+    public void testCloseRethrowsPendingAsyncSendFailure(DeliveryGuarantee guarantee)
+            throws Exception {
+        final SinkWriterMetricGroup metricGroup = createSinkWriterMetricGroup();
+        final LifecycleRecordSerializer serializer =
+                new LifecycleRecordSerializer(topic, false, false);
+        final KafkaWriter<Integer> writer = createWriter(guarantee, serializer, metricGroup, true);
+        final Counter numRecordsOutErrors = metricGroup.getNumRecordsOutErrorsCounter();
+
+        writer.write(1, SINK_WRITER_CONTEXT);
+        assertThat(numRecordsOutErrors.getCount()).isEqualTo(0);
+
+        assertThatThrownBy(writer::close)
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("One or more Kafka Producer send requests")
+                .hasRootCauseInstanceOf(RecordTooLargeException.class)
+                .hasNoSuppressedExceptions();
+
+        assertThat(numRecordsOutErrors.getCount()).isEqualTo(1);
+        assertThat(serializer.closeCalls).hasValue(1);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = DeliveryGuarantee.class,
+            names = {"AT_LEAST_ONCE", "EXACTLY_ONCE"})
+    public void testCloseReportsBothAsyncSendAndRecordSerializerCloseFailure(
+            DeliveryGuarantee guarantee) throws Exception {
+        final SinkWriterMetricGroup metricGroup = createSinkWriterMetricGroup();
+        final LifecycleRecordSerializer serializer =
+                new LifecycleRecordSerializer(topic, false, true);
+        final KafkaWriter<Integer> writer = createWriter(guarantee, serializer, metricGroup, true);
+        final Counter numRecordsOutErrors = metricGroup.getNumRecordsOutErrorsCounter();
+
+        writer.write(1, SINK_WRITER_CONTEXT);
+
+        assertThatThrownBy(writer::close)
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("One or more Kafka Producer send requests")
+                .hasRootCauseInstanceOf(RecordTooLargeException.class)
+                .satisfies(
+                        e -> {
+                            assertThat(e.getSuppressed()).hasSize(1);
+                            assertThat(e.getSuppressed()[0])
+                                    .isInstanceOf(IOException.class)
+                                    .hasMessage("close failed");
+                        });
+
+        assertThat(numRecordsOutErrors.getCount()).isEqualTo(1);
+        assertThat(serializer.closeCalls).hasValue(1);
+    }
+
     @Test
     public void testCurrentSendTimeMetric() throws Exception {
         try (final KafkaWriter<Integer> writer = createWriter(DeliveryGuarantee.AT_LEAST_ONCE)) {
@@ -276,16 +351,44 @@ public class KafkaWriterITCase extends KafkaWriterTestBase {
         }
     }
 
+    /**
+     * Creates a writer whose producer rejects every record when {@code tinyMaxRequestSize} is set,
+     * which fails the send synchronously with a {@link RecordTooLargeException} through the
+     * delivery callback.
+     */
+    private KafkaWriter<Integer> createWriter(
+            DeliveryGuarantee guarantee,
+            LifecycleRecordSerializer serializer,
+            SinkWriterMetricGroup metricGroup,
+            boolean tinyMaxRequestSize)
+            throws IOException {
+        return createWriter(
+                builder -> {
+                    builder.setDeliveryGuarantee(guarantee);
+                    if (tinyMaxRequestSize) {
+                        builder.setProperty("max.request.size", "1");
+                    }
+                    ((KafkaSinkBuilder<Integer>) builder).setRecordSerializer(serializer);
+                },
+                new SinkInitContext(metricGroup, timeService, null));
+    }
+
     private static class LifecycleRecordSerializer
             implements KafkaRecordSerializationSchema<Integer> {
         private final KafkaRecordSerializationSchema<Integer> delegate;
         private final boolean failOnOpen;
+        private final boolean failOnClose;
         final AtomicInteger openCalls = new AtomicInteger();
         final AtomicInteger closeCalls = new AtomicInteger();
 
         LifecycleRecordSerializer(String topic, boolean failOnOpen) {
+            this(topic, failOnOpen, false);
+        }
+
+        LifecycleRecordSerializer(String topic, boolean failOnOpen, boolean failOnClose) {
             this.delegate = new IntegerRecordSerializer(topic);
             this.failOnOpen = failOnOpen;
+            this.failOnClose = failOnClose;
         }
 
         @Override
@@ -305,8 +408,11 @@ public class KafkaWriterITCase extends KafkaWriterTestBase {
         }
 
         @Override
-        public void close() {
+        public void close() throws Exception {
             closeCalls.incrementAndGet();
+            if (failOnClose) {
+                throw new IOException("close failed");
+            }
         }
     }
 }
