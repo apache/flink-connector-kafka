@@ -231,7 +231,15 @@ public class TestKafkaContainer implements AutoCloseable, Startable {
     public TestKafkaContainer withKafkaLogLevel(String logLevel) {
         if (isConfluentImage) {
             delegate.withEnv("KAFKA_LOG4J_ROOT_LOGLEVEL", logLevel);
-            delegate.withEnv("KAFKA_LOG4J_LOGGERS", "state.change.logger=" + logLevel);
+            // ConfluentKafkaContainer waits for "Transitioning from RECOVERY to RUNNING", which
+            // BrokerLifecycleManager logs at INFO. Since Kafka 4.3 (CP 8.3) that class lives in
+            // org.apache.kafka.server, outside the image's default kafka=INFO logger, so a
+            // quieter root level would hide the line and the container would never start.
+            delegate.withEnv(
+                    "KAFKA_LOG4J_LOGGERS",
+                    "state.change.logger="
+                            + logLevel
+                            + ",org.apache.kafka.server.BrokerLifecycleManager=INFO");
             delegate.withEnv("KAFKA_LOG4J_TOOLS_ROOT_LOGLEVEL", logLevel);
         }
         return this;

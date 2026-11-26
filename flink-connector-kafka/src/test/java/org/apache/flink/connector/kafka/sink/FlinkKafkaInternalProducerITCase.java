@@ -208,11 +208,10 @@ class FlinkKafkaInternalProducerITCase {
                                     resumedProducer.abortTransaction();
                                 }
                             });
-            if (firstCommit == secondCommit) {
-                secondOp.doesNotThrowAnyException();
-            } else {
-                secondOp.isInstanceOf(InvalidTxnStateException.class);
-            }
+            // With Transactions V2 (KIP-890), the default since Kafka 4.0, ending a transaction
+            // bumps the producer epoch. A producer resumed with the epoch of the finished
+            // transaction is therefore fenced, whether it commits or aborts.
+            secondOp.isInstanceOf(ProducerFencedException.class);
         }
 
         assertNumTransactions(1, transactionIdPrefix);

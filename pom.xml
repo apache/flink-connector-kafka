@@ -52,7 +52,7 @@ under the License.
 		<flink.parent.artifactId>flink-connector-kafka-parent</flink.parent.artifactId>
 
 		<!-- Main Dependencies -->
-		<confluent.version>7.9.2</confluent.version>
+		<confluent.version>8.4.1</confluent.version>
 		<flink.version>2.2.1</flink.version>
 		<kafka.version>4.4.0</kafka.version>
 
