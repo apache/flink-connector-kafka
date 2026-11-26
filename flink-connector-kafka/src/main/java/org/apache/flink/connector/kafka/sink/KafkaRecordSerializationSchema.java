@@ -55,8 +55,8 @@ public interface KafkaRecordSerializationSchema<T> extends Serializable {
 
     /**
      * Closes this schema and releases any resources acquired in {@link #open}. It is called when
-     * the writer is closed, which includes a writer whose initialization failed, so it may follow
-     * a failed {@link #open}. Calling it on an already closed schema must have no effect.
+     * the writer is closed, which includes a writer whose initialization failed, so it may follow a
+     * failed {@link #open}. Calling it on an already closed schema must have no effect.
      */
     default void close() throws Exception {}
 
