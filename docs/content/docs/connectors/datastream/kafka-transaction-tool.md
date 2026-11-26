@@ -194,8 +194,11 @@ already been fenced. With the job still stopped, it is safe to repeat the same a
 the same cluster and verified transactional ID. This applies only to retrying an abort; never
 use abort to recover from an uncertain commit.
 
-A commit timeout or interruption returns exit code `3` and means the outcome is **unknown**:
-Kafka may already have accepted or completed the commit. Keep the job stopped and inspect
+If producer creation or local transaction resumption fails, the tool exits with code `2`.
+This invocation did not attempt to commit. An earlier commit attempt may still have succeeded.
+
+If Kafka's commit call times out or is interrupted, the tool exits with code `3`. The outcome
+is **unknown**. Kafka may already have accepted or completed the commit. Keep the job stopped and inspect
 Kafka's transaction state and broker logs. If retrying, retry only `commit` with the **same
 transactional ID, producer ID, epoch, and transaction protocol**, against the same cluster.
 Never switch to `abort` after an uncertain commit.

@@ -33,6 +33,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.errors.InterruptException;
+import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.errors.TransactionalIdNotFoundException;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
@@ -203,8 +204,8 @@ public final class KafkaTransactionManager {
      * producerId} and {@code epoch} match exactly what was recorded in the Flink checkpoint,
      * otherwise, the broker will reject the commit or fence this attempt.
      *
-     * <p>A timeout or interruption leaves the commit outcome unknown: the broker may still finish
-     * committing the transaction. Only the same commit may be retried; aborting is unsafe.
+     * <p>A timeout or interruption during the commit call leaves its outcome unknown. Only the same
+     * commit may be retried; aborting is unsafe.
      *
      * @param bootstrapServers Kafka bootstrap servers (e.g., "localhost:9092").
      * @param transactionalId The transactional ID of the transaction to commit.
@@ -244,34 +245,53 @@ public final class KafkaTransactionManager {
 
         final Properties props = createProducerProperties(bootstrapServers, transactionalId);
 
-        try {
-            final FlinkKafkaInternalProducer<?, ?> producer =
-                    producerFactory.apply(props, transactionalId);
-            completeAndClose(
-                    transactionalId,
-                    () -> {
-                        producer.resumeTransaction(producerId, epoch, useTransactionV2);
-                        producer.commitTransaction();
-                    },
-                    producer);
-
-            LOG.info("Successfully committed transaction: {}", transactionalId);
-        } catch (TimeoutException | InterruptException e) {
+        boolean commitAttempted = false;
+        boolean acknowledged = false;
+        try (FlinkKafkaInternalProducer<?, ?> producer =
+                producerFactory.apply(props, transactionalId)) {
+            producer.resumeTransaction(producerId, epoch, useTransactionV2);
+            commitAttempted = true;
+            producer.commitTransaction();
+            acknowledged = true;
+        } catch (RuntimeException e) {
             if (e instanceof InterruptException) {
                 Thread.currentThread().interrupt();
             }
-            throw new CommitOutcomeUnknownException(
-                    String.format(
-                            "Commit outcome is unknown for transaction '%s' (ProducerId: %d, Epoch: %d, Protocol: %s). Kafka may still complete the commit. Retry only the same commit with the same transactional ID, producer ID, epoch and transaction protocol; do not abort the transaction.",
-                            transactionalId, producerId, epoch, useTransactionV2 ? "v2" : "v1"),
-                    e);
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    String.format(
-                            "Failed to commit transaction '%s'. Possible causes: incorrect ProducerId (%d) or Epoch (%d), transaction already aborted or expired on the broker, or producer fenced by another instance. Check Kafka broker logs for details.",
-                            transactionalId, producerId, epoch),
-                    e);
+            if (!commitAttempted) {
+                throw new RuntimeException(
+                        String.format(
+                                "Failed to prepare transaction '%s'. This invocation did not attempt to commit.",
+                                transactionalId),
+                        e);
+            }
+            if (!acknowledged) {
+                if (e instanceof TimeoutException || e instanceof InterruptException) {
+                    throw new CommitOutcomeUnknownException(
+                            String.format(
+                                    "Commit outcome is unknown for transaction '%s' (ProducerId: %d, Epoch: %d, Protocol: %s). Kafka may still complete the commit. Retry only the same commit with the same transactional ID, producer ID, epoch and transaction protocol; do not abort the transaction.",
+                                    transactionalId,
+                                    producerId,
+                                    epoch,
+                                    useTransactionV2 ? "v2" : "v1"),
+                            e);
+                }
+                final String hint =
+                        e instanceof ProducerFencedException && !useTransactionV2
+                                ? " A V1 retry can be fenced if the transaction was already committed using V2."
+                                : "";
+                throw new RuntimeException(
+                        String.format(
+                                "Failed to commit transaction '%s' (ProducerId: %d, Epoch: %d, Protocol: %s).%s",
+                                transactionalId,
+                                producerId,
+                                epoch,
+                                useTransactionV2 ? "v2" : "v1",
+                                hint),
+                        e);
+            }
+            logCloseFailure(transactionalId, e);
         }
+        LOG.info("Successfully committed transaction: {}", transactionalId);
     }
 
     private static void completeAndClose(
@@ -287,11 +307,15 @@ public final class KafkaTransactionManager {
             if (e instanceof InterruptException) {
                 Thread.currentThread().interrupt();
             }
-            LOG.warn(
-                    "Kafka acknowledged the operation for transactional ID '{}', but closing its producer failed.",
-                    transactionalId,
-                    e);
+            logCloseFailure(transactionalId, e);
         }
+    }
+
+    private static void logCloseFailure(String transactionalId, Exception e) {
+        LOG.warn(
+                "Kafka acknowledged the operation for transactional ID '{}', but closing its producer failed.",
+                transactionalId,
+                e);
     }
 
     @VisibleForTesting

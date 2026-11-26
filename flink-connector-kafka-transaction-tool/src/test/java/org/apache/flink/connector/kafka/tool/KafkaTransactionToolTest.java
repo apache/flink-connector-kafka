@@ -18,6 +18,7 @@
 
 package org.apache.flink.connector.kafka.tool;
 
+import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
 import org.apache.flink.testutils.logging.LoggerAuditingExtension;
 
 import org.apache.commons.cli.ParseException;
@@ -40,7 +41,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiFunction;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -509,15 +513,27 @@ class KafkaTransactionToolTest {
     }
 
     @Test
+    void testProducerSetupTimeoutReturnsTwo() {
+        assertThat(
+                        runCommit(
+                                (properties, id) -> {
+                                    throw new TimeoutException("Producer setup timed out");
+                                }))
+                .isEqualTo(2);
+    }
+
+    @Test
     void testCommitTimeoutReturnsThree() {
-        assertThat(runCommitWithFailure(new TimeoutException("Commit acknowledgement timed out")))
+        assertThat(
+                        runCommitWithFailure(
+                                () -> new TimeoutException("Commit acknowledgement timed out")))
                 .isEqualTo(3);
     }
 
     @Test
     void testCommitInterruptionReturnsThreeAndRestoresInterrupt() {
         try {
-            assertThat(runCommitWithFailure(new InterruptException("Commit interrupted")))
+            assertThat(runCommitWithFailure(() -> new InterruptException("Commit interrupted")))
                     .isEqualTo(3);
             assertThat(Thread.currentThread().isInterrupted()).isTrue();
         } finally {
@@ -527,11 +543,23 @@ class KafkaTransactionToolTest {
 
     @Test
     void testFencedCommitReturnsTwo() {
-        assertThat(runCommitWithFailure(new ProducerFencedException("Producer fenced")))
+        assertThat(runCommitWithFailure(() -> new ProducerFencedException("Producer fenced")))
                 .isEqualTo(2);
     }
 
-    private static int runCommitWithFailure(RuntimeException failure) {
+    private static int runCommitWithFailure(Supplier<RuntimeException> failure) {
+        return runCommit(
+                (props, id) ->
+                        new FlinkKafkaInternalProducer<byte[], byte[]>(props, id) {
+                            @Override
+                            public void commitTransaction() {
+                                throw failure.get();
+                            }
+                        });
+    }
+
+    private static int runCommit(
+            BiFunction<Properties, String, FlinkKafkaInternalProducer<?, ?>> producerFactory) {
         return KafkaTransactionTool.run(
                 new String[] {
                     "--action", "commit",
@@ -540,11 +568,6 @@ class KafkaTransactionToolTest {
                     "--producer-id", "100",
                     "--epoch", "5"
                 },
-                properties ->
-                        new KafkaTransactionManager(
-                                properties,
-                                (producerProperties, id) -> {
-                                    throw failure;
-                                }));
+                properties -> new KafkaTransactionManager(properties, producerFactory));
     }
 }

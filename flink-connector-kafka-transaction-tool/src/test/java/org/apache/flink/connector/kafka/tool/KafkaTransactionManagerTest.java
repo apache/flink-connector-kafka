@@ -95,6 +95,39 @@ class KafkaTransactionManagerTest {
     }
 
     @Test
+    void testCommitWithMissingBootstrapPortReportsNoAttempt() {
+        assertThatThrownBy(() -> manager.commitTransaction("missing-port", "tx-1", 100, (short) 2))
+                .hasMessageContaining("This invocation did not attempt to commit")
+                .hasCauseInstanceOf(KafkaException.class);
+    }
+
+    @Test
+    void testResumeInterruptionReportsNoAttemptAndClosesProducer() {
+        final TestingProducer producer =
+                new TestingProducer(() -> null) {
+                    @Override
+                    public void resumeTransaction(long producerId, short epoch, boolean useV2) {
+                        throw new InterruptException("Interrupted during resumption");
+                    }
+                };
+        final KafkaTransactionManager manager =
+                new KafkaTransactionManager(new Properties(), (properties, id) -> producer);
+        try {
+            assertThatThrownBy(
+                            () ->
+                                    manager.commitTransaction(
+                                            "localhost:9092", "tx-1", 100, (short) 2))
+                    .hasMessageContaining("This invocation did not attempt to commit")
+                    .hasCauseInstanceOf(InterruptException.class);
+            assertThat(producer.commitAttempts).isZero();
+            assertThat(producer.isClosed()).isTrue();
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
     void testClientPropertiesArePreservedAndToolPropertiesTakePrecedence() {
         final Properties clientProperties = new Properties();
         clientProperties.setProperty(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL");
@@ -220,6 +253,7 @@ class KafkaTransactionManagerTest {
                                 failingManager.commitTransaction(
                                         "localhost:9092", "tx-1", 100, (short) 2))
                 .hasMessageContaining("Failed to commit transaction")
+                .hasMessageContaining("already committed using V2")
                 .hasCause(fenced);
         assertThat(fenced.getSuppressed()).containsExactly(closeFailure);
         assertThat(producer.isClosed()).isTrue();
