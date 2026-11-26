@@ -198,6 +198,7 @@ under the License.
 					</classpathDependencyExcludes>
 					<systemPropertyVariables>
 						<transaction.tool.jar>${transaction.tool.jar}</transaction.tool.jar>
+						<transaction.tool.thin.jar>${project.build.directory}/${project.build.finalName}.jar</transaction.tool.thin.jar>
 					</systemPropertyVariables>
 				</configuration>
 				<executions>
@@ -232,6 +233,25 @@ under the License.
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-antrun-plugin</artifactId>
+				<executions>
+					<execution>
+						<id>prepare-uber-jar-notices</id>
+						<phase>prepare-package</phase>
+						<goals>
+							<goal>run</goal>
+						</goals>
+						<configuration>
+							<target>
+								<zip destfile="${project.build.directory}/uber-jar-notices.zip"
+									 basedir="${project.basedir}/src/uber/resources"/>
+							</target>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-shade-plugin</artifactId>
 				<executions>
 					<execution>
@@ -242,6 +262,9 @@ under the License.
 						</goals>
 						<configuration>
 							<shadedArtifactAttached>true</shadedArtifactAttached>
+							<extraJars>
+								<extraJar>${project.build.directory}/uber-jar-notices.zip</extraJar>
+							</extraJars>
 							<shadedClassifierName>uber-jar</shadedClassifierName>
 							<createDependencyReducedPom>false</createDependencyReducedPom>
 							<!-- Keep the executable and its NOTICE in sync across Flink versions. -->
@@ -276,6 +299,13 @@ under the License.
 								<transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
 							</transformers>
 							<filters>
+								<!-- The standalone LICENSE also covers the bundled libraries. -->
+								<filter>
+									<artifact>${project.groupId}:${project.artifactId}</artifact>
+									<excludes>
+										<exclude>META-INF/LICENSE</exclude>
+									</excludes>
+								</filter>
 								<filter>
 									<artifact>*:*</artifact>
 									<excludes>

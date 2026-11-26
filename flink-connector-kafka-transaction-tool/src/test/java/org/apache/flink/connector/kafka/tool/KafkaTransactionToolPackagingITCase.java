@@ -153,6 +153,19 @@ class KafkaTransactionToolPackagingITCase {
     }
 
     @Test
+    void testThinJarContainsOnlyProjectLicenseAndNotice() throws Exception {
+        final Path thinJar = Path.of(System.getProperty("transaction.tool.thin.jar"));
+        try (JarFile jar = new JarFile(thinJar.toFile())) {
+            assertThat(readEntry(jar, "META-INF/LICENSE"))
+                    .contains("Apache License")
+                    .doesNotContain("QOS.ch", "Luben Karavelov");
+            assertThat(readEntry(jar, "META-INF/NOTICE"))
+                    .contains("The Apache Software Foundation")
+                    .doesNotContain("This project bundles", "org.apache.kafka:kafka-clients:");
+        }
+    }
+
+    @Test
     void testExcludedDependencyMetadata() throws Exception {
         try (JarFile jar = new JarFile(toolJar().toFile())) {
             assertThat(jar.stream().map(entry -> entry.getName()))
