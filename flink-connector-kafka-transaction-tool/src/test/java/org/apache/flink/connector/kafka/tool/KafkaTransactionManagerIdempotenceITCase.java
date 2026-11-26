@@ -98,7 +98,12 @@ class KafkaTransactionManagerIdempotenceITCase {
         final String transactionalId = UUID.randomUUID().toString();
         final Properties properties = producerProperties(kafka);
         properties.put(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG, "2000");
-        createLingeringTransaction(properties, topic, transactionalId, "expired");
+        try (FlinkKafkaInternalProducer<String, String> producer =
+                new FlinkKafkaInternalProducer<>(properties, transactionalId)) {
+            producer.initTransactions();
+            producer.beginTransaction();
+            producer.send(new ProducerRecord<>(topic, 0, null, "expired")).get();
+        }
         sendSentinel(kafka, topic);
 
         try (Admin admin = createAdmin(kafka)) {
