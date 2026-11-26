@@ -317,7 +317,7 @@ The <a href="#topic-integrity-check">topic integrity check</a> does not detect t
 it only checks the subscribed topics.
 
 To stop reading a removed topic, change the ```uid``` of the source and restart the job from the
-savepoint with ```--allow-non-restored-state```. This drops the offsets of all splits of the source,
+savepoint with ```--allowNonRestoredState``` (```-n```). This drops the offsets of all splits of the source,
 not only of the removed topic, so the new source starts from its starting offsets. To continue from
 the offsets committed by the previous job, enable [offset committing](#consumer-offset-committing)
 and use ```OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST)```. The reset strategy
@@ -325,6 +325,10 @@ applies to partitions without committed offsets, such as the partitions of a new
 With ```committedOffsets()```, which uses ```OffsetResetStrategy.NONE```, the source fails with a
 ```NoOffsetForPartitionException``` on such partitions. The committed offsets can be behind the
 savepoint, so some records may be read again.
+
+Changing the ```uid``` of the source also changes the generated IDs of downstream operators that
+have no ```uid``` set. ```--allowNonRestoredState``` then drops their state as well, without an error.
+Check that all stateful operators have a ```uid``` before you restart the job.
 
 If the topics change regularly, consider the
 [Dynamic Kafka connector]({{< ref "docs/connectors/datastream/dynamic-kafka" >}}). It filters the

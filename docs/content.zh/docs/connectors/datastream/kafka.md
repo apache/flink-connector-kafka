@@ -292,12 +292,15 @@ Kafka Source 一旦将分片分配给某个读取器，就不会再收回该分�
 ```setPartitions(Set)``` 中移除的分区，情况也是如此。动态分区检查能够检测到这些分区，但只会记录
 ```Discovered removed partitions: [...]``` 日志。Topic 完整性检查也不会检测到它们，因为它只检查已订阅的 Topic。
 
-要停止读取被移除的 Topic，请修改 Source 的 ```uid```，并使用 ```--allow-non-restored-state``` 参数从 savepoint
+要停止读取被移除的 Topic，请修改 Source 的 ```uid```，并使用 ```--allowNonRestoredState```（```-n```）参数从 savepoint
 重启作业。这会丢弃该 Source 所有分片的 offset，而不仅仅是被移除 Topic 的 offset，因此新的 Source 会从其起始消费位点开始读取。
 如果要从上一个作业提交的 offset 继续消费，请启用消费位点提交，并使用
 ```OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST)```。重置策略适用于没有已提交 offset 的分区，
 例如新订阅 Topic 的分区。如果使用 ```committedOffsets()```（即 ```OffsetResetStrategy.NONE```），Source 会在这些分区上抛出
 ```NoOffsetForPartitionException``` 并失败。已提交的 offset 可能落后于 savepoint，因此部分数据可能会被重复读取。
+
+修改 Source 的 ```uid``` 也会改变下游未设置 ```uid``` 的算子自动生成的 ID。```--allowNonRestoredState``` 会同时丢弃这些算子的状态，
+并且不会报错。重启作业之前，请确认所有有状态的算子都设置了 ```uid```。
 
 如果 Topic 经常变化，可以考虑使用 [Dynamic Kafka 连接器]({{< ref "docs/connectors/datastream/dynamic-kafka" >}})。
 它会根据当前的元数据过滤恢复的分片，并停止读取已从元数据中移除的 Topic。
