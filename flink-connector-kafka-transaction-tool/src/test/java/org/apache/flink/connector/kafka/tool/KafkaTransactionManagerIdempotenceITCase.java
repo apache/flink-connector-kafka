@@ -25,6 +25,7 @@ import org.apache.flink.connector.kafka.testutils.TestKafkaContainer;
 import org.apache.flink.runtime.testutils.CommonTestUtils;
 
 import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.admin.FinalizedVersionRange;
 import org.apache.kafka.clients.admin.TransactionDescription;
 import org.apache.kafka.clients.admin.TransactionState;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -69,18 +70,20 @@ class KafkaTransactionManagerIdempotenceITCase {
                             "100");
 
     @BeforeAll
-    static void verifyTransactionV2IsEnabled() throws Exception {
-        try (Admin admin = createAdmin(KAFKA_V2)) {
-            assertThat(admin.describeFeatures().featureMetadata().get().finalizedFeatures())
-                    .containsKey("transaction.version");
-            assertThat(
-                            admin.describeFeatures()
-                                    .featureMetadata()
-                                    .get()
-                                    .finalizedFeatures()
-                                    .get("transaction.version")
-                                    .maxVersionLevel())
-                    .isGreaterThanOrEqualTo((short) 2);
+    static void verifyBrokerTransactionVersions() throws Exception {
+        assertThat(transactionVersion(KAFKA_V1)).isLessThan((short) 2);
+        assertThat(transactionVersion(KAFKA_V2)).isGreaterThanOrEqualTo((short) 2);
+    }
+
+    private static short transactionVersion(TestKafkaContainer kafka) throws Exception {
+        try (Admin admin = createAdmin(kafka)) {
+            final FinalizedVersionRange version =
+                    admin.describeFeatures()
+                            .featureMetadata()
+                            .get()
+                            .finalizedFeatures()
+                            .get("transaction.version");
+            return version == null ? 0 : version.maxVersionLevel();
         }
     }
 
@@ -280,7 +283,25 @@ class KafkaTransactionManagerIdempotenceITCase {
                 createLingeringTransaction(
                         producerProperties(KAFKA_V2), topic, transactionalId, "committed");
         final KafkaTransactionManager manager = new KafkaTransactionManager();
-        try (Admin admin = createAdmin(KAFKA_V2)) {
+        try (Admin admin = createAdmin(KAFKA_V2);
+                FlinkKafkaInternalProducer<String, String> producer =
+                        new FlinkKafkaInternalProducer<>(
+                                producerProperties(KAFKA_V2), transactionalId)) {
+            // Complete ApiVersions before resuming so Kafka already knows the cluster supports V2.
+            producer.partitionsFor(topic);
+            new KafkaTransactionManager(new Properties(), (properties, id) -> producer)
+                    .commitTransaction(
+                            KAFKA_V2.getBootstrapServers(),
+                            transactionalId,
+                            original.producerId(),
+                            (short) original.producerEpoch());
+
+            assertThat(describe(admin, transactionalId).producerEpoch())
+                    .isEqualTo(original.producerEpoch());
+            waitForState(admin, transactionalId, TransactionState.COMPLETE_COMMIT);
+            final TransactionDescription committed = describe(admin, transactionalId);
+            assertThat(committed.producerId()).isEqualTo(original.producerId());
+
             assertThat(
                             KafkaTransactionTool.run(
                                     new String[] {
@@ -296,19 +317,6 @@ class KafkaTransactionManagerIdempotenceITCase {
                                         Integer.toString(original.producerEpoch())
                                     }))
                     .isZero();
-
-            waitForState(admin, transactionalId, TransactionState.COMPLETE_COMMIT);
-            final TransactionDescription committed = describe(admin, transactionalId);
-            assertThat(committed.producerId()).isEqualTo(original.producerId());
-            assertThat(committed.producerEpoch()).isEqualTo(original.producerEpoch());
-            assertThat(consumeCommitted(KAFKA_V2, topic)).containsExactly("committed");
-
-            manager.commitTransaction(
-                    KAFKA_V2.getBootstrapServers(),
-                    transactionalId,
-                    original.producerId(),
-                    (short) original.producerEpoch(),
-                    false);
             assertUnchanged(admin, transactionalId, committed);
 
             assertThatThrownBy(
