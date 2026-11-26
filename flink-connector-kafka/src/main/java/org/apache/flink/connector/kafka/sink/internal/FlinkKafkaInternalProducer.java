@@ -339,6 +339,22 @@ public class FlinkKafkaInternalProducer<K, V> extends KafkaProducer<K, V> {
         this.transactionState = TransactionState.PRECOMMITTED;
     }
 
+    /**
+     * Resumes a transaction for a single commit with the selected protocol. Close this producer
+     * after the commit. The cluster's current feature level cannot identify an older transaction's
+     * original protocol.
+     */
+    public void resumeTransaction(long producerId, short epoch, boolean useTransactionV2) {
+        resumeTransaction(producerId, epoch);
+        final Object transactionManager = getTransactionManager();
+        synchronized (transactionManager) {
+            setField(transactionManager, "isTransactionV2Enabled", useTransactionV2);
+            // Kafka checks for a feature upgrade when building EndTxn. A V1-to-V2 upgrade
+            // also queues InitProducerId for the next transaction and would fence a V1 retry.
+            setField(transactionManager, "latestFinalizedFeaturesEpoch", Long.MAX_VALUE);
+        }
+    }
+
     private static Object createProducerIdAndEpoch(long producerId, short epoch) {
         try {
             Field field =
