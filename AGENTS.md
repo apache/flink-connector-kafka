@@ -26,7 +26,7 @@ This file provides guidance for AI coding agents working with the Apache Flink K
 - Java 11, 17, or 21. Java 11 syntax must be used everywhere: the build compiles with source level 11 (target 17). On JDK 11 pass `-Pjava11-target`, as CI does.
 - Maven 3.8.6 (Maven wrapper `./mvnw` included; prefer it)
 - Git
-- Docker (every `*ITCase` starts Kafka through Testcontainers)
+- Docker for integration tests that start Kafka through Testcontainers
 - Python 3.9 to 3.11 with tox, only for `flink-python`
 - Unix-like environment (Linux, macOS, WSL)
 - The connector builds against `flink.version` in the root `pom.xml`, which is the lowest supported Flink minor version. A change must also work against every Flink version in `.github/workflows/push_pr.yml` and the `main` rows of `.github/workflows/weekly.yml`.
@@ -48,6 +48,7 @@ This file provides guidance for AI coding agents working with the Apache Flink K
 - Single unit test class: `./mvnw test -pl flink-connector-kafka -Dtest=KafkaSourceReaderTest`
 - Single test method: `./mvnw test -pl flink-connector-kafka -Dtest=KafkaSourceReaderTest#testCommitOffsetsWithoutAliveFetchers`
 - Single ITCase: `./mvnw test -pl flink-connector-kafka -Dtest=KafkaSinkITCase` (`-Dtest` overrides the phase filter; `verify -Dtest=...` runs the class twice)
+- Run `./mvnw clean verify -pl flink-connector-kafka-transaction-tool -am -Dflink.version=<version>` for the transaction tool suite. `KafkaTransactionToolPackagingITCase` reads the freshly built JARs and runtime dependency tree during `integration-test` and runs without a broker.
 - ArchUnit rules: `./mvnw test -pl flink-connector-kafka -Dtest='*ArchitectureTest'`, then check `git status flink-connector-kafka/archunit-violations/` (see Testing Standards)
 - End-to-end tests need a Flink distribution: `./mvnw clean verify -Prun-end-to-end-tests -DdistDir=<path to flink-<version>>`. CI runs them on every PR.
 - PyFlink tests: `./mvnw clean install -DskipTests`, then `cd flink-python && chmod a+x dev/* && ./dev/lint-python.sh -e mypy,sphinx`. The scripts are downloaded into `flink-python/dev/` during the Maven `validate` phase without the executable bit, which is why CI sets it first.
@@ -73,6 +74,7 @@ This file provides guidance for AI coding agents working with the Apache Flink K
 ### Modules
 
 - `flink-connector-kafka` — The connector: `KafkaSource`, `KafkaSink`, `DynamicKafkaSource`, and the Table/SQL factories. Also publishes a test-jar with `KafkaTestEnvironment*` and `testutils`.
+- `flink-connector-kafka-transaction-tool` — CLI for committing or aborting lingering Kafka transactions. Publishes a thin JAR and an executable JAR with the `uber-jar` classifier.
 - `flink-sql-connector-kafka` — Shaded SQL jar; relocates `org.apache.kafka`. Bundled dependencies are listed in `src/main/resources/META-INF/NOTICE`.
 - `flink-connector-kafka-e2e-tests/` — `flink-streaming-kafka-test` (the job), `flink-streaming-kafka-test-base` (shared classes), `flink-end-to-end-tests-common-kafka` (the tests).
 - `flink-python` — PyFlink wrappers (`pyflink/datastream/connectors/kafka.py`) and their tests (`pyflink/datastream/connectors/tests/test_kafka.py`). Maven packaging `pom`, no Java.
@@ -131,7 +133,7 @@ Splits, enumerator state, writer state and committables are written by `SimpleVe
 ### Bumping `kafka.version`
 
 1. Re-check the reflection in `FlinkKafkaInternalProducer`
-2. Update `flink-sql-connector-kafka/src/main/resources/META-INF/NOTICE` and the transaction tool’s `src/uber/resources/META-INF/NOTICE` for changed bundled dependencies. Recheck the secured OAuth dependency against Kafka and run `KafkaTransactionToolPackagingITCase` against each supported Flink version.
+2. Update `flink-sql-connector-kafka/src/main/resources/META-INF/NOTICE` and the transaction tool’s `src/uber/resources/META-INF/NOTICE` for changed bundled dependencies. Recheck the secured OAuth dependency against Kafka and run the transaction tool suite under [Testing](#testing) for each supported Flink version.
 3. Update `DockerImageVersions` in the test utils: `APACHE_KAFKA` follows `kafka.version`, `CP_KAFKA` and `SCHEMA_REGISTRY` follow `confluent.version`
 4. Verify: `dependency:tree` for new transitive dependencies, the license check from CI, the full ITCase suite
 
