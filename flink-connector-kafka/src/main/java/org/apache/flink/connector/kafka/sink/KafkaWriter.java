@@ -207,13 +207,30 @@ class KafkaWriter<IN>
     public void close() throws Exception {
         markClosed();
         LOG.debug("Closing writer with {}", currentProducer);
-        closeAll(currentProducer, recordSerializer::close);
-        checkState(
-                currentProducer.isClosed(), "Could not close current producer " + currentProducer);
-        currentProducer = null;
+        Exception failure = null;
+        try {
+            closeAll(currentProducer, recordSerializer::close);
+            checkState(
+                    currentProducer.isClosed(),
+                    "Could not close current producer " + currentProducer);
+            currentProducer = null;
+        } catch (Exception e) {
+            failure = e;
+        }
 
-        // Rethrow exception for the case in which close is called before writer() and flush().
-        checkAsyncException();
+        try {
+            // Rethrow exception for the case in which close is called before writer() and flush().
+            checkAsyncException();
+        } catch (IOException e) {
+            if (failure != null) {
+                e.addSuppressed(failure);
+            }
+            failure = e;
+        }
+
+        if (failure != null) {
+            throw failure;
+        }
     }
 
     protected void markClosed() {
