@@ -78,6 +78,7 @@ class KafkaWriter<IN>
     protected final KafkaRecordSerializationSchema<IN> recordSerializer;
     protected final Callback deliveryCallback;
     protected final KafkaRecordSerializationSchema.KafkaSinkContext kafkaSinkContext;
+    protected final SerializationSchema.InitializationContext schemaContext;
     private volatile Exception asyncProducerException;
     private final Map<String, KafkaMetricMutableWrapper> previouslyCreatedMetrics = new HashMap<>();
     private final SinkWriterMetricGroup metricGroup;
@@ -142,18 +143,23 @@ class KafkaWriter<IN>
                         sinkInitContext.getTaskInfo().getIndexOfThisSubtask(),
                         sinkInitContext.getTaskInfo().getNumberOfParallelSubtasks(),
                         kafkaProducerConfig);
+        this.schemaContext = schemaContext;
+
+        initFlinkMetrics();
+    }
+
+    protected final void openSchema() {
         try {
             recordSerializer.open(schemaContext, kafkaSinkContext);
         } catch (Exception e) {
             throw new FlinkRuntimeException("Cannot initialize schema.", e);
         }
-
-        initFlinkMetrics();
     }
 
     public void initialize() {
         // Workaround for FLINK-37612: ensure that we are not leaking producers
         try {
+            openSchema();
             this.currentProducer = new FlinkKafkaInternalProducer<>(this.kafkaProducerConfig);
             initKafkaMetrics(this.currentProducer);
         } catch (Throwable t) {
@@ -201,13 +207,30 @@ class KafkaWriter<IN>
     public void close() throws Exception {
         markClosed();
         LOG.debug("Closing writer with {}", currentProducer);
-        closeAll(currentProducer);
-        checkState(
-                currentProducer.isClosed(), "Could not close current producer " + currentProducer);
-        currentProducer = null;
+        Exception failure = null;
+        try {
+            closeAll(currentProducer, recordSerializer::close);
+            checkState(
+                    currentProducer.isClosed(),
+                    "Could not close current producer " + currentProducer);
+            currentProducer = null;
+        } catch (Exception e) {
+            failure = e;
+        }
 
-        // Rethrow exception for the case in which close is called before writer() and flush().
-        checkAsyncException();
+        try {
+            // Rethrow exception for the case in which close is called before writer() and flush().
+            checkAsyncException();
+        } catch (IOException e) {
+            if (failure != null) {
+                e.addSuppressed(failure);
+            }
+            failure = e;
+        }
+
+        if (failure != null) {
+            throw failure;
+        }
     }
 
     protected void markClosed() {

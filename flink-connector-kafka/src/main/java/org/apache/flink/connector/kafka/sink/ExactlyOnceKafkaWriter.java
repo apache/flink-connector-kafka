@@ -39,7 +39,6 @@ import org.apache.flink.connector.kafka.sink.internal.TransactionNamingStrategyI
 import org.apache.flink.connector.kafka.sink.internal.TransactionOwnership;
 import org.apache.flink.connector.kafka.util.AdminUtils;
 import org.apache.flink.runtime.checkpoint.CheckpointIDCounter;
-import org.apache.flink.util.FlinkRuntimeException;
 
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -150,12 +149,6 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
                 checkNotNull(
                         transactionNamingStrategy, "transactionNamingStrategy must not be null");
 
-        try {
-            recordSerializer.open(schemaContext, kafkaSinkContext);
-        } catch (Exception e) {
-            throw new FlinkRuntimeException("Cannot initialize schema.", e);
-        }
-
         this.recoveredStates = checkNotNull(recoveredStates, "recoveredStates");
         TaskInfo taskInfo = sinkInitContext.getTaskInfo();
         TransactionOwnership ownership = transactionNamingStrategy.getOwnership();
@@ -193,6 +186,7 @@ class ExactlyOnceKafkaWriter<IN> extends KafkaWriter<IN> {
     public void initialize() {
         // Workaround for FLINK-37612: ensure that we are not leaking producers
         try {
+            openSchema();
             abortLingeringTransactions(
                     checkNotNull(recoveredStates, "recoveredStates"), restoredCheckpointId + 1);
             this.currentProducer = startTransaction(restoredCheckpointId + 1);

@@ -17,6 +17,7 @@
 
 package org.apache.flink.connector.kafka.sink;
 
+import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer;
@@ -26,6 +27,8 @@ import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.test.junit5.MiniClusterExtension;
 
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.errors.RecordTooLargeException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -37,9 +40,11 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for the standalone KafkaWriter. */
 public class KafkaWriterITCase extends KafkaWriterTestBase {
@@ -120,6 +125,152 @@ public class KafkaWriterITCase extends KafkaWriterTestBase {
         }
     }
 
+    @ParameterizedTest
+    @EnumSource(
+            value = DeliveryGuarantee.class,
+            names = {"AT_LEAST_ONCE", "EXACTLY_ONCE"})
+    public void testRecordSerializerIsOpenedAndClosedOnceWithWriter(DeliveryGuarantee guarantee)
+            throws Exception {
+        final LifecycleRecordSerializer serializer = new LifecycleRecordSerializer(topic, false);
+        try (final KafkaWriter<Integer> writer =
+                createWriter(
+                        builder ->
+                                ((KafkaSinkBuilder<Integer>) builder)
+                                        .setDeliveryGuarantee(guarantee)
+                                        .setRecordSerializer(serializer),
+                        createInitContext())) {
+            assertThat(serializer.openCalls).hasValue(1);
+            assertThat(serializer.closeCalls).hasValue(0);
+        }
+
+        assertThat(serializer.openCalls).hasValue(1);
+        assertThat(serializer.closeCalls).hasValue(1);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = DeliveryGuarantee.class,
+            names = {"AT_LEAST_ONCE", "EXACTLY_ONCE"})
+    public void testRecordSerializerIsClosedWhenOpenFails(DeliveryGuarantee guarantee) {
+        final LifecycleRecordSerializer serializer = new LifecycleRecordSerializer(topic, true);
+
+        assertThatThrownBy(
+                        () ->
+                                createWriter(
+                                        builder ->
+                                                ((KafkaSinkBuilder<Integer>) builder)
+                                                        .setDeliveryGuarantee(guarantee)
+                                                        .setRecordSerializer(serializer),
+                                        createInitContext()))
+                .hasRootCauseMessage("open failed");
+
+        assertThat(serializer.openCalls).hasValue(1);
+        assertThat(serializer.closeCalls).hasValue(1);
+    }
+
+    @Test
+    public void testRecordSerializerIsNotOpenedWhenWriterConstructionFails() throws Exception {
+        final String prefix = "duplicate-prefix-" + topic;
+        try (final KafkaWriter<Integer> ignored =
+                createWriter(
+                        builder ->
+                                builder.setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
+                                        .setTransactionalIdPrefix(prefix),
+                        createInitContext())) {
+            final LifecycleRecordSerializer serializer =
+                    new LifecycleRecordSerializer(topic, false);
+
+            assertThatThrownBy(
+                            () ->
+                                    createWriter(
+                                            builder ->
+                                                    ((KafkaSinkBuilder<Integer>) builder)
+                                                            .setDeliveryGuarantee(
+                                                                    DeliveryGuarantee.EXACTLY_ONCE)
+                                                            .setTransactionalIdPrefix(prefix)
+                                                            .setRecordSerializer(serializer),
+                                            createInitContext()))
+                    .hasMessageContaining("duplicate transactionalIdPrefix");
+
+            assertThat(serializer.openCalls).hasValue(0);
+            assertThat(serializer.closeCalls).hasValue(0);
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = DeliveryGuarantee.class,
+            names = {"AT_LEAST_ONCE", "EXACTLY_ONCE"})
+    public void testCloseRethrowsRecordSerializerCloseFailure(DeliveryGuarantee guarantee)
+            throws Exception {
+        final LifecycleRecordSerializer serializer =
+                new LifecycleRecordSerializer(topic, false, true);
+        final KafkaWriter<Integer> writer =
+                createWriter(guarantee, serializer, createSinkWriterMetricGroup(), false);
+
+        assertThatThrownBy(writer::close)
+                .isInstanceOf(IOException.class)
+                .hasMessage("close failed")
+                .hasNoSuppressedExceptions();
+
+        assertThat(serializer.closeCalls).hasValue(1);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = DeliveryGuarantee.class,
+            names = {"AT_LEAST_ONCE", "EXACTLY_ONCE"})
+    public void testCloseRethrowsPendingAsyncSendFailure(DeliveryGuarantee guarantee)
+            throws Exception {
+        final SinkWriterMetricGroup metricGroup = createSinkWriterMetricGroup();
+        final LifecycleRecordSerializer serializer =
+                new LifecycleRecordSerializer(topic, false, false);
+        final KafkaWriter<Integer> writer = createWriter(guarantee, serializer, metricGroup, true);
+        final Counter numRecordsOutErrors = metricGroup.getNumRecordsOutErrorsCounter();
+
+        writer.write(1, SINK_WRITER_CONTEXT);
+        assertThat(numRecordsOutErrors.getCount()).isEqualTo(0);
+
+        assertThatThrownBy(writer::close)
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("One or more Kafka Producer send requests")
+                .hasRootCauseInstanceOf(RecordTooLargeException.class)
+                .hasNoSuppressedExceptions();
+
+        assertThat(numRecordsOutErrors.getCount()).isEqualTo(1);
+        assertThat(serializer.closeCalls).hasValue(1);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = DeliveryGuarantee.class,
+            names = {"AT_LEAST_ONCE", "EXACTLY_ONCE"})
+    public void testCloseReportsBothAsyncSendAndRecordSerializerCloseFailure(
+            DeliveryGuarantee guarantee) throws Exception {
+        final SinkWriterMetricGroup metricGroup = createSinkWriterMetricGroup();
+        final LifecycleRecordSerializer serializer =
+                new LifecycleRecordSerializer(topic, false, true);
+        final KafkaWriter<Integer> writer = createWriter(guarantee, serializer, metricGroup, true);
+        final Counter numRecordsOutErrors = metricGroup.getNumRecordsOutErrorsCounter();
+
+        writer.write(1, SINK_WRITER_CONTEXT);
+
+        assertThatThrownBy(writer::close)
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("One or more Kafka Producer send requests")
+                .hasRootCauseInstanceOf(RecordTooLargeException.class)
+                .satisfies(
+                        e -> {
+                            assertThat(e.getSuppressed()).hasSize(1);
+                            assertThat(e.getSuppressed()[0])
+                                    .isInstanceOf(IOException.class)
+                                    .hasMessage("close failed");
+                        });
+
+        assertThat(numRecordsOutErrors.getCount()).isEqualTo(1);
+        assertThat(serializer.closeCalls).hasValue(1);
+    }
+
     @Test
     public void testCurrentSendTimeMetric() throws Exception {
         try (final KafkaWriter<Integer> writer = createWriter(DeliveryGuarantee.AT_LEAST_ONCE)) {
@@ -197,6 +348,71 @@ public class KafkaWriterITCase extends KafkaWriterTestBase {
                                         .setDeliveryGuarantee(guarantee),
                         createInitContext())) {
             assertThat(metricListener.getGauge(KAFKA_METRIC_WITH_GROUP_NAME)).isNotPresent();
+        }
+    }
+
+    /**
+     * Creates a writer whose producer rejects every record when {@code tinyMaxRequestSize} is set,
+     * which fails the send synchronously with a {@link RecordTooLargeException} through the
+     * delivery callback.
+     */
+    private KafkaWriter<Integer> createWriter(
+            DeliveryGuarantee guarantee,
+            LifecycleRecordSerializer serializer,
+            SinkWriterMetricGroup metricGroup,
+            boolean tinyMaxRequestSize)
+            throws IOException {
+        return createWriter(
+                builder -> {
+                    builder.setDeliveryGuarantee(guarantee);
+                    if (tinyMaxRequestSize) {
+                        builder.setProperty("max.request.size", "1");
+                    }
+                    ((KafkaSinkBuilder<Integer>) builder).setRecordSerializer(serializer);
+                },
+                new SinkInitContext(metricGroup, timeService, null));
+    }
+
+    private static class LifecycleRecordSerializer
+            implements KafkaRecordSerializationSchema<Integer> {
+        private final KafkaRecordSerializationSchema<Integer> delegate;
+        private final boolean failOnOpen;
+        private final boolean failOnClose;
+        final AtomicInteger openCalls = new AtomicInteger();
+        final AtomicInteger closeCalls = new AtomicInteger();
+
+        LifecycleRecordSerializer(String topic, boolean failOnOpen) {
+            this(topic, failOnOpen, false);
+        }
+
+        LifecycleRecordSerializer(String topic, boolean failOnOpen, boolean failOnClose) {
+            this.delegate = new IntegerRecordSerializer(topic);
+            this.failOnOpen = failOnOpen;
+            this.failOnClose = failOnClose;
+        }
+
+        @Override
+        public void open(
+                SerializationSchema.InitializationContext context, KafkaSinkContext sinkContext)
+                throws Exception {
+            openCalls.incrementAndGet();
+            if (failOnOpen) {
+                throw new IOException("open failed");
+            }
+        }
+
+        @Override
+        public ProducerRecord<byte[], byte[]> serialize(
+                Integer element, KafkaSinkContext context, Long timestamp) {
+            return delegate.serialize(element, context, timestamp);
+        }
+
+        @Override
+        public void close() throws Exception {
+            closeCalls.incrementAndGet();
+            if (failOnClose) {
+                throw new IOException("close failed");
+            }
         }
     }
 }
