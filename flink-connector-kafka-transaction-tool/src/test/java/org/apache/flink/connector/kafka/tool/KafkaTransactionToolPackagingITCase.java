@@ -168,7 +168,9 @@ class KafkaTransactionToolPackagingITCase {
     void testBundledClassPackages() throws Exception {
         final List<String> expectedPackages =
                 List.of(
-                        "com/fasterxml/jackson/",
+                        "com/fasterxml/jackson/annotation/",
+                        "com/fasterxml/jackson/core/",
+                        "com/fasterxml/jackson/databind/",
                         "com/github/luben/zstd/",
                         "javax/annotation/",
                         "net/jpountz/",

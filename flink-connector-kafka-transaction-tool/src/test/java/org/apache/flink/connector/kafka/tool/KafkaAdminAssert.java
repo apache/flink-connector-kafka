@@ -48,7 +48,7 @@ public class KafkaAdminAssert extends AbstractAssert<KafkaAdminAssert, Admin>
 
     /** Entry point using a TestContainer. Creates and manages the Admin client lifecycle. */
     public static KafkaAdminAssert assertThat(TestKafkaContainer kafkaContainer) {
-        Properties props = new Properties();
+        final Properties props = new Properties();
         props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaContainer.getBootstrapServers());
         return new KafkaAdminAssert(Admin.create(props), true);
     }
@@ -61,7 +61,7 @@ public class KafkaAdminAssert extends AbstractAssert<KafkaAdminAssert, Admin>
     /** Fetches all transactions and switches context to Transaction assertions. */
     public KafkaTransactionsAssert transactions() {
         try {
-            Collection<TransactionListing> listings = actual.listTransactions().all().get();
+            final Collection<TransactionListing> listings = actual.listTransactions().all().get();
             return new KafkaTransactionsAssert(listings);
         } catch (Exception e) {
             throw new RuntimeException("Failed to list transactions from Kafka", e);
@@ -85,7 +85,7 @@ public class KafkaAdminAssert extends AbstractAssert<KafkaAdminAssert, Admin>
 
         /** Extracts IDs and returns a standard ListAssert. */
         public ListAssert<String> extractingIds() {
-            List<String> ids =
+            final List<String> ids =
                     actual.stream()
                             .map(TransactionListing::transactionalId)
                             .collect(Collectors.toList());
@@ -94,7 +94,7 @@ public class KafkaAdminAssert extends AbstractAssert<KafkaAdminAssert, Admin>
 
         /** Extracts ID -> State map and returns a standard MapAssert. */
         public MapAssert<String, TransactionState> extractingStates() {
-            Map<String, TransactionState> stateMap =
+            final Map<String, TransactionState> stateMap =
                     actual.stream()
                             .collect(
                                     Collectors.toMap(

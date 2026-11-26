@@ -18,14 +18,18 @@
 
 package org.apache.flink.connector.kafka.tool;
 
+import org.apache.flink.testutils.logging.LoggerAuditingExtension;
+
 import org.apache.commons.cli.ParseException;
 import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -40,9 +44,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.slf4j.event.Level.ERROR;
 
 /** Tests for {@link KafkaTransactionTool} CLI argument parsing. */
 class KafkaTransactionToolTest {
+
+    @RegisterExtension
+    final LoggerAuditingExtension errorLogger =
+            new LoggerAuditingExtension(KafkaTransactionTool.class, ERROR);
 
     @TempDir private Path temporaryDirectory;
 
@@ -371,22 +380,23 @@ class KafkaTransactionToolTest {
                         "new active transaction",
                         "outcome is unknown",
                         "unknown transactional ID",
-                        "0 = success/help",
-                        "1 = command-line parsing error",
+                        "0 = success or explicit help (--help or -help)",
+                        "1 = empty or invalid command line",
                         "2 = operation or validation error",
                         "3 = unknown commit outcome",
                         "not proof that the transaction was not committed",
                         "--command-config");
     }
 
-    @Test
-    void testHelpReturnsZero() {
-        assertThat(KafkaTransactionTool.run(new String[] {"--help"})).isEqualTo(0);
+    @ParameterizedTest
+    @ValueSource(strings = {"--help", "-help"})
+    void testExplicitHelpReturnsZero(String option) {
+        assertThat(KafkaTransactionTool.run(new String[] {option})).isZero();
     }
 
     @Test
-    void testEmptyArgsReturnsZero() {
-        assertThat(KafkaTransactionTool.run(new String[] {})).isEqualTo(0);
+    void testEmptyArgsReturnsOne() {
+        assertThat(KafkaTransactionTool.run(new String[] {})).isEqualTo(1);
     }
 
     @Test
@@ -409,31 +419,25 @@ class KafkaTransactionToolTest {
     @Test
     void testUnknownActionWithCommitOnlyOptionsIsReportedBeforeCreatingClients() {
         final AtomicBoolean managerCreated = new AtomicBoolean();
-        final ByteArrayOutputStream output = new ByteArrayOutputStream();
-        final PrintStream originalError = System.err;
-        try (PrintStream stream = new PrintStream(output, true, StandardCharsets.UTF_8)) {
-            System.setErr(stream);
-            assertThat(
-                            KafkaTransactionTool.run(
-                                    new String[] {
-                                        "--action", "foo",
-                                        "--bootstrap-servers", "localhost:9092",
-                                        "--transactional-id", "tx-1",
-                                        "--producer-id", "1",
-                                        "--epoch", "1"
-                                    },
-                                    properties -> {
-                                        managerCreated.set(true);
-                                        throw new AssertionError(
-                                                "Unknown action must fail before client creation");
-                                    }))
-                    .isEqualTo(2);
-        } finally {
-            System.setErr(originalError);
-        }
+        assertThat(
+                        KafkaTransactionTool.run(
+                                new String[] {
+                                    "--action", "foo",
+                                    "--bootstrap-servers", "localhost:9092",
+                                    "--transactional-id", "tx-1",
+                                    "--producer-id", "1",
+                                    "--epoch", "1"
+                                },
+                                properties -> {
+                                    managerCreated.set(true);
+                                    throw new AssertionError(
+                                            "Unknown action must fail before client creation");
+                                }))
+                .isEqualTo(2);
         assertThat(managerCreated).isFalse();
-        assertThat(output.toString(StandardCharsets.UTF_8))
-                .contains("Unknown action: foo. Supported actions: 'abort', 'commit'.");
+        assertThat(errorLogger.getMessages())
+                .contains(
+                        "Kafka transaction operation failed: Unknown action: foo. Supported actions: 'abort', 'commit'.");
     }
 
     @Test

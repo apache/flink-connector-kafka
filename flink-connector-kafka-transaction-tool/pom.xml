@@ -157,12 +157,6 @@ under the License.
 
 		<dependency>
 			<groupId>org.testcontainers</groupId>
-			<artifactId>testcontainers</artifactId>
-			<scope>test</scope>
-		</dependency>
-
-		<dependency>
-			<groupId>org.testcontainers</groupId>
 			<artifactId>testcontainers-kafka</artifactId>
 			<scope>test</scope>
 		</dependency>
@@ -199,6 +193,9 @@ under the License.
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-surefire-plugin</artifactId>
 				<configuration>
+					<classpathDependencyExcludes>
+						<classpathDependencyExclude>org.slf4j:slf4j-simple</classpathDependencyExclude>
+					</classpathDependencyExcludes>
 					<systemPropertyVariables>
 						<transaction.tool.jar>${transaction.tool.jar}</transaction.tool.jar>
 					</systemPropertyVariables>

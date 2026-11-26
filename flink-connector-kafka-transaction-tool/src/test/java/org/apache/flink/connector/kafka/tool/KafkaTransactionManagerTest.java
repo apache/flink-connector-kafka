@@ -142,6 +142,7 @@ class KafkaTransactionManagerTest {
         clientProperties.setProperty("custom.callback.option", "custom-value");
         clientProperties.setProperty(ProducerConfig.MAX_BLOCK_MS_CONFIG, "180000");
         clientProperties.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "configured:9092");
+        clientProperties.setProperty(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "configured-tx");
         final Properties originalProperties = new Properties();
         originalProperties.putAll(clientProperties);
         final KafkaTransactionManager configuredManager =
@@ -156,9 +157,9 @@ class KafkaTransactionManagerTest {
                 .containsEntry(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL")
                 .containsEntry(SaslConfigs.SASL_MECHANISM, "SCRAM-SHA-512")
                 .containsEntry("custom.callback.option", "custom-value")
-                .containsEntry(ProducerConfig.MAX_BLOCK_MS_CONFIG, "180000")
                 .containsEntry(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "requested:9092")
                 .doesNotContainKeys(
+                        ProducerConfig.MAX_BLOCK_MS_CONFIG,
                         ProducerConfig.TRANSACTIONAL_ID_CONFIG,
                         ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
                         ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG);

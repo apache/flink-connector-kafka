@@ -79,7 +79,6 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testcontainers.containers.Network;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -106,16 +105,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class KafkaTransactionManagerITCase {
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaTransactionManagerITCase.class);
-    private static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
 
     @Nested
     class AbortAndCommitTests {
 
         @Container
         final TestKafkaContainer kafkaContainer =
-                createKafkaContainer(KafkaTransactionManagerITCase.class)
-                        .withNetwork(Network.newNetwork())
-                        .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS);
+                createKafkaContainer(KafkaTransactionManagerITCase.class);
 
         @Test
         void testAbortSpecificTransactionOnly() {
@@ -151,7 +147,7 @@ class KafkaTransactionManagerITCase {
             assertThat(consumeRecords(topic, "read_committed")).isEmpty();
 
             // when
-            KafkaTransactionManager tool = new KafkaTransactionManager();
+            final KafkaTransactionManager tool = new KafkaTransactionManager();
             tool.abortTransaction(kafkaContainer.getBootstrapServers(), targetTxId);
 
             // then
@@ -274,7 +270,7 @@ class KafkaTransactionManagerITCase {
                     .contains(targetData, neighborData);
 
             // when
-            KafkaTransactionManager kafkaTransactionManager = new KafkaTransactionManager();
+            final KafkaTransactionManager kafkaTransactionManager = new KafkaTransactionManager();
             kafkaTransactionManager.commitTransaction(
                     kafkaContainer.getBootstrapServers(),
                     targetTxId,
@@ -317,7 +313,7 @@ class KafkaTransactionManagerITCase {
             final long invalidProducerId = 999999L;
             createLingeringTransaction(topic, transactionalId, "data");
 
-            KafkaTransactionManager manager = new KafkaTransactionManager();
+            final KafkaTransactionManager manager = new KafkaTransactionManager();
 
             // when/then
             assertThatThrownBy(
@@ -351,20 +347,20 @@ class KafkaTransactionManagerITCase {
                 producer.send(new ProducerRecord<>(topic, data));
                 producer.flush();
 
-                long pid = producer.getProducerId();
-                short epoch = producer.getEpoch();
+                final long pid = producer.getProducerId();
+                final short epoch = producer.getEpoch();
                 return new long[] {pid, epoch};
             }
         }
 
         private List<String> consumeRecords(String topic, String isolationLevel) {
-            Properties props = new Properties();
+            final Properties props = new Properties();
             props.put(
                     ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaContainer.getBootstrapServers());
             props.put(ConsumerConfig.GROUP_ID_CONFIG, "test-group-" + UUID.randomUUID());
             props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
 
-            boolean committed = "read_committed".equals(isolationLevel);
+            final boolean committed = "read_committed".equals(isolationLevel);
             return KafkaUtil.drainAllRecordsFromTopic(topic, props, committed).stream()
                     .map(r -> new String(r.value()))
                     .collect(Collectors.toList());
@@ -377,9 +373,7 @@ class KafkaTransactionManagerITCase {
 
         @Container
         private final TestKafkaContainer kafkaContainer =
-                createKafkaContainer(KafkaTransactionManagerITCase.class)
-                        .withNetwork(Network.newNetwork())
-                        .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS);
+                createKafkaContainer(KafkaTransactionManagerITCase.class);
 
         @RegisterExtension
         final MiniClusterExtension miniClusterExtension =
@@ -410,7 +404,7 @@ class KafkaTransactionManagerITCase {
                     1_000_000); // some high value only to allow savepoint triggering
 
             final DataStream<Long> source = createSource(env, 1000);
-            SharedReference<Set<Long>> checkpointedRecords =
+            final SharedReference<Set<Long>> checkpointedRecords =
                     sharedObjects.add(new ConcurrentSkipListSet<>());
 
             final String kafkaSinkUid = "kafka-sink-operator-uid";
@@ -432,27 +426,27 @@ class KafkaTransactionManagerITCase {
                     .sinkTo(NoCommitKafkaSinkWrapper.wrap(kafkaSink))
                     .uid(kafkaSinkUid);
 
-            StreamGraph streamGraph = env.getStreamGraph();
-            JobGraph jobGraph = streamGraph.getJobGraph();
+            final StreamGraph streamGraph = env.getStreamGraph();
+            final JobGraph jobGraph = streamGraph.getJobGraph();
 
-            JobID jobId = clusterClient.submitJob(jobGraph).get();
+            final JobID jobId = clusterClient.submitJob(jobGraph).get();
             CommonTestUtils.waitForAllTaskRunning(miniCluster, jobId, true);
             CommonTestUtils.waitUntilCondition(
                     () ->
                             listTransactionsForPrefix(transactionalIdPrefix).stream()
                                     .anyMatch(t -> t.state() == TransactionState.ONGOING));
 
-            Path flinkInternalSavepointTargetDirRestored =
+            final Path flinkInternalSavepointTargetDirRestored =
                     tempDir.resolve("native-savepoint-restored");
             Files.createDirectories(flinkInternalSavepointTargetDirRestored);
-            CompletableFuture<String> savepointFutureRestored =
+            final CompletableFuture<String> savepointFutureRestored =
                     clusterClient.stopWithSavepoint(
                             jobGraph.getJobID(),
                             false,
                             flinkInternalSavepointTargetDirRestored.toAbsolutePath().toString(),
                             SavepointFormatType.NATIVE);
             // Wait for savepoint completion
-            String savepointPathStringRestored = savepointFutureRestored.get();
+            final String savepointPathStringRestored = savepointFutureRestored.get();
             assertThat(checkpointedRecords.get()).isNotEmpty();
 
             // A periodic checkpoint may precommit a transaction before the savepoint, even with a
@@ -496,7 +490,7 @@ class KafkaTransactionManagerITCase {
         }
 
         private void createTestTopic(String topic) throws Exception {
-            Properties adminProps = new Properties();
+            final Properties adminProps = new Properties();
             adminProps.put("bootstrap.servers", kafkaContainer.getBootstrapServers());
             try (Admin admin = Admin.create(adminProps)) {
                 admin.createTopics(
@@ -510,12 +504,12 @@ class KafkaTransactionManagerITCase {
 
         private TransactionDescription describeTransaction(String transactionalId)
                 throws Exception {
-            Properties props = new Properties();
+            final Properties props = new Properties();
             props.put(
                     ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaContainer.getBootstrapServers());
 
             try (Admin admin = Admin.create(props)) {
-                TransactionDescription description =
+                final TransactionDescription description =
                         admin.describeTransactions(List.of(transactionalId))
                                 .all()
                                 .get()
@@ -528,7 +522,7 @@ class KafkaTransactionManagerITCase {
 
         private List<ConsumerRecord<byte[], byte[]>> drainAllRecordsFromTopic(
                 String topic, boolean committed) {
-            Properties properties = new Properties();
+            final Properties properties = new Properties();
             properties.put("bootstrap.servers", kafkaContainer.getBootstrapServers());
             properties.put("group.id", UUID.randomUUID().toString());
             properties.put("enable.auto.commit", false);
@@ -537,13 +531,13 @@ class KafkaTransactionManagerITCase {
         }
 
         private List<TransactionListing> listTransactionsForPrefix(String prefix) throws Exception {
-            Properties adminProps = new Properties();
+            final Properties adminProps = new Properties();
             adminProps.put("bootstrap.servers", kafkaContainer.getBootstrapServers());
 
             try (Admin admin = Admin.create(adminProps)) {
-                KafkaFuture<Collection<TransactionListing>> transactionsFuture =
+                final KafkaFuture<Collection<TransactionListing>> transactionsFuture =
                         admin.listTransactions(new ListTransactionsOptions()).all();
-                Collection<TransactionListing> transactions = transactionsFuture.get();
+                final Collection<TransactionListing> transactions = transactionsFuture.get();
                 return transactions.stream()
                         .filter(t -> t.transactionalId().contains(prefix))
                         .collect(Collectors.toList());
@@ -647,7 +641,7 @@ class KafkaTransactionManagerITCase {
         public void notifyCheckpointComplete(long checkpointId) throws Exception {
             // sync with shared object, this is guaranteed to sync eventually because of final
             // checkpoint
-            ArrayList<Long> committedRecords = new ArrayList<>();
+            final ArrayList<Long> committedRecords = new ArrayList<>();
             snapshottedRecords.get().forEach(committedRecords::add);
             checkpointedRecords.get().addAll(committedRecords);
         }

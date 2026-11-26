@@ -208,8 +208,8 @@ The tool uses the following exit codes:
 
 | Exit code | Meaning |
 | --- | --- |
-| `0` | The requested operation completed successfully, or help was displayed. |
-| `1` | Command-line parsing failed. |
+| `0` | The requested operation completed successfully, or help was explicitly requested with `--help` or `-help`. |
+| `1` | The command line was empty or could not be parsed. The tool displays usage. |
 | `2` | Configuration, validation, or another operation error occurred. Inspect the error and broker state before deciding what to do next. |
 | `3` | A commit timed out or was interrupted; its outcome is unknown. Do not abort. |
 

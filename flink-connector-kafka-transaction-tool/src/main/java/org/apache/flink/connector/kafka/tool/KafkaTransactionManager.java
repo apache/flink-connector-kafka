@@ -24,6 +24,7 @@ import org.apache.flink.connector.kafka.sink.internal.FlinkKafkaInternalProducer
 import org.apache.flink.util.Preconditions;
 
 import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.DescribeTransactionsOptions;
 import org.apache.kafka.clients.admin.TransactionDescription;
 import org.apache.kafka.clients.admin.TransactionState;
@@ -271,21 +272,32 @@ public final class KafkaTransactionManager {
 
     @VisibleForTesting
     Properties createAdminProperties(String bootstrapServers) {
-        final Properties props = new Properties();
-        props.putAll(clientProperties);
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        final Properties props = createClientProperties(bootstrapServers);
+        // Custom SASL callbacks and other plugins may consume keys unknown to Kafka.
+        props.keySet()
+                .removeIf(
+                        key ->
+                                ProducerConfig.configNames().contains(key)
+                                        && !AdminClientConfig.configNames().contains(key));
         return props;
     }
 
     @VisibleForTesting
     Properties createProducerProperties(String bootstrapServers, String transactionalId) {
-        final Properties props = createAdminProperties(bootstrapServers);
+        final Properties props = createClientProperties(bootstrapServers);
         props.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
         // We use ByteArraySerializer as we are only managing transaction control messages,
         // not sending actual data records.
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
         props.put(
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
+        return props;
+    }
+
+    private Properties createClientProperties(String bootstrapServers) {
+        final Properties props = new Properties();
+        props.putAll(clientProperties);
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         return props;
     }
 

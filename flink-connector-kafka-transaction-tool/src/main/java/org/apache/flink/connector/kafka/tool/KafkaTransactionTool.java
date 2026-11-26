@@ -74,7 +74,8 @@ import java.util.function.Function;
  *
  * <h3>Usage</h3>
  *
- * <p>You can execute the JAR directly using Java.
+ * <p>You can execute the JAR directly using Java. An empty command line prints usage and exits with
+ * code 1. Explicit help ({@code --help} or {@code -help}) exits with code 0.
  *
  * <p><b>Abort Transaction:</b><br>
  * Uses the Kafka "fencing" mechanism to force-abort a lingering transaction.
@@ -137,11 +138,6 @@ public final class KafkaTransactionTool {
         final Options options = getOptions(true);
         final HelpFormatter formatter = new HelpFormatter();
         formatter.setWidth(120);
-
-        if (args.length == 0) {
-            printHelp(formatter, options);
-            return 0;
-        }
 
         try {
             final CommandLine cmd = parseArguments(args);
@@ -215,7 +211,12 @@ public final class KafkaTransactionTool {
     }
 
     static CommandLine parseArguments(String[] args) throws ParseException {
-        final boolean helpRequested = Arrays.asList(args).contains("--" + OPTION_HELP);
+        final boolean helpRequested =
+                Arrays.stream(args)
+                        .anyMatch(
+                                arg ->
+                                        arg.equals("--" + OPTION_HELP)
+                                                || arg.equals("-" + OPTION_HELP));
         final CommandLine commandLine =
                 DefaultParser.builder()
                         .setAllowPartialMatching(false)
@@ -336,7 +337,7 @@ public final class KafkaTransactionTool {
                         + "Broker metadata may describe a new active transaction after a job restart; never use it without verifying the target.\n"
                         + "If a commit times out or is interrupted, its outcome is unknown. Retry only the same commit; do not abort.\n"
                         + "Abort rejects an unknown transactional ID when the broker supports the existence check; older brokers trigger a warning.\n"
-                        + "Exit codes: 0 = success/help; 1 = command-line parsing error; 2 = operation or validation error; 3 = unknown commit outcome.\n"
+                        + "Exit codes: 0 = success or explicit help (--help or -help); 1 = empty or invalid command line; 2 = operation or validation error; 3 = unknown commit outcome.\n"
                         + "A nonzero exit code is not proof that the transaction was not committed.\n"
                         + "See the Kafka transaction tool runbook in the connector documentation.\n\n"
                         + "Examples:\n"
