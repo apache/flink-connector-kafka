@@ -131,17 +131,17 @@ public class KafkaWriterITCase extends KafkaWriterTestBase {
     public void testRecordSerializerIsOpenedAndClosedOnceWithWriter(DeliveryGuarantee guarantee)
             throws Exception {
         final LifecycleRecordSerializer serializer = new LifecycleRecordSerializer(topic, false);
-        final KafkaWriter<Integer> writer =
+        try (final KafkaWriter<Integer> writer =
                 createWriter(
                         builder ->
                                 ((KafkaSinkBuilder<Integer>) builder)
                                         .setDeliveryGuarantee(guarantee)
                                         .setRecordSerializer(serializer),
-                        createInitContext());
+                        createInitContext())) {
+            assertThat(serializer.openCalls).hasValue(1);
+            assertThat(serializer.closeCalls).hasValue(0);
+        }
 
-        assertThat(serializer.openCalls).hasValue(1);
-        assertThat(serializer.closeCalls).hasValue(0);
-        writer.close();
         assertThat(serializer.openCalls).hasValue(1);
         assertThat(serializer.closeCalls).hasValue(1);
     }
