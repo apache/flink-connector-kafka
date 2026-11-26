@@ -16,6 +16,7 @@ This project bundles the following dependencies under the Apache Software Licens
 - org.apache.commons:commons-lang3:3.18.0
 - org.apache.commons:commons-text:1.10.0
 - org.apache.kafka:kafka-clients:4.2.0
+- org.bitbucket.b_c:jose4j:0.9.6
 - org.xerial.snappy:snappy-java:1.1.10.7
 
 This project bundles the following dependencies under the MIT License. See LICENSE for their copyright notices and license text.
@@ -29,6 +30,22 @@ This project bundles the following dependency under the BSD 2-Clause License. Se
 
 The compression libraries also bundle native LZ4, xxHash, Zstandard, Snappy,
 and Bitshuffle code. Their copyright notices and license texts are in LICENSE.
+
+The following notices are retained from jose4j 0.9.6:
+
+jose4j
+Copyright 2012-2015 Brian Campbell
+
+EcdsaUsingShaAlgorithm contains code for converting the concatenated
+R & S values of the signature to and from DER, which was originally
+derived from the Apache Santuario XML Security library's SignatureECDSA
+implementation. http://santuario.apache.org/
+
+The Base64 implementation in this software was derived from the
+Apache Commons Codec project. http://commons.apache.org/proper/commons-codec/
+
+JSON processing in this software was derived from the JSON.simple toolkit.
+https://code.google.com/p/json-simple/
 
 The following notices are retained from snappy-java 1.1.10.7:
 

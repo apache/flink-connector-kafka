@@ -18,18 +18,26 @@
 
 package org.apache.flink.connector.kafka.tool;
 
+import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.common.config.SaslConfigs;
+import org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginCallbackHandler;
+import org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule;
+import org.apache.kafka.common.security.oauthbearer.OAuthBearerTokenCallback;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import javax.security.auth.callback.Callback;
 import javax.security.auth.login.AppConfigurationEntry;
 
+import java.io.File;
 import java.io.InputStream;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -55,13 +63,16 @@ class KafkaTransactionToolPackagingITCase {
     }
 
     private String runExecutable(String argument, int expectedExitCode) throws Exception {
+        return runJava(List.of("-jar", toolJar().toString(), argument), expectedExitCode);
+    }
+
+    private String runJava(List<String> arguments, int expectedExitCode) throws Exception {
+        final List<String> command = new ArrayList<>();
+        command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+        command.addAll(arguments);
         final Path output = temporaryDirectory.resolve("tool-output.txt");
         final Process process =
-                new ProcessBuilder(
-                                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-                                "-jar",
-                                toolJar().toString(),
-                                argument)
+                new ProcessBuilder(command)
                         .redirectErrorStream(true)
                         .redirectOutput(output.toFile())
                         .start();
@@ -122,6 +133,67 @@ class KafkaTransactionToolPackagingITCase {
     }
 
     @Test
+    void testSecuredOAuthAuthenticationWithPackagedDependencies() throws Exception {
+        final Path token = temporaryDirectory.resolve("token.jwt");
+        final Base64.Encoder base64 = Base64.getUrlEncoder().withoutPadding();
+        final String header =
+                base64.encodeToString("{\"alg\":\"RS256\"}".getBytes(StandardCharsets.UTF_8));
+        final String claims =
+                base64.encodeToString(
+                        "{\"sub\":\"packaging-test\",\"exp\":4102444800}"
+                                .getBytes(StandardCharsets.UTF_8));
+        // The login handler reads claims on the client. Signature verification belongs to the
+        // broker.
+        Files.writeString(token, header + "." + claims + ".unused");
+        final String tokenUrl = token.toUri().toString();
+        final Path testClasses =
+                Path.of(
+                        SecuredOAuthLogin.class
+                                .getProtectionDomain()
+                                .getCodeSource()
+                                .getLocation()
+                                .toURI());
+        assertThat(
+                        runJava(
+                                List.of(
+                                        "-Dorg.apache.kafka.sasl.oauthbearer.allowed.urls="
+                                                + tokenUrl,
+                                        "-cp",
+                                        toolJar() + File.pathSeparator + testClasses,
+                                        SecuredOAuthLogin.class.getName(),
+                                        tokenUrl),
+                                0))
+                .contains("packaging-test");
+    }
+
+    /** Invoked with only the executable jar and this test's classes on the classpath. */
+    public static class SecuredOAuthLogin {
+        public static void main(String[] args) throws Exception {
+            final AdminClientConfig config =
+                    new AdminClientConfig(
+                            Map.of(
+                                    AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG,
+                                    "localhost:1",
+                                    SaslConfigs.SASL_OAUTHBEARER_TOKEN_ENDPOINT_URL,
+                                    args[0]));
+            final AppConfigurationEntry jaas =
+                    new AppConfigurationEntry(
+                            OAuthBearerLoginModule.class.getName(),
+                            AppConfigurationEntry.LoginModuleControlFlag.REQUIRED,
+                            Map.of());
+            final OAuthBearerLoginCallbackHandler handler = new OAuthBearerLoginCallbackHandler();
+            try {
+                handler.configure(config.values(), "OAUTHBEARER", List.of(jaas));
+                final OAuthBearerTokenCallback callback = new OAuthBearerTokenCallback();
+                handler.handle(new Callback[] {callback});
+                System.out.println(callback.token().principalName());
+            } finally {
+                handler.close();
+            }
+        }
+    }
+
+    @Test
     void testBundledLicenseAndNoticeResources() throws Exception {
         try (JarFile jar = new JarFile(toolJar().toFile())) {
             assertThat(readEntry(jar, "META-INF/LICENSE"))
@@ -141,6 +213,8 @@ class KafkaTransactionToolPackagingITCase {
                             "com.fasterxml.jackson.core:jackson-databind:",
                             "org.slf4j:slf4j-simple:",
                             "com.github.luben:zstd-jni:",
+                            "org.bitbucket.b_c:jose4j:0.9.6",
+                            "Brian Campbell",
                             "at.yawk.lz4:lz4-java:",
                             "org.xerial.snappy:snappy-java:");
             assertThat(readEntry(jar, "META-INF/FastDoubleParser-LICENSE"))
@@ -193,6 +267,7 @@ class KafkaTransactionToolPackagingITCase {
                         "org/apache/commons/text/",
                         "org/apache/flink/",
                         "org/apache/kafka/",
+                        "org/jose4j/",
                         "org/slf4j/",
                         "org/xerial/snappy/");
         try (JarFile jar = new JarFile(toolJar().toFile())) {

@@ -56,6 +56,14 @@ under the License.
 			<artifactId>kafka-clients</artifactId>
 		</dependency>
 
+		<!-- Kafka's standard OAuth login handler loads jose4j at runtime. -->
+		<dependency>
+			<groupId>org.bitbucket.b_c</groupId>
+			<artifactId>jose4j</artifactId>
+			<version>0.9.6</version>
+			<scope>runtime</scope>
+		</dependency>
+
 		<!-- CLI -->
 
 		<dependency>
@@ -225,7 +233,7 @@ under the License.
 						<phase>verify</phase>
 						<configuration>
 							<ignoredUnusedDeclaredDependencies>
-								org.slf4j:slf4j-simple,org.apache.flink:flink-streaming-java,org.testcontainers:testcontainers-kafka
+								org.bitbucket.b_c:jose4j,org.slf4j:slf4j-simple,org.apache.flink:flink-streaming-java,org.testcontainers:testcontainers-kafka
 							</ignoredUnusedDeclaredDependencies>
 						</configuration>
 					</execution>
@@ -287,6 +295,7 @@ under the License.
 									<include>org.apache.flink:flink-metrics-core</include>
 									<include>org.apache.flink:flink-shaded-guava</include>
 									<include>org.apache.kafka:kafka-clients</include>
+									<include>org.bitbucket.b_c:jose4j</include>
 									<include>org.slf4j:slf4j-api</include>
 									<include>org.slf4j:slf4j-simple</include>
 									<include>org.xerial.snappy:snappy-java</include>
