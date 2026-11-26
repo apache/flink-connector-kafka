@@ -70,6 +70,8 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RoundRobinPartitioner;
+import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Nested;
@@ -100,6 +102,7 @@ import java.util.stream.Collectors;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 @Testcontainers
 class KafkaTransactionManagerITCase {
@@ -112,6 +115,53 @@ class KafkaTransactionManagerITCase {
         @Container
         final TestKafkaContainer kafkaContainer =
                 createKafkaContainer(KafkaTransactionManagerITCase.class);
+
+        @Test
+        void testAbortSucceedsWhenProducerCloseFails() {
+            final String topic = "abort-close-failure";
+            final String transactionalId = "abort-close";
+            createLingeringTransaction(topic, transactionalId, "aborted");
+            final Properties properties = new Properties();
+            properties.put(ProducerConfig.PARTITIONER_CLASS_CONFIG, FailingClosePartitioner.class);
+
+            new KafkaTransactionManager(properties)
+                    .abortTransaction(kafkaContainer.getBootstrapServers(), transactionalId);
+
+            try (KafkaAdminAssert admin = KafkaAdminAssert.assertThat(kafkaContainer)) {
+                admin.transactions()
+                        .extractingStates()
+                        .extractingByKey(transactionalId)
+                        .isIn(TransactionState.COMPLETE_ABORT, TransactionState.EMPTY);
+            }
+            assertThat(consumeRecords(topic, "read_committed")).isEmpty();
+        }
+
+        @Test
+        void testAbortRetainsInitFailureWhenProducerCloseFails() {
+            final String topic = "rejected-abort-close-failure";
+            final String transactionalId = "rejected-abort-close";
+            createLingeringTransaction(topic, transactionalId, "pending");
+            final Properties properties = new Properties();
+            properties.put(ProducerConfig.PARTITIONER_CLASS_CONFIG, FailingClosePartitioner.class);
+            // The broker rejects InitProducerId when this exceeds transaction.max.timeout.ms.
+            properties.put(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG, Integer.MAX_VALUE);
+
+            final Throwable failure =
+                    catchThrowable(
+                            () ->
+                                    new KafkaTransactionManager(properties)
+                                            .abortTransaction(
+                                                    kafkaContainer.getBootstrapServers(),
+                                                    transactionalId));
+
+            assertThat(failure)
+                    .cause()
+                    .isInstanceOf(KafkaException.class)
+                    .hasMessageContaining("transaction.max.timeout.ms");
+            assertThat(failure.getCause().getSuppressed())
+                    .singleElement()
+                    .isInstanceOf(KafkaException.class);
+        }
 
         @Test
         void testAbortSpecificTransactionOnly() {
@@ -364,6 +414,14 @@ class KafkaTransactionManagerITCase {
             return KafkaUtil.drainAllRecordsFromTopic(topic, props, committed).stream()
                     .map(r -> new String(r.value()))
                     .collect(Collectors.toList());
+        }
+    }
+
+    /** Forces the Kafka producer to report a cleanup error. */
+    public static class FailingClosePartitioner extends RoundRobinPartitioner {
+        @Override
+        public void close() {
+            throw new IllegalStateException("Partitioner cleanup failed");
         }
     }
 

@@ -191,9 +191,27 @@ class KafkaTransactionManagerTest {
     }
 
     @Test
-    void testFencedCommitRemainsAFailure() {
+    void testInterruptedCloseAfterCommitPreservesSuccessAndInterrupt() {
+        final TestingProducer producer = new TestingProducer(() -> null);
+        final KafkaTransactionManager manager =
+                new KafkaTransactionManager(new Properties(), (properties, id) -> producer);
+        try {
+            producer.closeFailure = () -> new InterruptException("Interrupted while closing");
+            manager.commitTransaction("localhost:9092", "tx-1", 100, (short) 2);
+            assertThat(producer.commitAttempts).isOne();
+            assertThat(producer.isClosed()).isTrue();
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void testFencedCommitRemainsAFailureWhenCloseAlsoFails() {
         final ProducerFencedException fenced = new ProducerFencedException("Producer fenced");
         final TestingProducer producer = new TestingProducer(() -> fenced);
+        final KafkaException closeFailure = new KafkaException("Failed to close producer");
+        producer.closeFailure = () -> closeFailure;
         final KafkaTransactionManager failingManager =
                 new KafkaTransactionManager(new Properties(), (properties, id) -> producer);
 
@@ -203,6 +221,7 @@ class KafkaTransactionManagerTest {
                                         "localhost:9092", "tx-1", 100, (short) 2))
                 .hasMessageContaining("Failed to commit transaction")
                 .hasCause(fenced);
+        assertThat(fenced.getSuppressed()).containsExactly(closeFailure);
         assertThat(producer.isClosed()).isTrue();
     }
 
@@ -245,6 +264,7 @@ class KafkaTransactionManagerTest {
     private static class TestingProducer extends FlinkKafkaInternalProducer<byte[], byte[]> {
         private final Supplier<RuntimeException> commitFailureSupplier;
         private RuntimeException commitFailure;
+        private Supplier<RuntimeException> closeFailure = () -> null;
         private int commitAttempts;
 
         private TestingProducer(Supplier<RuntimeException> commitFailureSupplier) {
@@ -258,7 +278,9 @@ class KafkaTransactionManagerTest {
         public void commitTransaction() {
             commitAttempts++;
             commitFailure = commitFailureSupplier.get();
-            throw commitFailure;
+            if (commitFailure != null) {
+                throw commitFailure;
+            }
         }
 
         @Override
@@ -273,10 +295,14 @@ class KafkaTransactionManagerTest {
 
         @Override
         public void close() {
+            final RuntimeException failure = closeFailure.get();
             // Closing Kafka's sender thread may consume the interrupt before the manager catches
             // it.
             Thread.interrupted();
             super.close();
+            if (failure != null) {
+                throw failure;
+            }
         }
     }
 }

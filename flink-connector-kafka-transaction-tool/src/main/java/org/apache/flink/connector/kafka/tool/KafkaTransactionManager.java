@@ -118,11 +118,10 @@ public final class KafkaTransactionManager {
         // Use standard KafkaProducer. The side-effect of initTransactions() performs the abort.
         try {
             final KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(props);
-            try {
-                producer.initTransactions();
-            } finally {
-                producer.close(Duration.ofMillis(timeoutMs));
-            }
+            completeAndClose(
+                    transactionalId,
+                    producer::initTransactions,
+                    () -> producer.close(Duration.ofMillis(timeoutMs)));
             LOG.info("Successfully fenced transactional ID: {}", transactionalId);
         } catch (Exception e) {
             throw new RuntimeException(
@@ -245,11 +244,16 @@ public final class KafkaTransactionManager {
 
         final Properties props = createProducerProperties(bootstrapServers, transactionalId);
 
-        try (FlinkKafkaInternalProducer<?, ?> producer =
-                producerFactory.apply(props, transactionalId)) {
-
-            producer.resumeTransaction(producerId, epoch, useTransactionV2);
-            producer.commitTransaction();
+        try {
+            final FlinkKafkaInternalProducer<?, ?> producer =
+                    producerFactory.apply(props, transactionalId);
+            completeAndClose(
+                    transactionalId,
+                    () -> {
+                        producer.resumeTransaction(producerId, epoch, useTransactionV2);
+                        producer.commitTransaction();
+                    },
+                    producer);
 
             LOG.info("Successfully committed transaction: {}", transactionalId);
         } catch (TimeoutException | InterruptException e) {
@@ -266,6 +270,26 @@ public final class KafkaTransactionManager {
                     String.format(
                             "Failed to commit transaction '%s'. Possible causes: incorrect ProducerId (%d) or Epoch (%d), transaction already aborted or expired on the broker, or producer fenced by another instance. Check Kafka broker logs for details.",
                             transactionalId, producerId, epoch),
+                    e);
+        }
+    }
+
+    private static void completeAndClose(
+            String transactionalId, Runnable operation, AutoCloseable producer) throws Exception {
+        boolean acknowledged = false;
+        try (producer) {
+            operation.run();
+            acknowledged = true;
+        } catch (Exception e) {
+            if (!acknowledged) {
+                throw e;
+            }
+            if (e instanceof InterruptException) {
+                Thread.currentThread().interrupt();
+            }
+            LOG.warn(
+                    "Kafka acknowledged the operation for transactional ID '{}', but closing its producer failed.",
+                    transactionalId,
                     e);
         }
     }
