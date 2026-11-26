@@ -25,9 +25,14 @@ import org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule;
 import org.apache.kafka.common.security.oauthbearer.OAuthBearerTokenCallback;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.w3c.dom.Document;
+import org.w3c.dom.Node;
 
 import javax.security.auth.callback.Callback;
 import javax.security.auth.login.AppConfigurationEntry;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.xpath.XPathFactory;
+import javax.xml.xpath.XPathNodes;
 
 import java.io.File;
 import java.io.InputStream;
@@ -38,10 +43,15 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.jar.JarFile;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -208,15 +218,7 @@ class KafkaTransactionToolPackagingITCase {
                             "Redistribution and use in source and binary forms",
                             "Permission is hereby granted");
             assertThat(readEntry(jar, "META-INF/NOTICE"))
-                    .contains(
-                            "org.apache.kafka:kafka-clients:",
-                            "com.fasterxml.jackson.core:jackson-databind:",
-                            "org.slf4j:slf4j-simple:",
-                            "com.github.luben:zstd-jni:",
-                            "org.bitbucket.b_c:jose4j:0.9.6",
-                            "Brian Campbell",
-                            "at.yawk.lz4:lz4-java:",
-                            "org.xerial.snappy:snappy-java:");
+                    .contains("Brian Campbell", "com.google.guava:guava:");
             assertThat(readEntry(jar, "META-INF/FastDoubleParser-LICENSE"))
                     .contains("Werner Randelshofer");
             assertThat(readEntry(jar, "META-INF/FastDoubleParser-ThirdParty-LICENSE"))
@@ -224,6 +226,71 @@ class KafkaTransactionToolPackagingITCase {
             assertThat(readEntry(jar, "META-INF/Schubfach-LICENSE"))
                     .contains("Permission is hereby granted");
         }
+    }
+
+    @Test
+    void testNoticeMatchesBundledDependencyVersions() throws Exception {
+        final Path module = Path.of(System.getProperty("basedir"));
+        final Set<String> shadedArtifacts = shadedThirdPartyArtifacts(module.resolve("pom.xml"));
+
+        // TGF nodes are numbered and contain group:artifact:type[:classifier]:version:scope.
+        final Pattern coordinate =
+                Pattern.compile(
+                        "\\d+ ([^:\\s]+:[^:\\s]+):[^:\\s]+:(\\S+):(?:compile|runtime)(?: \\(optional\\))?");
+        final List<String> expected = new ArrayList<>();
+        final Set<String> resolvedArtifacts = new HashSet<>();
+        for (String line :
+                Files.readAllLines(
+                        Path.of(System.getProperty("transaction.tool.runtime.dependencies")))) {
+            final Matcher match = coordinate.matcher(line.trim());
+            if (match.matches() && shadedArtifacts.contains(match.group(1))) {
+                resolvedArtifacts.add(match.group(1));
+                expected.add(match.group(1) + ":" + match.group(2));
+            }
+        }
+        assertThat(resolvedArtifacts).as("Resolved shade inputs").isEqualTo(shadedArtifacts);
+
+        final String notice =
+                Files.readString(module.resolve("src/uber/resources/META-INF/NOTICE"));
+        final List<String> declared =
+                notice.lines()
+                        .filter(line -> line.matches("- [^\\s:]+:[^\\s:]+:(?:[^\\s:]+:)?[^\\s:]+"))
+                        .map(line -> line.substring(2))
+                        .collect(Collectors.toList());
+        assertThat(declared)
+                .as("Bundled dependencies in NOTICE")
+                .containsExactlyInAnyOrderElementsOf(expected);
+        try (JarFile jar = new JarFile(toolJar().toFile())) {
+            final List<String> packaged =
+                    readEntry(jar, "META-INF/NOTICE").lines().collect(Collectors.toList());
+            for (String dependency : declared) {
+                assertThat(packaged).contains("- " + dependency);
+            }
+        }
+    }
+
+    private static Set<String> shadedThirdPartyArtifacts(Path pom) throws Exception {
+        final DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        // The unprefixed XPath selects elements from a namespace-unaware Maven POM DOM.
+        factory.setNamespaceAware(false);
+        final Document document = factory.newDocumentBuilder().parse(pom.toFile());
+        final XPathNodes includes =
+                XPathFactory.newInstance()
+                        .newXPath()
+                        .evaluateExpression(
+                                "//plugin[artifactId='maven-shade-plugin']/executions/execution[id='default']/configuration/artifactSet/includes/include",
+                                document,
+                                XPathNodes.class);
+        final Set<String> artifacts = new HashSet<>();
+        for (Node include : includes) {
+            final String artifact = include.getTextContent().trim();
+            if (!artifact.startsWith("org.apache.flink:")) {
+                artifacts.add(artifact);
+            }
+        }
+        assertThat(artifacts).as("Third-party shade includes").isNotEmpty();
+        return artifacts;
     }
 
     @Test
@@ -271,20 +338,22 @@ class KafkaTransactionToolPackagingITCase {
                         "org/slf4j/",
                         "org/xerial/snappy/");
         try (JarFile jar = new JarFile(toolJar().toFile())) {
-            assertThat(
-                            jar.stream()
-                                    .map(entry -> entry.getName())
-                                    .filter(name -> name.endsWith(".class"))
-                                    .map(
-                                            name ->
-                                                    name.replaceFirst(
-                                                            "^META-INF/versions/[0-9]+/", ""))
-                                    .filter(
-                                            name ->
-                                                    expectedPackages.stream()
-                                                            .noneMatch(name::startsWith)))
-                    .as("Classes outside the expected bundled packages")
-                    .isEmpty();
+            final Set<String> packages =
+                    jar.stream()
+                            .map(entry -> entry.getName())
+                            .filter(name -> name.endsWith(".class"))
+                            .map(name -> name.replaceFirst("^META-INF/versions/[0-9]+/", ""))
+                            .map(
+                                    name ->
+                                            expectedPackages.stream()
+                                                    .filter(name::startsWith)
+                                                    .findFirst()
+                                                    .orElse(name))
+                            .collect(Collectors.toSet());
+            assertThat(packages)
+                    .as("Bundled class packages")
+                    .containsExactlyInAnyOrderElementsOf(expectedPackages);
+            assertThat(jar.getJarEntry("org/slf4j/impl/StaticLoggerBinder.class")).isNotNull();
         }
     }
 

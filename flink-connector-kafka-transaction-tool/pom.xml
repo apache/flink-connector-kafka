@@ -37,6 +37,7 @@ under the License.
 	<properties>
 		<japicmp.skip>true</japicmp.skip>
 		<transaction.tool.jar>${project.build.directory}/${project.build.finalName}-uber-jar.jar</transaction.tool.jar>
+		<transaction.tool.runtime.dependencies>${project.build.directory}/runtime-dependencies.tgf</transaction.tool.runtime.dependencies>
 	</properties>
 
 	<dependencies>
@@ -206,6 +207,7 @@ under the License.
 					</classpathDependencyExcludes>
 					<systemPropertyVariables>
 						<transaction.tool.jar>${transaction.tool.jar}</transaction.tool.jar>
+						<transaction.tool.runtime.dependencies>${transaction.tool.runtime.dependencies}</transaction.tool.runtime.dependencies>
 						<transaction.tool.thin.jar>${project.build.directory}/${project.build.finalName}.jar</transaction.tool.thin.jar>
 					</systemPropertyVariables>
 				</configuration>
@@ -225,6 +227,18 @@ under the License.
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-dependency-plugin</artifactId>
 				<executions>
+					<execution>
+						<id>list-transaction-tool-runtime-dependencies</id>
+						<phase>prepare-package</phase>
+						<goals>
+							<goal>tree</goal>
+						</goals>
+						<configuration>
+							<scope>runtime</scope>
+							<outputType>tgf</outputType>
+							<outputFile>${transaction.tool.runtime.dependencies}</outputFile>
+						</configuration>
+					</execution>
 					<execution>
 						<id>analyze-deps</id>
 						<goals>

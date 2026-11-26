@@ -131,7 +131,7 @@ Splits, enumerator state, writer state and committables are written by `SimpleVe
 ### Bumping `kafka.version`
 
 1. Re-check the reflection in `FlinkKafkaInternalProducer`
-2. Update `flink-sql-connector-kafka/src/main/resources/META-INF/NOTICE`
+2. Update `flink-sql-connector-kafka/src/main/resources/META-INF/NOTICE` and the transaction tool’s `src/uber/resources/META-INF/NOTICE` for changed bundled dependencies. Recheck the secured OAuth dependency against Kafka and run `KafkaTransactionToolPackagingITCase` against each supported Flink version.
 3. Update `DockerImageVersions` in the test utils: `APACHE_KAFKA` follows `kafka.version`, `CP_KAFKA` and `SCHEMA_REGISTRY` follow `confluent.version`
 4. Verify: `dependency:tree` for new transitive dependencies, the license check from CI, the full ITCase suite
 
