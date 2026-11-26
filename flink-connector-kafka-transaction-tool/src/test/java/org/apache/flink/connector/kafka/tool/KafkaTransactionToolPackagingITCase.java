@@ -153,15 +153,48 @@ class KafkaTransactionToolPackagingITCase {
     }
 
     @Test
-    void testExcludedDependencyMetadataAndClasses() throws Exception {
+    void testExcludedDependencyMetadata() throws Exception {
         try (JarFile jar = new JarFile(toolJar().toFile())) {
             assertThat(jar.stream().map(entry -> entry.getName()))
                     .noneMatch(
                             name ->
                                     name.equals("module-info.class")
                                             || name.endsWith("/module-info.class")
-                                            || name.equals("META-INF/DEPENDENCIES")
-                                            || name.startsWith("org/apache/commons/io/"));
+                                            || name.equals("META-INF/DEPENDENCIES"));
+        }
+    }
+
+    @Test
+    void testBundledClassPackages() throws Exception {
+        final List<String> expectedPackages =
+                List.of(
+                        "com/fasterxml/jackson/",
+                        "com/github/luben/zstd/",
+                        "javax/annotation/",
+                        "net/jpountz/",
+                        "org/apache/commons/cli/",
+                        "org/apache/commons/collections/",
+                        "org/apache/commons/lang3/",
+                        "org/apache/commons/text/",
+                        "org/apache/flink/",
+                        "org/apache/kafka/",
+                        "org/slf4j/",
+                        "org/xerial/snappy/");
+        try (JarFile jar = new JarFile(toolJar().toFile())) {
+            assertThat(
+                            jar.stream()
+                                    .map(entry -> entry.getName())
+                                    .filter(name -> name.endsWith(".class"))
+                                    .map(
+                                            name ->
+                                                    name.replaceFirst(
+                                                            "^META-INF/versions/[0-9]+/", ""))
+                                    .filter(
+                                            name ->
+                                                    expectedPackages.stream()
+                                                            .noneMatch(name::startsWith)))
+                    .as("Classes outside the expected bundled packages")
+                    .isEmpty();
         }
     }
 
