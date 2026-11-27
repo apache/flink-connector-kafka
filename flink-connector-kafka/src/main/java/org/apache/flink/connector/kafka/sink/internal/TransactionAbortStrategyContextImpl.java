@@ -221,6 +221,8 @@ public class TransactionAbortStrategyContextImpl implements TransactionAbortStra
 
     private Map<String, TransactionDescription> describePrecommitted() {
         if (precommittedDescriptions == null) {
+            // One batched describe call for all precommitted ids, made at most once. Callers only
+            // look up the ids that the listing reported as ongoing.
             precommittedDescriptions =
                     transactionDescriber.apply(precommittedTransactions.keySet());
         }
