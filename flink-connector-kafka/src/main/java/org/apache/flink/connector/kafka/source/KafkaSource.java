@@ -199,13 +199,16 @@ public class KafkaSource<OUT>
     @Override
     public SplitEnumerator<KafkaPartitionSplit, KafkaSourceEnumState> createEnumerator(
             SplitEnumeratorContext<KafkaPartitionSplit> enumContext) {
-        return new KafkaSourceEnumerator(
-                subscriber,
-                startingOffsetsInitializer,
-                stoppingOffsetsInitializer,
-                props,
-                enumContext,
-                boundedness);
+        final KafkaSourceEnumerator enumerator =
+                new KafkaSourceEnumerator(
+                        subscriber,
+                        startingOffsetsInitializer,
+                        stoppingOffsetsInitializer,
+                        props,
+                        enumContext,
+                        boundedness);
+        enumerator.registerMetrics(enumContext.metricGroup());
+        return enumerator;
     }
 
     @Internal
@@ -214,14 +217,17 @@ public class KafkaSource<OUT>
             SplitEnumeratorContext<KafkaPartitionSplit> enumContext,
             KafkaSourceEnumState checkpoint)
             throws IOException {
-        return new KafkaSourceEnumerator(
-                subscriber,
-                startingOffsetsInitializer,
-                stoppingOffsetsInitializer,
-                props,
-                enumContext,
-                boundedness,
-                checkpoint);
+        final KafkaSourceEnumerator enumerator =
+                new KafkaSourceEnumerator(
+                        subscriber,
+                        startingOffsetsInitializer,
+                        stoppingOffsetsInitializer,
+                        props,
+                        enumContext,
+                        boundedness,
+                        checkpoint);
+        enumerator.registerMetrics(enumContext.metricGroup());
+        return enumerator;
     }
 
     @Internal

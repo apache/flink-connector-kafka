@@ -17,14 +17,23 @@
 
 package org.apache.flink.connector.kafka.source;
 
+import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.connector.source.SplitEnumerator;
+import org.apache.flink.api.connector.source.mocks.MockSplitEnumeratorContext;
 import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.DefaultKafkaDatasetIdentifier;
 import org.apache.flink.connector.kafka.lineage.DefaultTypeDatasetFacet;
 import org.apache.flink.connector.kafka.lineage.KafkaDatasetIdentifierProvider;
+import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumState;
+import org.apache.flink.connector.kafka.source.enumerator.KafkaSourceEnumerator;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
+import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
+import org.apache.flink.metrics.groups.SplitEnumeratorMetricGroup;
+import org.apache.flink.metrics.testutils.MetricListener;
+import org.apache.flink.runtime.metrics.groups.InternalSplitEnumeratorMetricGroup;
 import org.apache.flink.streaming.api.lineage.LineageDataset;
 import org.apache.flink.streaming.api.lineage.LineageVertex;
 import org.apache.flink.util.Collector;
@@ -166,6 +175,52 @@ public class KafkaSourceTest {
         assertThat(dataset.facets()).containsKey(DefaultTypeDatasetFacet.TYPE_FACET_NAME);
         assertThat(dataset.facets().get(DefaultTypeDatasetFacet.TYPE_FACET_NAME))
                 .hasFieldOrPropertyWithValue("typeInformation", TypeInformation.of(String.class));
+    }
+
+    @Test
+    public void testEnumeratorRegistersRemovedPartitionsGauge() throws Exception {
+        KafkaSource<String> source =
+                KafkaSource.<String>builder()
+                        .setProperties(kafkaProperties)
+                        .setTopics("topic1")
+                        .setValueOnlyDeserializer(new SimpleStringSchema())
+                        .build();
+
+        MetricListener createListener = new MetricListener();
+        try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
+                        contextWithMetricGroup(createListener);
+                SplitEnumerator<KafkaPartitionSplit, KafkaSourceEnumState> enumerator =
+                        source.createEnumerator(context)) {
+            assertRemovedPartitionsGauge(createListener);
+        }
+
+        MetricListener restoreListener = new MetricListener();
+        try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
+                        contextWithMetricGroup(restoreListener);
+                SplitEnumerator<KafkaPartitionSplit, KafkaSourceEnumState> enumerator =
+                        source.restoreEnumerator(
+                                context, new KafkaSourceEnumState(Collections.emptySet(), true))) {
+            assertRemovedPartitionsGauge(restoreListener);
+        }
+    }
+
+    private static MockSplitEnumeratorContext<KafkaPartitionSplit> contextWithMetricGroup(
+            MetricListener metricListener) {
+        return new MockSplitEnumeratorContext<KafkaPartitionSplit>(1) {
+            @Override
+            public SplitEnumeratorMetricGroup metricGroup() {
+                return new InternalSplitEnumeratorMetricGroup(metricListener.getMetricGroup());
+            }
+        };
+    }
+
+    private static void assertRemovedPartitionsGauge(MetricListener metricListener) {
+        assertThat(
+                        metricListener.<Integer>getGauge(
+                                "enumerator",
+                                KafkaSourceEnumerator.KAFKA_SOURCE_ENUMERATOR_METRIC_GROUP,
+                                KafkaSourceEnumerator.REMOVED_PARTITIONS_METRIC_GAUGE))
+                .hasValueSatisfying(gauge -> assertThat(gauge.getValue()).isZero());
     }
 
     private static class TestingKafkaSubscriber
