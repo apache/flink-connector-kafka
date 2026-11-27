@@ -44,6 +44,34 @@ public class TransactionalIdFactory {
                 + checkpointOffset;
     }
 
+    /**
+     * Checks whether the transactionalId has been built by {@link #buildTransactionalId(String,
+     * int, long)} with the given prefix.
+     *
+     * <p>It is not sufficient that the id starts with the prefix because ids of other producers may
+     * do so as well. For the prefix {@code sink}, {@code sink-2-0-1} has been built with the prefix
+     * {@code sink-2}, and {@code sink-a-b} has not been built by this factory at all.
+     */
+    public static boolean hasPrefix(String transactionalId, String transactionalIdPrefix) {
+        final int lastSep = transactionalId.lastIndexOf(TRANSACTIONAL_ID_DELIMITER);
+        final int secondLastSep =
+                transactionalId.lastIndexOf(TRANSACTIONAL_ID_DELIMITER, lastSep - 1);
+        if (secondLastSep != transactionalIdPrefix.length()
+                || !transactionalId.startsWith(transactionalIdPrefix)) {
+            return false;
+        }
+        try {
+            final int subtaskId =
+                    Integer.parseInt(transactionalId.substring(secondLastSep + 1, lastSep));
+            final long checkpointOffset = Long.parseLong(transactionalId.substring(lastSep + 1));
+            // Reject numbers that the factory would write differently, such as 01 or +1.
+            return buildTransactionalId(transactionalIdPrefix, subtaskId, checkpointOffset)
+                    .equals(transactionalId);
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
     public static int extractSubtaskId(String name) {
         int lastSep = name.lastIndexOf("-");
         int secondLastSep = name.lastIndexOf("-", lastSep - 1);
