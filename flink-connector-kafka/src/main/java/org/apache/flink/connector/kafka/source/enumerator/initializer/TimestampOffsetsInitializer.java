@@ -71,8 +71,15 @@ class TimestampOffsetsInitializer implements OffsetsInitializer {
         return initialOffsets;
     }
 
+    /**
+     * The starting offsets are resolved by the enumerator and are within the log at that time, so
+     * this strategy only applies to a position that left the log afterwards: a running or restored
+     * split that fell behind retention. Resuming from the earliest available offset reads every
+     * record still in the log, whereas {@link OffsetResetStrategy#LATEST} would silently skip to
+     * the log end.
+     */
     @Override
     public OffsetResetStrategy getAutoOffsetResetStrategy() {
-        return OffsetResetStrategy.LATEST;
+        return OffsetResetStrategy.EARLIEST;
     }
 }
