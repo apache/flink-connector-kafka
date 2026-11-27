@@ -320,7 +320,7 @@ Kafka source 会在不同的[范围 (Scope)]({{< ref "docs/ops/metrics" >}}/#sco
   </thead>
   <tbody>
     <tr>
-        <th rowspan="8">算子</th>
+        <th rowspan="9">算子</th>
         <td>currentEmitEventTimeLag</td>
         <td>n/a</td>
         <td>数据的事件时间与数据离开 Source 时的间隔¹：<code>currentEmitEventTimeLag = EmitTime - EventTime</code></td>
@@ -367,6 +367,14 @@ Kafka source 会在不同的[范围 (Scope)]({{< ref "docs/ops/metrics" >}}/#sco
       <td>KafkaSourceReader.currentOffsets</td>
       <td>topic, partition</td>
       <td>每个 partition 当前读取的位点。各个 partition 的指标可以通过指定 topic 名称和 partition ID 获取。</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>KafkaSourceEnumerator.removedPartitions</td>
+      <td>n/a</td>
+      <td>仍分配给读取器、但在最近一次分区检查中已不再存在的 partition 数量，原因是其 Topic 已从订阅中移除，或者这些 partition 已不存在。
+      Kafka Source 不会收回已分配的分片，因此读取器会继续读取这些 partition。该指标由分片枚举器在 Source 算子的
+      <code>coordinator.enumerator</code> 组中汇报。</td>
       <td>Gauge</td>
     </tr>
   </tbody>

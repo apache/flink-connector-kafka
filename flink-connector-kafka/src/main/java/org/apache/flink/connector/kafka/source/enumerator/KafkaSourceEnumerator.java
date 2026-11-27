@@ -30,6 +30,7 @@ import org.apache.flink.connector.kafka.source.enumerator.metadata.TopicIntegrit
 import org.apache.flink.connector.kafka.source.enumerator.metadata.TopicMetadataSettable;
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
+import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.util.FlinkRuntimeException;
 
 import org.apache.kafka.clients.admin.AdminClient;
@@ -99,6 +100,9 @@ public class KafkaSourceEnumerator
         implements SplitEnumerator<KafkaPartitionSplit, KafkaSourceEnumState> {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaSourceEnumerator.class);
 
+    public static final String KAFKA_SOURCE_ENUMERATOR_METRIC_GROUP = "KafkaSourceEnumerator";
+    public static final String REMOVED_PARTITIONS_METRIC_GAUGE = "removedPartitions";
+
     /**
      * Selects the target reader for a split while it is enqueued in pending assignments.
      *
@@ -153,6 +157,12 @@ public class KafkaSourceEnumerator
     private final boolean topicIntegrityCheckEnabled;
 
     private final TopicIntegrityProvider topicIntegrityProvider;
+
+    // Removed partitions are not revoked from the readers, which keep reading them. Only a change
+    // is logged as a warning so that a long-lasting state does not flood the log; the gauge keeps
+    // the state visible for alerting. The gauge is read outside the coordinator thread.
+    private Set<TopicPartition> lastRemovedPartitions = Collections.emptySet();
+    private volatile int numRemovedPartitions;
 
     public KafkaSourceEnumerator(
             KafkaSubscriber subscriber,
@@ -240,6 +250,19 @@ public class KafkaSourceEnumerator
                 initialDiscoveryFinished,
                 topicIntegrityCheckEnabled,
                 topicIntegrityProvider.getTrackedTopicIdsByName());
+    }
+
+    /**
+     * Registers the metrics of this enumerator.
+     *
+     * <p>This is not done in the constructor because the dynamic Kafka source creates one
+     * enumerator per cluster on the same context and recreates them on metadata changes, which
+     * would register colliding metrics.
+     */
+    public void registerMetrics(MetricGroup metricGroup) {
+        metricGroup
+                .addGroup(KAFKA_SOURCE_ENUMERATOR_METRIC_GROUP)
+                .gauge(REMOVED_PARTITIONS_METRIC_GAUGE, () -> numRemovedPartitions);
     }
 
     private static Map<TopicPartition, KafkaPartitionSplit> indexByPartition(
@@ -602,9 +625,7 @@ public class KafkaSourceEnumerator
         if (!newPartitions.isEmpty()) {
             LOG.info("Discovered new partitions: {}", newPartitions);
         }
-        if (!removedPartitions.isEmpty()) {
-            LOG.info("Discovered removed partitions: {}", removedPartitions);
-        }
+        reportRemovedPartitions(removedPartitions);
 
         Set<TopicPartition> initialPartitions = new HashSet<>();
         if (initialDiscovery) {
@@ -618,6 +639,24 @@ public class KafkaSourceEnumerator
             }
         }
         return new PartitionChange(initialPartitions, newPartitions, removedPartitions);
+    }
+
+    private void reportRemovedPartitions(Set<TopicPartition> removedPartitions) {
+        if (!removedPartitions.equals(lastRemovedPartitions)) {
+            if (!removedPartitions.isEmpty()) {
+                LOG.warn(
+                        "Discovered removed partitions: {}. They are no longer subscribed or no "
+                                + "longer exist, but the Kafka source does not revoke assigned "
+                                + "splits, so the readers keep reading them as long as they exist.",
+                        removedPartitions);
+            } else {
+                LOG.info("The previously removed partitions are part of the subscription again.");
+            }
+        } else if (!removedPartitions.isEmpty()) {
+            LOG.debug("Discovered removed partitions: {}", removedPartitions);
+        }
+        lastRemovedPartitions = removedPartitions;
+        numRemovedPartitions = removedPartitions.size();
     }
 
     private AdminClient getKafkaAdminClient() {

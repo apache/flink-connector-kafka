@@ -354,7 +354,7 @@ Kafka source exposes the following metrics in the respective [scope]({{< ref "do
   </thead>
   <tbody>
     <tr>
-        <th rowspan="8">Operator</th>
+        <th rowspan="9">Operator</th>
         <td>currentEmitEventTimeLag</td>
         <td>n/a</td>
         <td>The time span from the record event timestamp to the time the record is emitted by the source connector¹: <code>currentEmitEventTimeLag = EmitTime - EventTime.</code></td>
@@ -405,6 +405,16 @@ Kafka source exposes the following metrics in the respective [scope]({{< ref "do
       <td>topic, partition</td>
       <td>The consumer's current read offset, for each partition. A particular
       partition's metric can be specified by topic name and partition id.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td>KafkaSourceEnumerator.removedPartitions</td>
+      <td>n/a</td>
+      <td>The number of partitions that are still assigned to readers although the last partition
+      discovery no longer found them, because their topic was removed from the subscription or the
+      partitions no longer exist. The Kafka source does not revoke assigned splits, so the readers
+      keep reading these partitions. This metric is reported by the split enumerator in the
+      <code>coordinator.enumerator</code> group of the source operator.</td>
       <td>Gauge</td>
     </tr>
   </tbody>

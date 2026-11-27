@@ -28,6 +28,8 @@ import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsIni
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.connector.kafka.testutils.KafkaSourceTestEnv;
+import org.apache.flink.metrics.Gauge;
+import org.apache.flink.metrics.testutils.MetricListener;
 import org.apache.flink.mock.Whitebox;
 import org.apache.flink.runtime.checkpoint.CheckpointException;
 import org.apache.flink.runtime.checkpoint.CheckpointFailureReason;
@@ -632,6 +634,46 @@ public class KafkaSourceEnumeratorTest {
             assertThat(partitionChange.getNewPartitions()).isEqualTo(expectedNewPartitions);
             assertThat(partitionChange.getInitialPartitions()).isEqualTo(Set.of());
             assertThat(partitionChange.getRemovedPartitions()).isEqualTo(expectedRemovedPartitions);
+        }
+    }
+
+    @Test
+    public void testRemovedPartitionsGauge() throws Throwable {
+        final List<KafkaPartitionSplit> restoredSplits =
+                KafkaSourceTestEnv.getPartitionsForTopics(PRE_EXISTING_TOPICS).stream()
+                        .map(tp -> new KafkaPartitionSplit(tp, 0L))
+                        .collect(Collectors.toList());
+        final MetricListener metricListener = new MetricListener();
+        try (MockSplitEnumeratorContext<KafkaPartitionSplit> context =
+                        new MockSplitEnumeratorContext<>(NUM_SUBTASKS);
+                KafkaSourceEnumerator enumerator =
+                        createEnumerator(
+                                context,
+                                1L,
+                                OffsetsInitializer.earliest(),
+                                Collections.singleton(TOPIC1),
+                                restoredSplits,
+                                Collections.emptySet(),
+                                true,
+                                new Properties())) {
+            enumerator.registerMetrics(metricListener.getMetricGroup());
+            final Gauge<Integer> removedPartitions =
+                    metricListener
+                            .<Integer>getGauge(
+                                    KafkaSourceEnumerator.KAFKA_SOURCE_ENUMERATOR_METRIC_GROUP,
+                                    KafkaSourceEnumerator.REMOVED_PARTITIONS_METRIC_GAUGE)
+                            .get();
+            assertThat(removedPartitions.getValue()).isZero();
+
+            // TOPIC2 was removed from the subscription, but its restored splits stay assigned
+            enumerator.start();
+            runPeriodicPartitionDiscovery(context);
+            assertThat(removedPartitions.getValue()).isEqualTo(KafkaSourceTestEnv.NUM_PARTITIONS);
+
+            enumerator.getPartitionChange(
+                    new HashSet<>(KafkaSourceTestEnv.getPartitionsForTopics(PRE_EXISTING_TOPICS)),
+                    false);
+            assertThat(removedPartitions.getValue()).isZero();
         }
     }
 
