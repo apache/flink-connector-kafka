@@ -485,6 +485,24 @@ class KafkaDynamicTableFactoryTest {
                 "group-offsets"
             })
     void testTableSourceSetOffsetResetForEveryStartupMode(String startupMode) {
+        assertThat(getTableSourceAutoOffsetReset(startupMode, "none")).isEqualTo("none");
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "earliest-offset",
+                "latest-offset",
+                "specific-offsets",
+                "timestamp",
+                "group-offsets"
+            })
+    void testTableSourceSetByDurationOffsetResetForEveryStartupMode(String startupMode) {
+        assertThat(getTableSourceAutoOffsetReset(startupMode, "by_duration:PT1H"))
+                .isEqualTo("by_duration:PT1H");
+    }
+
+    private String getTableSourceAutoOffsetReset(String startupMode, String offsetReset) {
         final Map<String, String> modifiedOptions =
                 getModifiedOptions(
                         getBasicSourceOptions(),
@@ -492,7 +510,7 @@ class KafkaDynamicTableFactoryTest {
                             options.put("scan.startup.mode", startupMode);
                             options.put(
                                     PROPERTIES_PREFIX + ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                                    "none");
+                                    offsetReset);
                             if (!"specific-offsets".equals(startupMode)) {
                                 options.remove("scan.startup.specific-offsets");
                             }
@@ -501,7 +519,7 @@ class KafkaDynamicTableFactoryTest {
                             }
                         });
 
-        assertThat(getTableSourceAutoOffsetReset(modifiedOptions)).isEqualTo("none");
+        return getTableSourceAutoOffsetReset(modifiedOptions);
     }
 
     @ParameterizedTest
@@ -532,9 +550,9 @@ class KafkaDynamicTableFactoryTest {
 
         assertThatThrownBy(() -> getTableSourceAutoOffsetReset(modifiedOptions))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "auto.offset.reset can not be set to errorStrategy. "
-                                + "Valid values: [latest,earliest,none]");
+                .hasMessageStartingWith(
+                        "auto.offset.reset can not be set to errorStrategy. Valid values: ")
+                .hasMessageContaining("by_duration");
     }
 
     @Test

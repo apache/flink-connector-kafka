@@ -83,6 +83,18 @@ class DynamicKafkaSourceBuilderTest {
     }
 
     @Test
+    void testAutoOffsetResetAcceptsByDuration() {
+        assertThat(
+                        baseBuilder()
+                                .setProperty(
+                                        ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "by_duration:PT1H")
+                                .build()
+                                .getProperties()
+                                .getProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG))
+                .isEqualTo("by_duration:PT1H");
+    }
+
+    @Test
     void testAutoOffsetResetExplicitPropertyOverridesInitializerStrategy() {
         assertThat(
                         baseBuilder()
