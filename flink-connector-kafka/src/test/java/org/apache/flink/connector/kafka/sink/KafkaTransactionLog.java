@@ -43,7 +43,11 @@ import static org.apache.kafka.common.internals.Topic.TRANSACTION_STATE_TOPIC_NA
  */
 class KafkaTransactionLog {
 
-    private static final int SUPPORTED_KAFKA_SCHEMA_VERSION = 0;
+    private static final int MAX_KEY_SCHEMA_VERSION = 0;
+    // Brokers write version 1 when transaction.version is 1 or higher (KIP-890), as on Kafka 4.x
+    // brokers by default. It only adds tagged fields at the end, so the fields read here keep
+    // their positions.
+    private static final int MAX_VALUE_SCHEMA_VERSION = 1;
     private final Properties consumerConfig;
 
     /**
@@ -77,7 +81,7 @@ class KafkaTransactionLog {
     private Optional<TransactionRecord> parseTransaction(
             ConsumerRecord<byte[], byte[]> consumerRecord, Predicate<String> transactionIdFilter) {
         final ByteBuffer keyBuffer = ByteBuffer.wrap(consumerRecord.key());
-        checkKafkaSchemaVersionMatches(keyBuffer);
+        checkKafkaSchemaVersion(keyBuffer, MAX_KEY_SCHEMA_VERSION);
         // Ignore 2 bytes because Kafka's internal representation
         keyBuffer.getShort();
         final String transactionalId = StandardCharsets.UTF_8.decode(keyBuffer).toString();
@@ -87,7 +91,7 @@ class KafkaTransactionLog {
         }
 
         final ByteBuffer valueBuffer = ByteBuffer.wrap(consumerRecord.value());
-        checkKafkaSchemaVersionMatches(valueBuffer);
+        checkKafkaSchemaVersion(valueBuffer, MAX_VALUE_SCHEMA_VERSION);
         final TransactionState state = TransactionState.fromByte(readTransactionState(valueBuffer));
 
         return Optional.of(new TransactionRecord(transactionalId, state));
@@ -187,13 +191,13 @@ class KafkaTransactionLog {
         }
     }
 
-    private static void checkKafkaSchemaVersionMatches(ByteBuffer buffer) {
+    private static void checkKafkaSchemaVersion(ByteBuffer buffer, int maxSupportedVersion) {
         final short version = buffer.getShort();
-        if (version != SUPPORTED_KAFKA_SCHEMA_VERSION) {
+        if (version < 0 || version > maxSupportedVersion) {
             throw new IllegalStateException(
                     String.format(
-                            "Kafka has changed the schema version from %s to %s",
-                            SUPPORTED_KAFKA_SCHEMA_VERSION, version));
+                            "Kafka has changed the schema version to %s, the latest supported version is %s",
+                            version, maxSupportedVersion));
         }
     }
 }

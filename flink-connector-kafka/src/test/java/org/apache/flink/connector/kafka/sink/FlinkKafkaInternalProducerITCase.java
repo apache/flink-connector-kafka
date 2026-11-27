@@ -38,9 +38,13 @@ import org.assertj.core.api.AbstractThrowableAssert;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.params.BeforeParameterizedClassInvocation;
+import org.junit.jupiter.params.Parameter;
+import org.junit.jupiter.params.ParameterizedClass;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -53,11 +57,16 @@ import java.util.stream.Collectors;
 
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
+import static org.apache.flink.connector.kafka.testutils.KafkaUtil.restartWithTransactionVersion;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+/** Runs with Transactions V2 (KIP-890), the default of Kafka 4.x brokers, and with V1. */
 @Testcontainers
+@ParameterizedClass(name = "transaction.version={0}")
+@ValueSource(shorts = {2, 1})
 class FlinkKafkaInternalProducerITCase {
 
     @RegisterExtension
@@ -72,6 +81,13 @@ class FlinkKafkaInternalProducerITCase {
     @Container
     private static final TestKafkaContainer KAFKA_CONTAINER =
             createKafkaContainer(FlinkKafkaInternalProducerITCase.class);
+
+    @Parameter short transactionVersion;
+
+    @BeforeParameterizedClassInvocation
+    static void startBroker(short transactionVersion) {
+        restartWithTransactionVersion(KAFKA_CONTAINER, transactionVersion);
+    }
 
     @AfterEach
     public void check() {
@@ -183,6 +199,9 @@ class FlinkKafkaInternalProducerITCase {
     @ParameterizedTest
     @CsvSource({"true,true", "true,false", "false,true", "false,false"})
     void testDoubleCommitAndAbort(boolean firstCommit, boolean secondCommit) {
+        // resumeTransaction doesn't enable Transactions V2 on the resumed producer, so it ends
+        // the transaction with V1 rules and is fenced on a V2 broker instead (FLINK-40689).
+        assumeTrue(transactionVersion < 2, "FLINK-40689: resumed producers don't use V2");
         final String topic = "test-double-commit-transaction-" + firstCommit + secondCommit;
         final String transactionIdPrefix = "testDoubleCommitTransaction-";
         final String transactionalId = transactionIdPrefix + "id";

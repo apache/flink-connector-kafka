@@ -32,6 +32,10 @@ import org.apache.kafka.common.serialization.IntegerSerializer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.params.BeforeParameterizedClassInvocation;
+import org.junit.jupiter.params.Parameter;
+import org.junit.jupiter.params.ParameterizedClass;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -48,10 +52,16 @@ import static org.apache.flink.connector.kafka.sink.KafkaTransactionLog.Transact
 import static org.apache.flink.connector.kafka.sink.KafkaTransactionLog.TransactionState.PrepareCommit;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
+import static org.apache.flink.connector.kafka.testutils.KafkaUtil.restartWithTransactionVersion;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link KafkaTransactionLog} to retrieve abortable Kafka transactions. */
+/**
+ * Tests for {@link KafkaTransactionLog} to retrieve abortable Kafka transactions, with Transactions
+ * V2 (KIP-890), the default of Kafka 4.x brokers, and with V1.
+ */
 @Testcontainers
+@ParameterizedClass(name = "transaction.version={0}")
+@ValueSource(shorts = {2, 1})
 class KafkaTransactionLogITCase {
 
     private static final String TOPIC_NAME = "kafkaTransactionLogTest";
@@ -71,6 +81,13 @@ class KafkaTransactionLogITCase {
             createKafkaContainer(KafkaTransactionLogITCase.class);
 
     private final List<Producer<byte[], Integer>> openProducers = new ArrayList<>();
+
+    @Parameter short transactionVersion;
+
+    @BeforeParameterizedClassInvocation
+    static void startBroker(short transactionVersion) {
+        restartWithTransactionVersion(KAFKA_CONTAINER, transactionVersion);
+    }
 
     @AfterEach
     void tearDown() {

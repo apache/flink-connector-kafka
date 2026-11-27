@@ -132,8 +132,9 @@ Splits, enumerator state, writer state and committables are written by `SimpleVe
 
 1. Re-check the reflection in `FlinkKafkaInternalProducer`
 2. Update `flink-sql-connector-kafka/src/main/resources/META-INF/NOTICE`
-3. Update `DockerImageVersions` in the test utils: `APACHE_KAFKA` follows `kafka.version`, `CP_KAFKA` and `SCHEMA_REGISTRY` follow `confluent.version`
-4. Verify: `dependency:tree` for new transitive dependencies, the license check from CI, the full ITCase suite
+3. Bump `confluent.version` to the Confluent Platform line built on the new Kafka version: CP 8.N is Kafka 4.N, see the [compatibility table](https://docs.confluent.io/platform/current/installation/versions-interoperability.html#cp-and-apache-ak-compatibility)
+4. Update `DockerImageVersions` in the test utils: `APACHE_KAFKA` follows `kafka.version`, `CP_KAFKA` and `SCHEMA_REGISTRY` follow `confluent.version`
+5. Verify: `dependency:tree` for new transitive dependencies, the license check from CI, the full ITCase suite
 
 ### Bumping `flink.version` or changing the CI matrix
 

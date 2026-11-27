@@ -37,9 +37,13 @@ import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.errors.InvalidProducerEpochException;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.params.BeforeParameterizedClassInvocation;
+import org.junit.jupiter.params.Parameter;
+import org.junit.jupiter.params.ParameterizedClass;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -55,11 +59,17 @@ import java.util.function.Consumer;
 
 import static org.apache.flink.connector.kafka.sink.internal.TransactionalIdFactory.buildTransactionalId;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.drainAllRecordsFromTopic;
+import static org.apache.flink.connector.kafka.testutils.KafkaUtil.restartWithTransactionVersion;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
 
-/** Tests for the standalone KafkaWriter. */
+/**
+ * Tests for the standalone KafkaWriter, with Transactions V2 (KIP-890), the default of Kafka 4.x
+ * brokers, and with V1.
+ */
+@ParameterizedClass(name = "transaction.version={0}")
+@ValueSource(shorts = {2, 1})
 public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
 
     @RegisterExtension
@@ -73,6 +83,20 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
 
     private static final Consumer<KafkaSinkBuilder<?>> EXACTLY_ONCE =
             sink -> sink.setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE);
+
+    // A fenced producer fails with ProducerFencedException on transaction coordinator requests
+    // and with InvalidProducerEpochException on produce requests. The writer reports the former
+    // with Transactions V1 and the latter with V2, which sends no AddPartitionsToTxn requests.
+    private static final Class<?>[] FENCED_EXCEPTIONS = {
+        ProducerFencedException.class, InvalidProducerEpochException.class
+    };
+
+    @Parameter short transactionVersion;
+
+    @BeforeParameterizedClassInvocation
+    static void startBroker(short transactionVersion) {
+        restartWithTransactionVersion(KAFKA_CONTAINER, transactionVersion);
+    }
 
     @Test
     void testFlushAsyncErrorPropagationAndErrorCounter() throws Exception {
@@ -90,8 +114,7 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
         triggerProducerException(writer, properties);
 
         // test flush
-        assertThatCode(() -> writer.flush(false))
-                .hasRootCauseExactlyInstanceOf(ProducerFencedException.class);
+        assertThatCode(() -> writer.flush(false)).rootCause().isInstanceOfAny(FENCED_EXCEPTIONS);
         assertThat(numRecordsOutErrors.getCount()).isEqualTo(1L);
 
         assertThatCode(() -> writer.write(1, SINK_WRITER_CONTEXT))
@@ -99,8 +122,9 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
                 .doesNotThrowAnyException();
         assertThat(numRecordsOutErrors.getCount()).isEqualTo(1L);
 
+        awaitFailedSend(writer);
         // async exception is checked and thrown on close
-        assertThatCode(writer::close).hasRootCauseInstanceOf(ProducerFencedException.class);
+        assertThatCode(writer::close).rootCause().isInstanceOfAny(FENCED_EXCEPTIONS);
     }
 
     @Test
@@ -121,7 +145,8 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
         writer.getCurrentProducer().flush();
 
         assertThatCode(() -> writer.write(1, SINK_WRITER_CONTEXT))
-                .hasRootCauseExactlyInstanceOf(ProducerFencedException.class);
+                .rootCause()
+                .isInstanceOfAny(FENCED_EXCEPTIONS);
         assertThat(numRecordsOutErrors.getCount()).isEqualTo(1L);
 
         assertThatCode(() -> writer.write(1, SINK_WRITER_CONTEXT))
@@ -129,8 +154,9 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
                 .doesNotThrowAnyException();
         assertThat(numRecordsOutErrors.getCount()).isEqualTo(1L);
 
+        awaitFailedSend(writer);
         // async exception is checked and thrown on close
-        assertThatCode(writer::close).hasRootCauseInstanceOf(ProducerFencedException.class);
+        assertThatCode(writer::close).rootCause().isInstanceOfAny(FENCED_EXCEPTIONS);
     }
 
     @Test
@@ -156,7 +182,8 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
                                 // execute all mails
                             }
                         })
-                .hasRootCauseExactlyInstanceOf(ProducerFencedException.class);
+                .rootCause()
+                .isInstanceOfAny(FENCED_EXCEPTIONS);
 
         assertThat(numRecordsOutErrors.getCount()).isEqualTo(1L);
 
@@ -165,8 +192,9 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
                 .doesNotThrowAnyException();
         assertThat(numRecordsOutErrors.getCount()).isEqualTo(1L);
 
+        awaitFailedSend(writer);
         // async exception is checked and thrown on close
-        assertThatCode(writer::close).hasRootCauseInstanceOf(ProducerFencedException.class);
+        assertThatCode(writer::close).rootCause().isInstanceOfAny(FENCED_EXCEPTIONS);
     }
 
     @Test
@@ -189,7 +217,8 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
         // test flush
         assertThatCode(writer::close)
                 .as("flush should throw the exception from the WriterCallback")
-                .hasRootCauseExactlyInstanceOf(ProducerFencedException.class);
+                .rootCause()
+                .isInstanceOfAny(FENCED_EXCEPTIONS);
         assertThat(numRecordsOutErrors.getCount()).isEqualTo(1L);
     }
 
@@ -206,6 +235,17 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
         }
 
         writer.write(1, SINK_WRITER_CONTEXT);
+    }
+
+    /**
+     * Waits until a record written after the first failure has failed too. The producer runs a
+     * failed batch's callbacks before it records the error. With Transactions V1, the first failure
+     * comes from AddPartitionsToTxn and is recorded before any batch fails. With V2, it is a failed
+     * batch, so a write right after it can still be sent and fail later. Without waiting, that
+     * failure can arrive after {@link KafkaWriter#close()} has started, which ignores it.
+     */
+    private static void awaitFailedSend(KafkaWriter<Integer> writer) {
+        writer.getCurrentProducer().flush();
     }
 
     /** Test that producer is not accidentally recreated or pool is used. */

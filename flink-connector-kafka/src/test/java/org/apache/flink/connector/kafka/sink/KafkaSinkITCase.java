@@ -102,7 +102,6 @@ import javax.annotation.Nullable;
 import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -123,6 +122,7 @@ import static org.apache.flink.configuration.StateRecoveryOptions.SAVEPOINT_PATH
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.checkProducerLeak;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createKafkaContainer;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.createNewTopicAndWaitForPartitionAssignment;
+import static org.apache.flink.connector.kafka.testutils.KafkaUtil.setTransactionVersion;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -181,6 +181,9 @@ class KafkaSinkITCase {
                 KAFKA_CONTAINER.getBootstrapServers());
         createNewTopicAndWaitForPartitionAssignment(
                 topic, 1, TOPIC_REPLICATION_FACTOR, adminProperties);
+        // Tests run with Transactions V2 (KIP-890), the default of Kafka 4.x brokers. The
+        // exactly-once tests also run with V1 and set the version themselves.
+        setTransactionVersion(KAFKA_CONTAINER, (short) 2);
     }
 
     @AfterEach
@@ -236,15 +239,20 @@ class KafkaSinkITCase {
         writeRecordsToKafka(DeliveryGuarantee.NONE);
     }
 
-    @ParameterizedTest(name = "{0}, chained={1}")
+    @ParameterizedTest(name = "{0}, chained={1}, transaction.version={2}")
     @MethodSource("getEOSParameters")
     public void testWriteRecordsToKafkaWithExactlyOnceGuarantee(
-            TransactionNamingStrategy namingStrategy, boolean chained) throws Exception {
+            TransactionNamingStrategy namingStrategy, boolean chained, short transactionVersion)
+            throws Exception {
+        setTransactionVersion(KAFKA_CONTAINER, transactionVersion);
         writeRecordsToKafka(DeliveryGuarantee.EXACTLY_ONCE, namingStrategy, chained);
     }
 
-    @Test
-    void testWriteRecordsToKafkaWithExactlyOnceGuaranteeBatch() throws Exception {
+    @ParameterizedTest(name = "transaction.version={0}")
+    @ValueSource(shorts = {2, 1})
+    void testWriteRecordsToKafkaWithExactlyOnceGuaranteeBatch(short transactionVersion)
+            throws Exception {
+        setTransactionVersion(KAFKA_CONTAINER, transactionVersion);
         final StreamExecutionEnvironment env =
                 StreamExecutionEnvironment.getExecutionEnvironment(createConfiguration(1));
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
@@ -269,11 +277,15 @@ class KafkaSinkITCase {
     }
 
     static Stream<Arguments> getEOSParameters() {
-        return Arrays.stream(TransactionNamingStrategy.values())
-                .flatMap(
-                        strategy ->
-                                Stream.of(true, false)
-                                        .map(chained -> Arguments.of(strategy, chained)));
+        List<Arguments> parameters = new ArrayList<>();
+        for (TransactionNamingStrategy strategy : TransactionNamingStrategy.values()) {
+            for (boolean chained : new boolean[] {true, false}) {
+                parameters.add(Arguments.of(strategy, chained, (short) 2));
+            }
+            // Chaining doesn't change how the sink uses transactions, so V1 runs only chained.
+            parameters.add(Arguments.of(strategy, true, (short) 1));
+        }
+        return parameters.stream();
     }
 
     @Test
@@ -281,29 +293,35 @@ class KafkaSinkITCase {
         testRecoveryWithAssertion(DeliveryGuarantee.AT_LEAST_ONCE, 1);
     }
 
-    @ParameterizedTest(name = "{0}, chained={1}")
+    @ParameterizedTest(name = "{0}, chained={1}, transaction.version={2}")
     @MethodSource("getEOSParameters")
     public void testRecoveryWithExactlyOnceGuarantee(
-            TransactionNamingStrategy namingStrategy, boolean chained) throws Exception {
+            TransactionNamingStrategy namingStrategy, boolean chained, short transactionVersion)
+            throws Exception {
+        setTransactionVersion(KAFKA_CONTAINER, transactionVersion);
         testRecoveryWithAssertion(DeliveryGuarantee.EXACTLY_ONCE, 1, namingStrategy, chained);
     }
 
-    @ParameterizedTest(name = "{0}, chained={1}")
+    @ParameterizedTest(name = "{0}, chained={1}, transaction.version={2}")
     @MethodSource("getEOSParameters")
     public void testRecoveryWithExactlyOnceGuaranteeAndConcurrentCheckpoints(
-            TransactionNamingStrategy namingStrategy, boolean chained) throws Exception {
+            TransactionNamingStrategy namingStrategy, boolean chained, short transactionVersion)
+            throws Exception {
+        setTransactionVersion(KAFKA_CONTAINER, transactionVersion);
         testRecoveryWithAssertion(DeliveryGuarantee.EXACTLY_ONCE, 2, namingStrategy, chained);
     }
 
-    @ParameterizedTest(name = "{0}, chained={1}")
+    @ParameterizedTest(name = "{0}, chained={1}, transaction.version={2}")
     @MethodSource("getEOSParameters")
     public void testAbortTransactionsOfPendingCheckpointsAfterFailure(
             TransactionNamingStrategy namingStrategy,
             boolean chained,
+            short transactionVersion,
             @TempDir File checkpointDir,
             @InjectMiniCluster MiniCluster miniCluster,
             @InjectClusterClient ClusterClient<?> clusterClient)
             throws Exception {
+        setTransactionVersion(KAFKA_CONTAINER, transactionVersion);
         // Run a first job failing during the async phase of a checkpoint to leave some
         // lingering transactions
         final Configuration config = createConfiguration(4);
@@ -347,13 +365,15 @@ class KafkaSinkITCase {
         assertThat(committedRecords).containsExactlyInAnyOrderElementsOf(checkpointedRecords.get());
     }
 
-    @ParameterizedTest(name = "{0}, chained={1}")
+    @ParameterizedTest(name = "{0}, chained={1}, transaction.version={2}")
     @MethodSource("getEOSParameters")
     public void testAbortTransactionsAfterScaleInBeforeFirstCheckpoint(
             TransactionNamingStrategy namingStrategy,
             boolean chained,
+            short transactionVersion,
             @InjectClusterClient ClusterClient<?> clusterClient)
             throws Exception {
+        setTransactionVersion(KAFKA_CONTAINER, transactionVersion);
         // Run a first job opening 5 transactions one per subtask and fail in async checkpoint phase
         try {
             SharedReference<Set<Long>> checkpointedRecords =
