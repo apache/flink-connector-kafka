@@ -20,6 +20,8 @@ package org.apache.flink.connector.kafka.sink.internal;
 
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -131,6 +133,45 @@ class TransactionAbortStrategyImplTest {
             LISTING.abortTransactions(testContext);
             assertThat(testContext.getAbortedTransactions()).containsExactlyInAnyOrder(t31, t32);
         }
+
+        @ParameterizedTest
+        @ValueSource(
+                strings = {
+                    // sinks with the prefixes "prefix0" and "prefix-2"
+                    PREFIX + "0-0-1",
+                    PREFIX + "-2-0-1",
+                    // producers that are not a sink
+                    PREFIX + "-a-b",
+                    PREFIX,
+                    "unrelated"
+                })
+        void testIgnoresTransactionsOfOtherProducers(String otherTransactionalId) {
+            TestContext testContext = new TestContext();
+            testContext.setSubtaskIdAndParallelism(0, 1);
+            testContext.setOwnedSubtaskIdsAndMaxParallelism(0, 1);
+
+            testContext.addOpenTransaction(otherTransactionalId);
+            String t01 = testContext.addOpenTransaction(0, 1L);
+
+            LISTING.abortTransactions(testContext);
+            assertThat(testContext.getAbortedTransactions()).containsExactly(t01);
+        }
+
+        @Test
+        void testChangedPrefix() {
+            TestContext testContext = new TestContext();
+            testContext.setSubtaskIdAndParallelism(0, 1);
+            testContext.setOwnedSubtaskIdsAndMaxParallelism(0, 1);
+
+            String oldPrefixT01 = testContext.addOpenTransaction(0, 1L);
+            // the new prefix extends the old one, so that each id belongs to only one of them
+            testContext.setPrefix(PREFIX + "-2");
+            String newPrefixT02 = testContext.addOpenTransaction(0, 2L);
+
+            LISTING.abortTransactions(testContext);
+            assertThat(testContext.getAbortedTransactions())
+                    .containsExactlyInAnyOrder(oldPrefixT01, newPrefixT02);
+        }
     }
 
     static final class TestContext implements TransactionAbortStrategyImpl.Context {
@@ -162,8 +203,12 @@ class TransactionAbortStrategyImplTest {
 
         public String addOpenTransaction(int oldSubtaskId, long checkpointId) {
             String transactionalId = getTransactionalId(oldSubtaskId, checkpointId);
-            openTransactionalIds.add(transactionalId);
+            addOpenTransaction(transactionalId);
             return transactionalId;
+        }
+
+        public void addOpenTransaction(String transactionalId) {
+            openTransactionalIds.add(transactionalId);
         }
 
         @Override
