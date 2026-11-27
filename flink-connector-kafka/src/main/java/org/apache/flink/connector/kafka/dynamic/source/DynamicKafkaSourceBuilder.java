@@ -347,9 +347,9 @@ public class DynamicKafkaSourceBuilder<T> {
                             + "startup, but Kafka may reset to {} if an initialized offset "
                             + "becomes unavailable.",
                     ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                    configuredOffsetReset,
+                    normalizedOffsetReset,
                     startingOffsetsInitializer.getAutoOffsetResetStrategy().name().toLowerCase(),
-                    configuredOffsetReset);
+                    normalizedOffsetReset);
         }
     }
 
