@@ -88,7 +88,8 @@ class OffsetsInitializerTest {
         for (long offset : offsets.values()) {
             assertThat(offset).isEqualTo(KafkaSourceTestEnv.NUM_RECORDS_PER_PARTITION);
         }
-        assertThat(initializer.getAutoOffsetResetStrategy()).isEqualTo(OffsetResetStrategy.LATEST);
+        assertThat(initializer.getAutoOffsetResetStrategy())
+                .isEqualTo(OffsetResetStrategy.EARLIEST);
     }
 
     @Test
@@ -113,7 +114,8 @@ class OffsetsInitializerTest {
                     long expectedOffset = tp.partition() > 2 ? tp.partition() : 3L;
                     assertThat((long) offset).isEqualTo(expectedOffset);
                 });
-        assertThat(initializer.getAutoOffsetResetStrategy()).isEqualTo(OffsetResetStrategy.LATEST);
+        assertThat(initializer.getAutoOffsetResetStrategy())
+                .isEqualTo(OffsetResetStrategy.EARLIEST);
     }
 
     @Test
@@ -125,7 +127,8 @@ class OffsetsInitializerTest {
         assertThat(initializer.getPartitionOffsets(partitions, retriever))
                 .as("offsets are equal to 0 since the timestamp is out of range.")
                 .isEqualTo(expectedOffsets);
-        assertThat(initializer.getAutoOffsetResetStrategy()).isEqualTo(OffsetResetStrategy.LATEST);
+        assertThat(initializer.getAutoOffsetResetStrategy())
+                .isEqualTo(OffsetResetStrategy.EARLIEST);
     }
 
     @Test

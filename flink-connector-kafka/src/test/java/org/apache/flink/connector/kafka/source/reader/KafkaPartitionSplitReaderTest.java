@@ -22,8 +22,12 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
+import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.KafkaSourceOptions;
+import org.apache.flink.connector.kafka.source.KafkaSourceTestUtils;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.metrics.KafkaSourceReaderMetrics;
+import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.connector.kafka.testutils.KafkaSourceTestEnv;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
@@ -73,6 +77,8 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
 import static org.apache.flink.connector.kafka.testutils.KafkaSourceTestEnv.NUM_RECORDS_PER_PARTITION;
 import static org.apache.flink.core.testutils.CommonTestUtils.waitUtil;
@@ -331,6 +337,73 @@ public class KafkaPartitionSplitReaderTest {
 
         // Verify that the current offset of the consumer is the expected offset
         assertThat(reader.consumer().position(partition)).isEqualTo(expectedOffset);
+    }
+
+    /**
+     * A restored split whose position fell behind the log start resumes from the log start, not
+     * from wherever the startup mode would start a new split.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"earliest", "latest", "timestamp"})
+    void testRestoredPositionBelowLogStartResumesFromLogStart(String startupMode)
+            throws Exception {
+        final OffsetsInitializer startingOffsets;
+        switch (startupMode) {
+            case "earliest":
+                startingOffsets = OffsetsInitializer.earliest();
+                break;
+            case "latest":
+                startingOffsets = OffsetsInitializer.latest();
+                break;
+            default:
+                startingOffsets = OffsetsInitializer.timestamp(0L);
+        }
+        final KafkaSource<byte[]> source =
+                KafkaSource.<byte[]>builder()
+                        .setBootstrapServers("unused")
+                        .setTopics(TOPIC1)
+                        .setDeserializer(
+                                KafkaRecordDeserializationSchema.valueOnly(
+                                        ByteArrayDeserializer.class))
+                        .setStartingOffsets(startingOffsets)
+                        .build();
+        final Properties props = new Properties();
+        props.setProperty(
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                KafkaSourceTestUtils.getKafkaSourceConfiguration(source)
+                        .toMap()
+                        .get(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG));
+        final KafkaPartitionSplitReader reader =
+                createReader(props, UnregisteredMetricsGroup.createSourceReaderMetricGroup());
+        final TopicPartition tp = new TopicPartition(TOPIC1, 5);
+        final long logStart = earliestOffsets.get(tp);
+        assignSplit(reader, new KafkaPartitionSplit(tp, logStart - 3));
+
+        final List<Long> consumedOffsets = new ArrayList<>();
+        waitUtil(
+                () -> {
+                    final RecordsWithSplitIds<ConsumerRecord<byte[], byte[]>> records;
+                    try {
+                        records = reader.fetch();
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                    while (records.nextSplit() != null) {
+                        ConsumerRecord<byte[], byte[]> record;
+                        while ((record = records.nextRecordFromSplit()) != null) {
+                            consumedOffsets.add(record.offset());
+                        }
+                    }
+                    return reader.consumer().position(tp) >= NUM_RECORDS_PER_PARTITION;
+                },
+                Duration.ofSeconds(30),
+                "the reader to reach the end of " + tp);
+
+        assertThat(consumedOffsets)
+                .isEqualTo(
+                        LongStream.range(logStart, NUM_RECORDS_PER_PARTITION)
+                                .boxed()
+                                .collect(Collectors.toList()));
     }
 
     @Test

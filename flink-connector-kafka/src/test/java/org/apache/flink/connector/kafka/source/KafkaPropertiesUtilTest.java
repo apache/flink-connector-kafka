@@ -46,7 +46,7 @@ class KafkaPropertiesUtilTest {
         assertThat(
                         KafkaPropertiesUtil.resolveAutoOffsetResetStrategy(
                                 new Properties(), new Properties(), OffsetsInitializer.latest()))
-                .isEqualTo(OffsetResetStrategy.LATEST);
+                .isEqualTo(OffsetResetStrategy.EARLIEST);
     }
 
     @Test
