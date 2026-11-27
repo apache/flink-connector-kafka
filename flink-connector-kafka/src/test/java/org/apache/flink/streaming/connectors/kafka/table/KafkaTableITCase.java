@@ -1158,6 +1158,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                                 + "  'properties.bootstrap.servers' = '%s',\n"
                                 + "  'properties.group.id' = '%s',\n"
                                 + "  'scan.startup.mode' = 'earliest-offset',\n"
+                                + "  'scan.bounded.mode' = 'latest-offset',\n"
                                 + "  'key.format' = 'json',\n"
                                 + "  'key.fields' = 'id',\n"
                                 + "  'value.format' = 'debezium-json',\n"
@@ -1165,7 +1166,7 @@ class KafkaTableITCase extends KafkaTableTestBase {
                                 + ")",
                         topic, bootstraps, groupId, valueFieldsInclude));
 
-        final List<Row> result = collectRows(tEnv.sqlQuery("SELECT * FROM kafka"), 1);
+        final List<Row> result = collectAllRows(tEnv.sqlQuery("SELECT * FROM kafka"));
 
         assertThat(result)
                 .containsExactly(

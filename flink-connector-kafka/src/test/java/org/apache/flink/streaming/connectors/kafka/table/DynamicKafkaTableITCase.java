@@ -48,6 +48,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.apache.flink.core.testutils.FlinkAssertions.anyCauseMatches;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaTableTestUtils.collectAllRows;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaTableTestUtils.collectRows;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.HamcrestCondition.matching;
@@ -238,6 +239,7 @@ class DynamicKafkaTableITCase extends KafkaTableTestBase {
                                 + "  'properties.bootstrap.servers' = '%s',\n"
                                 + "  'properties.group.id' = '%s',\n"
                                 + "  'scan.startup.mode' = 'earliest-offset',\n"
+                                + "  'scan.bounded.mode' = 'latest-offset',\n"
                                 + "  'key.format' = 'json',\n"
                                 + "  'key.fields' = 'id',\n"
                                 + "  'value.format' = 'debezium-json',\n"
@@ -249,7 +251,7 @@ class DynamicKafkaTableITCase extends KafkaTableTestBase {
                         groupId,
                         valueFieldsInclude));
 
-        final List<Row> result = collectRows(tEnv.sqlQuery("SELECT * FROM dynamic_kafka"), 1);
+        final List<Row> result = collectAllRows(tEnv.sqlQuery("SELECT * FROM dynamic_kafka"));
 
         assertThat(result)
                 .containsExactly(
