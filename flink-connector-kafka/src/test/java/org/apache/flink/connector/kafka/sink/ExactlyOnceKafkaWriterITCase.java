@@ -41,6 +41,9 @@ import org.apache.kafka.common.errors.InvalidProducerEpochException;
 import org.apache.kafka.common.errors.ProducerFencedException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.params.BeforeParameterizedClassInvocation;
+import org.junit.jupiter.params.Parameter;
+import org.junit.jupiter.params.ParameterizedClass;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -56,11 +59,17 @@ import java.util.function.Consumer;
 
 import static org.apache.flink.connector.kafka.sink.internal.TransactionalIdFactory.buildTransactionalId;
 import static org.apache.flink.connector.kafka.testutils.KafkaUtil.drainAllRecordsFromTopic;
+import static org.apache.flink.connector.kafka.testutils.KafkaUtil.restartWithTransactionVersion;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
 
-/** Tests for the standalone KafkaWriter. */
+/**
+ * Tests for the standalone KafkaWriter, with Transactions V2 (KIP-890), the default of Kafka 4.x
+ * brokers, and with V1.
+ */
+@ParameterizedClass(name = "transaction.version={0}")
+@ValueSource(shorts = {2, 1})
 public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
 
     @RegisterExtension
@@ -76,11 +85,18 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
             sink -> sink.setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE);
 
     // A fenced producer fails with ProducerFencedException on transaction coordinator requests
-    // and with InvalidProducerEpochException on produce requests. With Transactions V2 (KIP-890),
-    // the default since Kafka 4.0, the writer's send reports the latter.
+    // and with InvalidProducerEpochException on produce requests. The writer reports the former
+    // with Transactions V1 and the latter with V2, which sends no AddPartitionsToTxn requests.
     private static final Class<?>[] FENCED_EXCEPTIONS = {
         ProducerFencedException.class, InvalidProducerEpochException.class
     };
+
+    @Parameter short transactionVersion;
+
+    @BeforeParameterizedClassInvocation
+    static void startBroker(short transactionVersion) {
+        restartWithTransactionVersion(KAFKA_CONTAINER, transactionVersion);
+    }
 
     @Test
     void testFlushAsyncErrorPropagationAndErrorCounter() throws Exception {
@@ -222,10 +238,11 @@ public class ExactlyOnceKafkaWriterITCase extends KafkaWriterTestBase {
     }
 
     /**
-     * Waits until a record written after the first failure has failed too. With Transactions V2,
-     * the producer calls the failed batch's callbacks before it records the error, so a write right
-     * after the first failure can still be sent and fail later. Without waiting, that failure can
-     * arrive after {@link KafkaWriter#close()} has started, which ignores it.
+     * Waits until a record written after the first failure has failed too. The producer runs a
+     * failed batch's callbacks before it records the error. With Transactions V1, the first failure
+     * comes from AddPartitionsToTxn and is recorded before any batch fails. With V2, it is a failed
+     * batch, so a write right after it can still be sent and fail later. Without waiting, that
+     * failure can arrive after {@link KafkaWriter#close()} has started, which ignores it.
      */
     private static void awaitFailedSend(KafkaWriter<Integer> writer) {
         writer.getCurrentProducer().flush();

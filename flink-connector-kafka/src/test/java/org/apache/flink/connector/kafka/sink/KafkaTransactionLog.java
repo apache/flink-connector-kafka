@@ -44,8 +44,9 @@ import static org.apache.kafka.common.internals.Topic.TRANSACTION_STATE_TOPIC_NA
 class KafkaTransactionLog {
 
     private static final int MAX_KEY_SCHEMA_VERSION = 0;
-    // Brokers with Transactions V2 (KIP-890), the default since Kafka 4.0, write version 1. It
-    // only adds tagged fields at the end, so the fields read here keep their positions.
+    // Brokers write version 1 when transaction.version is 1 or higher (KIP-890), as on Kafka 4.x
+    // brokers by default. It only adds tagged fields at the end, so the fields read here keep
+    // their positions.
     private static final int MAX_VALUE_SCHEMA_VERSION = 1;
     private final Properties consumerConfig;
 

@@ -21,8 +21,12 @@ package org.apache.flink.connector.kafka.testutils;
 import org.apache.flink.core.testutils.CommonTestUtils;
 
 import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.FeatureUpdate;
+import org.apache.kafka.clients.admin.FinalizedVersionRange;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.admin.OffsetSpec;
+import org.apache.kafka.clients.admin.UpdateFeaturesOptions;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -56,6 +60,7 @@ public class KafkaUtil {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaUtil.class);
     private static final Duration CONSUMER_POLL_DURATION = Duration.ofSeconds(1);
     private static final int REQUEST_TIMEOUT_SECONDS = 30;
+    private static final String TRANSACTION_VERSION = "transaction.version";
 
     private KafkaUtil() {}
 
@@ -277,6 +282,73 @@ public class KafkaUtil {
         } catch (Exception e) {
             e.printStackTrace();
             fail("Create test topic : " + topic + " failed, " + e.getMessage());
+        }
+    }
+
+    /**
+     * Restarts the container with the given {@code transaction.version} unless its broker already
+     * uses it. A test class that runs once per version thus gets an empty broker for each run.
+     */
+    public static void restartWithTransactionVersion(TestKafkaContainer container, short version) {
+        try (AdminClient adminClient = createAdminClient(container)) {
+            if (getTransactionVersion(adminClient) == version) {
+                return;
+            }
+        }
+        container.stop();
+        container.start();
+        setTransactionVersion(container, version);
+    }
+
+    /**
+     * Sets the broker's {@code transaction.version} feature and waits until the broker reports it.
+     * Producers created afterwards use Transactions V2 (KIP-890) only on version 2 or higher.
+     */
+    public static void setTransactionVersion(TestKafkaContainer container, short version) {
+        try (AdminClient adminClient = createAdminClient(container)) {
+            short current = getTransactionVersion(adminClient);
+            if (current == version) {
+                return;
+            }
+            LOG.info("Changing transaction.version from {} to {}", current, version);
+            FeatureUpdate.UpgradeType upgradeType =
+                    version > current
+                            ? FeatureUpdate.UpgradeType.UPGRADE
+                            : FeatureUpdate.UpgradeType.SAFE_DOWNGRADE;
+            adminClient
+                    .updateFeatures(
+                            Collections.singletonMap(
+                                    TRANSACTION_VERSION, new FeatureUpdate(version, upgradeType)),
+                            new UpdateFeaturesOptions())
+                    .all()
+                    .get(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            CommonTestUtils.waitUtil(
+                    () -> getTransactionVersion(adminClient) == version,
+                    Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS),
+                    "The broker does not report transaction.version " + version);
+        } catch (Exception e) {
+            throw new IllegalStateException("Cannot set transaction.version to " + version, e);
+        }
+    }
+
+    private static AdminClient createAdminClient(TestKafkaContainer container) {
+        Properties properties = new Properties();
+        properties.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, container.getBootstrapServers());
+        return AdminClient.create(properties);
+    }
+
+    private static short getTransactionVersion(AdminClient adminClient) {
+        try {
+            FinalizedVersionRange range =
+                    adminClient
+                            .describeFeatures()
+                            .featureMetadata()
+                            .get(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                            .finalizedFeatures()
+                            .get(TRANSACTION_VERSION);
+            return range == null ? 0 : range.maxVersionLevel();
+        } catch (Exception e) {
+            throw new IllegalStateException("Cannot describe the broker's features", e);
         }
     }
 }

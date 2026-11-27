@@ -67,6 +67,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.BeforeParameterizedClassInvocation;
+import org.junit.jupiter.params.Parameter;
+import org.junit.jupiter.params.ParameterizedClass;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -107,8 +111,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * without losing or duplicating records. The first checkpoint after restoration must make the
  * replayed record visible to {@code read_committed} consumers; an abandoned transaction under the
  * reused transactional id must not block that output.
+ *
+ * <p>Runs with Transactions V2 (KIP-890), the default of Kafka 4.x brokers, and with V1.
  */
 @Testcontainers
+@ParameterizedClass(name = "transaction.version={0}")
+@ValueSource(shorts = {2, 1})
 class KafkaSinkRecoveryITCase {
     private static final long TIMEOUT_SECONDS = 60;
 
@@ -127,6 +135,13 @@ class KafkaSinkRecoveryITCase {
     @RegisterExtension final SharedObjectsExtension sharedObjects = SharedObjectsExtension.create();
 
     private final List<AutoCloseable> cleanupActions = new ArrayList<>();
+
+    @Parameter short transactionVersion;
+
+    @BeforeParameterizedClassInvocation
+    static void startBroker(short transactionVersion) {
+        KafkaUtil.restartWithTransactionVersion(KAFKA, transactionVersion);
+    }
 
     @AfterEach
     void tearDown() throws Throwable {
